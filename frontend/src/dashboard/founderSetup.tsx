@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button"
 import CelebrationOverlay from "@/components/CelebrationOverlay"
 import { cn } from "@/lib/utils"
 import { useEffect, useState } from "react"
-import { useLocation, type Location } from "react-router-dom"
+import { useLocation, useNavigate, type Location } from "react-router-dom"
 
 const startupStages = ["Idea", "MVP", "Launch", "Growth"] as const
 const industries = [
@@ -26,19 +26,33 @@ const experienceLevels = [
 const minHours = 5
 const maxHours = 60
 
+type FounderProfile = {
+  stage: string
+  industries: string[]
+  experience: string
+  hours: number
+}
+
 type FounderLocationState = {
   celebrate?: boolean
+  profile?: FounderProfile
 }
 
 const FounderSetup = () => {
   const location = useLocation() as Location & { state?: FounderLocationState }
+  const navigate = useNavigate()
+  const initialProfile = location.state?.profile
   const [showArrivalCelebration, setShowArrivalCelebration] = useState(
     Boolean(location.state?.celebrate),
   )
-  const [stage, setStage] = useState<string | null>("Idea")
-  const [selectedIndustries, setSelectedIndustries] = useState<string[]>(["AI/ML"])
-  const [experience, setExperience] = useState<string | null>("First Time Founder")
-  const [hours, setHours] = useState(30)
+  const [stage, setStage] = useState<string | null>(initialProfile?.stage ?? "Idea")
+  const [selectedIndustries, setSelectedIndustries] = useState<string[]>(
+    initialProfile?.industries ?? ["AI/ML"],
+  )
+  const [experience, setExperience] = useState<string | null>(
+    initialProfile?.experience ?? "First Time Founder",
+  )
+  const [hours, setHours] = useState(initialProfile?.hours ?? 30)
 
   const toggleIndustry = (industry: string) => {
     setSelectedIndustries((prev) =>
@@ -63,6 +77,17 @@ const FounderSetup = () => {
     const timer = setTimeout(() => setShowArrivalCelebration(false), 700)
     return () => clearTimeout(timer)
   }, [showArrivalCelebration])
+
+  const handleContinue = () => {
+    if (!isValid || !stage || !experience) return
+    const profile: FounderProfile = {
+      stage,
+      industries: selectedIndustries,
+      experience,
+      hours,
+    }
+    navigate("/founder/summary", { state: { profile } })
+  }
 
   return (
     <div className="min-h-dvh w-full flex flex-col">
@@ -213,6 +238,7 @@ const FounderSetup = () => {
                 type="button"
                 disabled={!isValid}
                 className="w-full h-11 text-sm font-semibold"
+                onClick={handleContinue}
               >
                 Continue
               </Button>
