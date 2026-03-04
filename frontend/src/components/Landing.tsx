@@ -1,5 +1,8 @@
+import { useState } from "react"
 import { Lightbulb, Users, Target, ArrowRight } from "lucide-react"
+import { Link, useNavigate } from "react-router-dom"
 import NavBar from "@/components/ui/NavBar"
+import CelebrationOverlay from "@/components/CelebrationOverlay"
 
 const roles = [
   {
@@ -23,6 +26,18 @@ const roles = [
 ]
 
 const Landing = () => {
+  const [showFounderCelebration, setShowFounderCelebration] = useState(false)
+  const navigate = useNavigate()
+
+  const handleFounderStart = () => {
+    if (showFounderCelebration) return
+    setShowFounderCelebration(true)
+    setTimeout(() => {
+      navigate("/founder/setup", { state: { celebrate: true } })
+      setShowFounderCelebration(false)
+    }, 900)
+  }
+
   return (
     <div className="min-h-dvh w-full flex flex-col">
       <NavBar />
@@ -61,13 +76,24 @@ const Landing = () => {
               </div>
               <h2 className="text-xl font-bold text-foreground">{role.title}</h2>
               <p className="text-muted-foreground text-sm flex-1">{role.description}</p>
-              <a
-                href="#"
-                className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
-              >
-                Get Started
-                <ArrowRight className="h-4 w-4" />
-              </a>
+              {role.title === "Founder" ? (
+                <button
+                  type="button"
+                  onClick={handleFounderStart}
+                  className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                >
+                  Get Started
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              ) : (
+                <Link
+                  to="#"
+                  className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                >
+                  Get Started
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              )}
             </div>
           ))}
         </section>
@@ -79,6 +105,11 @@ const Landing = () => {
         >
           Explore Platform Without Signing Up
         </a>
+
+        <CelebrationOverlay
+          visible={showFounderCelebration}
+          message="You’re starting your founder journey!"
+        />
         </div>
       </div>
     </div>
