@@ -1,6 +1,7 @@
 type CelebrationOverlayProps = {
   visible: boolean
   message?: string
+  label?: string
 }
 
 const confettiPieces = Array.from({ length: 18 })
@@ -13,7 +14,7 @@ const colors = [
   "bg-[#ef4444]",
 ]
 
-const CelebrationOverlay = ({ visible, message }: CelebrationOverlayProps) => {
+const CelebrationOverlay = ({ visible, message, label }: CelebrationOverlayProps) => {
   if (!visible) return null
 
   return (
@@ -23,7 +24,7 @@ const CelebrationOverlay = ({ visible, message }: CelebrationOverlayProps) => {
       <div className="relative z-10 flex flex-col items-center gap-4 px-6">
         <div className="relative flex flex-col items-center gap-3 rounded-3xl bg-background/90 border border-border px-6 py-5 shadow-2xl shadow-black/40 backdrop-blur">
           <span className="text-xs font-semibold tracking-[0.2em] text-[#38bdf8] uppercase">
-            Founder Journey
+            {label ?? "Founder Journey"}
           </span>
           <p className="text-lg sm:text-xl font-semibold text-foreground text-center">
             {message ?? "You&apos;re starting your founder journey!"}

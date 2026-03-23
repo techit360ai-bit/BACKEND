@@ -13,8 +13,8 @@ import {
   Route,
   LineChart,
   User,
-} from "lucide-react";
-import { Link } from "react-router-dom";
+} from "lucide-react"
+import { Link } from "react-router-dom"
 
 const stats = [
   {
@@ -41,7 +41,7 @@ const stats = [
     helper: "Top 10%",
     iconBg: "bg-orange-400",
   },
-];
+] as const
 
 const steps = [
   { label: "Idea Validated", status: "complete", progress: 100 },
@@ -49,7 +49,7 @@ const steps = [
   { label: "MVP Development", status: "active", progress: 32 },
   { label: "Market Testing", status: "upcoming", progress: 0 },
   { label: "Launch Ready", status: "upcoming", progress: 0 },
-];
+] as const
 
 const insights = [
   {
@@ -67,7 +67,7 @@ const insights = [
     detail: "5 pending requests",
     progress: 34,
   },
-];
+] as const
 
 const recentUpdates = [
   {
@@ -91,30 +91,26 @@ const recentUpdates = [
     project: "HealthHub",
     tag: "team",
   },
-];
+] as const
 
-const Dashboard = () => {
+const CollaboratorDashboard = () => {
   return (
     <div className="min-h-dvh w-full flex bg-background text-foreground">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-64 xl:w-72 flex-col border-r border-border bg-sidebar text-        sidebar-foreground sticky top-0 h-dvh">
+      <aside className="hidden md:flex w-64 xl:w-72 flex-col border-r border-border bg-sidebar text-sidebar-foreground sticky top-0 h-dvh">
         <div className="px-5 pt-5 pb-4 flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#38bdf8] text-primary-            foreground shadow-lg">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#38bdf8] text-primary-foreground shadow-lg">
             <Lightbulb className="h-5 w-5" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-foreground">
-              TechIT Forge
-            </p>
-            <p className="text-[0.7rem] text-muted-foreground">
-              Build. Match. Launch.
-            </p>
+            <p className="text-sm font-semibold text-foreground">TechIT Forge</p>
+            <p className="text-[0.7rem] text-muted-foreground">Build. Match. Launch.</p>
           </div>
         </div>
 
         <nav className="flex-1 px-3 space-y-1 text-sm">
           <Link
-            to="/dashboard"
+            to="/collaborator/dashboard"
             className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 bg-sidebar-primary text-sidebar-primary-foreground font-medium"
           >
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#7c3aed]/80 text-xs">
@@ -193,10 +189,8 @@ const Dashboard = () => {
               DU
             </div>
             <div className="flex-1">
-              <p className="text-sm font-medium text-sidebar-foreground">
-                Demo User
-              </p>
-              <p className="text-[0.7rem] text-muted-foreground">Founder</p>
+              <p className="text-sm font-medium text-sidebar-foreground">Demo User</p>
+              <p className="text-[0.7rem] text-muted-foreground">Collaborator</p>
             </div>
           </div>
         </div>
@@ -222,8 +216,8 @@ const Dashboard = () => {
                 <Bell className="h-4 w-4" />
               </button>
               <button className="inline-flex items-center gap-2 rounded-full bg-[#7c3aed] px-4 py-2 text-sm font-medium shadow-lg shadow-[#7c3aed]/40 hover:bg-[#7c3aed]/90 text-primary-foreground">
-                <Lightbulb className="h-4 w-4" />
-                <span>New Idea</span>
+                <Users className="h-4 w-4" />
+                <span>Find Team</span>
               </button>
             </div>
           </div>
@@ -235,7 +229,7 @@ const Dashboard = () => {
                 Welcome back, Demo User
               </h1>
               <p className="text-sm text-muted-foreground">
-                Here&apos;s what&apos;s happening with your projects.
+                Here&apos;s what&apos;s happening with your collaborations.
               </p>
             </div>
 
@@ -249,28 +243,16 @@ const Dashboard = () => {
                     <div
                       className={`flex h-10 w-10 items-center justify-center rounded-xl ${stat.iconBg} text-white`}
                     >
-                      {stat.label === "Active Projects" && (
-                        <Target className="h-5 w-5" />
-                      )}
-                      {stat.label === "Team Members" && (
-                        <Users className="h-5 w-5" />
-                      )}
-                      {stat.label === "Market Readiness" && (
-                        <Lightbulb className="h-5 w-5" />
-                      )}
-                      {stat.label === "Match Score" && (
-                        <Target className="h-5 w-5" />
-                      )}
+                      {stat.label === "Active Projects" && <Target className="h-5 w-5" />}
+                      {stat.label === "Team Members" && <Users className="h-5 w-5" />}
+                      {stat.label === "Market Readiness" && <Lightbulb className="h-5 w-5" />}
+                      {stat.label === "Match Score" && <Target className="h-5 w-5" />}
                     </div>
                     <p className="text-2xl font-semibold">{stat.value}</p>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {stat.label}
-                    </p>
-                    <p className="text-[0.7rem] text-muted-foreground">
-                      {stat.helper}
-                    </p>
+                    <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+                    <p className="text-[0.7rem] text-muted-foreground">{stat.helper}</p>
                   </div>
                 </div>
               ))}
@@ -281,9 +263,7 @@ const Dashboard = () => {
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6">
             {/* Market-Ready Path */}
             <div className="rounded-2xl bg-card/80 border border-border px-5 py-5 space-y-4">
-              <h2 className="text-sm font-semibold text-foreground">
-                Market-Ready Path
-              </h2>
+              <h2 className="text-sm font-semibold text-foreground">Market-Ready Path</h2>
               <ol className="space-y-3 text-sm">
                 {steps.map((step, index) => (
                   <li key={step.label} className="flex items-start gap-3">
@@ -292,8 +272,8 @@ const Dashboard = () => {
                         step.status === "complete"
                           ? "bg-emerald-500 text-white"
                           : step.status === "active"
-                            ? "bg-slate-800 text-slate-200 border border-slate-600"
-                            : "bg-slate-900 text-slate-500 border border-slate-700"
+                          ? "bg-slate-800 text-slate-200 border border-slate-600"
+                          : "bg-slate-900 text-slate-500 border border-slate-700"
                       }`}
                     >
                       {index + 1}
@@ -306,8 +286,8 @@ const Dashboard = () => {
                             step.status === "complete"
                               ? "bg-emerald-400"
                               : step.status === "active"
-                                ? "bg-[#38bdf8]"
-                                : "bg-muted-foreground/40"
+                              ? "bg-[#38bdf8]"
+                              : "bg-muted-foreground/40"
                           }`}
                           style={{ width: `${step.progress}%` }}
                         />
@@ -348,9 +328,7 @@ const Dashboard = () => {
           <section className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)] gap-5 lg:gap-6">
             {/* Recent Updates */}
             <div className="rounded-2xl bg-card/80 border border-border px-5 py-5 space-y-4">
-              <h2 className="text-sm font-semibold text-foreground">
-                Recent Updates
-              </h2>
+              <h2 className="text-sm font-semibold text-foreground">Recent Updates</h2>
               <div className="space-y-3 text-sm">
                 {recentUpdates.map((update) => (
                   <div
@@ -363,14 +341,10 @@ const Dashboard = () => {
                     <div className="flex-1">
                       <p className="text-foreground">
                         <span className="font-medium">{update.name}</span>{" "}
-                        <span className="text-muted-foreground">
-                          {update.action}
-                        </span>{" "}
+                        <span className="text-muted-foreground">{update.action}</span>{" "}
                         <span className="font-medium">{update.project}</span>
                       </p>
-                      <p className="text-[0.7rem] text-muted-foreground">
-                        Just now
-                      </p>
+                      <p className="text-[0.7rem] text-muted-foreground">Just now</p>
                     </div>
                     <span className="text-[0.7rem] px-2 py-0.5 rounded-full bg-muted text-foreground/80 capitalize">
                       {update.tag}
@@ -383,36 +357,24 @@ const Dashboard = () => {
             {/* Right column cards */}
             <div className="grid grid-cols-1 gap-4">
               <div className="rounded-2xl bg-card/80 border border-border px-4 py-4 space-y-2">
-                <p className="text-sm font-semibold text-foreground">
-                  Find Collaborators
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  5 new matches available
-                </p>
+                <p className="text-sm font-semibold text-foreground">Find Collaborators</p>
+                <p className="text-xs text-muted-foreground">5 new matches available</p>
                 <button className="text-xs text-[#38bdf8] hover:text-[#7dd3fc] font-medium">
                   View matches →
                 </button>
               </div>
 
               <div className="rounded-2xl bg-card/80 border border-border px-4 py-4 space-y-2">
-                <p className="text-sm font-semibold text-foreground">
-                  Active Workspaces
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  3 projects in progress
-                </p>
+                <p className="text-sm font-semibold text-foreground">Active Workspaces</p>
+                <p className="text-xs text-muted-foreground">3 projects in progress</p>
                 <button className="text-xs text-[#38bdf8] hover:text-[#7dd3fc] font-medium">
                   Go to workspace →
                 </button>
               </div>
 
               <div className="rounded-2xl bg-card/80 border border-border px-4 py-4 space-y-2">
-                <p className="text-sm font-semibold text-foreground">
-                  Investor Network
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  2 investors interested
-                </p>
+                <p className="text-sm font-semibold text-foreground">Investor Network</p>
+                <p className="text-xs text-muted-foreground">2 investors interested</p>
                 <button className="text-xs text-[#38bdf8] hover:text-[#7dd3fc] font-medium">
                   View investors →
                 </button>
@@ -422,7 +384,8 @@ const Dashboard = () => {
         </div>
       </main>
     </div>
-  );
-};
+  )
+}
 
-export default Dashboard;
+export default CollaboratorDashboard
+

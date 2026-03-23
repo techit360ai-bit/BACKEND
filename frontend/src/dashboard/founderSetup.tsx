@@ -251,6 +251,7 @@ const FounderSetup = () => {
         <CelebrationOverlay
           visible={showArrivalCelebration}
           message="Welcome to your founder setup."
+          label="Founder Journey"
         />
       </main>
     </div>
