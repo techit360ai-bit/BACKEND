@@ -17,7 +17,7 @@ interface IdeaData {
 }
 
 interface IdeaSubmissionProps {
-  onSubmit: (idea: IdeaData) => void;
+  onSubmit?: (idea: IdeaData) => void;
 }
 
 export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
@@ -66,7 +66,9 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
       colors: ["#6366f1", "#06b6d4", "#10b981"],
     });
 
-    onSubmit(idea);
+    if (onSubmit) {
+      onSubmit(idea);
+    }
     setTimeout(() => {
       navigate("/idea-eval", { state: { idea } });
     }, 1000);

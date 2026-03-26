@@ -7,6 +7,8 @@ import CollaboratorSetup from "@/dashboard/collaboratorSetup";
 import CollaboratorSummary from "@/dashboard/collaboratorSummary";
 import CollaboratorDashboard from "@/dashboard/collaboratorDashboard";
 import IncubationHub from "@/dashboard/incubationHub";
+import AIEvaluation from "@/dashboard/AIEvaluation";
+import MatchResults from "@/dashboard/matchResults";
 import NotFound from "@/dashboard/NotFound";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -25,6 +27,8 @@ const App = () => {
         />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
+        <Route path="/idea-eval" element={<AIEvaluation />} />
+        <Route path="/matches" element={<MatchResults />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <ThemeToggle />

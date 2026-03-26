@@ -43,9 +43,9 @@ export default function AIEvaluation() {
     return (
       <div className="min-h-screen w-full flex bg-background text-foreground">
         <Sidebar />
-        <main className="flex-1 flex items-center justify-center bg-slate-950 py-12">
+        <main className="flex-1 flex items-center justify-center bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
           <div className="text-center">
-            <h1 className="text-3xl font-bold text-white mb-4">
+            <h1 className="text-3xl font-bold text-foreground mb-4">
               No idea data found
             </h1>
             <Link
@@ -64,7 +64,7 @@ export default function AIEvaluation() {
     <div className="min-h-screen w-full flex bg-background text-foreground">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto bg-slate-950 py-12">
+      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
         <div className="max-w-4xl mx-auto px-4">
           {/* Header */}
           <motion.div
@@ -75,16 +75,16 @@ export default function AIEvaluation() {
             <div className="inline-flex items-center justify-center size-20 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-full mb-4 shadow-2xl shadow-emerald-500/50">
               <Sparkles className="size-10 text-white" />
             </div>
-            <h1 className="text-4xl font-bold text-white mb-2">
+            <h1 className="text-4xl font-bold text-foreground mb-2">
               AI Evaluation Complete
             </h1>
-            <p className="text-slate-300 mb-4">
+            <p className="text-muted-foreground mb-4">
               Evaluating:{" "}
-              <span className="font-semibold text-indigo-400">
+              <span className="font-semibold text-indigo-600 dark:text-indigo-400">
                 {idea.title}
               </span>
             </p>
-            <p className="text-slate-400">
+            <p className="text-muted-foreground">
               Here's your idea's market readiness score
             </p>
           </motion.div>
@@ -94,12 +94,12 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-gradient-to-br from-indigo-500/10 to-cyan-500/10 border-2 border-indigo-500/30 rounded-2xl p-8 mb-8 text-center"
+            className="bg-gradient-to-br from-indigo-100 to-cyan-100 dark:from-indigo-500/10 dark:to-cyan-500/10 border-2 border-indigo-200 dark:border-indigo-500/30 rounded-2xl p-8 mb-8 text-center"
           >
-            <div className="text-6xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent mb-2">
+            <div className="text-6xl font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent mb-2">
               87/100
             </div>
-            <div className="text-xl text-white mb-4">
+            <div className="text-xl text-foreground mb-4">
               Market Readiness Score
             </div>
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 rounded-full text-emerald-300 text-sm">
@@ -113,52 +113,54 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.25 }}
-            className="bg-slate-900 rounded-xl p-6 border border-slate-800 mb-8"
+            className="bg-card rounded-xl p-6 border border-border mb-8"
           >
-            <h3 className="text-lg font-bold text-white mb-4">
+            <h3 className="text-lg font-bold text-foreground mb-4">
               Your Submission
             </h3>
             <div className="grid md:grid-cols-2 gap-4">
               <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wide">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
                   Pitch
                 </p>
-                <p className="text-white mt-1">{idea.pitch}</p>
+                <p className="text-foreground mt-1">{idea.pitch}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wide">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
                   Problem
                 </p>
-                <p className="text-white mt-1">{idea.problem}</p>
+                <p className="text-foreground mt-1">{idea.problem}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wide">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
                   Solution
                 </p>
-                <p className="text-white mt-1">{idea.solution}</p>
+                <p className="text-foreground mt-1">{idea.solution}</p>
               </div>
               <div>
-                <p className="text-xs text-slate-400 uppercase tracking-wide">
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">
                   Target Users
                 </p>
-                <p className="text-white mt-1">
+                <p className="text-foreground mt-1">
                   {idea.target || "Not specified"}
                 </p>
               </div>
               {idea.industry && (
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
                     Industry
                   </p>
-                  <p className="text-white mt-1 capitalize">{idea.industry}</p>
+                  <p className="text-foreground mt-1 capitalize">
+                    {idea.industry}
+                  </p>
                 </div>
               )}
               {idea.techStack && (
                 <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-wide">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
                     Tech Stack
                   </p>
-                  <p className="text-white mt-1">{idea.techStack}</p>
+                  <p className="text-foreground mt-1">{idea.techStack}</p>
                 </div>
               )}
             </div>
@@ -190,15 +192,15 @@ export default function AIEvaluation() {
             ].map((metric) => (
               <div
                 key={metric.label}
-                className="bg-slate-900 rounded-xl p-6 border border-slate-800"
+                className="bg-card rounded-xl p-6 border border-border"
               >
-                <div className="text-sm text-slate-400 mb-2">
+                <div className="text-sm text-muted-foreground mb-2">
                   {metric.label}
                 </div>
-                <div className="text-3xl font-bold text-white mb-3">
+                <div className="text-3xl font-bold text-foreground mb-3">
                   {metric.score}%
                 </div>
-                <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     className={`h-full bg-gradient-to-r ${metric.color}`}
                     style={{ width: `${metric.score}%` }}
@@ -213,9 +215,9 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            className="bg-slate-900 rounded-xl p-6 border border-slate-800 mb-8"
+            className="bg-card rounded-xl p-6 border border-border mb-8"
           >
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
               <AlertTriangle className="size-5 text-amber-400" />
               Risk Analysis
             </h3>
@@ -239,24 +241,24 @@ export default function AIEvaluation() {
               ].map((item) => (
                 <div
                   key={item.risk}
-                  className="flex items-start gap-4 p-3 bg-slate-800/50 rounded-lg"
+                  className="flex items-start gap-4 p-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg"
                 >
                   <div
                     className={`px-2 py-1 rounded text-xs ${
                       item.level === "Low"
-                        ? "bg-emerald-500/20 text-emerald-300"
+                        ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-300"
                         : item.level === "Medium"
-                          ? "bg-amber-500/20 text-amber-300"
-                          : "bg-red-500/20 text-red-300"
+                          ? "bg-amber-500/20 text-amber-600 dark:text-amber-300"
+                          : "bg-red-500/20 text-red-600 dark:text-red-300"
                     }`}
                   >
                     {item.level}
                   </div>
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-white">
+                    <div className="text-sm font-medium text-foreground">
                       {item.risk}
                     </div>
-                    <div className="text-xs text-slate-400">
+                    <div className="text-xs text-muted-foreground">
                       {item.description}
                     </div>
                   </div>
@@ -270,9 +272,9 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className="bg-slate-900 rounded-xl p-6 border border-slate-800 mb-8"
+            className="bg-card rounded-xl p-6 border border-border mb-8"
           >
-            <h3 className="text-lg font-bold text-white mb-6">
+            <h3 className="text-lg font-bold text-foreground mb-6">
               AI-Generated Roadmap
             </h3>
             <div className="space-y-4">
@@ -303,10 +305,12 @@ export default function AIEvaluation() {
                     {index + 1}
                   </div>
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-white">
+                    <div className="text-sm font-medium text-foreground">
                       {item.task}
                     </div>
-                    <div className="text-xs text-slate-400">{item.phase}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {item.phase}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -318,10 +322,10 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.6 }}
-            className="bg-gradient-to-r from-indigo-500/10 to-cyan-500/10 border border-indigo-500/30 rounded-xl p-6 mb-8"
+            className="bg-gradient-to-r from-indigo-100 to-cyan-100 dark:from-indigo-500/10 dark:to-cyan-500/10 border border-indigo-200 dark:border-indigo-500/30 rounded-xl p-6 mb-8"
           >
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-              <Users className="size-5 text-indigo-400" />
+            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+              <Users className="size-5 text-indigo-600 dark:text-indigo-400" />
               Recommended Team Composition
             </h3>
             <div className="grid md:grid-cols-3 gap-4">
@@ -332,12 +336,14 @@ export default function AIEvaluation() {
               ].map((member) => (
                 <div
                   key={member.role}
-                  className="bg-slate-900/50 rounded-lg p-4"
+                  className="bg-white dark:bg-slate-900/50 rounded-lg p-4"
                 >
-                  <div className="text-sm font-medium text-white mb-1">
+                  <div className="text-sm font-medium text-foreground mb-1">
                     {member.role}
                   </div>
-                  <div className="text-xs text-slate-400">{member.skills}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {member.skills}
+                  </div>
                 </div>
               ))}
             </div>
