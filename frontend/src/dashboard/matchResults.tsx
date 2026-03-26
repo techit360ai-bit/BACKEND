@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import { Mail, MessageCircle, Star, Award } from "lucide-react";
 import confetti from "canvas-confetti";
 import Sidebar from "../components/Sidebar";
+import MobileMenuButton from "../components/MobileMenuButton";
 
 const matches = [
   {
@@ -57,6 +58,10 @@ export default function MatchResults() {
 
       <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-6 lg:py-12">
         <div className="max-w-6xl mx-auto px-4 lg:px-6">
+          {/* Mobile Menu Button */}
+          <div className="mb-6 flex items-center justify-between md:hidden">
+            <MobileMenuButton />
+          </div>
           {/* Header */}
           <div className="mb-6 lg:mb-8">
             <h1 className="text-2xl lg:text-3xl font-bold text-foreground mb-2">

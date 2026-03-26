@@ -10,6 +10,7 @@ import {
 import confetti from "canvas-confetti";
 import { useEffect } from "react";
 import Sidebar from "../components/Sidebar";
+import MobileMenuButton from "../components/MobileMenuButton";
 
 interface IdeaData {
   title: string;
@@ -66,6 +67,10 @@ export default function AIEvaluation() {
 
       <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
         <div className="max-w-4xl mx-auto px-4">
+          {/* Mobile Menu Button */}
+          <div className="mb-6 flex items-center justify-between md:hidden">
+            <MobileMenuButton />
+          </div>
           {/* Header */}
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}

@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Lightbulb, AlertCircle, Sparkles, ArrowRight } from "lucide-react";
 import confetti from "canvas-confetti";
 import Sidebar from "../components/Sidebar";
+import MobileMenuButton from "../components/MobileMenuButton";
 
 interface IdeaData {
   title: string;
@@ -81,8 +82,12 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
     <div className="min-h-screen w-full flex bg-background text-foreground">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto bg-slate-950 py-12">
+      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
         <div className="max-w-6xl mx-auto px-4">
+          {/* Mobile Menu Button */}
+          <div className="mb-6 flex items-center justify-between md:hidden">
+            <MobileMenuButton />
+          </div>
           {/* Header */}
           <div className="text-center mb-12">
             <motion.div
