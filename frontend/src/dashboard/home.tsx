@@ -97,7 +97,7 @@ const Dashboard = () => {
   return (
     <div className="min-h-dvh w-full flex bg-background text-foreground">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-64 xl:w-72 flex-col border-r border-border bg-sidebar text-        sidebar-foreground sticky top-0 h-dvh">
+      <aside className="hidden md:flex w-64 xl:w-72 flex-col border-r border-border bg-sidebar text-sidebar-foreground sticky top-0 h-dvh">
         <div className="px-5 pt-5 pb-4 flex items-center gap-2">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#38bdf8] text-primary-            foreground shadow-lg">
             <Lightbulb className="h-5 w-5" />
@@ -123,7 +123,7 @@ const Dashboard = () => {
             <span>Dashboard</span>
           </Link>
           <Link
-            to="#"
+            to="/incubation-hub"
             className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-muted-foreground hover:bg-sidebar-accent/40"
           >
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-xs">

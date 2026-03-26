@@ -36,10 +36,21 @@ const Landing = () => {
   const [showFounderCelebration, setShowFounderCelebration] = useState(false);
   const [showCollaboratorCelebration, setShowCollaboratorCelebration] =
     useState(false);
+  const [showInvestorCelebration, setShowInvestorCelebration] = useState(false);
+  const [showOrganizationCelebration, setShowOrganizationCelebration] =
+    useState(false);
   const navigate = useNavigate();
 
+  // Helper function to check if any celebration is showing
+  const isCelebrationActive = () =>
+    showFounderCelebration ||
+    showCollaboratorCelebration ||
+    showInvestorCelebration ||
+    showOrganizationCelebration;
+
+  //function that shows the celebration overlay for founder and then navigates to the founder setup page after 900ms, also prevents multiple clicks while the celebration is showing
   const handleFounderStart = () => {
-    if (showFounderCelebration || showCollaboratorCelebration) return;
+    if (isCelebrationActive()) return;
     setShowFounderCelebration(true);
     setTimeout(() => {
       navigate("/founder/setup", { state: { celebrate: true } });
@@ -47,12 +58,33 @@ const Landing = () => {
     }, 900);
   };
 
+  //function that shows the celebration overlay for collaborator and then navigates to the collaborator setup page after 900ms, also prevents multiple clicks while the celebration is showing
   const handleCollaboratorStart = () => {
-    if (showCollaboratorCelebration || showFounderCelebration) return;
+    if (isCelebrationActive()) return;
     setShowCollaboratorCelebration(true);
     setTimeout(() => {
       navigate("/collaborator/setup", { state: { celebrate: true } });
       setShowCollaboratorCelebration(false);
+    }, 900);
+  };
+
+  //function that shows the celebration overlay for investor and then navigates to the investor setup page after 900ms, also prevents multiple clicks while the celebration is showing
+  const handleInvestorStart = () => {
+    if (isCelebrationActive()) return;
+    setShowInvestorCelebration(true);
+    setTimeout(() => {
+      navigate("/investor/setup", { state: { celebrate: true } });
+      setShowInvestorCelebration(false);
+    }, 900);
+  };
+
+  //function that shows the celebration overlay for organization and then navigates to the organization setup page after 900ms, also prevents multiple clicks while the celebration is showing
+  const handleOrganizationStart = () => {
+    if (isCelebrationActive()) return;
+    setShowOrganizationCelebration(true);
+    setTimeout(() => {
+      navigate("/organization/setup", { state: { celebrate: true } });
+      setShowOrganizationCelebration(false);
     }, 900);
   };
 
@@ -79,7 +111,6 @@ const Landing = () => {
               matching and collaboration.
             </p>
           </section>
-
           {/* Role Cards */}
           <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 w-full">
             {roles.map((role) => (
@@ -116,6 +147,24 @@ const Landing = () => {
                     Get Started
                     <ArrowRight className="h-4 w-4" />
                   </button>
+                ) : role.title === "Investor" ? (
+                  <button
+                    type="button"
+                    onClick={handleInvestorStart}
+                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                  >
+                    Get Started
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : role.title === "Organization" ? (
+                  <button
+                    type="button"
+                    onClick={handleOrganizationStart}
+                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                  >
+                    Get Started
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
                 ) : (
                   <Link
                     to="#"
@@ -128,7 +177,6 @@ const Landing = () => {
               </div>
             ))}
           </section>
-
           {/* Bottom Link */}
           <a
             href="#"
@@ -136,7 +184,6 @@ const Landing = () => {
           >
             Explore Platform Without Signing Up
           </a>
-
           <CelebrationOverlay
             visible={showFounderCelebration}
             message="You’re starting your founder journey!"
@@ -146,7 +193,17 @@ const Landing = () => {
             visible={showCollaboratorCelebration}
             message="You’re starting your collaborator journey!"
             label="Collaborator Journey"
+          />{" "}
+          <CelebrationOverlay
+            visible={showInvestorCelebration}
+            message="You're starting your investor journey!"
+            label="Investor Journey"
           />
+          <CelebrationOverlay
+            visible={showOrganizationCelebration}
+            message="You're starting your organization journey!"
+            label="Organization Journey"
+          />{" "}
         </div>
       </div>
     </div>
