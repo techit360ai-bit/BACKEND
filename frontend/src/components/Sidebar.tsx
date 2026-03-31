@@ -8,6 +8,7 @@ import {
   Route,
   LineChart,
   User,
+  Wallet,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useSidebar } from "../contexts/SidebarContext";
@@ -108,6 +109,16 @@ export default function Sidebar() {
               <LineChart className="h-4 w-4" />
             </span>
             <span>Investors</span>
+          </Link>
+          <Link
+            to="/wallet"
+            onClick={closeSidebar}
+            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-400 hover:bg-slate-800/50 transition-colors"
+          >
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 text-xs">
+              <Wallet className="h-4 w-4" />
+            </span>
+            <span>Wallet</span>
           </Link>
           <Link
             to="#"

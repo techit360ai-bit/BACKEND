@@ -5,6 +5,8 @@ import {
   MessageCircleMore,
   Search,
   Lightbulb,
+  Wallet,
+  Share2,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import MobileMenuButton from "../components/MobileMenuButton";
@@ -107,8 +109,17 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <a
+                href="/wallet"
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Wallet className="h-4 w-4" />
+              </a>
               <button className="flex h-9 w-9 items-center justify-center rounded-full bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
                 <MessageCircleMore className="h-4 w-4" />
+              </button>
+              <button className="flex h-9 w-9 items-center justify-center rounded-full bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
+                <Share2 className="h-4 w-4" />
               </button>
               <button className="flex h-9 w-9 items-center justify-center rounded-full bg-card border border-border text-muted-foreground hover:text-foreground hover:bg-slate-200 dark:hover:bg-slate-800 transition-colors">
                 <Bell className="h-4 w-4" />

@@ -9,6 +9,7 @@ import CollaboratorDashboard from "@/dashboard/collaboratorDashboard";
 import IncubationHub from "@/dashboard/incubationHub";
 import AIEvaluation from "@/dashboard/AIEvaluation";
 import MatchResults from "@/dashboard/matchResults";
+import Wallet from "@/TechitWallet/Wallet";
 import NotFound from "@/dashboard/NotFound";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
@@ -26,6 +27,7 @@ const App = () => {
           element={<CollaboratorDashboard />}
         />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
         <Route path="/idea-eval" element={<AIEvaluation />} />
         <Route path="/matches" element={<MatchResults />} />
