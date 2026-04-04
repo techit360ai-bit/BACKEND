@@ -4,15 +4,14 @@ import { cn } from "@/lib/utils";
 import { useEffect } from "react";
 import { useLocation, useNavigate, type Location } from "react-router-dom";
 
-type FounderProfile = {
-  stage: string;
-  industries: string[];
-  experience: string;
+type CollaboratorProfile = {
+  skills: string[];
   hours: number;
+  riskTolerance: "Low" | "Medium" | "High";
 };
 
 type SummaryLocationState = {
-  profile?: FounderProfile;
+  profile?: CollaboratorProfile;
 };
 
 const initialsFromName = (name: string) => {
@@ -22,14 +21,14 @@ const initialsFromName = (name: string) => {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 };
 
-const FounderSummary = () => {
+const CollaboratorSummary = () => {
   const navigate = useNavigate();
   const location = useLocation() as Location & { state?: SummaryLocationState };
   const profile = location.state?.profile;
 
   useEffect(() => {
     if (!profile) {
-      navigate("/founder/setup", { replace: true });
+      navigate("/collaborator/setup", { replace: true });
     }
   }, [navigate, profile]);
 
@@ -38,7 +37,15 @@ const FounderSummary = () => {
   const name = "Demo User";
   const initials = initialsFromName(name);
 
-  const aiScore = 80 + Math.min(15, profile.industries.length * 3);
+  const aiScoreBase = 70;
+  const aiScore =
+    aiScoreBase +
+    Math.min(20, profile.skills.length * 3) +
+    (profile.riskTolerance === "High"
+      ? 5
+      : profile.riskTolerance === "Medium"
+        ? 2
+        : 0);
 
   return (
     <div className="min-h-dvh w-full flex flex-col">
@@ -74,13 +81,12 @@ const FounderSummary = () => {
                         {name}
                       </h2>
                       <span className="rounded-full bg-cyan-500/10 px-2 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 dark:border-cyan-500/50">
-                        Verified
+                        Collaborator
                       </span>
                     </div>
                     <p className="text-xs sm:text-sm text-muted-foreground max-w-md">
-                      Focused founder exploring{" "}
-                      {profile.industries[0] ?? "your chosen industry"}, ready
-                      to collaborate on early-stage ideas.
+                      Experienced collaborator ready to join high-potential
+                      teams and contribute hands-on with key skills.
                     </p>
                   </div>
                 </div>
@@ -101,15 +107,15 @@ const FounderSummary = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs sm:text-sm">
                 <div className="rounded-2xl bg-muted/5 border border-border/60 px-4 py-3 space-y-1">
                   <p className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground">
-                    Industries
+                    Key Skills
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {profile.industries.map((industry) => (
+                    {profile.skills.map((skill: string) => (
                       <span
-                        key={industry}
+                        key={skill}
                         className="rounded-full bg-cyan-500/20 dark:bg-cyan-950/50 text-xs text-cyan-700 dark:text-cyan-300 px-2 py-0.5 border border-cyan-500/30 dark:border-cyan-500/50"
                       >
-                        {industry}
+                        {skill}
                       </span>
                     ))}
                   </div>
@@ -126,18 +132,22 @@ const FounderSummary = () => {
 
                 <div className="rounded-2xl bg-muted/5 border border-border/60 px-4 py-3 space-y-1">
                   <p className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground">
-                    Experience
+                    Risk Tolerance
                   </p>
                   <p className="text-sm text-foreground">
-                    {profile.experience}
+                    {profile.riskTolerance}
                   </p>
                 </div>
 
                 <div className="rounded-2xl bg-muted/5 border border-border/60 px-4 py-3 space-y-1">
                   <p className="text-[0.7rem] font-semibold tracking-wide text-muted-foreground">
-                    Stage Preference
+                    Collaboration Fit
                   </p>
-                  <p className="text-sm text-foreground">{profile.stage}</p>
+                  <p className="text-sm text-foreground">
+                    Best suited for teams seeking{" "}
+                    {profile.riskTolerance.toLowerCase()}-risk, committed
+                    collaborators.
+                  </p>
                 </div>
               </div>
 
@@ -147,29 +157,25 @@ const FounderSummary = () => {
                 </p>
                 <ul className="text-xs sm:text-sm text-muted-foreground space-y-1 list-disc list-inside">
                   <li>
-                    Prioritizing founders with{" "}
+                    Prioritizing roles that need{" "}
                     <span className="text-foreground font-medium">
-                      {profile.experience.toLowerCase()}
-                    </span>{" "}
-                    experience interested in{" "}
-                    <span className="text-foreground font-medium">
-                      {profile.stage.toLowerCase()}
-                    </span>{" "}
-                    stage work.
-                  </li>
-                  <li>
-                    Looking for projects in{" "}
-                    <span className="text-foreground font-medium">
-                      {profile.industries.join(", ")}
+                      {profile.skills.slice(0, 3).join(", ")}
                     </span>
                     .
                   </li>
                   <li>
-                    Prefers founders with{" "}
+                    Matching with teams that align with a{" "}
+                    <span className="text-foreground font-medium">
+                      {profile.riskTolerance.toLowerCase()}
+                    </span>{" "}
+                    risk profile.
+                  </li>
+                  <li>
+                    Prefers collaborations requiring around{" "}
                     <span className="text-foreground font-medium">
                       {profile.hours}h/week
                     </span>{" "}
-                    available for collaboration.
+                    commitment.
                   </li>
                 </ul>
               </div>
@@ -180,13 +186,18 @@ const FounderSummary = () => {
             <Button
               variant="outline"
               className="w-full sm:w-40"
-              onClick={() => navigate("/founder/setup", { state: { profile } })}
+              onClick={() =>
+                navigate("/collaborator/setup", { state: { profile } })
+              }
             >
               Edit Profile
             </Button>
             <Button
-              className="w-full sm:flex-1 h-11 text-sm font-semibold bg-linear-to-r from-violet-500 via-cyan-500 to-teal-500 text-white hover:from-violet-600 hover:via-cyan-600 hover:to-teal-600 dark:from-violet-600 dark:via-cyan-600 dark:to-teal-600 dark:hover:from-violet-700 dark:hover:via-cyan-700 dark:hover:to-teal-700"
-              onClick={() => navigate("/dashboard")}
+              className={cn(
+                "w-full sm:flex-1 h-11 text-sm font-semibold",
+                "bg-linear-to-r from-violet-500 via-cyan-500 to-teal-500 text-white hover:from-violet-600 hover:via-cyan-600 hover:to-teal-600 shadow-lg shadow-violet-500/20 dark:shadow-violet-600/20",
+              )}
+              onClick={() => navigate("/collaborator/dashboard")}
             >
               Enter Incubator
             </Button>
@@ -197,4 +208,4 @@ const FounderSummary = () => {
   );
 };
 
-export default FounderSummary;
+export default CollaboratorSummary;

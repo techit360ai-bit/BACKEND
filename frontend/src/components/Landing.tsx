@@ -91,18 +91,18 @@ const Landing = () => {
   return (
     <div className="min-h-dvh w-full flex flex-col">
       <NavBar />
-      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative overflow-hidden bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-[#0f172a] dark:via-[#1e1b4b] dark:to-[#0f172a] text-foreground">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 relative overflow-hidden bg-linear-to-b from-slate-50 via-violet-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900/30 dark:to-slate-950 text-foreground">
         {/* Subtle flecks/noise effect */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_50%,rgba(120,80,200,0.06)_0%,transparent_70%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_50%,rgba(139,92,246,0.08)_0%,transparent_70%)] dark:bg-[radial-gradient(ellipse_at_50%_50%,rgba(168,85,247,0.05)_0%,transparent_70%)]" />
 
         <div className="relative z-10 flex flex-col items-center max-w-4xl w-full gap-16">
           {/* Hero Section */}
           <section className="flex flex-col items-center gap-6 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#38bdf8]/90 shadow-lg">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-violet-500 to-cyan-500 shadow-lg shadow-violet-500/30 dark:shadow-violet-600/20">
               <Lightbulb className="h-8 w-8 text-white" />
             </div>
             <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-              <span className="bg-linear-to-r from-[#a78bfa] via-[#38bdf8] to-[#a78bfa] bg-clip-text text-transparent">
+              <span className="bg-linear-to-r from-violet-600 via-cyan-500 to-teal-500 dark:from-violet-400 dark:via-cyan-400 dark:to-teal-400 bg-clip-text text-transparent">
                 Build. Match. Launch.
               </span>
             </h1>
@@ -133,7 +133,7 @@ const Landing = () => {
                   <button
                     type="button"
                     onClick={handleFounderStart}
-                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                    className="inline-flex items-center gap-1.5 text-violet-600 dark:text-violet-400 font-medium hover:text-violet-700 dark:hover:text-violet-300 transition-colors text-sm"
                   >
                     Get Started
                     <ArrowRight className="h-4 w-4" />
@@ -142,7 +142,7 @@ const Landing = () => {
                   <button
                     type="button"
                     onClick={handleCollaboratorStart}
-                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                    className="inline-flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400 font-medium hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors text-sm"
                   >
                     Get Started
                     <ArrowRight className="h-4 w-4" />
@@ -151,7 +151,7 @@ const Landing = () => {
                   <button
                     type="button"
                     onClick={handleInvestorStart}
-                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                    className="inline-flex items-center gap-1.5 text-teal-600 dark:text-teal-400 font-medium hover:text-teal-700 dark:hover:text-teal-300 transition-colors text-sm"
                   >
                     Get Started
                     <ArrowRight className="h-4 w-4" />
@@ -160,7 +160,7 @@ const Landing = () => {
                   <button
                     type="button"
                     onClick={handleOrganizationStart}
-                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                    className="inline-flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-medium hover:text-rose-700 dark:hover:text-rose-300 transition-colors text-sm"
                   >
                     Get Started
                     <ArrowRight className="h-4 w-4" />
@@ -168,7 +168,7 @@ const Landing = () => {
                 ) : (
                   <Link
                     to="#"
-                    className="inline-flex items-center gap-1.5 text-[#38bdf8] font-medium hover:text-[#7dd3fc] transition-colors text-sm"
+                    className="inline-flex items-center gap-1.5 text-violet-600 dark:text-violet-400 font-medium hover:text-violet-700 dark:hover:text-violet-300 transition-colors text-sm"
                   >
                     Get Started
                     <ArrowRight className="h-4 w-4" />

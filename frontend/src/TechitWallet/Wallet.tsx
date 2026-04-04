@@ -22,8 +22,8 @@ const recentUsage = [
     title: "AI code generation",
     time: "2 min ago",
     credits: "-12",
-    color: "bg-orange-500/20",
-    iconColor: "text-orange-400",
+    color: "bg-violet-500/20",
+    iconColor: "text-violet-400",
   },
   {
     id: 2,
@@ -31,8 +31,8 @@ const recentUsage = [
     title: "Deploy pipeline",
     time: "15 min ago",
     credits: "-10",
-    color: "bg-pink-500/20",
-    iconColor: "text-pink-400",
+    color: "bg-cyan-500/20",
+    iconColor: "text-cyan-400",
   },
   {
     id: 3,
@@ -40,8 +40,8 @@ const recentUsage = [
     title: "Automation run",
     time: "1 hour ago",
     credits: "-8",
-    color: "bg-yellow-500/20",
-    iconColor: "text-yellow-400",
+    color: "bg-teal-500/20",
+    iconColor: "text-teal-400",
   },
   {
     id: 4,
@@ -49,8 +49,8 @@ const recentUsage = [
     title: "Database backup",
     time: "3 hours ago",
     credits: "-5",
-    color: "bg-purple-500/20",
-    iconColor: "text-purple-400",
+    color: "bg-rose-500/20",
+    iconColor: "text-rose-400",
   },
   {
     id: 5,
@@ -58,8 +58,8 @@ const recentUsage = [
     title: "API analytics",
     time: "5 hours ago",
     credits: "-3",
-    color: "bg-blue-500/20",
-    iconColor: "text-blue-400",
+    color: "bg-violet-500/20",
+    iconColor: "text-violet-400",
   },
 ];
 
@@ -68,13 +68,13 @@ const bottomCards = [
     title: "Upgrade Plan",
     description: "Get more credits monthly",
     icon: CreditCard,
-    color: "border-blue-500/50",
+    color: "border-violet-500/50",
   },
   {
     title: "Usage Analytics",
     description: "See detailed breakdowns",
     icon: TrendingUp,
-    color: "border-purple-500/50",
+    color: "border-cyan-500/50",
   },
   {
     title: "Run Automation",
@@ -222,31 +222,33 @@ export default function Wallet() {
       <Sidebar />
 
       {/* Main content */}
-      <main className="flex-1 min-h-dvh overflow-y-auto bg-gradient-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      <main className="flex-1 min-h-dvh overflow-y-auto bg-linear-to-b from-slate-50 via-violet-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900/50 dark:to-slate-950">
         {/* Top Navigation */}
-        <div className="border-b border-slate-800 dark:border-slate-800 bg-slate-950 dark:bg-slate-950 sticky top-0 z-40">
+        <div className="border-b border-violet-200/50 dark:border-violet-800/50 bg-linear-to-r from-sky-50 to-violet-50 dark:from-slate-900/50 dark:to-purple-900/50 sticky top-0 z-40">
           <div className="max-w-6xl mx-auto px-4 lg:px-8 py-4 flex items-center justify-between gap-8">
             <div className="flex items-center gap-8">
               <MobileMenuButton />
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
-                  <span className="text-xl font-bold text-white">TechIT</span>
+                  <span className="text-xl font-bold bg-linear-to-r from-violet-600 to-cyan-600 dark:from-violet-400 dark:to-cyan-400 bg-clip-text text-transparent">
+                    TechIT
+                  </span>
                 </div>
                 <nav className="flex items-center gap-6 text-sm">
-                  <button className="text-cyan-400 font-medium border-b-2 border-cyan-400 pb-1">
+                  <button className="text-violet-600 dark:text-violet-400 font-medium border-b-2 border-violet-600 dark:border-violet-400 pb-1">
                     Wallet
                   </button>
-                  <button className="text-slate-400 hover:text-white transition-colors">
+                  <button className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
                     Pricing
                   </button>
-                  <button className="text-slate-400 hover:text-white transition-colors">
+                  <button className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors">
                     Analytics
                   </button>
                 </nav>
               </div>
             </div>
-            <div className="flex items-center gap-3 bg-slate-900 px-4 py-2 rounded-full border border-slate-800">
-              <span className="text-sm font-semibold text-white">
+            <div className="flex items-center gap-3 bg-linear-to-r from-violet-100 to-cyan-100 dark:from-violet-950/40 dark:to-cyan-950/40 px-4 py-2 rounded-full border border-violet-300 dark:border-violet-800/50">
+              <span className="text-sm font-semibold text-slate-900 dark:text-white">
                 1,240 Credits
               </span>
             </div>
@@ -255,7 +257,7 @@ export default function Wallet() {
 
         <div className="max-w-6xl mx-auto px-4 lg:px-8 py-8 space-y-8">
           {/* Main Credit Card */}
-          <div className="rounded-3xl bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-800 border border-indigo-600/50 px-8 py-8 space-y-6">
+          <div className="rounded-3xl bg-linear-to-br from-violet-600 via-violet-500 to-cyan-500 border border-violet-400/50 dark:border-violet-600/50 px-8 py-8 space-y-6 shadow-xl shadow-violet-500/20">
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-4">
@@ -595,7 +597,7 @@ export default function Wallet() {
 
               {/* Footer Note */}
               <div className="rounded-lg bg-slate-800/50 border border-slate-700 px-4 py-3 flex items-start gap-3">
-                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/20 mt-0.5 flex-shrink-0">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/20 mt-0.5 shrink-0">
                   <span className="text-xs text-cyan-400">✓</span>
                 </div>
                 <div>
@@ -634,7 +636,7 @@ export default function Wallet() {
               {/* Modal Header */}
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-purple-800">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-linear-to-br from-purple-600 to-purple-800">
                     <Play className="h-8 w-8 text-white fill-white" />
                   </div>
                 </div>
@@ -697,7 +699,7 @@ export default function Wallet() {
             />
 
             {/* Modal Content */}
-            <div className="relative bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col">
+            <div className="relative bg-linear-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col">
               {/* Close Button */}
               <button
                 onClick={closePlans}
@@ -790,7 +792,7 @@ export default function Wallet() {
                             key={idx}
                             className="flex items-start gap-2 text-xs"
                           >
-                            <div className="flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500/20 mt-0.5 flex-shrink-0">
+                            <div className="flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500/20 mt-0.5 shrink-0">
                               <span className="text-xs text-cyan-400">✓</span>
                             </div>
                             <span className="text-slate-300">{feature}</span>
@@ -802,7 +804,7 @@ export default function Wallet() {
                       <button
                         className={`w-full rounded-lg py-2 font-semibold transition-all text-xs ${
                           plan.popular
-                            ? "bg-gradient-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white"
+                            ? "bg-linear-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white"
                             : "bg-slate-800 hover:bg-slate-700 text-white border border-slate-700"
                         }`}
                       >
@@ -819,7 +821,7 @@ export default function Wallet() {
                     return (
                       <div
                         key={idx}
-                        className="rounded-xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/50 p-3 sm:p-4 space-y-2 hover:border-slate-600 transition-all"
+                        className="rounded-xl bg-linear-to-br from-slate-800/50 to-slate-900/50 border border-slate-700/50 p-3 sm:p-4 space-y-2 hover:border-slate-600 transition-all"
                       >
                         <IconComponent className="h-5 w-5 text-cyan-400" />
                         <h4 className="text-xs sm:text-sm font-semibold text-white">
@@ -834,7 +836,7 @@ export default function Wallet() {
                 </div>
 
                 {/* Custom Plan Section */}
-                <div className="rounded-2xl bg-gradient-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/20 p-4 sm:p-6 text-center space-y-2 pb-8">
+                <div className="rounded-2xl bg-linear-to-r from-blue-600/20 to-cyan-600/20 border border-blue-500/20 p-4 sm:p-6 text-center space-y-2 pb-8">
                   <h3 className="text-lg sm:text-xl font-bold text-white">
                     Need a custom plan?
                   </h3>
@@ -849,7 +851,7 @@ export default function Wallet() {
               </div>
 
               {/* Fixed Footer with Cancel Button */}
-              <div className="border-t border-slate-700 p-4 bg-gradient-to-t from-slate-950 to-transparent">
+              <div className="border-t border-slate-700 p-4 bg-linear-to-t from-slate-950 to-transparent">
                 <button
                   onClick={closePlans}
                   className="w-full rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-800 text-white font-semibold py-3 transition-colors"

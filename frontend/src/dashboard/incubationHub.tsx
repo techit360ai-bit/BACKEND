@@ -82,7 +82,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
     <div className="min-h-screen w-full flex bg-background text-foreground">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
+      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-violet-50/30 to-slate-100 dark:from-slate-950 dark:via-slate-900/30 dark:to-slate-950 py-12">
         <div className="max-w-6xl mx-auto px-4">
           {/* Mobile Menu Button */}
           <div className="mb-6 flex items-center justify-between md:hidden">
@@ -93,7 +93,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
-              className="inline-flex items-center justify-center size-16 bg-gradient-to-br from-indigo-500 to-cyan-500 rounded-2xl mb-4 shadow-2xl shadow-indigo-500/50"
+              className="inline-flex items-center justify-center size-16 bg-linear-to-br from-violet-500 to-cyan-500 rounded-2xl mb-4 shadow-2xl shadow-violet-500/50"
             >
               <Lightbulb className="size-8 text-white" />
             </motion.div>
@@ -112,9 +112,9 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                 <div
                   className={`size-10 rounded-full flex items-center justify-center font-bold transition-all ${
                     num < step
-                      ? "bg-emerald-500 text-white"
+                      ? "bg-linear-to-r from-cyan-500 to-teal-500 text-white"
                       : num === step
-                        ? "bg-indigo-500 text-white"
+                        ? "bg-linear-to-r from-violet-500 to-violet-600 text-white"
                         : "bg-slate-800 text-slate-500"
                   }`}
                 >
@@ -307,7 +307,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                     <button
                       onClick={() => setStep(step + 1)}
                       disabled={!canProceed}
-                      className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed text-white rounded-lg flex items-center justify-center gap-2 transition-all"
+                      className="flex-1 px-6 py-3 bg-linear-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed text-white rounded-lg flex items-center justify-center gap-2 transition-all"
                     >
                       <span>Next Step</span>
                       <ArrowRight className="size-4" />
@@ -315,7 +315,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                   ) : (
                     <button
                       onClick={handleSubmit}
-                      className="flex-1 px-6 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-500/30"
+                      className="flex-1 px-6 py-3 bg-linear-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg flex items-center justify-center gap-2 transition-all shadow-lg shadow-indigo-500/30"
                     >
                       <Sparkles className="size-4" />
                       <span>Evaluate Idea</span>
@@ -346,7 +346,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                     </div>
                     <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-indigo-500 to-indigo-400 transition-all duration-500"
+                        className="h-full bg-linear-to-r from-indigo-500 to-indigo-400 transition-all duration-500"
                         style={{ width: `${aiScore.clarity}%` }}
                       />
                     </div>
@@ -361,7 +361,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                     </div>
                     <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-cyan-500 to-cyan-400 transition-all duration-500"
+                        className="h-full bg-linear-to-r from-cyan-500 to-cyan-400 transition-all duration-500"
                         style={{ width: `${aiScore.marketPotential}%` }}
                       />
                     </div>
@@ -376,7 +376,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                     </div>
                     <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
+                        className="h-full bg-linear-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
                         style={{ width: `${aiScore.feasibility}%` }}
                       />
                     </div>
@@ -386,7 +386,7 @@ export default function IdeaSubmission({ onSubmit }: IdeaSubmissionProps) {
                 {/* Suggestions */}
                 <div className="bg-slate-800/50 rounded-lg p-4">
                   <div className="flex items-start gap-2 mb-2">
-                    <AlertCircle className="size-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <AlertCircle className="size-4 text-amber-400 shrink-0 mt-0.5" />
                     <div className="text-sm text-slate-300">
                       <p className="font-medium mb-1">
                         Tips for a better score:

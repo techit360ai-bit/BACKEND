@@ -44,14 +44,14 @@ export default function AIEvaluation() {
     return (
       <div className="min-h-screen w-full flex bg-background text-foreground">
         <Sidebar />
-        <main className="flex-1 flex items-center justify-center bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
+        <main className="flex-1 flex items-center justify-center bg-linear-to-b from-slate-50 via-violet-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900/30 dark:to-slate-950 py-12">
           <div className="text-center">
             <h1 className="text-3xl font-bold text-foreground mb-4">
               No idea data found
             </h1>
             <Link
               to="/idea-submit"
-              className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg transition-all shadow-lg shadow-indigo-500/30"
+              className="inline-block px-6 py-3 bg-linear-to-r from-violet-500 to-violet-600 hover:from-violet-600 hover:to-violet-700 text-white rounded-lg transition-all shadow-lg shadow-violet-500/30"
             >
               Submit an Idea
             </Link>
@@ -65,7 +65,7 @@ export default function AIEvaluation() {
     <div className="min-h-screen w-full flex bg-background text-foreground">
       <Sidebar />
 
-      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-100 via-indigo-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 py-12">
+      <main className="flex-1 overflow-y-auto bg-linear-to-b from-slate-50 via-violet-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900/30 dark:to-slate-950 py-12">
         <div className="max-w-4xl mx-auto px-4">
           {/* Mobile Menu Button */}
           <div className="mb-6 flex items-center justify-between md:hidden">
@@ -77,7 +77,7 @@ export default function AIEvaluation() {
             animate={{ opacity: 1, scale: 1 }}
             className="text-center mb-12"
           >
-            <div className="inline-flex items-center justify-center size-20 bg-gradient-to-br from-emerald-500 to-teal-500 rounded-full mb-4 shadow-2xl shadow-emerald-500/50">
+            <div className="inline-flex items-center justify-center size-20 bg-linear-to-br from-cyan-500 to-teal-500 rounded-full mb-4 shadow-2xl shadow-cyan-500/50">
               <Sparkles className="size-10 text-white" />
             </div>
             <h1 className="text-4xl font-bold text-foreground mb-2">
@@ -85,7 +85,7 @@ export default function AIEvaluation() {
             </h1>
             <p className="text-muted-foreground mb-4">
               Evaluating:{" "}
-              <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+              <span className="font-semibold text-violet-600 dark:text-violet-400">
                 {idea.title}
               </span>
             </p>
@@ -99,15 +99,15 @@ export default function AIEvaluation() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
-            className="bg-gradient-to-br from-indigo-100 to-cyan-100 dark:from-indigo-500/10 dark:to-cyan-500/10 border-2 border-indigo-200 dark:border-indigo-500/30 rounded-2xl p-8 mb-8 text-center"
+            className="bg-linear-to-br from-violet-100 to-cyan-100 dark:from-violet-500/10 dark:to-cyan-500/10 border-2 border-violet-200 dark:border-violet-500/30 rounded-2xl p-8 mb-8 text-center"
           >
-            <div className="text-6xl font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 dark:from-indigo-400 dark:to-cyan-400 bg-clip-text text-transparent mb-2">
+            <div className="text-6xl font-bold bg-linear-to-r from-violet-500 to-cyan-500 dark:from-violet-400 dark:to-cyan-400 bg-clip-text text-transparent mb-2">
               87/100
             </div>
             <div className="text-xl text-foreground mb-4">
               Market Readiness Score
             </div>
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/20 rounded-full text-emerald-300 text-sm">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-500/20 rounded-full text-cyan-600 dark:text-cyan-300 text-sm">
               <TrendingUp className="size-4" />
               <span>High Potential - Ready for MVP</span>
             </div>

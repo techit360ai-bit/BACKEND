@@ -105,7 +105,7 @@ export default function MatchResults() {
                 <div className="flex flex-col sm:flex-row items-start gap-4 lg:gap-6">
                   {/* Avatar */}
                   <div className="flex-shrink-0 w-full sm:w-auto flex sm:flex-col items-start sm:items-center gap-4 sm:gap-2">
-                    <div className="size-16 sm:size-20 rounded-full bg-gradient-to-br from-indigo-500 to-cyan-500 flex items-center justify-center text-xl sm:text-2xl font-bold text-white flex-shrink-0">
+                    <div className="size-16 sm:size-20 rounded-full bg-linear-to-br from-indigo-500 to-cyan-500 flex items-center justify-center text-xl sm:text-2xl font-bold text-white shrink-0">
                       {match.avatar}
                     </div>
                     {/* Match Badge */}
@@ -134,7 +134,7 @@ export default function MatchResults() {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1 flex-shrink-0">
+                      <div className="flex items-center gap-1 shrink-0">
                         {[...Array(5)].map((_, i) => (
                           <Star
                             key={i}

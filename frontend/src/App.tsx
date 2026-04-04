@@ -1,11 +1,17 @@
 import { Routes, Route } from "react-router";
 import Landing from "@/components/Landing";
-import FounderSetup from "@/dashboard/founderSetup";
-import FounderSummary from "@/dashboard/founderSummary";
+import FounderSetup from "@/dashboard/founders/setup";
+import FounderSummary from "@/dashboard/founders/summary";
 import Dashboard from "@/dashboard/home";
-import CollaboratorSetup from "@/dashboard/collaboratorSetup";
-import CollaboratorSummary from "@/dashboard/collaboratorSummary";
-import CollaboratorDashboard from "@/dashboard/collaboratorDashboard";
+import CollaboratorSetup from "@/dashboard/collaborators/setup";
+import CollaboratorSummary from "@/dashboard/collaborators/summary";
+import CollaboratorDashboard from "@/dashboard/collaborators/dashboard";
+import AITaskCenter from "@/dashboard/collaborators/tasks";
+import ToolsPage from "@/dashboard/collaborators/tools";
+import OpportunitiesPage from "@/dashboard/collaborators/opportunities";
+import PerformancePage from "@/dashboard/collaborators/performance";
+import MessagesPage from "@/dashboard/collaborators/messages";
+import EarningsPage from "@/dashboard/collaborators/earnings";
 import IncubationHub from "@/dashboard/incubationHub";
 import AIEvaluation from "@/dashboard/AIEvaluation";
 import MatchResults from "@/dashboard/matchResults";
@@ -26,6 +32,15 @@ const App = () => {
           path="/collaborator/dashboard"
           element={<CollaboratorDashboard />}
         />
+        <Route path="/collaborator/tasks" element={<AITaskCenter />} />
+        <Route path="/collaborator/tools" element={<ToolsPage />} />
+        <Route
+          path="/collaborator/opportunities"
+          element={<OpportunitiesPage />}
+        />
+        <Route path="/collaborator/performance" element={<PerformancePage />} />
+        <Route path="/collaborator/messages" element={<MessagesPage />} />
+        <Route path="/collaborator/earnings" element={<EarningsPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
