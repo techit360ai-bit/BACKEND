@@ -68,12 +68,12 @@ const Landing = () => {
     }, 900);
   };
 
-  //function that shows the celebration overlay for investor and then navigates to the investor setup page after 900ms, also prevents multiple clicks while the celebration is showing
+  //function that shows the celebration overlay for investor and then navigates to the investor onboarding page after 900ms, also prevents multiple clicks while the celebration is showing
   const handleInvestorStart = () => {
     if (isCelebrationActive()) return;
     setShowInvestorCelebration(true);
     setTimeout(() => {
-      navigate("/investor/setup", { state: { celebrate: true } });
+      navigate("/investor/onboarding/step-1", { state: { celebrate: true } });
       setShowInvestorCelebration(false);
     }, 900);
   };

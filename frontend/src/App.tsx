@@ -18,10 +18,18 @@ import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
 import NotFound from "@/dashboard/NotFound";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { InvestorStep1 } from "@/dashboard/investors/onboarding/InvestorStep1";
+import { InvestorStep2 } from "@/dashboard/investors/onboarding/InvestorStep2";
+import { InvestorStep3 } from "@/dashboard/investors/onboarding/InvestorStep3";
+import { InvestorStep4 } from "@/dashboard/investors/onboarding/InvestorStep4";
+import { InvestorStep5 } from "@/dashboard/investors/onboarding/InvestorStep5";
+import InvestorDashboard from "@/dashboard/investors/InvestorDashboard";
+import DealIntelligence from "@/dashboard/investors/DealIntelligence";
+import { UserProvider } from "@/contexts/UserContext";
 
 const App = () => {
   return (
-    <>
+    <UserProvider>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/founder/setup" element={<FounderSetup />} />
@@ -41,6 +49,16 @@ const App = () => {
         <Route path="/collaborator/performance" element={<PerformancePage />} />
         <Route path="/collaborator/messages" element={<MessagesPage />} />
         <Route path="/collaborator/earnings" element={<EarningsPage />} />
+        <Route path="/investor/onboarding/step-1" element={<InvestorStep1 />} />
+        <Route path="/investor/onboarding/step-2" element={<InvestorStep2 />} />
+        <Route path="/investor/onboarding/step-3" element={<InvestorStep3 />} />
+        <Route path="/investor/onboarding/step-4" element={<InvestorStep4 />} />
+        <Route path="/investor/onboarding/step-5" element={<InvestorStep5 />} />
+        <Route path="/investor/dashboard" element={<InvestorDashboard />} />
+        <Route
+          path="/investor/deal-intelligence"
+          element={<DealIntelligence />}
+        />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
@@ -49,7 +67,7 @@ const App = () => {
         <Route path="*" element={<NotFound />} />
       </Routes>
       <ThemeToggle />
-    </>
+    </UserProvider>
   );
 };
 
