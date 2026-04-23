@@ -24,7 +24,7 @@ import { InvestorStep3 } from "@/dashboard/investors/onboarding/InvestorStep3";
 import { InvestorStep4 } from "@/dashboard/investors/onboarding/InvestorStep4";
 import { InvestorStep5 } from "@/dashboard/investors/onboarding/InvestorStep5";
 import InvestorDashboard from "@/dashboard/investors/InvestorDashboard";
-import DealIntelligence from "@/dashboard/investors/DealIntelligence";
+import { DealIntelligence } from "@/components/investor/DealIntelligence";
 import { UserProvider } from "@/contexts/UserContext";
 
 const App = () => {
@@ -32,6 +32,7 @@ const App = () => {
     <UserProvider>
       <Routes>
         <Route path="/" element={<Landing />} />
+
         <Route path="/founder/setup" element={<FounderSetup />} />
         <Route path="/founder/summary" element={<FounderSummary />} />
         <Route path="/collaborator/setup" element={<CollaboratorSetup />} />

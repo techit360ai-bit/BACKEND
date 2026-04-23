@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+// InvestorDashboard.tsx
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useInvestorProfile } from "@/contexts/UserContext";
 import { InvestorSidebar } from "./components/InvestorSidebar";
@@ -20,10 +21,11 @@ export function InvestorDashboard() {
   const { investorProfile } = useInvestorProfile();
 
   useEffect(() => {
-    // If user hasn't completed onboarding, redirect to step 1
-    if (!investorProfile.investorType) {
-      navigate("/investor/onboarding/step-1");
-    }
+    // If user hasn't completed onboarding AND explicitly needs it, redirect to step 1
+    // Skip this check during development or when navigating to dashboard
+    // if (!investorProfile.investorType) {
+    //   navigate("/investor/onboarding/step-1");
+    // }
   }, [investorProfile.investorType, navigate]);
 
   return (

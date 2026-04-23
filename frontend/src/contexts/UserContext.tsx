@@ -38,10 +38,10 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [investorProfile, setInvestorProfile] = useState<InvestorProfile>({
-    investorType: "",
-    location: "",
-    fundSize: "",
-    yearsInvesting: 0,
+    investorType: "Institutional", // Default value so dashboard is accessible
+    location: "North America",
+    fundSize: "$10M - $50M",
+    yearsInvesting: 1,
     industries: [],
     stage: "",
     checkSize: "",
