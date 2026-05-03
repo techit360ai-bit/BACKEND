@@ -26,6 +26,7 @@ import { InvestorStep5 } from "@/dashboard/investors/onboarding/InvestorStep5";
 import InvestorDashboard from "@/dashboard/investors/InvestorDashboard";
 import { DealIntelligence } from "@/components/investor/DealIntelligence";
 import { UserProvider } from "@/contexts/UserContext";
+import Chat from "@/dashboard/chat/Chat";
 
 const App = () => {
   return (
@@ -61,6 +62,7 @@ const App = () => {
           element={<DealIntelligence />}
         />
         <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
         <Route path="/idea-eval" element={<AIEvaluation />} />
