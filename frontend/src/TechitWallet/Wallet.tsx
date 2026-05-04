@@ -513,7 +513,7 @@ export default function Wallet() {
           </div>
         </div>
 
-        {/* ── Buy Credits Modal ─────────────────────────────────────────────── */}
+        {/*  Buy Credits Modal  */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
@@ -597,7 +597,7 @@ export default function Wallet() {
           </div>
         )}
 
-        {/* ── View Usage Modal ──────────────────────────────────────────────── */}
+        {/*  View Usage Modal */}
         {isViewUsageOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div
@@ -659,7 +659,7 @@ export default function Wallet() {
           </div>
         )}
 
-        {/* ── Pricing Plans Modal ───────────────────────────────────────────── */}
+        {/*  Pricing Plans Modal  */}
         {isPlansOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
             <div
@@ -821,7 +821,7 @@ export default function Wallet() {
           </div>
         )}
 
-        {/* ── Payment Modal ─────────────────────────────────────────────────── */}
+        {/* Payment Modal */}
         {paymentPlan && (
           <PaymentModal
             isOpen={!!paymentPlan}

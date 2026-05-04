@@ -27,6 +27,8 @@ import InvestorDashboard from "@/dashboard/investors/InvestorDashboard";
 import { DealIntelligence } from "@/components/investor/DealIntelligence";
 import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
+import Signup from "@/components/SignUp";
+import Login from "@/components/Login";
 
 const App = () => {
   return (
@@ -67,6 +69,8 @@ const App = () => {
         <Route path="/incubation-hub" element={<IncubationHub />} />
         <Route path="/idea-eval" element={<AIEvaluation />} />
         <Route path="/matches" element={<MatchResults />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/signin" element={<Login />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       <ThemeToggle />

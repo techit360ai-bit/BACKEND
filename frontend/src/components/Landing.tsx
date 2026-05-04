@@ -324,7 +324,11 @@ function MarqueeTicker() {
 }
 
 const Landing = () => {
-  // One state flag per role so each CelebrationOverlay shows the right message
+  // ── Celebration states
+  // showRegistrationCelebration: fired by the navbar "Get Started" button only
+  const [showRegistrationCelebration, setShowRegistrationCelebration] =
+    useState(false);
+  // Role-specific celebrations fired by each role card / the final CTA section
   const [showFounderCelebration, setShowFounderCelebration] = useState(false);
   const [showCollaboratorCelebration, setShowCollaboratorCelebration] =
     useState(false);
@@ -336,17 +340,29 @@ const Landing = () => {
 
   // Prevents double-triggering if the user clicks multiple cards quickly
   const isCelebrationActive = () =>
+    showRegistrationCelebration ||
     showFounderCelebration ||
     showCollaboratorCelebration ||
     showInvestorCelebration ||
     showOrganizationCelebration;
 
-  // Show the overlay for 900ms, then navigate to the right setup route
+  // ── Navbar "Get Started" handler
+  // Shows "You're starting your registration process!" then navigates to /signup
+  const handleGetStarted = () => {
+    if (isCelebrationActive()) return;
+    setShowRegistrationCelebration(true);
+    setTimeout(() => {
+      navigate("/signup", { state: { celebrate: true } });
+      setShowRegistrationCelebration(false);
+    }, 900);
+  };
+
+  // ── Role-card handlers ───────────────────────────────────────────────────────
   const handleFounderStart = () => {
     if (isCelebrationActive()) return;
     setShowFounderCelebration(true);
     setTimeout(() => {
-      navigate("/founder/setup", { state: { celebrate: true } });
+      navigate("/signup", { state: { celebrate: true } });
       setShowFounderCelebration(false);
     }, 900);
   };
@@ -396,8 +412,8 @@ const Landing = () => {
 
   return (
     <>
-      {/* Navbar is outside the scrollable div so it stays fixed above everything */}
-      <Navbar onGetStarted={handleFounderStart} />
+      {/* Navbar receives handleGetStarted — NOT handleFounderStart */}
+      <Navbar onGetStarted={handleGetStarted} />
 
       <div
         style={{
@@ -453,7 +469,7 @@ const Landing = () => {
 
             {/* CTA buttons. The section's padding-bottom handles the gap below. */}
             <div className="hero-cta-row">
-              <button className="btn-primary" onClick={handleFounderStart}>
+              <button className="btn-primary" onClick={handleGetStarted}>
                 Join the Network <ArrowRight size={16} />
               </button>
               <button className="btn-ghost">
@@ -793,7 +809,7 @@ const Landing = () => {
                 ))}
               </div>
 
-              <button className="btn-primary" onClick={handleFounderStart}>
+              <button className="btn-primary" onClick={handleGetStarted}>
                 Join TechIT Network <ArrowRight size={16} />
               </button>
             </div>
@@ -867,9 +883,13 @@ const Landing = () => {
 
         {/* 
             CELEBRATION OVERLAYS
-            Preserved exactly from the original Landing.tsx.
-            Each one shows for 900ms then the navigate() call fires.
+            Each role card and the main "Get Started" button trigger a different overlay message, shown here.
         */}
+        <CelebrationOverlay
+          visible={showRegistrationCelebration}
+          message="You're starting your registration process!"
+          label="Registration Process"
+        />
         <CelebrationOverlay
           visible={showFounderCelebration}
           message="You're starting your founder journey!"
