@@ -14,6 +14,7 @@ import {
 import { useState } from "react";
 import Sidebar from "../components/Sidebar";
 import MobileMenuButton from "../components/MobileMenuButton";
+import PaymentModal from "../components/PaymentModal";
 
 const recentUsage = [
   {
@@ -204,11 +205,17 @@ const pricingFeatures = [
   },
 ];
 
+// Type for a pricing plan (used by PaymentModal)
+type PricingPlan = (typeof pricingPlans)[0];
+
 export default function Wallet() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewUsageOpen, setIsViewUsageOpen] = useState(false);
   const [isPlansOpen, setIsPlansOpen] = useState(false);
   const [currency, setCurrency] = useState<"NGN" | "USD">("NGN");
+
+  // PaymentModal state — holds the plan the user clicked "Get Started" on
+  const [paymentPlan, setPaymentPlan] = useState<PricingPlan | null>(null);
 
   const openModal = () => setIsModalOpen(true);
   const closeModal = () => setIsModalOpen(false);
@@ -216,6 +223,12 @@ export default function Wallet() {
   const closeViewUsage = () => setIsViewUsageOpen(false);
   const openPlans = () => setIsPlansOpen(true);
   const closePlans = () => setIsPlansOpen(false);
+
+  // Opens PaymentModal for the selected plan (also closes Plans modal)
+  const handleGetStarted = (plan: PricingPlan) => {
+    closePlans();
+    setPaymentPlan(plan);
+  };
 
   return (
     <div className="min-h-dvh w-full flex bg-background text-foreground">
@@ -319,7 +332,6 @@ export default function Wallet() {
 
               <div className="h-64 w-full">
                 <svg viewBox="0 0 700 250" className="w-full h-full">
-                  {/* Grid lines */}
                   <line
                     x1="0"
                     y1="50"
@@ -356,8 +368,6 @@ export default function Wallet() {
                     strokeWidth="1"
                     strokeDasharray="5,5"
                   />
-
-                  {/* Gradient fill under the line */}
                   <defs>
                     <linearGradient
                       id="lineGradient"
@@ -374,8 +384,6 @@ export default function Wallet() {
                       />
                     </linearGradient>
                   </defs>
-
-                  {/* Line path */}
                   <polyline
                     points="50,87.5 150,80 250,142.5 350,125 450,75 550,35 650,87.5"
                     fill="none"
@@ -384,14 +392,10 @@ export default function Wallet() {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-
-                  {/* Gradient fill path */}
                   <polygon
                     points="50,87.5 150,80 250,142.5 350,125 450,75 550,35 650,87.5 650,250 50,250"
                     fill="url(#lineGradient)"
                   />
-
-                  {/* Data points (circles) */}
                   {[
                     { x: 50, y: 87.5, value: 150 },
                     { x: 150, y: 80, value: 140 },
@@ -402,13 +406,7 @@ export default function Wallet() {
                     { x: 650, y: 87.5, value: 150 },
                   ].map((point, idx) => (
                     <g key={idx} className="group cursor-pointer">
-                      <circle
-                        cx={point.x}
-                        cy={point.y}
-                        r="5"
-                        fill="#06b6d4"
-                        className="transition-all hover:r-7"
-                      />
+                      <circle cx={point.x} cy={point.y} r="5" fill="#06b6d4" />
                       <circle
                         cx={point.x}
                         cy={point.y}
@@ -454,7 +452,6 @@ export default function Wallet() {
                   Recent Usage
                 </h3>
               </div>
-
               <div className="space-y-3">
                 {recentUsage.map((item) => {
                   const IconComponent = item.icon;
@@ -516,26 +513,20 @@ export default function Wallet() {
           </div>
         </div>
 
-        {/* Buy Credits Modal */}
+        {/* ── Buy Credits Modal ─────────────────────────────────────────────── */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Blurred background */}
             <div
               className="absolute inset-0 bg-black/50 backdrop-blur-sm"
               onClick={closeModal}
             />
-
-            {/* Modal Content */}
             <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto space-y-6">
-              {/* Close Button */}
               <button
                 onClick={closeModal}
                 className="absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors"
               >
                 <X className="h-6 w-6 text-slate-400 hover:text-white" />
               </button>
-
-              {/* Modal Header */}
               <div>
                 <h2 className="text-2xl font-bold text-white">
                   Buy TechIT Credits
@@ -544,8 +535,6 @@ export default function Wallet() {
                   Choose the perfect pack for your needs
                 </p>
               </div>
-
-              {/* Credit Packages Grid */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {creditPackages.map((pkg) => (
                   <div
@@ -561,27 +550,23 @@ export default function Wallet() {
                         Most Popular
                       </div>
                     )}
-
                     <div>
                       <h3 className="text-lg font-semibold text-white">
                         {pkg.name}
                       </h3>
                     </div>
-
                     <div>
                       <p className="text-4xl font-bold text-cyan-400">
                         {pkg.credits}
                       </p>
                       <p className="text-xs text-slate-400">credits</p>
                     </div>
-
                     <div>
                       <p className="text-lg font-semibold text-white">
                         {pkg.price}
                       </p>
                       <p className="text-xs text-slate-400">/ {pkg.usdPrice}</p>
                     </div>
-
                     <button
                       className={`w-full rounded-lg py-2.5 font-semibold transition-colors ${
                         pkg.popular
@@ -594,8 +579,6 @@ export default function Wallet() {
                   </div>
                 ))}
               </div>
-
-              {/* Footer Note */}
               <div className="rounded-lg bg-slate-800/50 border border-slate-700 px-4 py-3 flex items-start gap-3">
                 <div className="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500/20 mt-0.5 shrink-0">
                   <span className="text-xs text-cyan-400">✓</span>
@@ -614,33 +597,26 @@ export default function Wallet() {
           </div>
         )}
 
-        {/* View Usage Modal - Automation Preview */}
+        {/* ── View Usage Modal ──────────────────────────────────────────────── */}
         {isViewUsageOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Blurred background */}
             <div
               className="absolute inset-0 bg-black/50 backdrop-blur-sm"
               onClick={closeViewUsage}
             />
-
-            {/* Modal Content */}
             <div className="relative bg-slate-900 border border-slate-800 rounded-2xl p-8 max-w-sm w-full space-y-6">
-              {/* Close Button */}
               <button
                 onClick={closeViewUsage}
                 className="absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors"
               >
                 <X className="h-6 w-6 text-slate-400 hover:text-white" />
               </button>
-
-              {/* Modal Header */}
               <div className="text-center space-y-4">
                 <div className="flex justify-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-full bg-linear-to-br from-purple-600 to-purple-800">
                     <Play className="h-8 w-8 text-white fill-white" />
                   </div>
                 </div>
-
                 <div>
                   <h2 className="text-xl font-bold text-white">
                     AI Data Processing
@@ -650,15 +626,11 @@ export default function Wallet() {
                   </p>
                 </div>
               </div>
-
-              {/* Credit Cost Box */}
               <div className="rounded-lg border border-cyan-500/50 bg-slate-800/50 px-6 py-4 text-center space-y-1">
                 <p className="text-sm text-slate-400">This automation costs</p>
                 <p className="text-4xl font-bold text-cyan-400">12 credits</p>
                 <p className="text-xs text-slate-400">≈ ₦120 / $0.12</p>
               </div>
-
-              {/* Action Buttons */}
               <div className="space-y-3">
                 <button className="w-full rounded-xl bg-cyan-500 hover:bg-cyan-600 text-white font-semibold py-3 transition-colors flex items-center justify-center gap-2">
                   <Play className="h-4 w-4 fill-white" />
@@ -675,8 +647,6 @@ export default function Wallet() {
                   Buy More Credits
                 </button>
               </div>
-
-              {/* Current Balance */}
               <div className="text-center pt-2">
                 <p className="text-xs text-slate-400">
                   Current balance:{" "}
@@ -689,28 +659,21 @@ export default function Wallet() {
           </div>
         )}
 
-        {/* Pricing Plans Modal */}
+        {/* ── Pricing Plans Modal ───────────────────────────────────────────── */}
         {isPlansOpen && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-            {/* Blurred background */}
             <div
               className="fixed inset-0 bg-black/50 backdrop-blur-sm -z-10"
               onClick={closePlans}
             />
-
-            {/* Modal Content */}
             <div className="relative bg-linear-to-b from-slate-950 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col">
-              {/* Close Button */}
               <button
                 onClick={closePlans}
                 className="absolute top-4 right-4 p-2 hover:bg-slate-800 rounded-lg transition-colors z-10"
               >
                 <X className="h-6 w-6 text-slate-400 hover:text-white" />
               </button>
-
-              {/* Scrollable Content */}
               <div className="overflow-y-auto flex-1 px-6 sm:px-8 pt-6 sm:pt-8">
-                {/* Header Section */}
                 <div className="text-center space-y-2 pb-8">
                   <div className="inline-block bg-cyan-500/20 border border-cyan-500/50 rounded-full px-4 py-1">
                     <span className="text-sm font-semibold text-cyan-400">
@@ -767,15 +730,11 @@ export default function Wallet() {
                           Most Popular
                         </div>
                       )}
-
-                      {/* Plan Name */}
                       <div>
                         <h3 className="text-base font-bold text-white">
                           {plan.name}
                         </h3>
                       </div>
-
-                      {/* Price */}
                       <div>
                         <p className="text-2xl font-bold text-cyan-400">
                           {currency === "NGN" ? plan.priceNGN : plan.priceUSD}
@@ -784,8 +743,6 @@ export default function Wallet() {
                           {plan.credits}
                         </p>
                       </div>
-
-                      {/* Features */}
                       <div className="space-y-2">
                         {plan.features.slice(0, 3).map((feature, idx) => (
                           <div
@@ -800,8 +757,9 @@ export default function Wallet() {
                         ))}
                       </div>
 
-                      {/* Button */}
+                      {/* ── Get Started → opens PaymentModal ── */}
                       <button
+                        onClick={() => handleGetStarted(plan)}
                         className={`w-full rounded-lg py-2 font-semibold transition-all text-xs ${
                           plan.popular
                             ? "bg-linear-to-r from-cyan-500 to-cyan-600 hover:from-cyan-600 hover:to-cyan-700 text-white"
@@ -850,7 +808,7 @@ export default function Wallet() {
                 </div>
               </div>
 
-              {/* Fixed Footer with Cancel Button */}
+              {/* Fixed Footer */}
               <div className="border-t border-slate-700 p-4 bg-linear-to-t from-slate-950 to-transparent">
                 <button
                   onClick={closePlans}
@@ -861,6 +819,16 @@ export default function Wallet() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ── Payment Modal ─────────────────────────────────────────────────── */}
+        {paymentPlan && (
+          <PaymentModal
+            isOpen={!!paymentPlan}
+            onClose={() => setPaymentPlan(null)}
+            plan={paymentPlan}
+            currency={currency}
+          />
         )}
       </main>
     </div>

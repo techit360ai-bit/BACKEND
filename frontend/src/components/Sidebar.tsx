@@ -38,7 +38,7 @@ export default function Sidebar() {
           </div>
           <div>
             <p className="text-sm font-semibold text-slate-900 dark:text-white">
-              TechIT Forge
+              TechIT Network
             </p>
             <p className="text-[0.7rem] text-slate-500 dark:text-slate-400">
               Build. Match. Launch.
