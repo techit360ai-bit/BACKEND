@@ -1,10 +1,24 @@
-import { Sun, Moon, Monitor, ChevronDown } from "lucide-react";
+import { Moon, Monitor, ChevronDown } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useTheme, type Theme } from "@/contexts/ThemeContext";
 import { cn } from "@/lib/utils";
 
-const options: { value: Theme; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "Light", icon: Sun },
+// LinkedIn "in" icon in white
+function LinkedInWhiteIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className={className}
+      fill="#FFFFFF"
+    >
+      <path d="M20.447 20.452H17.01v-5.569c0-1.327-.024-3.037-1.852-3.037-1.854 0-2.137 1.446-2.137 2.94v5.666H9.583V9h3.308v1.561h.046c.461-.873 1.587-1.794 3.267-1.794 3.493 0 4.141 2.299 4.141 5.292v6.393zM5.337 7.433a1.922 1.922 0 1 1 0-3.844 1.922 1.922 0 0 1 0 3.844zM6.979 20.452H3.691V9h3.288v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.226.792 24 1.771 24h20.451C23.2 24 24 23.226 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
+    </svg>
+  );
+}
+
+const options: { value: Theme; label: string; icon: React.ElementType }[] = [
+  { value: "light", label: "Light", icon: LinkedInWhiteIcon },
   { value: "dark", label: "Dark", icon: Moon },
   { value: "system", label: "Auto", icon: Monitor },
 ];

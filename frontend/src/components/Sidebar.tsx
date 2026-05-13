@@ -10,11 +10,25 @@ import {
   User,
   Wallet,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useSidebar } from "../contexts/SidebarContext";
 
 export default function Sidebar() {
   const { isOpen, closeSidebar } = useSidebar();
+  const { pathname } = useLocation();
+
+  const activeClass =
+    "bg-linear-to-r from-violet-500 to-violet-600 text-white font-medium shadow-lg shadow-violet-500/20 dark:shadow-violet-600/20 hover:from-violet-600 hover:to-violet-700";
+
+  const navItem = (to: string, hoverColor: string) =>
+    pathname === to
+      ? `w-full flex items-center gap-3 rounded-xl px-3 py-2.5 ${activeClass} transition-all`
+      : `w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 ${hoverColor} transition-colors`;
+
+  const iconClass = (to: string) =>
+    pathname === to
+      ? "inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-xs"
+      : "inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs";
 
   return (
     <>
@@ -50,64 +64,86 @@ export default function Sidebar() {
           <Link
             to="/dashboard"
             onClick={closeSidebar}
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 bg-linear-to-r from-violet-500 to-violet-600 text-white font-medium shadow-lg shadow-violet-500/20 dark:shadow-violet-600/20 hover:from-violet-600 hover:to-violet-700 transition-all"
+            className={navItem(
+              "/dashboard",
+              "hover:bg-violet-100/50 dark:hover:bg-violet-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 text-xs">
+            <span className={iconClass("/dashboard")}>
               <LayoutDashboard className="h-4 w-4" />
             </span>
             <span>Dashboard</span>
           </Link>
           <Link
-            onClick={closeSidebar}
             to="/incubation-hub"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-violet-100/50 dark:hover:bg-violet-950/50 transition-colors"
+            onClick={closeSidebar}
+            className={navItem(
+              "/incubation-hub",
+              "hover:bg-violet-100/50 dark:hover:bg-violet-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("/incubation-hub")}>
               <FlaskConical className="h-4 w-4" />
             </span>
             <span>Incubation Hub</span>
           </Link>
           <Link
             to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50 transition-colors"
+            className={navItem(
+              "#",
+              "hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("#")}>
               <PanelsTopLeft className="h-4 w-4" />
             </span>
             <span>Workspaces</span>
           </Link>
           <Link
             to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-teal-100/50 dark:hover:bg-teal-950/50 transition-colors"
+            className={navItem(
+              "#",
+              "hover:bg-teal-100/50 dark:hover:bg-teal-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("#")}>
               <Rss className="h-4 w-4" />
             </span>
             <span>Feed</span>
           </Link>
           <Link
-            to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50 transition-colors"
+            to="/chat"
+            onClick={closeSidebar}
+            className={navItem(
+              "/chat",
+              "hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("/chat")}>
               <MessageSquare className="h-4 w-4" />
             </span>
             <span>Messages</span>
           </Link>
           <Link
             to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-rose-100/50 dark:hover:bg-rose-950/50 transition-colors"
+            className={navItem(
+              "#",
+              "hover:bg-rose-100/50 dark:hover:bg-rose-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("#")}>
               <Route className="h-4 w-4" />
             </span>
             <span>Market Pathway</span>
           </Link>
           <Link
             to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-violet-100/50 dark:hover:bg-violet-950/50 transition-colors"
+            className={navItem(
+              "#",
+              "hover:bg-violet-100/50 dark:hover:bg-violet-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("#")}>
               <LineChart className="h-4 w-4" />
             </span>
             <span>Investors</span>
@@ -115,18 +151,24 @@ export default function Sidebar() {
           <Link
             to="/wallet"
             onClick={closeSidebar}
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50 transition-colors"
+            className={navItem(
+              "/wallet",
+              "hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("/wallet")}>
               <Wallet className="h-4 w-4" />
             </span>
             <span>Wallet</span>
           </Link>
           <Link
             to="#"
-            className="w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700 dark:text-slate-300 hover:bg-teal-100/50 dark:hover:bg-teal-950/50 transition-colors"
+            className={navItem(
+              "#",
+              "hover:bg-teal-100/50 dark:hover:bg-teal-950/50",
+            )}
           >
-            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-200 dark:bg-slate-800 text-xs">
+            <span className={iconClass("#")}>
               <User className="h-4 w-4" />
             </span>
             <span>Profile</span>

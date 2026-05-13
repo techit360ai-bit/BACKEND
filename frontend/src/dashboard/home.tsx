@@ -8,7 +8,7 @@ import {
   Wallet,
   Share2,
 } from "lucide-react";
-import Sidebar from "../components/Sidebar";
+import Sidebar from "@/components/Sidebar";
 import MobileMenuButton from "../components/MobileMenuButton";
 
 const stats = [
