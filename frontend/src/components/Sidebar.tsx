@@ -100,9 +100,9 @@ export default function Sidebar() {
             <span>Workspaces</span>
           </Link>
           <Link
-            to="#"
+            to="/chat"
             className={navItem(
-              "#",
+              "/chat",
               "hover:bg-teal-100/50 dark:hover:bg-teal-950/50",
             )}
           >
@@ -112,10 +112,10 @@ export default function Sidebar() {
             <span>Feed</span>
           </Link>
           <Link
-            to="/chat"
+            to="#"
             onClick={closeSidebar}
             className={navItem(
-              "/chat",
+              "#",
               "hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50",
             )}
           >
