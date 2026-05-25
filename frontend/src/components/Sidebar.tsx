@@ -88,25 +88,27 @@ export default function Sidebar() {
             <span>Incubation Hub</span>
           </Link>
           <Link
-            to="#"
+            to="/workspaces"
+            onClick={closeSidebar}
             className={navItem(
-              "#",
+              "/workspaces",
               "hover:bg-cyan-100/50 dark:hover:bg-cyan-950/50",
             )}
           >
-            <span className={iconClass("#")}>
+            <span className={iconClass("/workspaces")}>
               <PanelsTopLeft className="h-4 w-4" />
             </span>
             <span>Workspaces</span>
           </Link>
           <Link
-            to="/chat"
+            to="/feed"
+            onClick={closeSidebar}
             className={navItem(
-              "/chat",
+              "/feed",
               "hover:bg-teal-100/50 dark:hover:bg-teal-950/50",
             )}
           >
-            <span className={iconClass("#")}>
+            <span className={iconClass("/feed")}>
               <Rss className="h-4 w-4" />
             </span>
             <span>Feed</span>

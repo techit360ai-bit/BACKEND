@@ -1,2 +1,390 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
 
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  --background: #ffffff;
+  --foreground: oklch(0.145 0 0);
+  --card: #ffffff;
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: #030213;
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.95 0.0058 264.53);
+  --secondary-foreground: #030213;
+  --muted: #ececf0;
+  --muted-foreground: #717182;
+  --accent: #e9ebef;
+  --accent-foreground: #030213;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --input: transparent;
+  --input-background: #f3f3f5;
+  --switch-background: #cbced4;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #030213;
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+
+  /* TechIT Workspace Custom Colors */
+  --techit-navy: #0a1929;
+  --techit-blue: #2196f3;
+  --techit-success: #10b981;
+  --techit-warning: #f59e0b;
+  --techit-gold: #ffd700;
+
+  /* TechIT Feed / Hangout color system (always dark) */
+  --bg-base: #0a0a0f;
+  --bg-surface: #111118;
+  --bg-elevated: #1a1a25;
+  --bg-overlay: #22222e;
+  --text-primary: #f0f0f5;
+  --text-secondary: #9090a8;
+  --text-muted: #5c5c78;
+  --accent-primary: #4f6ef7;
+  --accent-glow: rgba(79, 110, 247, 0.15);
+  --score-green: #22c55e;
+  --score-amber: #f59e0b;
+  --score-red: #ef4444;
+  --score-blue: #4f6ef7;
+  --score-purple: #a855f7;
+  --post-milestone: #22c55e;
+  --post-insight: #4f6ef7;
+  --post-build-update: #f59e0b;
+  --post-question: #ec4899;
+  --post-collab-call: #a855f7;
+  --post-problem-signal: #ef4444;
+  --border-default: rgba(255, 255, 255, 0.06);
+  --border-active: rgba(79, 110, 247, 0.4);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Feed / Hangout utility colors */
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-overlay: var(--bg-overlay);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-glow: var(--accent-glow);
+  --color-score-green: var(--score-green);
+  --color-score-amber: var(--score-amber);
+  --color-score-red: var(--score-red);
+  --color-score-blue: var(--score-blue);
+  --color-score-purple: var(--score-purple);
+  --color-post-milestone: var(--post-milestone);
+  --color-post-insight: var(--post-insight);
+  --color-post-build-update: var(--post-build-update);
+  --color-post-question: var(--post-question);
+  --color-post-collab-call: var(--post-collab-call);
+  --color-post-problem-signal: var(--post-problem-signal);
+  --color-border-default: var(--border-default);
+  --color-border-active: var(--border-active);
+}
+
+/* Typography defaults scoped to the workspaces section so they don't override the rest of the app. */
+.workspaces-scope {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+.workspaces-scope h1,
+.workspaces-scope h2,
+.workspaces-scope h3,
+.workspaces-scope h4,
+.workspaces-scope h5,
+.workspaces-scope h6 {
+  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
+  font-weight: var(--font-weight-medium, 500);
+  line-height: 1.5;
+}
+
+.workspaces-scope h1 {
+  font-size: var(--text-2xl);
+}
+.workspaces-scope h2 {
+  font-size: var(--text-xl);
+}
+.workspaces-scope h3 {
+  font-size: var(--text-lg);
+}
+.workspaces-scope h4 {
+  font-size: var(--text-base);
+}
+
+.workspaces-scope label,
+.workspaces-scope button {
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-medium, 500);
+  line-height: 1.5;
+}
+
+.workspaces-scope input {
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-normal, 400);
+  line-height: 1.5;
+}
+
+/* Premium shimmer effect used on AI Agents premium tier */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.workspaces-scope .shimmer-gold {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 215, 0, 0.35),
+    transparent
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2.4s infinite;
+}
+
+/* ---- Feed / Hangout scoped styles ---- */
+
+.feed-scope {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.feed-scope h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  line-height: 1.3;
+}
+
+.feed-scope h2 {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: 1.4;
+}
+
+.feed-scope h3 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0px;
+  line-height: 1.4;
+}
+
+.feed-scope h4 {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.feed-scope .font-mono {
+  font-family: "JetBrains Mono", "Courier New", monospace;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.feed-scope ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.feed-scope ::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+
+.feed-scope ::-webkit-scrollbar-thumb {
+  background: var(--bg-elevated);
+  border-radius: 4px;
+}
+
+.feed-scope ::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+@keyframes pulse-amber {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(79, 110, 247, 0);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px rgba(79, 110, 247, 0.3);
+  }
+}
+
+@keyframes slide-in-from-top {
+  0% {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes count-up {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-pulse-amber {
+  animation: pulse-amber 2s ease-in-out infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-slide-in {
+  animation: slide-in-from-top 200ms ease-out;
+}
+
+.animate-count-up {
+  animation: count-up 600ms ease-out;
+}
+
+.feed-scope .card-hover {
+  transition: all 150ms ease;
+}
+
+.feed-scope .card-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}

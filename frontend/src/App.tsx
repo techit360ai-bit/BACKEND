@@ -1,4 +1,4 @@
-import { Routes, Route } from "react-router";
+import { Routes, Route, Navigate } from "react-router";
 import Landing from "@/components/Landing";
 import FounderSetup from "@/dashboard/founders/setup";
 import FounderSummary from "@/dashboard/founders/summary";
@@ -29,6 +29,29 @@ import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
 import Signup from "@/components/SignUp";
 import Login from "@/components/Login";
+import { MainLayout as WorkspacesLayout } from "@/dashboard/workspaces/components/layout/MainLayout";
+import { Build as WsBuild } from "@/dashboard/workspaces/pages/Build";
+import { AIAgents as WsAIAgents } from "@/dashboard/workspaces/pages/AIAgents";
+import { Reports as WsReports } from "@/dashboard/workspaces/pages/Reports";
+import { Incubator as WsIncubator } from "@/dashboard/workspaces/pages/Incubator";
+import { Tools as WsTools } from "@/dashboard/workspaces/pages/Tools";
+import { Chat as WsChat } from "@/dashboard/workspaces/pages/Chat";
+import { Files as WsFiles } from "@/dashboard/workspaces/pages/Files";
+import { Notifications as WsNotifications } from "@/dashboard/workspaces/pages/Notifications";
+import { Settings as WsSettings } from "@/dashboard/workspaces/pages/Settings";
+import { GitHub as WsGitHub } from "@/dashboard/workspaces/pages/GitHub";
+import { DevTools as WsDevTools } from "@/dashboard/workspaces/pages/DevTools";
+import { ComponentLibrary as WsComponentLibrary } from "@/dashboard/workspaces/components/ComponentLibrary";
+import { FeedLayout } from "@/dashboard/feed/components/FeedLayout";
+import { FeedPage } from "@/dashboard/feed/pages/FeedPage";
+import { TribePage } from "@/dashboard/feed/pages/TribePage";
+import { BuildLogPage } from "@/dashboard/feed/pages/BuildLogPage";
+import { QuestionsPage } from "@/dashboard/feed/pages/QuestionsPage";
+import { ProblemsPage } from "@/dashboard/feed/pages/ProblemsPage";
+import { NotificationsPage as FeedNotificationsPage } from "@/dashboard/feed/pages/NotificationsPage";
+import { PostDetailPage } from "@/dashboard/feed/pages/PostDetailPage";
+import { MyLogPage } from "@/dashboard/feed/pages/MyLogPage";
+import { UserProfilePage } from "@/dashboard/feed/pages/UserProfilePage";
 
 const App = () => {
   return (
@@ -71,6 +94,46 @@ const App = () => {
         <Route path="/matches" element={<MatchResults />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/signin" element={<Login />} />
+
+        {/* Collaborative Project Workspace */}
+        <Route path="/workspaces" element={<WorkspacesLayout />}>
+          <Route index element={<Navigate to="build" replace />} />
+          <Route path="build" element={<WsBuild />} />
+          <Route path="incubator" element={<WsIncubator />} />
+          <Route path="tools" element={<WsTools />} />
+          <Route path="dev-tools" element={<WsDevTools />} />
+          <Route path="ai-agents" element={<WsAIAgents />} />
+          <Route path="chat" element={<WsChat />} />
+          <Route path="files" element={<WsFiles />} />
+          <Route path="github" element={<WsGitHub />} />
+          <Route path="reports" element={<WsReports />} />
+          <Route path="notifications" element={<WsNotifications />} />
+          <Route path="settings" element={<WsSettings />} />
+        </Route>
+        <Route path="/workspaces/components" element={<WsComponentLibrary />} />
+
+        {/* Feed / Hangout */}
+        <Route path="/feed" element={<FeedLayout />}>
+          <Route index element={<FeedPage />} />
+          <Route path="tribe" element={<TribePage />} />
+          <Route path="build-log" element={<BuildLogPage />} />
+          <Route path="questions" element={<QuestionsPage />} />
+          <Route path="problems" element={<ProblemsPage />} />
+          <Route path="notifications" element={<FeedNotificationsPage />} />
+          <Route path="my-log" element={<MyLogPage />} />
+          <Route path="post/:postId" element={<PostDetailPage />} />
+          <Route path="problem/:problemId" element={<PostDetailPage />} />
+          <Route path="profile/:userId" element={<UserProfilePage />} />
+          <Route
+            path="messages/:userId"
+            element={
+              <div className="p-8 text-center text-text-muted">
+                Messages feature coming soon...
+              </div>
+            }
+          />
+        </Route>
+
         <Route path="*" element={<NotFound />} />
       </Routes>
       <ThemeToggle />
