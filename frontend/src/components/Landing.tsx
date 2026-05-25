@@ -389,7 +389,7 @@ const Landing = () => {
     if (isCelebrationActive()) return;
     setShowOrganizationCelebration(true);
     setTimeout(() => {
-      navigate("/organization/setup", { state: { celebrate: true } });
+      navigate("/org/onboarding/step-1", { state: { celebrate: true } });
       setShowOrganizationCelebration(false);
     }, 900);
   };

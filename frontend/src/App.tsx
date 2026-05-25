@@ -37,6 +37,29 @@ import { DealRoom as InvestorDealRoom } from "@/dashboard/investors/section/comp
 import { DealRooms as InvestorDealRooms } from "@/dashboard/investors/section/components/investor/DealRooms";
 import { Reputation as InvestorReputation } from "@/dashboard/investors/section/components/investor/Reputation";
 import { InvestorProfile } from "@/dashboard/investors/section/components/investor/InvestorProfile";
+import { OrgLayout } from "@/dashboard/organization/section/components/org/OrgLayout";
+import { Dashboard as OrgDashboard } from "@/dashboard/organization/section/components/org/Dashboard";
+import { Teams as OrgTeams } from "@/dashboard/organization/section/components/org/Teams";
+import { Projects as OrgProjects } from "@/dashboard/organization/section/components/org/Projects";
+import { Incubator as OrgIncubator } from "@/dashboard/organization/section/components/org/Incubator";
+import { TalentPool as OrgTalentPool } from "@/dashboard/organization/section/components/org/TalentPool";
+import { AIOps as OrgAIOps } from "@/dashboard/organization/section/components/org/AIOps";
+import { Analytics as OrgAnalytics } from "@/dashboard/organization/section/components/org/Analytics";
+import { Marketplace as OrgMarketplace } from "@/dashboard/organization/section/components/org/Marketplace";
+import { MarketReady as OrgMarketReady } from "@/dashboard/organization/section/components/org/MarketReady";
+import { Hangout as OrgHangout } from "@/dashboard/organization/section/components/org/Hangout";
+import { Integrations as OrgIntegrations } from "@/dashboard/organization/section/components/org/Integrations";
+import { Billing as OrgBilling } from "@/dashboard/organization/section/components/org/Billing";
+import { Settings as OrgSettings } from "@/dashboard/organization/section/components/org/Settings";
+import { Hackathons as OrgHackathons } from "@/dashboard/organization/section/components/org/Hackathons";
+import { HackathonCreate as OrgHackathonCreate } from "@/dashboard/organization/section/components/org/HackathonCreate";
+import { HackathonDetail as OrgHackathonDetail } from "@/dashboard/organization/section/components/org/HackathonDetail";
+import { OrgProfile } from "@/dashboard/organization/section/components/org/OrgProfile";
+import { OrgStep1 } from "@/dashboard/organization/onboarding/OrgStep1";
+import { OrgStep2 } from "@/dashboard/organization/onboarding/OrgStep2";
+import { OrgStep3 } from "@/dashboard/organization/onboarding/OrgStep3";
+import { OrgStep4 } from "@/dashboard/organization/onboarding/OrgStep4";
+import { OrgStep5 } from "@/dashboard/organization/onboarding/OrgStep5";
 import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
 import Signup from "@/components/SignUp";
@@ -136,6 +159,35 @@ const App = () => {
           <Route path="settings" element={<WsSettings />} />
         </Route>
         <Route path="/workspaces/components" element={<WsComponentLibrary />} />
+
+        {/* Organization onboarding (flat, outside layout) */}
+        <Route path="/org/onboarding/step-1" element={<OrgStep1 />} />
+        <Route path="/org/onboarding/step-2" element={<OrgStep2 />} />
+        <Route path="/org/onboarding/step-3" element={<OrgStep3 />} />
+        <Route path="/org/onboarding/step-4" element={<OrgStep4 />} />
+        <Route path="/org/onboarding/step-5" element={<OrgStep5 />} />
+
+        {/* Organization section */}
+        <Route path="/org" element={<OrgLayout />}>
+          <Route index element={<OrgDashboard />} />
+          <Route path="dashboard" element={<OrgDashboard />} />
+          <Route path="teams" element={<OrgTeams />} />
+          <Route path="projects" element={<OrgProjects />} />
+          <Route path="incubator" element={<OrgIncubator />} />
+          <Route path="hackathons" element={<OrgHackathons />} />
+          <Route path="hackathons/new" element={<OrgHackathonCreate />} />
+          <Route path="hackathons/:id" element={<OrgHackathonDetail />} />
+          <Route path="talent" element={<OrgTalentPool />} />
+          <Route path="ai-ops" element={<OrgAIOps />} />
+          <Route path="analytics" element={<OrgAnalytics />} />
+          <Route path="marketplace" element={<OrgMarketplace />} />
+          <Route path="market-ready" element={<OrgMarketReady />} />
+          <Route path="hangout" element={<OrgHangout />} />
+          <Route path="integrations" element={<OrgIntegrations />} />
+          <Route path="billing" element={<OrgBilling />} />
+          <Route path="settings" element={<OrgSettings />} />
+          <Route path="profile" element={<OrgProfile />} />
+        </Route>
 
         {/* Feed / Hangout */}
         <Route path="/feed" element={<FeedLayout />}>
