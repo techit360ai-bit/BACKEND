@@ -13,7 +13,6 @@ import PerformancePage from "@/dashboard/collaborators/performance";
 import MessagesPage from "@/dashboard/collaborators/messages";
 import EarningsPage from "@/dashboard/collaborators/earnings";
 import IncubationHub from "@/dashboard/incubationHub";
-import AIEvaluation from "@/dashboard/AIEvaluation";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
 import NotFound from "@/dashboard/NotFound";
@@ -90,7 +89,6 @@ const App = () => {
         <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
-        <Route path="/idea-eval" element={<AIEvaluation />} />
         <Route path="/matches" element={<MatchResults />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/signin" element={<Login />} />
