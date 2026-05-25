@@ -22,8 +22,20 @@ import { InvestorStep2 } from "@/dashboard/investors/onboarding/InvestorStep2";
 import { InvestorStep3 } from "@/dashboard/investors/onboarding/InvestorStep3";
 import { InvestorStep4 } from "@/dashboard/investors/onboarding/InvestorStep4";
 import { InvestorStep5 } from "@/dashboard/investors/onboarding/InvestorStep5";
-import InvestorDashboard from "@/dashboard/investors/InvestorDashboard";
-import { DealIntelligence } from "@/components/investor/DealIntelligence";
+import { InvestorLayout } from "@/dashboard/investors/section/components/investor/InvestorLayout";
+import { Dashboard as InvestorDashboard } from "@/dashboard/investors/section/components/investor/Dashboard";
+import { DealIntelligence as InvestorDealIntelligence } from "@/dashboard/investors/section/components/investor/DealIntelligence";
+import { RiskAnalysis as InvestorRiskAnalysis } from "@/dashboard/investors/section/components/investor/RiskAnalysis";
+import { RiskRadar as InvestorRiskRadar } from "@/dashboard/investors/section/components/investor/RiskRadar";
+import { AllocationEngine as InvestorAllocationEngine } from "@/dashboard/investors/section/components/investor/AllocationEngine";
+import { Watchlist as InvestorWatchlist } from "@/dashboard/investors/section/components/investor/Watchlist";
+import { CapitalPools as InvestorCapitalPools } from "@/dashboard/investors/section/components/investor/CapitalPools";
+import { GlobalHeatmap as InvestorHeatmap } from "@/dashboard/investors/section/components/investor/GlobalHeatmap";
+import { DataRoom as InvestorDataRoom } from "@/dashboard/investors/section/components/investor/DataRoom";
+import { DataRooms as InvestorDataRooms } from "@/dashboard/investors/section/components/investor/DataRooms";
+import { DealRoom as InvestorDealRoom } from "@/dashboard/investors/section/components/investor/DealRoom";
+import { DealRooms as InvestorDealRooms } from "@/dashboard/investors/section/components/investor/DealRooms";
+import { Reputation as InvestorReputation } from "@/dashboard/investors/section/components/investor/Reputation";
 import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
 import Signup from "@/components/SignUp";
@@ -80,11 +92,24 @@ const App = () => {
         <Route path="/investor/onboarding/step-3" element={<InvestorStep3 />} />
         <Route path="/investor/onboarding/step-4" element={<InvestorStep4 />} />
         <Route path="/investor/onboarding/step-5" element={<InvestorStep5 />} />
-        <Route path="/investor/dashboard" element={<InvestorDashboard />} />
-        <Route
-          path="/investor/deal-intelligence"
-          element={<DealIntelligence />}
-        />
+
+        {/* Investor section */}
+        <Route path="/investor" element={<InvestorLayout />}>
+          <Route index element={<InvestorDashboard />} />
+          <Route path="dashboard" element={<InvestorDashboard />} />
+          <Route path="deal-intelligence" element={<InvestorDealIntelligence />} />
+          <Route path="risk-analysis" element={<InvestorRiskAnalysis />} />
+          <Route path="risk-radar/:startupId" element={<InvestorRiskRadar />} />
+          <Route path="allocation" element={<InvestorAllocationEngine />} />
+          <Route path="watchlist" element={<InvestorWatchlist />} />
+          <Route path="capital-pools" element={<InvestorCapitalPools />} />
+          <Route path="heatmap" element={<InvestorHeatmap />} />
+          <Route path="data-rooms" element={<InvestorDataRooms />} />
+          <Route path="data-room/:startupId" element={<InvestorDataRoom />} />
+          <Route path="deal-rooms" element={<InvestorDealRooms />} />
+          <Route path="deal-room/:startupId" element={<InvestorDealRoom />} />
+          <Route path="reputation" element={<InvestorReputation />} />
+        </Route>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
