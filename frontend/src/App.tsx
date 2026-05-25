@@ -36,6 +36,7 @@ import { DataRooms as InvestorDataRooms } from "@/dashboard/investors/section/co
 import { DealRoom as InvestorDealRoom } from "@/dashboard/investors/section/components/investor/DealRoom";
 import { DealRooms as InvestorDealRooms } from "@/dashboard/investors/section/components/investor/DealRooms";
 import { Reputation as InvestorReputation } from "@/dashboard/investors/section/components/investor/Reputation";
+import { InvestorProfile } from "@/dashboard/investors/section/components/investor/InvestorProfile";
 import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
 import Signup from "@/components/SignUp";
@@ -109,6 +110,7 @@ const App = () => {
           <Route path="deal-rooms" element={<InvestorDealRooms />} />
           <Route path="deal-room/:startupId" element={<InvestorDealRoom />} />
           <Route path="reputation" element={<InvestorReputation />} />
+          <Route path="profile" element={<InvestorProfile />} />
         </Route>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/chat" element={<Chat />} />

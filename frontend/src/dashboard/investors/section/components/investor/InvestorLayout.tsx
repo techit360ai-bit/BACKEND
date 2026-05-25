@@ -13,7 +13,10 @@ import {
   Rss,
   GraduationCap,
   ArrowLeft,
+  UserCircle,
+  ChevronRight,
 } from 'lucide-react';
+import { useInvestorProfile } from '@/contexts/UserContext';
 
 interface NavItem {
   path: string;
@@ -25,6 +28,7 @@ interface NavItem {
 
 export function InvestorLayout() {
   const location = useLocation();
+  const { investorProfile } = useInvestorProfile();
 
   const navItems: NavItem[] = [
     { path: '/investor', label: 'Dashboard', icon: LayoutDashboard },
@@ -37,6 +41,7 @@ export function InvestorLayout() {
     { path: '/investor/data-rooms', label: 'Data Rooms', icon: Database },
     { path: '/investor/deal-rooms', label: 'Deal Rooms', icon: Shield },
     { path: '/investor/reputation', label: 'Reputation', icon: Award },
+    { path: '/investor/profile', label: 'Profile', icon: UserCircle },
     // Cross-section + placeholder
     { path: '/feed', label: 'Feed', icon: Rss, external: true },
     { path: '#', label: 'Mentorship Hub', icon: GraduationCap, comingSoon: true },
@@ -111,10 +116,23 @@ export function InvestorLayout() {
             <ArrowLeft className="w-4 h-4" />
             Back to TechIT
           </Link>
-          <div className="px-4 py-3 bg-gray-800/50 rounded-lg">
-            <p className="text-xs text-gray-400">Investor</p>
-            <p className="text-sm font-medium text-white mt-1">Capital Partners LP</p>
-          </div>
+          <Link
+            to="/investor/profile"
+            className="block group px-4 py-3 bg-gray-800/50 hover:bg-gray-800 rounded-lg transition-colors"
+            title="Open investor profile"
+          >
+            <div className="flex items-center justify-between">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-gray-400">
+                  {investorProfile.investorType || 'Investor'}
+                </p>
+                <p className="text-sm font-medium text-white mt-0.5 truncate">
+                  {investorProfile.location || 'Capital Partners LP'}
+                </p>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-emerald-400 transition-colors flex-shrink-0 ml-2" />
+            </div>
+          </Link>
         </div>
       </aside>
 

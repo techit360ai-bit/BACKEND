@@ -1,9 +1,15 @@
 import { Link } from 'react-router-dom';
 import { investorMetrics, mockStartups } from '../../data/mockData';
-import { TrendingUp, Shield, DollarSign, Activity, Zap, ArrowRight } from 'lucide-react';
+import { TrendingUp, Shield, DollarSign, Activity, Zap, ArrowRight, Sparkles, X } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useInvestorProfile } from '@/contexts/UserContext';
+import { useState } from 'react';
 
 export function Dashboard() {
+  const { investorProfile } = useInvestorProfile();
+  const onboardingIncomplete =
+    investorProfile.industries.length === 0 || !investorProfile.stage;
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const highMomentumStartups = mockStartups
     .filter((s) => s.velocityDelta > 20)
     .slice(0, 5);
@@ -34,6 +40,38 @@ export function Dashboard() {
       </div>
 
       <div className="p-8">
+        {/* Onboarding banner — appears when profile is incomplete */}
+        {onboardingIncomplete && !bannerDismissed && (
+          <div className="mb-6 flex items-center gap-4 rounded-lg border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent px-5 py-4">
+            <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+              <Sparkles className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-white">
+                Complete your investor profile
+              </p>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Set your sectors, stage and check size so the dashboard prioritises
+                the deals you actually want to see.
+              </p>
+            </div>
+            <Link
+              to="/investor/onboarding/step-1"
+              className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition-colors flex-shrink-0"
+            >
+              Start onboarding
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+            <button
+              onClick={() => setBannerDismissed(true)}
+              className="p-1.5 rounded-md hover:bg-white/5 text-gray-500 hover:text-gray-300 transition-colors flex-shrink-0"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Top Metrics Bar */}
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
           <MetricCard

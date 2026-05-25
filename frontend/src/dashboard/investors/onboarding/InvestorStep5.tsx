@@ -49,7 +49,7 @@ export function InvestorStep5() {
 
   const handleComplete = () => {
     updateInvestorProfile({ dashboardMetrics });
-    navigate("/investor/dashboard");
+    navigate("/investor/profile");
   };
 
   const handleBack = () => {
