@@ -5,6 +5,7 @@ import FounderSummary from "@/dashboard/founders/summary";
 import Dashboard from "@/dashboard/home";
 import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
 import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
+import { Equity as CollabEquity } from "@/dashboard/collaborators/section/components/collab/Equity";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -106,6 +107,7 @@ const App = () => {
         <Route path="/collaborator" element={<CollabLayout />}>
           <Route index element={<Navigate to="/collaborator/dashboard" replace />} />
           <Route path="dashboard" element={<CollabDashboard />} />
+          <Route path="equity" element={<CollabEquity />} />
         </Route>
 
         {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
