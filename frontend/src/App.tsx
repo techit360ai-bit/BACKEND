@@ -52,6 +52,12 @@ import { OrgStep2 } from "@/dashboard/organization/onboarding/OrgStep2";
 import { OrgStep3 } from "@/dashboard/organization/onboarding/OrgStep3";
 import { OrgStep4 } from "@/dashboard/organization/onboarding/OrgStep4";
 import { OrgStep5 } from "@/dashboard/organization/onboarding/OrgStep5";
+import { CollabStep1 } from "@/dashboard/collaborators/onboarding/CollabStep1";
+import { CollabStep2 } from "@/dashboard/collaborators/onboarding/CollabStep2";
+import { CollabStep3 } from "@/dashboard/collaborators/onboarding/CollabStep3";
+import { CollabStep4 } from "@/dashboard/collaborators/onboarding/CollabStep4";
+import { CollabStep5 } from "@/dashboard/collaborators/onboarding/CollabStep5";
+import { CollabStep6 } from "@/dashboard/collaborators/onboarding/CollabStep6";
 import { UserProvider } from "@/contexts/UserContext";
 import Chat from "@/dashboard/chat/Chat";
 import Signup from "@/components/SignUp";
@@ -88,6 +94,14 @@ const App = () => {
 
         <Route path="/founder/setup" element={<FounderSetup />} />
         <Route path="/founder/summary" element={<FounderSummary />} />
+
+        <Route path="/collaborator/onboarding/step-1" element={<CollabStep1 />} />
+        <Route path="/collaborator/onboarding/step-2" element={<CollabStep2 />} />
+        <Route path="/collaborator/onboarding/step-3" element={<CollabStep3 />} />
+        <Route path="/collaborator/onboarding/step-4" element={<CollabStep4 />} />
+        <Route path="/collaborator/onboarding/step-5" element={<CollabStep5 />} />
+        <Route path="/collaborator/onboarding/step-6" element={<CollabStep6 />} />
+
         <Route path="/collaborator" element={<CollabLayout />}>
           <Route index element={<Navigate to="/collaborator/onboarding/step-1" replace />} />
         </Route>
