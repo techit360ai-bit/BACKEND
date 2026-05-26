@@ -7,6 +7,8 @@ import { CollabLayout } from "@/dashboard/collaborators/section/components/colla
 import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
 import { Equity as CollabEquity } from "@/dashboard/collaborators/section/components/collab/Equity";
 import { Tasks as CollabTasks } from "@/dashboard/collaborators/section/components/collab/Tasks";
+import { Performance as CollabPerformance } from "@/dashboard/collaborators/section/components/collab/Performance";
+import { Earnings as CollabEarnings } from "@/dashboard/collaborators/section/components/collab/Earnings";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -110,6 +112,8 @@ const App = () => {
           <Route path="dashboard" element={<CollabDashboard />} />
           <Route path="equity" element={<CollabEquity />} />
           <Route path="tasks" element={<CollabTasks />} />
+          <Route path="performance" element={<CollabPerformance />} />
+          <Route path="earnings" element={<CollabEarnings />} />
         </Route>
 
         {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
