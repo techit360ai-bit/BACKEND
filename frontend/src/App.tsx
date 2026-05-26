@@ -4,6 +4,7 @@ import FounderSetup from "@/dashboard/founders/setup";
 import FounderSummary from "@/dashboard/founders/summary";
 import Dashboard from "@/dashboard/home";
 import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
+import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -103,7 +104,8 @@ const App = () => {
         <Route path="/collaborator/onboarding/step-6" element={<CollabStep6 />} />
 
         <Route path="/collaborator" element={<CollabLayout />}>
-          <Route index element={<Navigate to="/collaborator/onboarding/step-1" replace />} />
+          <Route index element={<Navigate to="/collaborator/dashboard" replace />} />
+          <Route path="dashboard" element={<CollabDashboard />} />
         </Route>
 
         {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
