@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useMemo, type ReactNode } from "react";
+import { useLocation } from "react-router-dom";
 
 export interface PortfolioCompany {
   id: string;
@@ -66,11 +67,70 @@ export interface OrgProfile {
   plan: OrgPlan;
 }
 
+export type CollaboratorDiscipline =
+  | "Engineering"
+  | "Design"
+  | "Product"
+  | "Data & ML"
+  | "DevOps"
+  | "Security"
+  | "Marketing"
+  | "Research";
+
+export type Role = "founder" | "collaborator" | "investor" | "org";
+
+export interface NotificationPrefs {
+  opportunities: { email: boolean; inApp: boolean };
+  deadlines:     { email: boolean; inApp: boolean };
+  payments:      { email: boolean; inApp: boolean };
+  equityEvents:  { email: boolean; inApp: boolean };
+  quietHours:    "off" | "10pm-8am" | "weekends";
+}
+
+export interface CollaboratorProfile {
+  // Step 1 — Identity
+  name: string;
+  title: string;
+  location: string;
+  yearsExperience: number;
+  headline: string;
+  avatarUrl: string;
+
+  // Step 2 — Discipline & sub-skills
+  discipline: CollaboratorDiscipline | "";
+  subSkills: string[];
+
+  // Step 3 — Tech stack
+  techStack: string[];
+
+  // Step 4 — Availability
+  weeklyHours: number;
+  timezone: string;
+  earliestStart: "this-week" | "2-weeks" | "1-month";
+  commitmentStyle: "deep" | "parallel" | "many";
+
+  // Step 5 — Mission: Building for Equity
+  equityPreference: number;
+  minCashFloor: number;
+  vestingComfort: "standard" | "1y-cliff-4y" | "custom";
+
+  // Step 6 — Portfolio & goals
+  links: { github: string; linkedin: string; portfolio: string; twitter: string };
+  whyHere: string;
+  pinnedWork: string[];
+
+  // Status / settings
+  onboardingComplete: boolean;
+  notifications: NotificationPrefs;
+}
+
 interface UserContextType {
   investorProfile: InvestorProfile;
   updateInvestorProfile: (updates: Partial<InvestorProfile>) => void;
   orgProfile: OrgProfile;
   updateOrgProfile: (updates: Partial<OrgProfile>) => void;
+  collaboratorProfile: CollaboratorProfile;
+  updateCollaboratorProfile: (updates: Partial<CollaboratorProfile>) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -119,6 +179,49 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setOrgProfile((prev) => ({ ...prev, ...updates }));
   };
 
+  const [collaboratorProfile, setCollaboratorProfile] = useState<CollaboratorProfile>({
+    name: "Alex Chen",
+    title: "Senior Frontend Engineer",
+    location: "Lagos, Nigeria",
+    yearsExperience: 7,
+    headline: "I ship product-grade React systems quickly.",
+    avatarUrl: "",
+    discipline: "Engineering",
+    subSkills: ["React", "TypeScript", "Node.js", "System design", "Performance"],
+    techStack: ["React", "Next.js", "Postgres", "Vercel", "Tailwind", "tRPC"],
+    weeklyHours: 20,
+    timezone: "WAT",
+    earliestStart: "this-week",
+    commitmentStyle: "parallel",
+    equityPreference: 65,
+    minCashFloor: 2000,
+    vestingComfort: "standard",
+    links: {
+      github: "github.com/alexchen",
+      linkedin: "linkedin.com/in/alexchen",
+      portfolio: "alexchen.dev",
+      twitter: "@alexchen",
+    },
+    whyHere: "A product that becomes someone's daily tool, with skin in the game.",
+    pinnedWork: [],
+    onboardingComplete: true,
+    notifications: {
+      opportunities: { email: true, inApp: true },
+      deadlines:     { email: true, inApp: true },
+      payments:      { email: true, inApp: true },
+      equityEvents:  { email: true, inApp: true },
+      quietHours:    "off",
+    },
+  });
+
+  /**
+   * Shallow merge — for nested fields like `notifications` or `links`, callers must spread the
+   * existing sub-object themselves, e.g. `updateCollaboratorProfile({ notifications: { ...prev.notifications, quietHours: "weekends" } })`.
+   */
+  const updateCollaboratorProfile = (updates: Partial<CollaboratorProfile>) => {
+    setCollaboratorProfile((prev) => ({ ...prev, ...updates }));
+  };
+
   return (
     <UserContext.Provider
       value={{
@@ -126,6 +229,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         updateInvestorProfile,
         orgProfile,
         updateOrgProfile,
+        collaboratorProfile,
+        updateCollaboratorProfile,
       }}
     >
       {children}
@@ -151,4 +256,31 @@ export function useInvestorProfile() {
 export function useOrgProfile() {
   const { orgProfile, updateOrgProfile } = useUser();
   return { orgProfile, updateOrgProfile };
+}
+
+// Convenience hook for collaborator profile
+export function useCollaboratorProfile() {
+  const { collaboratorProfile, updateCollaboratorProfile } = useUser();
+  return { collaboratorProfile, updateCollaboratorProfile };
+}
+
+export function useActiveRoles(): { activeRoles: Set<Role>; currentRole: Role } {
+  const { collaboratorProfile, investorProfile, orgProfile } = useUser();
+  const location = useLocation();
+
+  const activeRoles = useMemo(() => {
+    const s = new Set<Role>(["founder"]);
+    if (collaboratorProfile.onboardingComplete)             s.add("collaborator");
+    if (investorProfile.industries.length > 0)              s.add("investor");
+    if (orgProfile.verificationStatus !== "unverified")     s.add("org");
+    return s;
+  }, [collaboratorProfile.onboardingComplete, investorProfile.industries.length, orgProfile.verificationStatus]);
+
+  const path = location.pathname;
+  let currentRole: Role = "founder";
+  if (path.startsWith("/collaborator")) currentRole = "collaborator";
+  else if (path.startsWith("/investor"))    currentRole = "investor";
+  else if (path.startsWith("/org"))         currentRole = "org";
+
+  return { activeRoles, currentRole };
 }
