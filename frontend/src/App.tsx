@@ -3,15 +3,7 @@ import Landing from "@/components/Landing";
 import FounderSetup from "@/dashboard/founders/setup";
 import FounderSummary from "@/dashboard/founders/summary";
 import Dashboard from "@/dashboard/home";
-import CollaboratorSetup from "@/dashboard/collaborators/setup";
-import CollaboratorSummary from "@/dashboard/collaborators/summary";
-import CollaboratorDashboard from "@/dashboard/collaborators/dashboard";
-import AITaskCenter from "@/dashboard/collaborators/tasks";
-import ToolsPage from "@/dashboard/collaborators/tools";
-import OpportunitiesPage from "@/dashboard/collaborators/opportunities";
-import PerformancePage from "@/dashboard/collaborators/performance";
-import MessagesPage from "@/dashboard/collaborators/messages";
-import EarningsPage from "@/dashboard/collaborators/earnings";
+import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -96,21 +88,14 @@ const App = () => {
 
         <Route path="/founder/setup" element={<FounderSetup />} />
         <Route path="/founder/summary" element={<FounderSummary />} />
-        <Route path="/collaborator/setup" element={<CollaboratorSetup />} />
-        <Route path="/collaborator/summary" element={<CollaboratorSummary />} />
-        <Route
-          path="/collaborator/dashboard"
-          element={<CollaboratorDashboard />}
-        />
-        <Route path="/collaborator/tasks" element={<AITaskCenter />} />
-        <Route path="/collaborator/tools" element={<ToolsPage />} />
-        <Route
-          path="/collaborator/opportunities"
-          element={<OpportunitiesPage />}
-        />
-        <Route path="/collaborator/performance" element={<PerformancePage />} />
-        <Route path="/collaborator/messages" element={<MessagesPage />} />
-        <Route path="/collaborator/earnings" element={<EarningsPage />} />
+        <Route path="/collaborator" element={<CollabLayout />}>
+          <Route index element={<Navigate to="/collaborator/onboarding/step-1" replace />} />
+        </Route>
+
+        {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
+        <Route path="/collaborator/setup"   element={<Navigate to="/collaborator/onboarding/step-1" replace />} />
+        <Route path="/collaborator/summary" element={<Navigate to="/collaborator/dashboard" replace />} />
+
         <Route path="/investor/onboarding/step-1" element={<InvestorStep1 />} />
         <Route path="/investor/onboarding/step-2" element={<InvestorStep2 />} />
         <Route path="/investor/onboarding/step-3" element={<InvestorStep3 />} />
