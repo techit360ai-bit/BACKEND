@@ -9,6 +9,10 @@ import { Equity as CollabEquity } from "@/dashboard/collaborators/section/compon
 import { Tasks as CollabTasks } from "@/dashboard/collaborators/section/components/collab/Tasks";
 import { Performance as CollabPerformance } from "@/dashboard/collaborators/section/components/collab/Performance";
 import { Earnings as CollabEarnings } from "@/dashboard/collaborators/section/components/collab/Earnings";
+import { Opportunities as CollabOpportunities } from "@/dashboard/collaborators/section/components/collab/Opportunities";
+import { Reputation as CollabReputation } from "@/dashboard/collaborators/section/components/collab/Reputation";
+import { Messages as CollabMessages } from "@/dashboard/collaborators/section/components/collab/Messages";
+import { Tools as CollabTools } from "@/dashboard/collaborators/section/components/collab/Tools";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -114,6 +118,10 @@ const App = () => {
           <Route path="tasks" element={<CollabTasks />} />
           <Route path="performance" element={<CollabPerformance />} />
           <Route path="earnings" element={<CollabEarnings />} />
+          <Route path="opportunities" element={<CollabOpportunities />} />
+          <Route path="reputation" element={<CollabReputation />} />
+          <Route path="messages" element={<CollabMessages />} />
+          <Route path="tools" element={<CollabTools />} />
         </Route>
 
         {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
