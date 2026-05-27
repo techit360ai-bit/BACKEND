@@ -13,6 +13,7 @@ import { Opportunities as CollabOpportunities } from "@/dashboard/collaborators/
 import { Reputation as CollabReputation } from "@/dashboard/collaborators/section/components/collab/Reputation";
 import { Messages as CollabMessages } from "@/dashboard/collaborators/section/components/collab/Messages";
 import { Tools as CollabTools } from "@/dashboard/collaborators/section/components/collab/Tools";
+import { CollabProfile } from "@/dashboard/collaborators/section/components/collab/CollabProfile";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import Wallet from "@/TechitWallet/Wallet";
@@ -122,6 +123,7 @@ const App = () => {
           <Route path="reputation" element={<CollabReputation />} />
           <Route path="messages" element={<CollabMessages />} />
           <Route path="tools" element={<CollabTools />} />
+          <Route path="profile" element={<CollabProfile />} />
         </Route>
 
         {/* Legacy redirects — Landing.tsx still navigates to /collaborator/setup */}
