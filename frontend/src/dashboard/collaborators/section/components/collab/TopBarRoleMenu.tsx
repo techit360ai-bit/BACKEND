@@ -3,26 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { ChevronDown, UserCircle, Settings as SettingsIcon, LogOut, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useUser, useActiveRoles, type Role } from "@/contexts/UserContext";
+import { roleDashboardPath, roleOnboardingPath } from "./roleRoutes";
 
 const roleLabel: Record<Role, string> = {
   founder: "Founder",
   collaborator: "Collaborator",
   investor: "Investor",
   org: "Organization",
-};
-
-export const roleDashboardPath: Record<Role, string> = {
-  founder: "/dashboard",
-  collaborator: "/collaborator/dashboard",
-  investor: "/investor/dashboard",
-  org: "/org/dashboard",
-};
-
-export const roleOnboardingPath: Record<Role, string> = {
-  founder: "/founder/setup",
-  collaborator: "/collaborator/onboarding/step-1",
-  investor: "/investor/onboarding/step-1",
-  org: "/org/onboarding/step-1",
 };
 
 export function TopBarRoleMenu() {
