@@ -104,7 +104,7 @@ const FounderSummary = () => {
                     Industries
                   </p>
                   <div className="flex flex-wrap gap-1.5">
-                    {profile.industries.map((industry) => (
+                    {profile.industries.map((industry:string) => (
                       <span
                         key={industry}
                         className="rounded-full bg-cyan-500/20 dark:bg-cyan-950/50 text-xs text-cyan-700 dark:text-cyan-300 px-2 py-0.5 border border-cyan-500/30 dark:border-cyan-500/50"
