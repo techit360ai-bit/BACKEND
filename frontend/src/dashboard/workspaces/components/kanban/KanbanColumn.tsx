@@ -1,5 +1,6 @@
 import { useDrop } from 'react-dnd';
-import { TaskCard, Task } from './TaskCard';
+import { TaskCard } from './TaskCard';
+import type { Task } from './type';
 import { Plus } from 'lucide-react';
 
 interface KanbanColumnProps {
