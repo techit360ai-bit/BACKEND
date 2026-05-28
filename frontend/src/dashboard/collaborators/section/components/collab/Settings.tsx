@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { User, Briefcase, Bell, UserCog, LogOut } from "lucide-react";
 import { useCollaboratorProfile, useActiveRoles, type CollaboratorDiscipline, type Role } from "@/contexts/UserContext";
-import { roleDashboardPath, roleOnboardingPath } from "./roleRoutes";
+import { roleDashboardPath, roleOnboardingPath } from "@/lib/roleRoutes";
 
 const disciplines: CollaboratorDiscipline[] = [
   "Engineering", "Design", "Product", "Data & ML",

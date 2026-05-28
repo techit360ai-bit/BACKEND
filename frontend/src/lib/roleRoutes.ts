@@ -1,3 +1,4 @@
+// frontend/src/lib/roleRoutes.ts
 import type { Role } from "@/contexts/UserContext";
 
 export const roleDashboardPath: Record<Role, string> = {
@@ -8,7 +9,7 @@ export const roleDashboardPath: Record<Role, string> = {
 };
 
 export const roleOnboardingPath: Record<Role, string> = {
-  founder: "/founder/setup",
+  founder: "/founder/onboarding/step-1",
   collaborator: "/collaborator/onboarding/step-1",
   investor: "/investor/onboarding/step-1",
   org: "/org/onboarding/step-1",

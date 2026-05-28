@@ -9,15 +9,7 @@ import {
   projects, tasks, signals, recentActivity,
 } from "@/dashboard/collaborators/section/data/mockData";
 import { useCollaboratorProfile } from "@/contexts/UserContext";
-
-function formatRelative(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const hours = Math.floor(diff / 3_600_000);
-  if (hours < 1) return "just now";
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return days === 1 ? "yesterday" : `${days}d ago`;
-}
+import { formatRelative } from "@/lib/formatRelative";
 
 export function Dashboard() {
   const navigate = useNavigate();

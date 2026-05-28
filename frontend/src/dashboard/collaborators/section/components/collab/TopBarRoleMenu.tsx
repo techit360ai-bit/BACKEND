@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ChevronDown, UserCircle, Settings as SettingsIcon, LogOut, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useUser, useActiveRoles, type Role } from "@/contexts/UserContext";
-import { roleDashboardPath, roleOnboardingPath } from "./roleRoutes";
+import { roleDashboardPath, roleOnboardingPath } from "@/lib/roleRoutes";
 
 const roleLabel: Record<Role, string> = {
   founder: "Founder",
