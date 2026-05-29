@@ -9,6 +9,7 @@ import { FounderStep6 } from "@/dashboard/founders/onboarding/FounderStep6";
 import { FounderLayout } from "@/dashboard/founders/section/components/founder/FounderLayout";
 import { Dashboard } from "@/dashboard/founders/section/components/founder/Dashboard";
 import { FounderProfile } from "@/dashboard/founders/section/components/founder/FounderProfile";
+import { Settings as FounderSettings } from "@/dashboard/founders/section/components/founder/Settings";
 import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
 import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
 import { Equity as CollabEquity } from "@/dashboard/collaborators/section/components/collab/Equity";
@@ -169,8 +170,9 @@ const App = () => {
           <Route path="profile" element={<InvestorProfile />} />
         </Route>
         <Route element={<FounderLayout />}>
-          <Route path="/dashboard"       element={<Dashboard />} />
-          <Route path="/founder/profile" element={<FounderProfile />} />
+          <Route path="/dashboard"        element={<Dashboard />} />
+          <Route path="/founder/profile"  element={<FounderProfile />} />
+          <Route path="/founder/settings" element={<FounderSettings />} />
         </Route>
         <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
