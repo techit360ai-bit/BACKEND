@@ -6,7 +6,8 @@ import { FounderStep3 } from "@/dashboard/founders/onboarding/FounderStep3";
 import { FounderStep4 } from "@/dashboard/founders/onboarding/FounderStep4";
 import { FounderStep5 } from "@/dashboard/founders/onboarding/FounderStep5";
 import { FounderStep6 } from "@/dashboard/founders/onboarding/FounderStep6";
-import Dashboard from "@/dashboard/home";
+import { FounderLayout } from "@/dashboard/founders/section/components/founder/FounderLayout";
+import { Dashboard } from "@/dashboard/founders/section/components/founder/Dashboard";
 import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
 import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
 import { Equity as CollabEquity } from "@/dashboard/collaborators/section/components/collab/Equity";
@@ -166,7 +167,9 @@ const App = () => {
           <Route path="reputation" element={<InvestorReputation />} />
           <Route path="profile" element={<InvestorProfile />} />
         </Route>
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route element={<FounderLayout />}>
+          <Route path="/dashboard" element={<Dashboard />} />
+        </Route>
         <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
         <Route path="/incubation-hub" element={<IncubationHub />} />
