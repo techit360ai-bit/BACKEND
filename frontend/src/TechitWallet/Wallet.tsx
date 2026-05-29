@@ -12,8 +12,6 @@ import {
   ShoppingCart,
 } from "lucide-react";
 import { useState } from "react";
-import Sidebar from "../components/Sidebar";
-import MobileMenuButton from "../components/MobileMenuButton";
 import PaymentModal from "../components/PaymentModal";
 
 const recentUsage = [
@@ -231,16 +229,13 @@ export default function Wallet() {
   };
 
   return (
-    <div className="min-h-dvh w-full flex bg-background text-foreground">
-      <Sidebar />
-
+    <div className="min-h-dvh w-full bg-background text-foreground">
       {/* Main content */}
       <main className="flex-1 min-h-dvh overflow-y-auto bg-linear-to-b from-slate-50 via-violet-50/30 to-slate-50 dark:from-slate-950 dark:via-slate-900/50 dark:to-slate-950">
         {/* Top Navigation */}
         <div className="border-b border-violet-200/50 dark:border-violet-800/50 bg-linear-to-r from-sky-50 to-violet-50 dark:from-slate-900/50 dark:to-purple-900/50 sticky top-0 z-40">
           <div className="max-w-6xl mx-auto px-4 lg:px-8 py-4 flex items-center justify-between gap-8">
             <div className="flex items-center gap-8">
-              <MobileMenuButton />
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
                   <span className="text-xl font-bold bg-linear-to-r from-violet-600 to-cyan-600 dark:from-violet-400 dark:to-cyan-400 bg-clip-text text-transparent">
