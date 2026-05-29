@@ -1,6 +1,6 @@
 // frontend/src/dashboard/founders/section/components/founder/Dashboard.tsx
 import { Link, useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { ArrowRight, CheckCircle, TrendingUp, Plus } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
@@ -10,6 +10,9 @@ import {
   recentActivity, journey,
   type Build,
 } from "@/dashboard/founders/section/data/mockData";
+
+// Captured at module load — stable reference, satisfies react-hooks/purity
+const NOW_MS = Date.now();
 
 const stageStyles: Record<string, string> = {
   Idea:    "bg-slate-100 text-slate-700",
@@ -34,7 +37,10 @@ export function Dashboard() {
 
   const firstName = p.name.split(" ")[0];
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
-  const weeksBuilding = Math.max(1, Math.floor((Date.now() - new Date(`${p.foundingYear}-01-01`).getTime()) / (7 * 86_400_000)));
+  const weeksBuilding = useMemo(
+    () => Math.max(1, Math.floor((NOW_MS - new Date(`${p.foundingYear}-01-01`).getTime()) / (7 * 86_400_000))),
+    [p.foundingYear],
+  );
 
   const toggleTask = (id: string) => {
     setTasks((cur) => cur.map((t) => t.id === id ? { ...t, done: !t.done } : t));
