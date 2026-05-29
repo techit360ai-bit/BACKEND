@@ -1,7 +1,11 @@
 import { Routes, Route, Navigate } from "react-router";
 import Landing from "@/components/Landing";
-import FounderSetup from "@/dashboard/founders/setup";
-import FounderSummary from "@/dashboard/founders/summary";
+import { FounderStep1 } from "@/dashboard/founders/onboarding/FounderStep1";
+import { FounderStep2 } from "@/dashboard/founders/onboarding/FounderStep2";
+import { FounderStep3 } from "@/dashboard/founders/onboarding/FounderStep3";
+import { FounderStep4 } from "@/dashboard/founders/onboarding/FounderStep4";
+import { FounderStep5 } from "@/dashboard/founders/onboarding/FounderStep5";
+import { FounderStep6 } from "@/dashboard/founders/onboarding/FounderStep6";
 import Dashboard from "@/dashboard/home";
 import { CollabLayout } from "@/dashboard/collaborators/section/components/collab/CollabLayout";
 import { Dashboard as CollabDashboard } from "@/dashboard/collaborators/section/components/collab/Dashboard";
@@ -103,8 +107,14 @@ const App = () => {
       <Routes>
         <Route path="/" element={<Landing />} />
 
-        <Route path="/founder/setup" element={<FounderSetup />} />
-        <Route path="/founder/summary" element={<FounderSummary />} />
+        <Route path="/founder/onboarding/step-1" element={<FounderStep1 />} />
+        <Route path="/founder/onboarding/step-2" element={<FounderStep2 />} />
+        <Route path="/founder/onboarding/step-3" element={<FounderStep3 />} />
+        <Route path="/founder/onboarding/step-4" element={<FounderStep4 />} />
+        <Route path="/founder/onboarding/step-5" element={<FounderStep5 />} />
+        <Route path="/founder/onboarding/step-6" element={<FounderStep6 />} />
+        <Route path="/founder/setup"   element={<Navigate to="/founder/onboarding/step-1" replace />} />
+        <Route path="/founder/summary" element={<Navigate to="/dashboard" replace />} />
 
         <Route path="/collaborator/onboarding/step-1" element={<CollabStep1 />} />
         <Route path="/collaborator/onboarding/step-2" element={<CollabStep2 />} />
