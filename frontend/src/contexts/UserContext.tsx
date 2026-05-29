@@ -124,6 +124,83 @@ export interface CollaboratorProfile {
   notifications: NotificationPrefs;
 }
 
+export type FounderStage = "Idea" | "MVP" | "Beta" | "Launch" | "Growth";
+export type FounderExperience = "first-time" | "some-experience" | "serial";
+export type LaunchStatus = "pre-launch" | "private-beta" | "public";
+export type CompModel = "equity-heavy" | "cash-equity-mix" | "cash-heavy";
+export type OwnershipPhilosophy = "equity-day-one" | "cash-first-equity-later" | "custom";
+export type OpenRole =
+  | "Frontend Engineer" | "Backend Engineer" | "Full-stack Engineer"
+  | "ML Engineer" | "Designer (Product)" | "Designer (Visual)"
+  | "Product Manager" | "Data Scientist" | "DevOps Engineer"
+  | "Growth Marketer" | "Content / Copy" | "Founder Associate";
+
+export interface FounderVerification {
+  twitter:      { handle: string;   verified: boolean };
+  linkedin:     { url: string;      verified: boolean };
+  personalSite: { url: string;      verified: boolean };
+  github:       { username: string; verified: boolean };
+  nin: {
+    country: string;
+    docType: "nin" | "passport" | "driver-license";
+    docNumber: string;
+    status: "unverified" | "pending" | "verified";
+  };
+}
+
+export interface FounderNotificationPrefs {
+  applications:  { email: boolean; inApp: boolean };
+  investors:     { email: boolean; inApp: boolean };
+  workspace:     { email: boolean; inApp: boolean };
+  opportunities: { email: boolean; inApp: boolean };
+  quietHours:    "off" | "10pm-8am" | "weekends";
+}
+
+export interface FounderProfile {
+  // Step 1
+  name: string;
+  title: string;
+  location: string;
+  yearsBuilding: number;
+  founderType: FounderExperience;
+  headline: string;
+  avatarUrl: string;
+  // Step 2
+  startupName: string;
+  oneLiner: string;
+  stage: FounderStage;
+  industries: string[];
+  foundingYear: number;
+  website: string;
+  logoEmoji: string;
+  // Step 3
+  currentTeamSize: number;
+  openRoles: OpenRole[];
+  compensationOffered: CompModel;
+  equityRangeMin: number;
+  equityRangeMax: number;
+  // Step 4
+  launchStatus: LaunchStatus;
+  users: number;
+  revenueMonthly: number;
+  fundingRaised: number;
+  leadInvestor: string;
+  nextMilestone: string;
+  // Step 5
+  whyBuilding: string;
+  winningIn3Years: string;
+  unfairAdvantage: string;
+  ownershipPhilosophy: OwnershipPhilosophy;
+  // Step 6
+  links: { github: string; linkedin: string; twitter: string; personal: string };
+  needsFromTechIT: string[];
+  pinnedWork: string[];
+  // Status
+  onboardingComplete: boolean;
+  verification: FounderVerification;
+  notifications: FounderNotificationPrefs;
+}
+
 interface UserContextType {
   investorProfile: InvestorProfile;
   updateInvestorProfile: (updates: Partial<InvestorProfile>) => void;
@@ -131,6 +208,8 @@ interface UserContextType {
   updateOrgProfile: (updates: Partial<OrgProfile>) => void;
   collaboratorProfile: CollaboratorProfile;
   updateCollaboratorProfile: (updates: Partial<CollaboratorProfile>) => void;
+  founderProfile: FounderProfile;
+  updateFounderProfile: (updates: Partial<FounderProfile>) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -222,6 +301,70 @@ export function UserProvider({ children }: { children: ReactNode }) {
     setCollaboratorProfile((prev) => ({ ...prev, ...updates }));
   };
 
+  const [founderProfile, setFounderProfile] = useState<FounderProfile>({
+    name: "Sarah Chen",
+    title: "Founder & CEO",
+    location: "Lagos, Nigeria",
+    yearsBuilding: 5,
+    founderType: "first-time",
+    headline: "Building the operating system for African SMEs.",
+    avatarUrl: "",
+    startupName: "AI Task Manager",
+    oneLiner: "AI that turns Slack chaos into a Kanban board.",
+    stage: "MVP",
+    industries: ["AI/ML", "SaaS"],
+    foundingYear: 2026,
+    website: "techit.ai",
+    logoEmoji: "🧠",
+    currentTeamSize: 2,
+    openRoles: ["Frontend Engineer", "ML Engineer", "Designer (Product)"],
+    compensationOffered: "equity-heavy",
+    equityRangeMin: 0.5,
+    equityRangeMax: 2.5,
+    launchStatus: "private-beta",
+    users: 240,
+    revenueMonthly: 0,
+    fundingRaised: 0,
+    leadInvestor: "",
+    nextMilestone: "Hit 1,000 active users by August.",
+    whyBuilding: "I watched my mother's bakery drown in WhatsApp orders. There's nothing built for African SMEs that talks the way they actually work.",
+    winningIn3Years: "Default SaaS for any African SME under 50 employees. $10M ARR.",
+    unfairAdvantage: "I ran SME ops for 4 years. I know the broken workflows by name.",
+    ownershipPhilosophy: "equity-day-one",
+    links: {
+      github: "github.com/sarahchen",
+      linkedin: "linkedin.com/in/sarahchen",
+      twitter: "@sarahchen",
+      personal: "sarahchen.com",
+    },
+    needsFromTechIT: ["Find collaborators", "Customer interviews"],
+    pinnedWork: [],
+    onboardingComplete: true,
+    verification: {
+      twitter:      { handle: "@sarahchen", verified: false },
+      linkedin:     { url: "linkedin.com/in/sarahchen", verified: true },
+      personalSite: { url: "sarahchen.com", verified: false },
+      github:       { username: "sarahchen", verified: true },
+      nin: { country: "Nigeria", docType: "nin", docNumber: "", status: "unverified" },
+    },
+    notifications: {
+      applications:  { email: true, inApp: true },
+      investors:     { email: true, inApp: true },
+      workspace:     { email: false, inApp: true },
+      opportunities: { email: true, inApp: true },
+      quietHours:    "off",
+    },
+  });
+
+  /**
+   * Shallow merge — for nested fields like `verification`, `notifications`, or `links`,
+   * callers must spread the existing sub-object themselves,
+   * e.g. updateFounderProfile({ notifications: { ...prev.notifications, quietHours: "weekends" } }).
+   */
+  const updateFounderProfile = (updates: Partial<FounderProfile>) => {
+    setFounderProfile((prev) => ({ ...prev, ...updates }));
+  };
+
   return (
     <UserContext.Provider
       value={{
@@ -231,6 +374,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         updateOrgProfile,
         collaboratorProfile,
         updateCollaboratorProfile,
+        founderProfile,
+        updateFounderProfile,
       }}
     >
       {children}
@@ -265,22 +410,29 @@ export function useCollaboratorProfile() {
 }
 
 export function useActiveRoles(): { activeRoles: Set<Role>; currentRole: Role } {
-  const { collaboratorProfile, investorProfile, orgProfile } = useUser();
+  const { founderProfile, collaboratorProfile, investorProfile, orgProfile } = useUser();
   const location = useLocation();
 
   const activeRoles = useMemo(() => {
-    const s = new Set<Role>(["founder"]);
-    if (collaboratorProfile.onboardingComplete)             s.add("collaborator");
-    if (investorProfile.industries.length > 0)              s.add("investor");
-    if (orgProfile.verificationStatus !== "unverified")     s.add("org");
+    const s = new Set<Role>();
+    if (founderProfile.onboardingComplete)              s.add("founder");
+    if (collaboratorProfile.onboardingComplete)         s.add("collaborator");
+    if (investorProfile.industries.length > 0)          s.add("investor");
+    if (orgProfile.verificationStatus !== "unverified") s.add("org");
     return s;
-  }, [collaboratorProfile.onboardingComplete, investorProfile.industries.length, orgProfile.verificationStatus]);
+  }, [founderProfile.onboardingComplete, collaboratorProfile.onboardingComplete, investorProfile.industries.length, orgProfile.verificationStatus]);
 
   const path = location.pathname;
   let currentRole: Role = "founder";
   if (path.startsWith("/collaborator")) currentRole = "collaborator";
-  else if (path.startsWith("/investor"))    currentRole = "investor";
-  else if (path.startsWith("/org"))         currentRole = "org";
+  else if (path.startsWith("/investor")) currentRole = "investor";
+  else if (path.startsWith("/org"))      currentRole = "org";
+  // everything else (/dashboard, /incubation-hub, /chat, /matchresults, /founder/*) → founder
 
   return { activeRoles, currentRole };
+}
+
+export function useFounderProfile() {
+  const { founderProfile, updateFounderProfile } = useUser();
+  return { founderProfile, updateFounderProfile };
 }
