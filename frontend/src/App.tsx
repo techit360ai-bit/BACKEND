@@ -173,11 +173,11 @@ const App = () => {
           <Route path="/dashboard"        element={<Dashboard />} />
           <Route path="/founder/profile"  element={<FounderProfile />} />
           <Route path="/founder/settings" element={<FounderSettings />} />
+          <Route path="/incubation-hub"   element={<IncubationHub />} />
+          <Route path="/chat"             element={<Chat />} />
+          <Route path="/matches"          element={<MatchResults />} />
         </Route>
-        <Route path="/chat" element={<Chat />} />
         <Route path="/wallet" element={<Wallet />} />
-        <Route path="/incubation-hub" element={<IncubationHub />} />
-        <Route path="/matches" element={<MatchResults />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/signin" element={<Login />} />
 
