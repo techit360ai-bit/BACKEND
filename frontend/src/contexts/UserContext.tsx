@@ -156,6 +156,27 @@ export interface FounderNotificationPrefs {
   quietHours:    "off" | "10pm-8am" | "weekends";
 }
 
+export interface HackathonTeamMember {
+  collaboratorId: string;
+  name: string;
+  role: string;
+  acceptedAt: string;
+}
+
+export interface HackathonRegistration {
+  hackathonId: string;
+  teamId: string;
+  teamName: string;
+  teamSize: number;
+  role: "leader" | "member";
+  inviteToken: string;
+  registeredAt: string;
+  members: HackathonTeamMember[];
+  openRoles: OpenRole[];
+  stage: "registered" | "submitted" | "building" | "submitted-final";
+  rosterClosed?: boolean;
+}
+
 export interface FounderProfile {
   // Step 1
   name: string;
@@ -199,6 +220,8 @@ export interface FounderProfile {
   onboardingComplete: boolean;
   verification: FounderVerification;
   notifications: FounderNotificationPrefs;
+  // Hackathon participation (PR-B)
+  hackathonRegistrations: HackathonRegistration[];
 }
 
 interface UserContextType {
@@ -210,6 +233,12 @@ interface UserContextType {
   updateCollaboratorProfile: (updates: Partial<CollaboratorProfile>) => void;
   founderProfile: FounderProfile;
   updateFounderProfile: (updates: Partial<FounderProfile>) => void;
+  registerForHackathon: (reg: HackathonRegistration) => void;
+  addHackathonMember: (teamId: string, member: HackathonTeamMember) => void;
+  updateHackathonRegistration: (
+    teamId: string,
+    updates: Partial<Omit<HackathonRegistration, "hackathonId" | "teamId" | "registeredAt">>,
+  ) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -354,6 +383,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       opportunities: { email: true, inApp: true },
       quietHours:    "off",
     },
+    hackathonRegistrations: [],
   });
 
   /**
@@ -363,6 +393,40 @@ export function UserProvider({ children }: { children: ReactNode }) {
    */
   const updateFounderProfile = (updates: Partial<FounderProfile>) => {
     setFounderProfile((prev) => ({ ...prev, ...updates }));
+  };
+
+  const registerForHackathon = (reg: HackathonRegistration) => {
+    setFounderProfile((prev) => ({
+      ...prev,
+      hackathonRegistrations: [...prev.hackathonRegistrations, reg],
+    }));
+  };
+
+  const addHackathonMember = (teamId: string, member: HackathonTeamMember) => {
+    setFounderProfile((prev) => ({
+      ...prev,
+      hackathonRegistrations: prev.hackathonRegistrations.map((r) =>
+        r.teamId === teamId
+          ? {
+              ...r,
+              members: [...r.members, member],
+              openRoles: r.openRoles.filter((role) => role !== member.role),
+            }
+          : r,
+      ),
+    }));
+  };
+
+  const updateHackathonRegistration = (
+    teamId: string,
+    updates: Partial<Omit<HackathonRegistration, "hackathonId" | "teamId" | "registeredAt">>,
+  ) => {
+    setFounderProfile((prev) => ({
+      ...prev,
+      hackathonRegistrations: prev.hackathonRegistrations.map((r) =>
+        r.teamId === teamId ? { ...r, ...updates } : r,
+      ),
+    }));
   };
 
   return (
@@ -376,6 +440,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
         updateCollaboratorProfile,
         founderProfile,
         updateFounderProfile,
+        registerForHackathon,
+        addHackathonMember,
+        updateHackathonRegistration,
       }}
     >
       {children}
@@ -433,6 +500,18 @@ export function useActiveRoles(): { activeRoles: Set<Role>; currentRole: Role } 
 }
 
 export function useFounderProfile() {
-  const { founderProfile, updateFounderProfile } = useUser();
-  return { founderProfile, updateFounderProfile };
+  const {
+    founderProfile,
+    updateFounderProfile,
+    registerForHackathon,
+    addHackathonMember,
+    updateHackathonRegistration,
+  } = useUser();
+  return {
+    founderProfile,
+    updateFounderProfile,
+    registerForHackathon,
+    addHackathonMember,
+    updateHackathonRegistration,
+  };
 }
