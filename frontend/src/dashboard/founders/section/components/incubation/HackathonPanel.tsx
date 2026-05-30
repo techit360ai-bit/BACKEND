@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Lightbulb, Hammer, Send } from "lucide-react";
-import { useFounderProfile } from "@/contexts/UserContext";
 import { StagePill } from "./hackathon/StagePill";
 import { DiscoverStage } from "./hackathon/DiscoverStage";
 import { RegisterStage } from "./hackathon/RegisterStage";
@@ -19,7 +18,6 @@ const STAGES: { id: StageId; label: string }[] = [
 export function HackathonPanel() {
   const [searchParams, setSearchParams] = useSearchParams();
   const stageParam = searchParams.get("stage");
-  const { founderProfile } = useFounderProfile();
 
   const activeStage: StageId = useMemo(() => {
     if (stageParam === "register") return "register";
@@ -34,8 +32,6 @@ export function HackathonPanel() {
     if (id === "discover") next.delete("stage");
     setSearchParams(next, { replace: true });
   };
-
-  const registrations = founderProfile.hackathonRegistrations;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -67,7 +63,7 @@ export function HackathonPanel() {
       </div>
 
       {/* Stage content */}
-      {activeStage === "discover" && <DiscoverStage registrations={registrations} />}
+      {activeStage === "discover" && <DiscoverStage />}
       {activeStage === "register" && <RegisterStage />}
       {activeStage === "brief" && <ComingInPRC stage="Submit Brief" icon={<Lightbulb className="w-8 h-8 text-slate-300" />} />}
       {activeStage === "build" && <ComingInPRC stage="Build" icon={<Hammer className="w-8 h-8 text-slate-300" />} />}
