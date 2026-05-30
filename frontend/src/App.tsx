@@ -26,6 +26,7 @@ import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
 import OpportunityHub from "@/dashboard/founders/section/components/founder/OpportunityHub";
 import OpportunityDetail from "@/dashboard/founders/section/components/founder/OpportunityDetail";
+import InviteAcceptPage from "@/dashboard/founders/section/components/founder/InviteAcceptPage";
 import Wallet from "@/TechitWallet/Wallet";
 import NotFound from "@/dashboard/NotFound";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -178,6 +179,7 @@ const App = () => {
           <Route path="/incubation-hub"   element={<IncubationHub />} />
           <Route path="/opportunity-hub"  element={<OpportunityHub />} />
           <Route path="/opportunity-hub/:opportunityId" element={<OpportunityDetail />} />
+          <Route path="/h/:hackathonId/team/:teamId" element={<InviteAcceptPage />} />
           <Route path="/chat"             element={<Chat />} />
           <Route path="/matches"          element={<MatchResults />} />
         </Route>
