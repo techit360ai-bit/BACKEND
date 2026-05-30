@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { ArrowRight, CheckCircle, TrendingUp, Plus } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
 import { formatRelative } from "@/lib/formatRelative";
+import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
+import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
 import {
   signals, tasks as initialTasks, activeBuilds as initialBuilds,
   recentActivity, journey,
@@ -251,29 +253,82 @@ export function Dashboard() {
         </ul>
       </div>
 
-      {/* Hackathon Momentum (empty-state placeholder for PR-C) */}
-      <div className="border border-slate-200 bg-white rounded-xl p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+      {/* Hackathon Momentum */}
+      {(() => {
+        const regs = p.hackathonRegistrations;
+        if (regs.length === 0) {
+          return (
+            <div className="border border-slate-200 bg-white rounded-xl p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <h2 className="text-sm font-semibold text-slate-700">Hackathon Momentum</h2>
+                    <TrendingUp className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <p className="text-sm text-slate-600">
+                    No active hackathons. Join a hackathon from the Opportunity Hub to see your team's momentum
+                    tracker here — 4-hour check-ins, build velocity, blockers.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("/opportunity-hub")}
+                  className="text-xs font-medium text-violet-700 px-3 py-1.5 rounded-lg border border-violet-200 hover:bg-violet-50 flex items-center gap-2 shrink-0"
+                >
+                  Browse opportunities →
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="border border-slate-200 bg-white rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-4">
               <h2 className="text-sm font-semibold text-slate-700">Hackathon Momentum</h2>
               <TrendingUp className="w-4 h-4 text-slate-400" />
             </div>
-            <p className="text-sm text-slate-600">
-              No active hackathons. Join a hackathon from the Opportunity Hub to see your team's momentum
-              tracker here — 4-hour check-ins, build velocity, blockers.
-            </p>
+            <ul className="space-y-3">
+              {regs.map((r) => {
+                const h = OPPORTUNITIES.find((o): o is Hackathon => o.type === "hackathon" && o.id === r.hackathonId);
+                if (!h) return null;
+                const memberCount = r.members.length + 1;
+                const teamSize = memberCount + r.openRoles.length;
+                const startMs = new Date(h.startDate).getTime() - Date.now();
+                const days = Math.max(0, Math.ceil(startMs / (1000 * 60 * 60 * 24)));
+                const startsLabel = days <= 7 ? `Starts in ${days} days` : `Starts ${h.startDate}`;
+                return (
+                  <li key={r.teamId} className="flex items-start gap-3 border border-slate-100 rounded-lg p-3">
+                    <span className="text-xl shrink-0" aria-hidden="true">{h.poster}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-900 truncate">{h.title}</p>
+                      <p className="text-xs text-slate-500">
+                        {r.teamName} · {memberCount} of {teamSize} members · {startsLabel}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Stage: <span className="text-slate-700 font-medium">Registered</span> ──○────── Submit brief next
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/incubation-hub?panel=hackathon")}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 shrink-0"
+                    >
+                      Manage team →
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <button
+              type="button"
+              onClick={() => navigate("/opportunity-hub")}
+              className="mt-4 text-xs font-medium text-violet-700 hover:underline"
+            >
+              Browse more opportunities →
+            </button>
           </div>
-          <button
-            type="button"
-            disabled
-            className="text-xs text-slate-400 px-3 py-1.5 rounded-lg border border-slate-200 cursor-not-allowed flex items-center gap-2 shrink-0"
-          >
-            Browse opportunities →
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-mono uppercase tracking-wider">Soon</span>
-          </button>
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 }
