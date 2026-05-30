@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  LayoutDashboard, FlaskConical, PanelsTopLeft, Rss, Sparkles, Lightbulb,
+  LayoutDashboard, FlaskConical, PanelsTopLeft, Rss, Compass, Lightbulb,
   Route as RouteIcon, MessageSquare, LineChart, Wallet, UserCircle,
   Settings as SettingsIcon, ArrowLeft,
 } from "lucide-react";
@@ -14,16 +14,16 @@ type NavKind = "link" | "external" | "placeholder";
 interface NavItem { name: string; path: string; icon: typeof LayoutDashboard; kind: NavKind; }
 
 const primaryNav: NavItem[] = [
-  { name: "Dashboard",      path: "/dashboard",      icon: LayoutDashboard, kind: "link" },
-  { name: "Incubation Hub", path: "/incubation-hub", icon: FlaskConical,    kind: "link" },
-  { name: "Workspaces",     path: "/workspaces",     icon: PanelsTopLeft,   kind: "link" },
-  { name: "Feed",           path: "/feed",           icon: Rss,             kind: "external" },
+  { name: "Dashboard",       path: "/dashboard",       icon: LayoutDashboard, kind: "link" },
+  { name: "Incubation Hub",  path: "/incubation-hub",  icon: FlaskConical,    kind: "link" },
+  { name: "Opportunity Hub", path: "/opportunity-hub", icon: Compass,         kind: "link" },
+  { name: "Workspaces",      path: "/workspaces",      icon: PanelsTopLeft,   kind: "link" },
+  { name: "Feed",            path: "/feed",            icon: Rss,             kind: "external" },
 ];
 
 const comingSoonNav: NavItem[] = [
-  { name: "Opportunity Hub", path: "#", icon: Sparkles,  kind: "placeholder" },
-  { name: "Idea Hub",        path: "#", icon: Lightbulb, kind: "placeholder" },
-  { name: "Market Pathway",  path: "#", icon: RouteIcon, kind: "placeholder" },
+  { name: "Idea Hub",       path: "#", icon: Lightbulb, kind: "placeholder" },
+  { name: "Market Pathway", path: "#", icon: RouteIcon, kind: "placeholder" },
 ];
 
 const utilityNav: NavItem[] = [

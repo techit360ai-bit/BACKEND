@@ -24,6 +24,7 @@ import { CollabProfile } from "@/dashboard/collaborators/section/components/coll
 import { Settings as CollabSettings } from "@/dashboard/collaborators/section/components/collab/Settings";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
+import OpportunityHub from "@/dashboard/founders/section/components/founder/OpportunityHub";
 import Wallet from "@/TechitWallet/Wallet";
 import NotFound from "@/dashboard/NotFound";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -174,6 +175,7 @@ const App = () => {
           <Route path="/founder/profile"  element={<FounderProfile />} />
           <Route path="/founder/settings" element={<FounderSettings />} />
           <Route path="/incubation-hub"   element={<IncubationHub />} />
+          <Route path="/opportunity-hub"  element={<OpportunityHub />} />
           <Route path="/chat"             element={<Chat />} />
           <Route path="/matches"          element={<MatchResults />} />
         </Route>
