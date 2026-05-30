@@ -8,6 +8,7 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
+import { HACKATHONS } from "@/dashboard/_shared/opportunities/data";
 
 type HackathonStatus = "upcoming" | "live" | "judging" | "completed";
 
@@ -25,60 +26,19 @@ interface HackathonListItem {
   status: HackathonStatus;
 }
 
-const hackathons: HackathonListItem[] = [
-  {
-    id: "ai-for-africa-2026",
-    title: "AI for Africa 2026",
-    theme: "AI agents that solve a real African problem",
-    startDate: "2026-06-12",
-    endDate: "2026-06-14",
-    durationHours: 48,
-    registrants: 420,
-    teamsFormed: 87,
-    prizePool: "$50,000",
-    partners: ["TechIT", "Google for Startups", "Lagos Innovation Hub"],
-    status: "upcoming",
-  },
-  {
-    id: "climate-builders-q2",
-    title: "Climate Builders Q2",
-    theme: "Carbon, water, and agriculture in emerging markets",
-    startDate: "2026-05-22",
-    endDate: "2026-05-24",
-    durationHours: 48,
-    registrants: 280,
-    teamsFormed: 62,
-    prizePool: "$30,000",
-    partners: ["TechIT", "GreenTech Foundation"],
-    status: "live",
-  },
-  {
-    id: "fintech-fast-track",
-    title: "FinTech Fast Track",
-    theme: "Cross-border payments for SMEs",
-    startDate: "2026-04-10",
-    endDate: "2026-04-12",
-    durationHours: 48,
-    registrants: 312,
-    teamsFormed: 71,
-    prizePool: "$40,000",
-    partners: ["Flutterwave", "TechIT"],
-    status: "judging",
-  },
-  {
-    id: "healthx-spring",
-    title: "HealthX Spring",
-    theme: "Telemedicine for rural clinics",
-    startDate: "2026-02-14",
-    endDate: "2026-02-16",
-    durationHours: 48,
-    registrants: 198,
-    teamsFormed: 44,
-    prizePool: "$25,000",
-    partners: ["WHO Africa", "TechIT"],
-    status: "completed",
-  },
-];
+const hackathons: HackathonListItem[] = HACKATHONS.map((h) => ({
+  id: h.id,
+  title: h.title,
+  theme: h.theme,
+  startDate: h.startDate,
+  endDate: h.endDate,
+  durationHours: h.durationHours,
+  registrants: h.registrants,
+  teamsFormed: h.teamsFormed,
+  prizePool: h.prizePool,
+  partners: h.partners,
+  status: h.hackathonStatus,
+}));
 
 const statusStyles: Record<HackathonStatus, { bg: string; text: string; dot: string; label: string }> = {
   upcoming: {
