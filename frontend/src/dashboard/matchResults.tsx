@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   Mail,
@@ -13,6 +14,11 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import confetti from "canvas-confetti";
+import { toast } from "sonner";
+import { useFounderProfile } from "@/contexts/UserContext";
+import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
+import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
+import { HackathonMatchBanner } from "@/dashboard/founders/section/components/founder/HackathonMatchBanner";
 
 interface Match {
   name: string;
@@ -71,6 +77,31 @@ const DEFAULT_EQUITY: Record<string, number> = {
 };
 
 export default function MatchResults() {
+  const [searchParams] = useSearchParams();
+  const hackathonId = searchParams.get("hackathon");
+  const { founderProfile, addHackathonMember } = useFounderProfile();
+
+  const hackathon: Hackathon | null = hackathonId
+    ? (OPPORTUNITIES.find((o): o is Hackathon => o.type === "hackathon" && o.id === hackathonId) ?? null)
+    : null;
+
+  const registration = hackathonId
+    ? founderProfile.hackathonRegistrations.find((r) => r.hackathonId === hackathonId) ?? null
+    : null;
+
+  const [invitedNames, setInvitedNames] = useState<Set<string>>(new Set());
+
+  const visibleMatches = useMemo(() => {
+    if (!hackathonId || !registration) return matches;
+    const openRoleWords = new Set(
+      registration.openRoles.flatMap((r) => r.toLowerCase().split(/[\s()/]+/).filter(Boolean)),
+    );
+    return matches.filter((m) => {
+      const matchWords = m.role.toLowerCase().split(/[\s()/]+/).filter(Boolean);
+      return matchWords.some((w) => openRoleWords.has(w));
+    });
+  }, [hackathonId, registration]);
+
   const [equity, setEquity] =
     useState<Record<string, number>>(DEFAULT_EQUITY);
   const [contractFor, setContractFor] = useState<Match | null>(null);
@@ -195,8 +226,15 @@ export default function MatchResults() {
           </div>
 
           {/* Match Cards Grid */}
+          {hackathonId && <HackathonMatchBanner hackathon={hackathon} teamName={registration?.teamName ?? null} />}
+          {hackathonId && visibleMatches.length === 0 && (
+            <div className="border border-slate-200 rounded-xl bg-white p-8 text-center">
+              <p className="text-sm text-slate-700 font-medium">No collaborators match the open roles for this hackathon.</p>
+              <p className="text-xs text-slate-500 mt-1">Try widening your role list or sharing the invite link directly.</p>
+            </div>
+          )}
           <div className="grid gap-6">
-            {matches.map((match, index) => {
+            {visibleMatches.map((match, index) => {
               const pct = equity[match.name] ?? 0;
               return (
                 <motion.div
@@ -299,13 +337,46 @@ export default function MatchResults() {
 
                       {/* Actions */}
                       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full sm:w-auto">
-                        <button
-                          onClick={() => handleInvite()}
-                          className="flex-1 sm:flex-none py-2 px-4 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg flex items-center justify-center gap-2 transition-all text-sm"
-                        >
-                          <Mail className="size-4" />
-                          <span>Invite</span>
-                        </button>
+                        {hackathonId && registration ? (
+                          invitedNames.has(match.name) ? (
+                            <button
+                              type="button"
+                              disabled
+                              className="flex-1 sm:flex-none py-2 px-4 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+                            >
+                              <CheckCircle2 className="size-4" />
+                              <span>Invited</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const role = registration.openRoles[0];
+                                if (!role) return;
+                                addHackathonMember(registration.teamId, {
+                                  collaboratorId: `mock_${match.name.replace(/\s+/g, "_").toLowerCase()}`,
+                                  name: match.name,
+                                  role,
+                                  acceptedAt: new Date().toISOString(),
+                                });
+                                setInvitedNames((s) => new Set(s).add(match.name));
+                                toast.success(`Invited ${match.name} to ${registration.teamName}`);
+                              }}
+                              className="flex-1 sm:flex-none py-2 px-4 rounded-lg bg-violet-600 hover:bg-violet-700 text-white flex items-center justify-center gap-2 text-sm"
+                            >
+                              <Mail className="size-4" />
+                              <span>Invite to {registration.teamName}</span>
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            onClick={() => handleInvite()}
+                            className="flex-1 sm:flex-none py-2 px-4 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white rounded-lg flex items-center justify-center gap-2 transition-all text-sm"
+                          >
+                            <Mail className="size-4" />
+                            <span>Invite</span>
+                          </button>
+                        )}
                         <button className="flex-1 sm:flex-none py-2 px-4 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-white rounded-lg flex items-center justify-center gap-2 transition-colors text-sm">
                           <MessageCircle className="size-4" />
                           <span>Message</span>
