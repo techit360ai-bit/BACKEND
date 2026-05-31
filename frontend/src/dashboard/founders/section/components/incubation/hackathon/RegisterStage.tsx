@@ -95,6 +95,7 @@ export function RegisterStage() {
       members: [],
       openRoles: selectedRoles,
       stage: "registered",
+      checkIns: [],
     });
     setSuccess({ teamId, inviteToken, teamName: teamName.trim(), hackathonId: hackathon.id });
     toast.success("Registered for " + hackathon.title);

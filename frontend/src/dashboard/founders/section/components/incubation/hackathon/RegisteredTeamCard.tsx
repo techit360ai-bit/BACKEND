@@ -1,10 +1,21 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Users, Copy, Check, X, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
 import type { HackathonRegistration } from "@/contexts/UserContext";
 import { useFounderProfile } from "@/contexts/UserContext";
+import { computeMomentum, momentumColor } from "@/dashboard/_shared/hackathon/momentum";
+
+const NEXT_ACTION_CTA: Record<
+  ReturnType<typeof computeMomentum>["nextAction"],
+  { label: string; stage: "brief" | "build" }
+> = {
+  "submit-brief": { label: "Submit brief →", stage: "brief" },
+  "log-check-in": { label: "Log check-in →", stage: "build" },
+  "build":        { label: "Open team", stage: "build" },
+  "complete":     { label: "Open team", stage: "build" },
+};
 
 interface Props {
   registration: HackathonRegistration;
@@ -29,6 +40,10 @@ export function RegisteredTeamCard({ registration, hackathon }: Props) {
   const days = daysUntil(hackathon.startDate);
   const memberCount = registration.members.length + 1; // +1 for the leader
   const teamSize = memberCount + registration.openRoles.length;
+
+  const momentum = useMemo(() => computeMomentum(registration, Date.now()), [registration]);
+  const momColor = momentumColor(momentum.score);
+  const cta = NEXT_ACTION_CTA[momentum.nextAction];
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(inviteUrl(registration));
@@ -57,6 +72,14 @@ export function RegisteredTeamCard({ registration, hackathon }: Props) {
                 <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{memberCount} of {teamSize}</span>
                 <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />Starts in {days} days</span>
               </div>
+              <p className="text-xs text-slate-500 mt-1">{momentum.nextActionLabel}</p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <p className={`text-2xl font-bold leading-none ${momColor.text}`}>{momentum.score}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-0.5">Momentum</p>
+            <div className="h-1.5 w-16 rounded-full bg-slate-100 mt-1">
+              <div className={`h-1.5 rounded-full ${momColor.bar}`} style={{ width: `${momentum.score}%` }} />
             </div>
           </div>
         </div>
@@ -77,11 +100,10 @@ export function RegisteredTeamCard({ registration, hackathon }: Props) {
           </button>
           <button
             type="button"
-            disabled
-            title="Submit brief — coming in PR-C"
-            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-100 text-slate-400 cursor-not-allowed"
+            onClick={() => navigate(`/incubation-hub?panel=hackathon&stage=${cta.stage}`)}
+            className="text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700"
           >
-            Submit brief — coming in PR-C
+            {cta.label}
           </button>
         </div>
       </div>

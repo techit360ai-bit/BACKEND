@@ -7,6 +7,7 @@ import { useFounderProfile } from "@/contexts/UserContext";
 import { formatRelative } from "@/lib/formatRelative";
 import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
+import { computeMomentum, momentumColor } from "@/dashboard/_shared/hackathon/momentum";
 import {
   signals, tasks as initialTasks, activeBuilds as initialBuilds,
   recentActivity, journey,
@@ -296,6 +297,13 @@ export function Dashboard() {
                 const startMs = new Date(h.startDate).getTime() - Date.now();
                 const days = Math.max(0, Math.ceil(startMs / (1000 * 60 * 60 * 24)));
                 const startsLabel = days <= 7 ? `Starts in ${days} days` : `Starts ${h.startDate}`;
+                const momentum = computeMomentum(r, Date.now());
+                const momColor = momentumColor(momentum.score);
+                const ctaLabel =
+                  momentum.nextAction === "submit-brief" ? "Submit brief →"
+                  : momentum.nextAction === "log-check-in" ? "Log check-in →"
+                  : "Open team";
+                const ctaStage = momentum.nextAction === "submit-brief" ? "brief" : "build";
                 return (
                   <li key={r.teamId} className="flex items-start gap-3 border border-slate-100 rounded-lg p-3">
                     <span className="text-xl shrink-0" aria-hidden="true">{h.poster}</span>
@@ -304,16 +312,20 @@ export function Dashboard() {
                       <p className="text-xs text-slate-500">
                         {r.teamName} · {memberCount} of {teamSize} members · {startsLabel}
                       </p>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Stage: <span className="text-slate-700 font-medium">Registered</span> ──○────── Submit brief next
-                      </p>
+                      <p className="text-xs text-slate-600 mt-1 font-medium">{momentum.nextActionLabel}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-2xl font-bold leading-none ${momColor.text}`}>{momentum.score}</p>
+                      <div className="h-1.5 w-16 rounded-full bg-slate-100 mt-1 ml-auto">
+                        <div className={`h-1.5 rounded-full ${momColor.bar}`} style={{ width: `${momentum.score}%` }} />
+                      </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate("/incubation-hub?panel=hackathon")}
-                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 shrink-0"
+                      onClick={() => navigate(`/incubation-hub?panel=hackathon&stage=${ctaStage}`)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 shrink-0 self-center"
                     >
-                      Manage team →
+                      {ctaLabel}
                     </button>
                   </li>
                 );

@@ -163,6 +163,38 @@ export interface HackathonTeamMember {
   acceptedAt: string;
 }
 
+export interface IdeaBrief {
+  problem:        string;  // 7 fields, all required, validated min 20 chars each
+  targetUser:     string;
+  solutionSketch: string;
+  whyNow:         string;
+  differentiator: string;
+  risk:           string;
+  successMetric:  string;
+  submittedAt:    string;  // ISO timestamp; presence = locked (read-only)
+}
+
+export interface BriefScore {
+  problemClarity: number;  // 0-100, three sub-scores
+  innovationGap:  number;
+  initialImpact:  number;
+  overall:        number;  // weighted avg: 0.4*problemClarity + 0.3*innovationGap + 0.3*initialImpact
+  critiques: {
+    problemClarity: string[];
+    innovationGap:  string[];
+    initialImpact:  string[];
+  };
+  computedAt: string;       // pinned at submit; never re-runs
+}
+
+export interface CheckIn {
+  id:        string;        // crypto-token (8-char base32, same pattern as invite tokens)
+  loggedAt:  string;        // ISO timestamp
+  status:    "on-track" | "blocked" | "pivoted";
+  update:    string;        // 1-line, max 140 chars
+  blocker?:  string;        // optional, only if status = "blocked"
+}
+
 export interface HackathonRegistration {
   hackathonId: string;
   teamId: string;
@@ -175,6 +207,9 @@ export interface HackathonRegistration {
   openRoles: OpenRole[];
   stage: "registered" | "submitted" | "building" | "submitted-final";
   rosterClosed?: boolean;
+  brief?:      IdeaBrief;     // present once submitted; absence gates Build stage
+  briefScore?: BriefScore;    // pinned at submit
+  checkIns:    CheckIn[];     // default []
 }
 
 export interface FounderProfile {
@@ -239,6 +274,8 @@ interface UserContextType {
     teamId: string,
     updates: Partial<Omit<HackathonRegistration, "hackathonId" | "teamId" | "registeredAt">>,
   ) => void;
+  submitBrief: (teamId: string, brief: IdeaBrief, score: BriefScore) => void;
+  addCheckIn: (teamId: string, checkIn: CheckIn) => void;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -398,7 +435,29 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const registerForHackathon = (reg: HackathonRegistration) => {
     setFounderProfile((prev) => ({
       ...prev,
-      hackathonRegistrations: [...prev.hackathonRegistrations, reg],
+      hackathonRegistrations: [...prev.hackathonRegistrations, { ...reg, checkIns: reg.checkIns ?? [] }],
+    }));
+  };
+
+  const submitBrief = (teamId: string, brief: IdeaBrief, score: BriefScore) => {
+    setFounderProfile((prev) => ({
+      ...prev,
+      hackathonRegistrations: prev.hackathonRegistrations.map((r) =>
+        r.teamId === teamId
+          ? { ...r, brief, briefScore: score, stage: "submitted" as const }
+          : r,
+      ),
+    }));
+  };
+
+  const addCheckIn = (teamId: string, checkIn: CheckIn) => {
+    setFounderProfile((prev) => ({
+      ...prev,
+      hackathonRegistrations: prev.hackathonRegistrations.map((r) =>
+        r.teamId === teamId
+          ? { ...r, checkIns: [...(r.checkIns ?? []), checkIn], stage: "building" as const }
+          : r,
+      ),
     }));
   };
 
@@ -443,6 +502,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
         registerForHackathon,
         addHackathonMember,
         updateHackathonRegistration,
+        submitBrief,
+        addCheckIn,
       }}
     >
       {children}
@@ -506,6 +567,8 @@ export function useFounderProfile() {
     registerForHackathon,
     addHackathonMember,
     updateHackathonRegistration,
+    submitBrief,
+    addCheckIn,
   } = useUser();
   return {
     founderProfile,
@@ -513,5 +576,7 @@ export function useFounderProfile() {
     registerForHackathon,
     addHackathonMember,
     updateHackathonRegistration,
+    submitBrief,
+    addCheckIn,
   };
 }
