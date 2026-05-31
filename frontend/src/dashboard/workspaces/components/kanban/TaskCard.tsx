@@ -3,16 +3,7 @@ import { Calendar, Clock, Flag } from 'lucide-react';
 import { Avatar, AvatarFallback } from '../ui/avatar';
 import { Badge } from '../ui/badge';
 
-export interface Task {
-  id: string;
-  title: string;
-  assignee: { name: string; avatar: string; color: string };
-  priority: 'high' | 'medium' | 'low';
-  dueDate: string;
-  timeTracked: string;
-  labels?: string[];
-}
-
+import type { Task } from './type';
 interface TaskCardProps {
   task: Task;
 }

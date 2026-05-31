@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { AIAgentCard, AIAgent } from '../components/ai/AIAgentCard';
+import { AIAgentCard } from '../components/ai/AIAgentCard';
+import type { AIAgent } from '../components/ai/AIAgentCard';
 import { Search, Filter, Plus, Code2, Plug } from 'lucide-react';
 import { CursorPresence } from '../components/ui/cursor-presence';
 import { Button } from '../components/ui/button';
