@@ -1,0 +1,49 @@
+{
+  "users": [
+    {
+      "id": "b813f4fb-e159-44f9-bdc1-f6f367699727",
+      "email": "adakoleandrew21@gmail.com",
+      "passwordHash": "$2b$12$SkIVTcuWDnx03.4DL0uL4OtJgEiOvX7gyhgjcU.9n7a/uC5kISrkO",
+      "createdAt": "2026-05-28T11:47:46.199Z",
+      "updatedAt": "2026-05-28T11:47:46.199Z"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "b813f4fb-e159-44f9-bdc1-f6f367699727",
+      "email": "adakoleandrew21@gmail.com",
+      "firstName": "Andrew",
+      "lastName": "Adakole",
+      "username": null,
+      "phone": "",
+      "country": "",
+      "countryCode": "",
+      "avatarUrl": null,
+      "bio": null,
+      "role": "founder",
+      "secondaryRoles": [],
+      "creditBalance": 0,
+      "credibilityScore": 0,
+      "isVerified": false,
+      "isOnboarded": false,
+      "startupStage": null,
+      "industries": [],
+      "experience": null,
+      "skills": [],
+      "weeklyHours": null,
+      "riskTolerance": null,
+      "investmentFocus": [],
+      "ticketSize": null,
+      "orgName": null,
+      "orgType": null,
+      "website": null,
+      "linkedinUrl": null,
+      "githubUrl": null,
+      "portfolioUrl": null,
+      "timezone": null,
+      "certifications": [],
+      "createdAt": "2026-05-28T11:47:46.199Z",
+      "updatedAt": "2026-05-28T11:47:46.199Z"
+    }
+  ]
+}

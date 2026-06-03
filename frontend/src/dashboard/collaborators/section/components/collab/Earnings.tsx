@@ -1,0 +1,159 @@
+// frontend/src/dashboard/collaborators/section/components/collab/Earnings.tsx
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import {
+  cashEarnings, cashTotals as initialTotals, payouts as initialPayouts,
+} from "@/dashboard/collaborators/section/data/mockData";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/dashboard/collaborators/section/components/ui/dialog";
+
+export function Earnings() {
+  const [totals, setTotals]     = useState(initialTotals);
+  const [payoutList, setPayoutList] = useState(initialPayouts);
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [amount, setAmount] = useState<number>(totals.pendingUSD);
+
+  const handleWithdraw = () => {
+    if (amount <= 0 || amount > totals.pendingUSD) return;
+    const month = new Date().toISOString().slice(0, 7);
+    setPayoutList((cur) => [{ id: `p-${Date.now()}`, monthIso: month, amount, status: "processing" as const }, ...cur]);
+    setTotals((cur) => ({ ...cur, pendingUSD: cur.pendingUSD - amount }));
+    toast(`Withdrawal initiated — $${amount.toLocaleString()} to •••1234. Funds arrive in 1–3 business days.`);
+    setWithdrawOpen(false);
+  };
+
+  return (
+    <div className="p-6 lg:p-8 max-w-6xl mx-auto space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Earnings</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Cash earned across all engagements.</p>
+        </div>
+        <button onClick={() => { setAmount(totals.pendingUSD); setWithdrawOpen(true); }}
+          disabled={totals.pendingUSD <= 0}
+          className="h-9 px-4 bg-amber-500 hover:bg-amber-400 text-foreground rounded-lg text-sm font-semibold disabled:bg-muted disabled:text-muted-foreground/70">
+          Withdraw funds
+        </button>
+      </div>
+
+      {/* Three stat cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Stat label="Lifetime"        value={`$${(totals.lifetimeUSD / 1000).toFixed(0)}K`} sub="Total cash earned" />
+        <Stat label="Pending"          value={`$${totals.pendingUSD.toLocaleString()}`}      sub="Awaiting payout" />
+        <Stat label="Revenue share (TTM)" value={`$${totals.revenueShareTTMUsd.toLocaleString()}`} sub="Trailing 12 months" />
+      </div>
+
+      {/* Per-startup breakdown */}
+      <div className="border border-border bg-background rounded-xl">
+        <div className="px-5 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold text-foreground">Per-startup breakdown</h2>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs uppercase tracking-wider text-muted-foreground border-b border-border">
+              <th className="text-left px-5 py-3 font-semibold">Project</th>
+              <th className="text-right px-5 py-3 font-semibold">Earned</th>
+              <th className="text-right px-5 py-3 font-semibold">Pending</th>
+              <th className="text-right px-5 py-3 font-semibold">Rev share</th>
+              <th className="text-left px-5 py-3 font-semibold">Contribution</th>
+              <th className="px-5 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {cashEarnings.map((c) => (
+              <tr key={c.projectId} className="hover:bg-background">
+                <td className="px-5 py-3 text-foreground">{c.projectName}</td>
+                <td className="px-5 py-3 text-right tabular-nums">${c.earned.toLocaleString()}</td>
+                <td className="px-5 py-3 text-right tabular-nums">${c.pending.toLocaleString()}</td>
+                <td className="px-5 py-3 text-right tabular-nums">{c.revenueSharePercent}%</td>
+                <td className="px-5 py-3 text-muted-foreground text-xs">{c.contributionNote}</td>
+                <td className="px-5 py-3 text-right">
+                  <Link to={`/collaborator/equity#startup-${c.projectId}`}
+                    className="text-xs px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 hover:bg-amber-100">
+                    Equity →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Payout history chart */}
+      <div className="border border-border bg-background rounded-xl p-6">
+        <h2 className="text-sm font-semibold text-foreground mb-4">Payout history</h2>
+        <div className="h-56">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={[...payoutList].reverse()}>
+              <XAxis dataKey="monthIso" tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(m) => String(m).slice(2)} />
+              <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}K`} />
+              <Tooltip formatter={(v: number) => `$${v.toLocaleString()}`} />
+              <Bar dataKey="amount">
+                {payoutList.map((p) => (
+                  <Cell key={p.id} fill={p.status === "processing" ? "#fbbf24" : "#f59e0b"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <ul className="mt-6 divide-y divide-border">
+          {payoutList.map((p) => (
+            <li key={p.id} className="py-2.5 flex items-center justify-between text-sm">
+              <span className="text-foreground">{p.monthIso}</span>
+              <span className="flex items-center gap-3">
+                <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === "processing" ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{p.status}</span>
+                <span className="font-semibold tabular-nums text-foreground">${p.amount.toLocaleString()}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Withdraw dialog */}
+      <Dialog open={withdrawOpen} onOpenChange={setWithdrawOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Withdraw funds</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-1.5">Destination</label>
+              <div className="p-3 border-2 border-amber-500 bg-amber-50 rounded-lg text-sm">
+                <p className="font-semibold text-foreground">Wells Fargo · checking</p>
+                <p className="text-xs text-muted-foreground mt-0.5">•••1234</p>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-1.5">Amount</label>
+              <input type="number" min={0} max={totals.pendingUSD} value={amount}
+                onChange={(e) => setAmount(Number(e.target.value) || 0)}
+                className="w-full h-10 border border-border rounded-lg px-3 text-sm tabular-nums focus:outline-none focus:border-amber-500" />
+              <p className="text-xs text-muted-foreground mt-1">Up to ${totals.pendingUSD.toLocaleString()} available</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <button onClick={() => setWithdrawOpen(false)} className="px-4 py-2 text-sm rounded-lg text-foreground hover:bg-muted/40">Cancel</button>
+            <button onClick={handleWithdraw} disabled={amount <= 0 || amount > totals.pendingUSD}
+              className="px-4 py-2 text-sm rounded-lg bg-amber-500 text-foreground font-semibold hover:bg-amber-400 disabled:bg-muted disabled:text-muted-foreground/70">
+              Withdraw
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div className="border border-border bg-background rounded-xl p-5">
+      <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">{label}</p>
+      <p className="text-2xl font-bold text-foreground tabular-nums mt-2">{value}</p>
+      <p className="text-xs text-muted-foreground mt-1">{sub}</p>
+    </div>
+  );
+}
