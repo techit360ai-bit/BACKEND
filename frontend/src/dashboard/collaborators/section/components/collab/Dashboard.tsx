@@ -2,7 +2,7 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { toast } from "sonner";
-import { TrendingUp, ArrowRight, CheckCircle } from "lucide-react";
+import { TrendingUp, ArrowRight, CheckCircle, GraduationCap, Headphones, Award } from "lucide-react";
 import {
   equityHoldings, equityTotals,
   cashTotals,
@@ -190,6 +190,34 @@ export function Dashboard() {
           ))}
         </ul>
       </div>
+
+      {/* TechIT Academy — Collaborator Learning */}
+      <Link
+        to="/collaborator/academy"
+        className="group block border border-slate-200 bg-gradient-to-br from-indigo-50 via-white to-purple-50 rounded-xl p-6 hover:border-indigo-300 transition-colors"
+      >
+        <div className="flex items-center gap-4">
+          <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-600 text-white shrink-0">
+            <GraduationCap className="w-6 h-6" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-slate-900">TechIT Academy</h2>
+              <span className="text-[10px] font-semibold uppercase tracking-wider bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                Collaborator Track
+              </span>
+            </div>
+            <p className="text-sm text-slate-500 mt-0.5">
+              Learn while you build — lessons, audio, and badges tailored to collaborators.
+            </p>
+            <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+              <span className="flex items-center gap-1"><Headphones className="w-3.5 h-3.5" /> Audio lessons</span>
+              <span className="flex items-center gap-1"><Award className="w-3.5 h-3.5" /> Earn badges</span>
+            </div>
+          </div>
+          <ArrowRight className="w-5 h-5 text-indigo-500 group-hover:translate-x-0.5 transition-transform shrink-0" />
+        </div>
+      </Link>
     </div>
   );
 }

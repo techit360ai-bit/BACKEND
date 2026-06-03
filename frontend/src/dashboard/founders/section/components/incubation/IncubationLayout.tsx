@@ -1,15 +1,21 @@
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Brain, Trophy } from "lucide-react";
+import { Brain, Trophy, GraduationCap } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
 import { MainIncubationPanel } from "./MainIncubationPanel";
 import { HackathonPanel } from "./HackathonPanel";
+import { Academy } from "@/dashboard/_shared/academy/Academy";
 
-type Panel = "main" | "hackathon";
+type Panel = "main" | "hackathon" | "learn";
 
 export default function IncubationLayout() {
   const [searchParams] = useSearchParams();
-  const initialPanel: Panel = searchParams.get("panel") === "hackathon" ? "hackathon" : "main";
+  const initialPanel: Panel =
+    searchParams.get("panel") === "hackathon"
+      ? "hackathon"
+      : searchParams.get("panel") === "learn"
+      ? "learn"
+      : "main";
   const [panel, setPanel] = useState<Panel>(initialPanel);
 
   const { founderProfile } = useFounderProfile();
@@ -34,9 +40,17 @@ export default function IncubationLayout() {
           onClick={() => setPanel("hackathon")}
           badge={registrationCount > 0 ? registrationCount : undefined}
         />
+        <SidebarPill
+          label="Learn"
+          icon={<GraduationCap className="w-5 h-5" />}
+          active={panel === "learn"}
+          onClick={() => setPanel("learn")}
+        />
       </aside>
       <div className="flex-1 min-w-0">
-        {panel === "main" ? <MainIncubationPanel /> : <HackathonPanel />}
+        {panel === "main" && <MainIncubationPanel />}
+        {panel === "hackathon" && <HackathonPanel />}
+        {panel === "learn" && <Academy role="founder" userName={founderProfile.name.split(" ")[0]} />}
       </div>
     </div>
   );
