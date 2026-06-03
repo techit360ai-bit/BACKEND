@@ -22,6 +22,7 @@ import { Reputation as CollabReputation } from "@/dashboard/collaborators/sectio
 import { Messages as CollabMessages } from "@/dashboard/collaborators/section/components/collab/Messages";
 import { Tools as CollabTools } from "@/dashboard/collaborators/section/components/collab/Tools";
 import { CollabProfile } from "@/dashboard/collaborators/section/components/collab/CollabProfile";
+import { AcademyPage as CollabAcademy } from "@/dashboard/collaborators/section/components/collab/AcademyPage";
 import { Settings as CollabSettings } from "@/dashboard/collaborators/section/components/collab/Settings";
 import IncubationHub from "@/dashboard/incubationHub";
 import MatchResults from "@/dashboard/matchResults";
@@ -140,6 +141,7 @@ const App = () => {
           <Route path="opportunities" element={<CollabOpportunities />} />
           <Route path="reputation" element={<CollabReputation />} />
           <Route path="messages" element={<CollabMessages />} />
+          <Route path="academy" element={<CollabAcademy />} />
           <Route path="tools" element={<CollabTools />} />
           <Route path="profile" element={<CollabProfile />} />
           <Route path="settings" element={<CollabSettings />} />
