@@ -1,9 +1,11 @@
 import { ArrowUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { BackButton } from '../components/BackButton';
 
 export function MyLogPage() {
   return (
     <div className="max-w-md mx-auto px-4 py-6 pb-20">
+      <BackButton className="mb-6" />
       {/* GSIS Large Display */}
       <div className="text-center mb-8">
         <h4 className="text-text-muted text-[11px] font-medium uppercase tracking-[1.5px] mb-4">

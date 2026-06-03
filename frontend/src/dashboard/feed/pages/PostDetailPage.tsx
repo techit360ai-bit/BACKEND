@@ -11,6 +11,7 @@ import {
   Send,
 } from 'lucide-react';
 import { ShareModal } from '../components/ShareModal';
+import { BackButton } from '../components/BackButton';
 
 export function PostDetailPage() {
   const { postId } = useParams();
@@ -121,13 +122,7 @@ export function PostDetailPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 pb-20 lg:pb-6">
-      {/* Back Button */}
-      <Link
-        to="/feed"
-        className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary text-sm mb-6 transition-colors"
-      >
-        ← Back to Feed
-      </Link>
+      <BackButton label="Back to Feed" className="mb-6" />
 
       {/* Post Card */}
       <div className="bg-bg-surface border border-border-default rounded-xl p-6 border-l-[3px] border-l-score-green mb-6">
