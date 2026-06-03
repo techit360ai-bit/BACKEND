@@ -1,5 +1,6 @@
 import { useParams, Link } from 'react-router-dom';
 import { MessageCircle, Share2, Mail, MapPin, Calendar, ExternalLink } from 'lucide-react';
+import { BackButton } from '../components/BackButton';
 
 export function UserProfilePage() {
   const { userId } = useParams();
@@ -58,14 +59,7 @@ export function UserProfilePage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 pb-20 lg:pb-6">
       {/* Back Button */}
-      {!isOwnProfile && (
-        <Link
-          to="/feed"
-          className="inline-flex items-center gap-2 text-text-secondary hover:text-text-primary text-sm mb-6 transition-colors"
-        >
-          ← Back
-        </Link>
-      )}
+      {!isOwnProfile && <BackButton label="Back" className="mb-6" />}
 
       {/* Profile Header */}
       <div className="bg-bg-surface border border-border-default rounded-xl p-6 mb-6">

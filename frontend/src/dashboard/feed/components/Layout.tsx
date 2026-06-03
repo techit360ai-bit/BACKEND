@@ -62,15 +62,8 @@ function GlobalNav({
         </div>
       </div>
 
-      {/* Right - Credits, Notifications, Avatar */}
+      {/* Right - Notifications, Avatar */}
       <div className="flex items-center gap-5">
-        {/* Credits */}
-        <div className="hidden md:flex items-center gap-2 bg-bg-elevated rounded-full px-3 py-1.5 text-xs">
-          <span className="text-text-secondary">⚡</span>
-          <span className="text-accent-primary font-mono">150</span>
-          <span className="text-text-secondary">credits</span>
-        </div>
-
         {/* Notification Bell */}
         <button
           onClick={onNotifClick}

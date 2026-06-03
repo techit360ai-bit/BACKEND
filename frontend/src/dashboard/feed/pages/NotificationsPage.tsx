@@ -12,6 +12,7 @@ import {
   Star,
   Settings,
 } from 'lucide-react';
+import { BackButton } from '../components/BackButton';
 
 type NotifType = 'fire' | 'comment' | 'collab' | 'gsis' | 'milestone' | 'mention' | 'answer';
 
@@ -211,6 +212,7 @@ export function NotificationsPage() {
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 pb-20 lg:pb-6">
+      <BackButton className="mb-6" />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>

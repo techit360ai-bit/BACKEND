@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { Eye, MessageCircle, TrendingUp } from 'lucide-react';
 import { LeftSidebar } from '../components/LeftSidebar';
 import { RightPanel } from '../components/RightPanel';
+import { BackButton } from '../components/BackButton';
 
 export function ProblemsPage() {
   const problems = [
@@ -86,6 +87,7 @@ export function ProblemsPage() {
       <main className="flex-1 min-w-0 lg:max-w-[720px] lg:mx-auto w-full">
         {/* Header */}
         <div className="sticky top-14 bg-bg-surface border-b border-border-default px-6 py-4 z-40">
+          <BackButton className="mb-3" />
           <div className="flex items-center justify-between mb-3">
             <div>
               <h1 className="text-xl font-semibold text-text-primary mb-1">Problem Signals</h1>
