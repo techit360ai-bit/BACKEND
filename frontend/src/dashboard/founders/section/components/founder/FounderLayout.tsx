@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Toaster } from "@/dashboard/collaborators/section/components/ui/sonner";
 import { useFounderProfile } from "@/contexts/UserContext";
+import { Havi } from "@/dashboard/_shared/havi/Havi";
 import { TopBarRoleMenu } from "./TopBarRoleMenu";
 
 type NavKind = "link" | "external" | "placeholder";
@@ -121,6 +122,13 @@ export function FounderLayout() {
       </main>
 
       <Toaster richColors position="bottom-right" />
+
+      {/* Havi — AI build companion (founders & collaborators only) */}
+      <Havi
+        role="founder"
+        userName={founderProfile.name.split(" ")[0]}
+        stage={founderProfile.stage}
+      />
     </div>
   );
 }

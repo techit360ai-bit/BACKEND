@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Toaster } from "@/dashboard/collaborators/section/components/ui/sonner";
 import { useCollaboratorProfile } from "@/contexts/UserContext";
+import { Havi } from "@/dashboard/_shared/havi/Havi";
 import { equityTotals } from "@/dashboard/collaborators/section/data/mockData";
 import { TopBarRoleMenu } from "./TopBarRoleMenu";
 
@@ -111,6 +112,9 @@ export function CollabLayout() {
       </main>
 
       <Toaster richColors position="bottom-right" />
+
+      {/* Havi — AI build companion (founders & collaborators only) */}
+      <Havi role="collaborator" userName={collaboratorProfile.name.split(" ")[0]} />
     </div>
   );
 }
