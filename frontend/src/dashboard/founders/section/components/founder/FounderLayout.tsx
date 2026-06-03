@@ -27,7 +27,7 @@ const comingSoonNav: NavItem[] = [
 ];
 
 const utilityNav: NavItem[] = [
-  { name: "Messages",  path: "/chat",         icon: MessageSquare, kind: "link" },
+  { name: "Messages",  path: "/founder/messages",         icon: MessageSquare, kind: "link" },
   { name: "Investors", path: "/matchresults", icon: LineChart,     kind: "link" },
   { name: "Wallet",    path: "/wallet",       icon: Wallet,        kind: "external" },
 ];

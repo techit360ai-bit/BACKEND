@@ -10,7 +10,7 @@ export interface Signal {
 }
 export const signals: Signal[] = [
   { id: "s1", type: "applications", message: "2 collaborator applications waiting on review", href: "/matchresults" },
-  { id: "s2", type: "messages",     message: "5 unread messages",                            href: "/chat" },
+  { id: "s2", type: "messages",     message: "5 unread messages",                            href: "/founder/messages" },
   { id: "s3", type: "investor",     message: "Investor Alex Chen viewed your profile · 2h ago", href: "/matchresults" },
 ];
 
@@ -24,7 +24,7 @@ export interface FounderTask {
   done: boolean;
 }
 export const tasks: FounderTask[] = [
-  { id: "t1", title: "Reply to Mike at SeedClub",        detail: "re: Series A intro · 1 day overdue", priority: "overdue",   href: "/chat",           done: false },
+  { id: "t1", title: "Reply to Mike at SeedClub",        detail: "re: Series A intro · 1 day overdue", priority: "overdue",   href: "/founder/messages",           done: false },
   { id: "t2", title: "Complete pitch deck",              detail: "3 slides remaining · Due tomorrow",  priority: "due-soon",  href: "/incubation-hub", done: false },
   { id: "t3", title: "Review collaborator applications", detail: "5 pending from Find Collaborator",   priority: "this-week", href: "/matchresults",   done: false },
 ];
