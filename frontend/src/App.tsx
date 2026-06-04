@@ -106,12 +106,22 @@ import { NotificationsPage as FeedNotificationsPage } from "@/dashboard/feed/pag
 import { PostDetailPage } from "@/dashboard/feed/pages/PostDetailPage";
 import { MyLogPage } from "@/dashboard/feed/pages/MyLogPage";
 import { UserProfilePage } from "@/dashboard/feed/pages/UserProfilePage";
+import PluginsDashboard from "@/dashboard/plugins/PluginsDashboard";
+import { RequirePluginsAccess } from "@/components/RequirePluginsAccess";
 
 const App = () => {
   return (
     <UserProvider>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route
+          path="/plugins"
+          element={
+            <RequirePluginsAccess>
+              <PluginsDashboard />
+            </RequirePluginsAccess>
+          }
+        />
 
         <Route path="/founder/onboarding/step-1" element={<FounderStep1 />} />
         <Route path="/founder/onboarding/step-2" element={<FounderStep2 />} />

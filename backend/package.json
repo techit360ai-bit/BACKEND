@@ -4,8 +4,8 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "start": "tsx src/index.js",
+    "dev": "tsx watch src/index.js"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +15,7 @@
     "express": "^5.2.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "nodemon": "^3.1.11",
+    "tsx": "^4.19.2"
   }
 }

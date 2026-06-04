@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { ArrowRight, Zap, ChevronDown } from "lucide-react";
+import { ArrowRight, Zap, ChevronDown, Boxes } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import CelebrationOverlay from "@/components/CelebrationOverlay";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useActiveRoles } from "@/contexts/UserContext";
 import "@/Landing.css";
 
 interface RoleCard {
@@ -224,6 +225,10 @@ function Reveal({
 
 function Navbar({ onGetStarted }: { onGetStarted: () => void }) {
   const [scrolled, setScrolled] = useState(false);
+  // Plugins & MCP is an owner/admin control panel — only surface the link to
+  // workspace-owner personas (founder/org), matching the /plugins route guard.
+  const { activeRoles } = useActiveRoles();
+  const canAccessPlugins = activeRoles.has("founder") || activeRoles.has("org");
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 24);
@@ -289,6 +294,29 @@ function Navbar({ onGetStarted }: { onGetStarted: () => void }) {
 
       {/* Sign In + Get Started */}
       <div className="nav-actions">
+        {canAccessPlugins && (
+          <Link
+            to="/plugins"
+            className="nav-plugins"
+            aria-label="Open the Plugins & MCP control panel"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 14px",
+              borderRadius: 9999,
+              fontSize: 13,
+              fontWeight: 600,
+              textDecoration: "none",
+              border: `1px solid ${scrolled ? "rgba(255,255,255,0.35)" : "rgba(99,102,241,0.35)"}`,
+              background: scrolled ? "rgba(255,255,255,0.10)" : "rgba(99,102,241,0.08)",
+              color: scrolled ? "#ffffff" : "#4f46e5",
+              transition: "all 150ms ease",
+            }}
+          >
+            <Boxes size={14} /> Plugins
+          </Link>
+        )}
         <Link
           to="/signin"
           className="nav-signin"

@@ -1,0 +1,13 @@
+{
+  "name": "@techit/plugin-github",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "dependencies": {
+    "@techit/core": "0.1.0",
+    "@techit/mcp-client": "0.1.0",
+    "@techit/plugin-sdk": "0.1.0"
+  }
+}
