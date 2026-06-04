@@ -1,4 +1,5 @@
 import type { Hackathon, Program, Funding, Event, Opportunity } from "./types";
+import { mentorshipRoomsAsOpportunities } from "../mentorship/data";
 
 const TECHIT = { id: "org_techit", name: "TechIT Foundation", logoEmoji: "🌐" };
 const GOOGLE = { id: "org_google", name: "Google for Startups", logoEmoji: "🟦" };
@@ -277,7 +278,15 @@ export const EVENTS: Event[] = [
   },
 ];
 
-export const OPPORTUNITIES: Opportunity[] = [...HACKATHONS, ...PROGRAMS, ...FUNDING, ...EVENTS];
+// Investor mentorship rooms surface here as announcements (type "program",
+// format "mentorship") — derived so adding a room auto-publishes it.
+export const OPPORTUNITIES: Opportunity[] = [
+  ...HACKATHONS,
+  ...PROGRAMS,
+  ...mentorshipRoomsAsOpportunities(),
+  ...FUNDING,
+  ...EVENTS,
+];
 
 export function findOpportunity(id: string): Opportunity | undefined {
   return OPPORTUNITIES.find((o) => o.id === id);
