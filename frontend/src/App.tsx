@@ -52,6 +52,14 @@ import { DealRoom as InvestorDealRoom } from "@/dashboard/investors/section/comp
 import { DealRooms as InvestorDealRooms } from "@/dashboard/investors/section/components/investor/DealRooms";
 import { Reputation as InvestorReputation } from "@/dashboard/investors/section/components/investor/Reputation";
 import { InvestorProfile } from "@/dashboard/investors/section/components/investor/InvestorProfile";
+import { MentorshipGate } from "@/dashboard/_shared/mentorship/MentorshipGate";
+import { Overview as MentorshipOverview } from "@/dashboard/_shared/mentorship/Overview";
+import { Room as MentorshipRoom } from "@/dashboard/_shared/mentorship/Room";
+import { Applications as MentorshipApplications } from "@/dashboard/_shared/mentorship/Applications";
+import { CreateRoom as MentorshipCreateRoom } from "@/dashboard/_shared/mentorship/CreateRoom";
+import { Analytics as MentorshipAnalytics } from "@/dashboard/_shared/mentorship/Analytics";
+import { Payments as MentorshipPayments } from "@/dashboard/_shared/mentorship/Payments";
+import { AdvancedHub as MentorshipAdvancedHub } from "@/dashboard/_shared/mentorship/AdvancedHub";
 import { OrgLayout } from "@/dashboard/organization/section/components/org/OrgLayout";
 import { Dashboard as OrgDashboard } from "@/dashboard/organization/section/components/org/Dashboard";
 import { Teams as OrgTeams } from "@/dashboard/organization/section/components/org/Teams";
@@ -175,6 +183,18 @@ const App = () => {
           <Route path="reputation" element={<InvestorReputation />} />
           <Route path="profile" element={<InvestorProfile />} />
         </Route>
+
+        {/* Mentorship Hub (own focused layout, gated by role) */}
+        <Route path="/investor/mentorship" element={<MentorshipGate />}>
+          <Route index element={<MentorshipOverview />} />
+          <Route path="room/:roomId" element={<MentorshipRoom />} />
+          <Route path="applications" element={<MentorshipApplications />} />
+          <Route path="create-room" element={<MentorshipCreateRoom />} />
+          <Route path="analytics" element={<MentorshipAnalytics />} />
+          <Route path="payments" element={<MentorshipPayments />} />
+          <Route path="hub" element={<MentorshipAdvancedHub />} />
+        </Route>
+
         <Route element={<FounderLayout />}>
           <Route path="/dashboard"        element={<Dashboard />} />
           <Route path="/founder/profile"  element={<FounderProfile />} />

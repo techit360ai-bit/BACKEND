@@ -42,9 +42,9 @@ export function InvestorLayout() {
     { path: '/investor/deal-rooms', label: 'Deal Rooms', icon: Shield },
     { path: '/investor/reputation', label: 'Reputation', icon: Award },
     { path: '/investor/profile', label: 'Profile', icon: UserCircle },
-    // Cross-section + placeholder
+    { path: '/investor/mentorship', label: 'Mentorship Hub', icon: GraduationCap },
+    // Cross-section
     { path: '/feed', label: 'Feed', icon: Rss, external: true },
-    { path: '#', label: 'Mentorship Hub', icon: GraduationCap, comingSoon: true },
   ];
 
   const isActive = (path: string) => {
