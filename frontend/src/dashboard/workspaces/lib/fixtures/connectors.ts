@@ -50,4 +50,14 @@ export const connectorsFixture: Connector[] = [
       { name: 'rollback_model', description: 'Roll back a deployment.', inputSchema: { model_id: { type: 'string', required: true } }, destructive: true },
     ],
   },
+  {
+    id: 'web3', name: 'Web3', category: 'Blockchain', status: 'pending',
+    authType: 'service_account', capabilities: ['read', 'execute'],
+    resources: ['wallet', 'contract', 'dao'],
+    tools: [
+      { name: 'read_wallet', description: 'Read a wallet balance and holdings.', inputSchema: { address: { type: 'string', required: true } } },
+      { name: 'call_contract', description: 'Call a read-only contract method.', inputSchema: { contract: { type: 'string', required: true }, method: { type: 'string', required: true } } },
+      { name: 'submit_transaction', description: 'Submit a signed transaction.', inputSchema: { contract: { type: 'string', required: true }, method: { type: 'string', required: true } }, destructive: true },
+    ],
+  },
 ];
