@@ -1,15 +1,18 @@
 import { Bot } from 'lucide-react';
 import { useConsole } from '../../lib/console/ConsoleContext';
+import { resolveApproval } from '../../lib/api/tasks';
 import { ToolCallEvent } from './ToolCallEvent';
 import { ApprovalCard } from './ApprovalCard';
 
-interface Props {
-  onResolveApproval: (taskId: string, approvalId: string, decision: 'approved' | 'rejected') => void;
-}
-
-export function Transcript({ onResolveApproval }: Props) {
-  const { state } = useConsole();
+export function Transcript() {
+  const { state, dispatch } = useConsole();
   const task = state.tasks.find((t) => t.id === state.activeTaskId);
+
+  // Reflect the decision on the card immediately, and unblock the stream.
+  const handleResolve = (taskId: string, approvalId: string, decision: 'approved' | 'rejected') => {
+    dispatch({ type: 'resolve_approval', taskId, approvalId, decision });
+    resolveApproval(taskId, approvalId, decision);
+  };
 
   if (!task) {
     return (
@@ -34,7 +37,7 @@ export function Transcript({ onResolveApproval }: Props) {
         }
         if (e.type === 'approval_request' && e.approval) {
           const ap = e.approval;
-          return <ApprovalCard key={e.id} approval={ap} onResolve={(d) => onResolveApproval(task.id, ap.id, d)} />;
+          return <ApprovalCard key={e.id} approval={ap} onResolve={(d) => handleResolve(task.id, ap.id, d)} />;
         }
         return null;
       })}

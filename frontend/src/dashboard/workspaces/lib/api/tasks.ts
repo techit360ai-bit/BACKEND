@@ -45,10 +45,12 @@ export async function* streamTask(taskId: string): AsyncGenerator<TaskEvent> {
     await delay(450);
     const event: TaskEvent = { ...ev, at: `mock+${++stamp}` };
     if (event.type === 'approval_request' && event.approval) {
+      // Surface the approval card FIRST so the user can act on it, THEN block
+      // waiting for their decision (delivered via resolveApproval()).
+      yield event;
       const decision = await new Promise<'approved' | 'rejected'>((resolve) => {
         approvalWaiters[`${taskId}:${event.approval!.id}`] = resolve;
       });
-      yield { ...event, approval: { ...event.approval, resolved: decision } };
       if (decision === 'rejected') {
         yield { id: nextId('e'), type: 'status', at: `mock+${++stamp}`, text: 'Cancelled by user' };
         return;

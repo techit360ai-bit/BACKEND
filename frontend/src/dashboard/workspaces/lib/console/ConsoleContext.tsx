@@ -8,7 +8,8 @@ type Action =
   | { type: 'add_task'; task: AgentTask }
   | { type: 'select'; id: string }
   | { type: 'append_event'; taskId: string; event: TaskEvent }
-  | { type: 'set_status'; taskId: string; status: AgentTaskStatus };
+  | { type: 'set_status'; taskId: string; status: AgentTaskStatus }
+  | { type: 'resolve_approval'; taskId: string; approvalId: string; decision: 'approved' | 'rejected' };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -19,6 +20,14 @@ function reducer(state: State, action: Action): State {
       return { ...state, tasks: state.tasks.map((t) => t.id === action.taskId ? { ...t, events: [...t.events, action.event] } : t) };
     case 'set_status':
       return { ...state, tasks: state.tasks.map((t) => t.id === action.taskId ? { ...t, status: action.status } : t) };
+    case 'resolve_approval':
+      return { ...state, tasks: state.tasks.map((t) => t.id === action.taskId ? {
+        ...t,
+        events: t.events.map((e) =>
+          e.type === 'approval_request' && e.approval && e.approval.id === action.approvalId
+            ? { ...e, approval: { ...e.approval, resolved: action.decision } }
+            : e),
+      } : t) };
     default: return state;
   }
 }

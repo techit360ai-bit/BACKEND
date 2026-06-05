@@ -8,7 +8,6 @@ import { ConsoleProvider } from '../lib/console/ConsoleContext';
 import { TaskList } from '../components/console/TaskList';
 import { Transcript } from '../components/console/Transcript';
 import { Composer } from '../components/console/Composer';
-import { resolveApproval } from '../lib/api/tasks';
 
 export function Agents() {
   const [agents, setAgents] = useState<AIAgent[]>([]);
@@ -49,7 +48,7 @@ export function Agents() {
               <div className="mt-4 flex border border-gray-200 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 240px)' }}>
                 <TaskList />
                 <div className="flex-1 flex flex-col">
-                  <Transcript onResolveApproval={resolveApproval} />
+                  <Transcript />
                   <Composer />
                 </div>
               </div>
