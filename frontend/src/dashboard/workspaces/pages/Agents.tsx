@@ -4,6 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import { AIAgentCard } from '../components/ai/AIAgentCard';
 import type { AIAgent } from '../components/ai/AIAgentCard';
 import { listAgents, toggleAgent } from '../lib/api/agents';
+import { ConsoleProvider } from '../lib/console/ConsoleContext';
+import { TaskList } from '../components/console/TaskList';
+import { Transcript } from '../components/console/Transcript';
+import { Composer } from '../components/console/Composer';
+import { resolveApproval } from '../lib/api/tasks';
 
 export function Agents() {
   const [agents, setAgents] = useState<AIAgent[]>([]);
@@ -40,7 +45,15 @@ export function Agents() {
           </TabsContent>
 
           <TabsContent value="console">
-            <div className="mt-4 text-sm text-gray-400">Console coming in the next task.</div>
+            <ConsoleProvider>
+              <div className="mt-4 flex border border-gray-200 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 240px)' }}>
+                <TaskList />
+                <div className="flex-1 flex flex-col">
+                  <Transcript onResolveApproval={resolveApproval} />
+                  <Composer />
+                </div>
+              </div>
+            </ConsoleProvider>
           </TabsContent>
         </Tabs>
       </div>
