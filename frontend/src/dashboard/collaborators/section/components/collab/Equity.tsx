@@ -1,18 +1,36 @@
 // frontend/src/dashboard/collaborators/section/components/collab/Equity.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { TrendingUp, X } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { equityHoldings, equityTotals, vestingTimeline, type EquityHolding } from "@/dashboard/collaborators/section/data/mockData";
+import { fetchCollaboratorEquity } from "@/lib/api/equity";
 
 export function Equity() {
   const [capHolding, setCapHolding] = useState<EquityHolding | null>(null);
 
+  // Load from ai-router; initial state is the bundled mock so first paint is
+  // unchanged and the screen still renders if the backend is unavailable.
+  const [holdings, setHoldings] = useState(equityHoldings);
+  const [totals, setTotals] = useState(equityTotals);
+  const [timeline, setTimeline] = useState(vestingTimeline);
+
+  useEffect(() => {
+    let alive = true;
+    fetchCollaboratorEquity().then((data) => {
+      if (!alive) return;
+      setHoldings(data.holdings);
+      setTotals(data.totals);
+      setTimeline(data.vestingTimeline);
+    });
+    return () => { alive = false; };
+  }, []);
+
   const chartData = (() => {
-    const months = vestingTimeline[0]?.points.map((p) => p.monthIso) ?? [];
+    const months = timeline[0]?.points.map((p) => p.monthIso) ?? [];
     return months.map((m, i) => {
       const row: Record<string, number | string> = { month: m };
-      vestingTimeline.forEach((s) => { row[s.projectName] = s.points[i]?.vestedPercent ?? 0; });
+      timeline.forEach((s) => { row[s.projectName] = s.points[i]?.vestedPercent ?? 0; });
       return row;
     });
   })();
@@ -23,17 +41,17 @@ export function Equity() {
       <div className="flex items-baseline justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Equity</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Ownership you've earned across {equityHoldings.length} startups.</p>
+          <p className="text-sm text-slate-500 mt-0.5">Ownership you've earned across {holdings.length} startups.</p>
         </div>
         <a href="#equity-philosophy" className="text-sm text-amber-600 hover:underline">Equity philosophy →</a>
       </div>
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Total value"          value={`$${(equityTotals.totalValueUSD / 1000).toFixed(1)}K`} />
-        <Stat label="Blended equity"        value={`${equityTotals.blendedEquityPercent}%`} />
-        <Stat label="Vested this quarter"   value={`$${(equityTotals.vestedThisQuarterUSD / 1000).toFixed(1)}K`} />
-        <Stat label="Next vest" value={equityTotals.nextVest?.date ?? "—"} sub={equityTotals.nextVest ? `+${equityTotals.nextVest.deltaPercent}% ${equityTotals.nextVest.startup}` : undefined} />
+        <Stat label="Total value"          value={`$${(totals.totalValueUSD / 1000).toFixed(1)}K`} />
+        <Stat label="Blended equity"        value={`${totals.blendedEquityPercent}%`} />
+        <Stat label="Vested this quarter"   value={`$${(totals.vestedThisQuarterUSD / 1000).toFixed(1)}K`} />
+        <Stat label="Next vest" value={totals.nextVest?.date ?? "—"} sub={totals.nextVest ? `+${totals.nextVest.deltaPercent}% ${totals.nextVest.startup}` : undefined} />
       </div>
 
       {/* Vesting timeline */}
@@ -46,7 +64,7 @@ export function Equity() {
               <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v) => `${v}%`} />
               <Tooltip />
               <Legend />
-              {vestingTimeline.map((s, i) => (
+              {timeline.map((s, i) => (
                 <Line key={s.projectId} type="monotone" dataKey={s.projectName} stroke={seriesColors[i % seriesColors.length]} strokeWidth={2} dot={false} />
               ))}
             </LineChart>
@@ -56,7 +74,7 @@ export function Equity() {
 
       {/* Per-startup cards */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {equityHoldings.map((h) => (
+        {holdings.map((h) => (
           <div key={h.projectId} id={`startup-${h.projectId}`} className="border border-slate-200 bg-white rounded-xl p-5">
             <div className="flex items-center gap-2 mb-3">
               <span className="text-2xl">{h.projectLogo}</span>

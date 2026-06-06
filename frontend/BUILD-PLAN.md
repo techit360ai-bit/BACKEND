@@ -27,7 +27,7 @@ renders offline.
 ## Epics & status  (✅ done · 🚧 in progress · ⬜ todo)
 
 ### Section A — frontend exists, wire to new backend
-- ⬜ A1 Collaborator Equity — wire Equity.tsx + collab Dashboard equity card
+- ✅ A1 Collaborator Equity — Equity.tsx wired to GET /collaborator/equity via lib/api/equity.ts (mock fallback). TODO minor: collab Dashboard.tsx equity card still reads mock directly.
 - ⬜ A2 Collaborator Earnings — wire Earnings.tsx (payouts/cash)
 - ⬜ A3 Investor Capital Pools — wire CapitalPools.tsx
 - ⬜ A4 Investor Deal Rooms — wire DealRooms.tsx + DealRoom.tsx
