@@ -28,7 +28,7 @@ renders offline.
 
 ### Section A — frontend exists, wire to new backend
 - ✅ A1 Collaborator Equity — Equity.tsx wired to GET /collaborator/equity via lib/api/equity.ts (mock fallback). TODO minor: collab Dashboard.tsx equity card still reads mock directly.
-- ⬜ A2 Collaborator Earnings — wire Earnings.tsx (payouts/cash)
+- ✅ A2 Collaborator Earnings — Earnings.tsx wired to GET /collaborator/earnings + POST .../withdraw via lib/api/earnings.ts (mock fallback)
 - ⬜ A3 Investor Capital Pools — wire CapitalPools.tsx
 - ⬜ A4 Investor Deal Rooms — wire DealRooms.tsx + DealRoom.tsx
 - ⬜ A5 Investor Data Rooms — wire DataRooms.tsx + DataRoom.tsx
