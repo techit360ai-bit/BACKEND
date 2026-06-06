@@ -1,40 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Wallet, Plus, TrendingUp, CheckCircle } from 'lucide-react';
 import type { CapitalPool } from '../../data/mockData';
+import { fetchCapitalPools, fallbackPools } from '@/lib/api/capitalPools';
 
 export function CapitalPools() {
-  const [pools] = useState<CapitalPool[]>([
-    {
-      id: '1',
-      name: 'TechIT Micro Fund Alpha',
-      totalCapital: 500000,
-      deployed: 380000,
-      startups: 8,
-      milestonesHit: 24,
-      fundsReleased: 280000,
-      roiSimulation: 3.2,
-      rules: {
-        minReadiness: 85,
-        maxPerStartup: 20,
-        milestoneTrigger: true,
-      },
-    },
-    {
-      id: '2',
-      name: 'AI Governance Fund',
-      totalCapital: 750000,
-      deployed: 520000,
-      startups: 10,
-      milestonesHit: 31,
-      fundsReleased: 420000,
-      roiSimulation: 4.1,
-      rules: {
-        minReadiness: 80,
-        maxPerStartup: 15,
-        milestoneTrigger: true,
-      },
-    },
-  ]);
+  // Initial state = bundled fallback so the screen renders unchanged on first
+  // paint and survives the backend being unavailable.
+  const [pools, setPools] = useState<CapitalPool[]>(fallbackPools);
+
+  useEffect(() => {
+    let alive = true;
+    fetchCapitalPools().then((data) => { if (alive) setPools(data); });
+    return () => { alive = false; };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
