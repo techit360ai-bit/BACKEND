@@ -95,16 +95,14 @@ import Signup from "@/components/SignUp";
 import Login from "@/components/Login";
 import { MainLayout as WorkspacesLayout } from "@/dashboard/workspaces/components/layout/MainLayout";
 import { Build as WsBuild } from "@/dashboard/workspaces/pages/Build";
-import { AIAgents as WsAIAgents } from "@/dashboard/workspaces/pages/AIAgents";
 import { Reports as WsReports } from "@/dashboard/workspaces/pages/Reports";
-import { Incubator as WsIncubator } from "@/dashboard/workspaces/pages/Incubator";
-import { Tools as WsTools } from "@/dashboard/workspaces/pages/Tools";
+import { Connectors as WsConnectors } from "@/dashboard/workspaces/pages/Connectors";
+import { Agents as WsAgents } from "@/dashboard/workspaces/pages/Agents";
 import { Chat as WsChat } from "@/dashboard/workspaces/pages/Chat";
 import { Files as WsFiles } from "@/dashboard/workspaces/pages/Files";
 import { Notifications as WsNotifications } from "@/dashboard/workspaces/pages/Notifications";
 import { Settings as WsSettings } from "@/dashboard/workspaces/pages/Settings";
 import { GitHub as WsGitHub } from "@/dashboard/workspaces/pages/GitHub";
-import { DevTools as WsDevTools } from "@/dashboard/workspaces/pages/DevTools";
 import { ComponentLibrary as WsComponentLibrary } from "@/dashboard/workspaces/components/ComponentLibrary";
 import { FeedLayout } from "@/dashboard/feed/components/FeedLayout";
 import { FeedPage } from "@/dashboard/feed/pages/FeedPage";
@@ -215,10 +213,9 @@ const App = () => {
         <Route path="/workspaces" element={<WorkspacesLayout />}>
           <Route index element={<Navigate to="build" replace />} />
           <Route path="build" element={<WsBuild />} />
-          <Route path="incubator" element={<WsIncubator />} />
-          <Route path="tools" element={<WsTools />} />
-          <Route path="dev-tools" element={<WsDevTools />} />
-          <Route path="ai-agents" element={<WsAIAgents />} />
+          <Route path="connectors" element={<WsConnectors />} />
+          <Route path="agents" element={<WsAgents />} />
+          <Route path="ai-agents" element={<Navigate to="/workspaces/agents" replace />} />
           <Route path="chat" element={<WsChat />} />
           <Route path="files" element={<WsFiles />} />
           <Route path="github" element={<WsGitHub />} />

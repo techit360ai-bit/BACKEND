@@ -1,16 +1,14 @@
 import { Link, NavLink } from 'react-router-dom';
 import {
   Hammer,
-  Rocket,
-  Wrench,
   Bot,
   MessageCircle,
   FolderOpen,
   BarChart3,
   ChevronLeft,
-  Code2,
   Github,
   ArrowLeft,
+  Plug,
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { useState } from 'react';
@@ -28,10 +26,8 @@ export function Sidebar() {
 
   const navItems: NavItem[] = [
     { path: '/workspaces/build', label: 'Build', icon: <Hammer className="w-5 h-5" /> },
-    { path: '/workspaces/incubator', label: 'Incubator Hub', icon: <Rocket className="w-5 h-5" /> },
-    { path: '/workspaces/tools', label: 'Tools', icon: <Wrench className="w-5 h-5" /> },
-    { path: '/workspaces/dev-tools', label: 'Dev Tools', icon: <Code2 className="w-5 h-5" /> },
-    { path: '/workspaces/ai-agents', label: 'AI Agents', icon: <Bot className="w-5 h-5" />, glow: true },
+    { path: '/workspaces/connectors', label: 'Connectors', icon: <Plug className="w-5 h-5" /> },
+    { path: '/workspaces/agents', label: 'Agents', icon: <Bot className="w-5 h-5" />, glow: true },
     { path: '/workspaces/chat', label: 'Chat', icon: <MessageCircle className="w-5 h-5" />, badge: 3 },
     { path: '/workspaces/files', label: 'Files', icon: <FolderOpen className="w-5 h-5" /> },
     { path: '/workspaces/github', label: 'GitHub', icon: <Github className="w-5 h-5" /> },
