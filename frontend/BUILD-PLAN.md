@@ -37,11 +37,11 @@ renders offline.
 
 ### Section B — backend exists, build/own the frontend surface
 API modules created for ALL B domains (lib/api/{gsis,dealFlow,training,alerts,audio,workspace}.ts).
-- 🚧 B1 Deal Intelligence — lib/api/dealFlow.ts ready (fetchDealFlow/fetchEvi). TODO: wire DealIntelligence.tsx ranking.
+- ✅ B1 Deal Intelligence — DealIntelligence.tsx ranks startups by live EVI-I/WCRS (fetchDealFlow), with "ranked by EVI-I" indicator; mock order fallback.
 - ✅ B2 Founder dashboard — GSIS master-score card wired into Dashboard.tsx via lib/api/gsis.ts (GET /dashboard/intelligence)
-- 🚧 B3 Adaptive Training — lib/api/training.ts ready. TODO: wire AcademyPage.tsx.
-- 🚧 B4 Anomaly/stagnation alerts — lib/api/alerts.ts ready. TODO: surface widget on a dashboard.
-- 🚧 B5 Audio briefing — lib/api/audio.ts ready. TODO: add momentum audio widget.
+- ✅ B3 Adaptive Training — shared Academy.tsx surfaces adaptive plan (generateCurriculum) + reports progress (updateTrainingProgress). Benefits founder + collaborator.
+- ✅ B4 Anomaly/stagnation alerts — founder Dashboard "Engine risk alerts" widget (runAnomalyScan over execution signals).
+- ✅ B5 Audio briefing — founder Dashboard "Play momentum briefing" widget (fetchAudioBriefing, plays TTS audio).
 - 🚧 B6 Workspace AI — lib/api/workspace.ts ready. TODO: wire into Workspace MCP console (new-frontend repo / PR #6).
 
 ### Section C — LAST (per user)

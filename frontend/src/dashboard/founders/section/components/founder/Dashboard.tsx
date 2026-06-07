@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { ArrowRight, CheckCircle, TrendingUp, Plus } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
 import { fetchDashboardIntelligence, type DashboardIntelligence } from "@/lib/api/gsis";
+import { fetchAudioBriefing } from "@/lib/api/audio";
+import { runAnomalyScan, type RiskFlag } from "@/lib/api/alerts";
 import { formatRelative } from "@/lib/formatRelative";
 import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
@@ -46,6 +48,30 @@ export function Dashboard() {
     fetchDashboardIntelligence().then((d) => { if (alive) setIntel(d); });
     return () => { alive = false; };
   }, []);
+
+  // B4 — anomaly risk flags from the engine over this founder's execution signals.
+  const [riskFlags, setRiskFlags] = useState<RiskFlag[]>([]);
+  useEffect(() => {
+    let alive = true;
+    runAnomalyScan([{ kind: "founder_execution", source: "dashboard" }])
+      .then((r) => { if (alive) setRiskFlags(r.risk_flags ?? []); });
+    return () => { alive = false; };
+  }, []);
+
+  // B5 — momentum audio briefing (TTS) on demand.
+  const [briefingUrl, setBriefingUrl] = useState<string | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const playBriefing = async () => {
+    setBriefingLoading(true);
+    const b = await fetchAudioBriefing(`Momentum briefing for ${firstName}: keep your build moving.`);
+    setBriefingLoading(false);
+    if (b?.audio_url) {
+      setBriefingUrl(b.audio_url);
+      try { void new Audio(b.audio_url).play(); } catch { /* autoplay may be blocked */ }
+    } else {
+      toast("Audio briefing unavailable right now.");
+    }
+  };
 
   const firstName = p.name.split(" ")[0];
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -171,6 +197,32 @@ export function Dashboard() {
           )}
         </div>
       )}
+
+      {/* Momentum briefing (B5) + risk alerts (B4) from the AI engine */}
+      <div className="border border-slate-200 bg-white rounded-xl p-4 flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={playBriefing}
+          disabled={briefingLoading}
+          className="text-sm px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:bg-slate-300"
+        >
+          {briefingLoading ? "Preparing…" : "▶ Play momentum briefing"}
+        </button>
+        {briefingUrl && <span className="text-xs text-slate-400">Audio ready</span>}
+        {riskFlags.length > 0 && (
+          <div className="flex-1 min-w-[12rem]">
+            <p className="text-xs font-semibold text-amber-700 mb-1">Engine risk alerts</p>
+            <ul className="space-y-0.5">
+              {riskFlags.slice(0, 3).map((f, i) => (
+                <li key={i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <span className="mt-0.5">⚠</span>
+                  <span>{f.message ?? f.type ?? "Risk flag"}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
       {/* Journey strip */}
       <div className="border border-slate-200 bg-white rounded-xl p-6">
