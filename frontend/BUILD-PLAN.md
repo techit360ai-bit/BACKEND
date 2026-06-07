@@ -32,7 +32,7 @@ renders offline.
 - ✅ A3 Investor Capital Pools — CapitalPools.tsx wired to GET /investor/capital-pools via lib/api/capitalPools.ts (fallback fixture)
 - 🚧 A4 Investor Deal Rooms — DealRooms.tsx (list) wired to GET /investor/deal-rooms via lib/api/dealRooms.ts. TODO: DealRoom.tsx detail still computes valuation locally (backend endpoint + fetchDealRoom() ready to wire).
 - 🚧 A5 Investor Data Rooms — DataRooms.tsx summary stats wired to GET /investor/data-rooms via lib/api/dataRooms.ts. TODO: per-card flags + DataRoom.tsx detail still read mock directly.
-- ⬜ A6 Investor Reputation — wire investor Reputation.tsx
+- ✅ A6 Investor Reputation — Reputation.tsx fully wired (score, metrics, reviews, progression, leaderboard) to GET /investor/reputation via lib/api/investorReputation.ts
 - ⬜ A7 Investor Global Heatmap — wire GlobalHeatmap.tsx
 
 ### Section B — backend exists, build/own the frontend surface
