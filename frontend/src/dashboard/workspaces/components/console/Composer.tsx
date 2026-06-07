@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Send } from 'lucide-react';
+import { Send, Sparkles } from 'lucide-react';
 import { Button } from '../ui/button';
 import { listAgents } from '../../lib/api/agents';
 import { createTask, streamTask, getTask, listTasks } from '../../lib/api/tasks';
+import { suggestTasks, flattenSuggestions } from '../../lib/api/workspaceAI';
 import { useConsole } from '../../lib/console/ConsoleContext';
 import type { AIAgent } from '../ai/AIAgentCard';
 
@@ -12,6 +13,17 @@ export function Composer() {
   const [agentId, setAgentId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  // B6 — pull AI task suggestions from ai-router WorkspaceAIService.
+  const fetchSuggestions = async () => {
+    if (suggesting) return;
+    setSuggesting(true);
+    const res = await suggestTasks({ agentId, currentPrompt: prompt });
+    setSuggestions(flattenSuggestions(res).slice(0, 5));
+    setSuggesting(false);
+  };
 
   useEffect(() => {
     listAgents().then((all) => {
@@ -48,8 +60,32 @@ export function Composer() {
         <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="text-sm border border-gray-200 rounded-lg px-2 py-1.5">
           {agents.map((a) => (<option key={a.id} value={a.id}>{a.name}</option>))}
         </select>
+        <button
+          type="button"
+          onClick={fetchSuggestions}
+          disabled={suggesting}
+          className="text-xs inline-flex items-center gap-1 border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          {suggesting ? 'Thinking…' : 'Suggest tasks'}
+        </button>
         {busy && <span className="text-xs text-gray-400">Agent working…</span>}
       </div>
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {suggestions.map((s, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => { setPrompt(s); setSuggestions([]); }}
+              className="text-xs text-left max-w-full truncate border border-[#2196F3]/30 bg-[#2196F3]/5 text-[#1976D2] rounded-full px-2.5 py-1 hover:bg-[#2196F3]/10"
+              title={s}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-2">
         <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submit()}
           placeholder="Ask an agent to carry out a task..."
