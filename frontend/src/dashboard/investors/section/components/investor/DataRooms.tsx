@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { mockStartups } from '../../data/mockData';
+import { fetchDataRooms } from '@/lib/api/dataRooms';
 import {
   Database,
   FileText,
@@ -39,8 +40,33 @@ export function DataRooms() {
     return matchSearch && matchSector;
   });
 
-  const totalDocs = mockStartups.length * SECTIONS.length;
-  const verifiedCount = mockStartups.filter((s) => s.complianceVerified).length;
+  // Totals from ai-router; initial values = mock-derived so first paint is
+  // unchanged and the screen survives the backend being unavailable.
+  const [totalDocs, setTotalDocs] = useState(mockStartups.length * SECTIONS.length);
+  const [verifiedCount, setVerifiedCount] = useState(
+    mockStartups.filter((s) => s.complianceVerified).length,
+  );
+  // Per-room verification flags keyed by projectId (overlay backend over mock).
+  const [roomMeta, setRoomMeta] = useState<Record<string, { complianceVerified: boolean; aiGovernanceVerified: boolean }>>({});
+  useEffect(() => {
+    let alive = true;
+    fetchDataRooms().then((data) => {
+      if (!alive) return;
+      setTotalDocs(data.totals.totalDocs);
+      setVerifiedCount(data.totals.complianceVerified);
+      const map: Record<string, { complianceVerified: boolean; aiGovernanceVerified: boolean }> = {};
+      data.rooms.forEach((r) => {
+        map[r.projectId] = {
+          complianceVerified: r.complianceVerified,
+          aiGovernanceVerified: r.aiGovernanceVerified,
+        };
+      });
+      setRoomMeta(map);
+    });
+    return () => { alive = false; };
+  }, []);
+  const compliance = (id: string, fallback: boolean) => roomMeta[id]?.complianceVerified ?? fallback;
+  const aiGov = (id: string, fallback: boolean) => roomMeta[id]?.aiGovernanceVerified ?? fallback;
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
@@ -121,7 +147,7 @@ export function DataRooms() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-white text-lg">{startup.name}</h3>
-                    {startup.complianceVerified && (
+                    {compliance(startup.id, startup.complianceVerified) && (
                       <CheckCircle className="w-4 h-4 text-emerald-400" />
                     )}
                   </div>
@@ -162,7 +188,7 @@ export function DataRooms() {
                   <Clock className="w-3.5 h-3.5" />
                   <span>Updated today</span>
                 </div>
-                {startup.aiGovernanceVerified ? (
+                {aiGov(startup.id, startup.aiGovernanceVerified) ? (
                   <div className="flex items-center gap-1.5 text-emerald-400">
                     <Shield className="w-3.5 h-3.5" />
                     <span>AI Verified</span>

@@ -1,9 +1,29 @@
+import { useEffect, useState } from 'react';
 import { Award, TrendingUp, Star, Clock, Heart, Zap, Shield } from 'lucide-react';
+import { fetchInvestorReputation, FALLBACK_REPUTATION } from '@/lib/api/investorReputation';
+
+// Map metric keys to their icon + accent color (presentation stays in the FE).
+const METRIC_STYLE: Record<string, { icon: React.ComponentType<{ className?: string }>; color: string }> = {
+  responseSpeed:       { icon: Clock,       color: 'text-emerald-400' },
+  founderRating:       { icon: Star,        color: 'text-amber-400' },
+  followThrough:       { icon: Zap,         color: 'text-purple-400' },
+  valueAdd:            { icon: Heart,       color: 'text-pink-400' },
+  portfolioEngagement: { icon: TrendingUp,  color: 'text-blue-400' },
+};
 
 export function Reputation() {
-  const investorScore = 87;
-  const scoreLevel = investorScore >= 85 ? 'Elite' : investorScore >= 70 ? 'Established' : 'Building';
-  
+  // Load from ai-router; initial state = bundled fallback so first paint is
+  // unchanged and the screen survives the backend being unavailable.
+  const [rep, setRep] = useState(FALLBACK_REPUTATION);
+  useEffect(() => {
+    let alive = true;
+    fetchInvestorReputation().then((data) => { if (alive) setRep(data); });
+    return () => { alive = false; };
+  }, []);
+
+  const investorScore = rep.score;
+  const scoreLevel = rep.level;
+
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
       {/* Header */}
@@ -41,7 +61,7 @@ export function Reputation() {
                 </span>
                 <div className="flex items-center gap-1 text-emerald-400">
                   <TrendingUp className="w-4 h-4" />
-                  <span className="text-sm font-medium">+3 this month</span>
+                  <span className="text-sm font-medium">+{rep.monthChange} this month</span>
                 </div>
               </div>
               
@@ -57,41 +77,19 @@ export function Reputation() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-xl font-semibold text-white mb-6">Reputation Metrics</h3>
               <div className="space-y-4">
-                <ScoreMetric
-                  icon={Clock}
-                  label="Response Speed"
-                  score={92}
-                  description="Average response time: 4.2 hours"
-                  color="text-emerald-400"
-                />
-                <ScoreMetric
-                  icon={Star}
-                  label="Founder Rating"
-                  score={88}
-                  description="Based on 12 founder reviews"
-                  color="text-amber-400"
-                />
-                <ScoreMetric
-                  icon={Zap}
-                  label="Follow-Through Consistency"
-                  score={85}
-                  description="Commitments kept: 94%"
-                  color="text-purple-400"
-                />
-                <ScoreMetric
-                  icon={Heart}
-                  label="Value-Add Contributions"
-                  score={81}
-                  description="Active portfolio support"
-                  color="text-pink-400"
-                />
-                <ScoreMetric
-                  icon={TrendingUp}
-                  label="Portfolio Engagement"
-                  score={90}
-                  description="Monthly check-ins: 100%"
-                  color="text-blue-400"
-                />
+                {rep.metrics.map((m) => {
+                  const style = METRIC_STYLE[m.key] ?? { icon: Star, color: 'text-emerald-400' };
+                  return (
+                    <ScoreMetric
+                      key={m.key}
+                      icon={style.icon}
+                      label={m.label}
+                      score={m.score}
+                      description={m.description}
+                      color={style.color}
+                    />
+                  );
+                })}
               </div>
             </div>
 
@@ -99,27 +97,16 @@ export function Reputation() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-xl font-semibold text-white mb-6">Recent Founder Reviews</h3>
               <div className="space-y-4">
-                <ReviewCard
-                  founderName="Sarah Chen"
-                  startup="QuantumAPI"
-                  rating={5}
-                  comment="Incredibly responsive and provided valuable strategic guidance. Made the funding process smooth and transparent."
-                  date="Feb 8, 2026"
-                />
-                <ReviewCard
-                  founderName="Marcus Rodriguez"
-                  startup="NeuralEdge AI"
-                  rating={5}
-                  comment="Goes beyond capital. Opened doors to key partnerships and actively helps with hiring. True value-add investor."
-                  date="Feb 1, 2026"
-                />
-                <ReviewCard
-                  founderName="Aisha Patel"
-                  startup="CloudMesh"
-                  rating={4}
-                  comment="Professional and fair terms. Would have appreciated faster turnaround on due diligence."
-                  date="Jan 24, 2026"
-                />
+                {rep.reviews.map((r, i) => (
+                  <ReviewCard
+                    key={`${r.founderName}-${i}`}
+                    founderName={r.founderName}
+                    startup={r.startup}
+                    rating={r.rating}
+                    comment={r.comment}
+                    date={r.date}
+                  />
+                ))}
               </div>
             </div>
           </div>
@@ -160,10 +147,9 @@ export function Reputation() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-lg font-semibold text-white mb-4">Score Progression</h3>
               <div className="space-y-3">
-                <ProgressItem month="Feb 2026" score={87} change={3} />
-                <ProgressItem month="Jan 2026" score={84} change={2} />
-                <ProgressItem month="Dec 2025" score={82} change={4} />
-                <ProgressItem month="Nov 2025" score={78} change={1} />
+                {rep.progression.map((p) => (
+                  <ProgressItem key={p.month} month={p.month} score={p.score} change={p.change} />
+                ))}
               </div>
             </div>
 
@@ -190,9 +176,9 @@ export function Reputation() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-lg font-semibold text-white mb-4">Leaderboard Position</h3>
               <div className="text-center py-4">
-                <p className="text-5xl font-bold font-mono text-emerald-400 mb-2">#12</p>
-                <p className="text-sm text-gray-400">out of 284 investors</p>
-                <p className="text-xs text-gray-500 mt-2">Top 4.2%</p>
+                <p className="text-5xl font-bold font-mono text-emerald-400 mb-2">#{rep.leaderboard.rank}</p>
+                <p className="text-sm text-gray-400">out of {rep.leaderboard.total} investors</p>
+                <p className="text-xs text-gray-500 mt-2">Top {rep.leaderboard.percentile}%</p>
               </div>
               <button className="w-full mt-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 text-sm font-medium rounded transition-all">
                 View Full Leaderboard

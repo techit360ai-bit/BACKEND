@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GraduationCap, Code2, Sparkles } from "lucide-react";
 import { ProgressCard } from "./ProgressCard";
 import { BadgeDisplay } from "./BadgeDisplay";
 import { LessonView } from "./LessonView";
 import { getCurriculum, getBadges, type AcademyRole } from "./curriculum";
+import { generateCurriculum, updateTrainingProgress, type Curriculum } from "@/lib/api/training";
 
 interface AcademyProps {
   /** Which curriculum track to show. Each role only ever sees its own track. */
@@ -40,6 +41,15 @@ export function Academy({ role, userName = "there" }: AcademyProps) {
   const [completedWeeks, setCompletedWeeks] = useState<number[]>([]);
   const [earnedBadgeIds, setEarnedBadgeIds] = useState<string[]>([meta.seedBadgeId]);
 
+  // Adaptive curriculum plan from ai-router's time-to-MVP engine. Surfaced as a
+  // banner; the static lesson content stays as the offline-safe fallback.
+  const [adaptivePlan, setAdaptivePlan] = useState<Curriculum | null>(null);
+  useEffect(() => {
+    let alive = true;
+    generateCurriculum({ role }).then((plan) => { if (alive) setAdaptivePlan(plan); });
+    return () => { alive = false; };
+  }, [role]);
+
   const currentLesson = curriculum.find((l) => l.week === currentWeek) || curriculum[0];
   const progressPercent = (completedWeeks.length / curriculum.length) * 100;
   const completedTasks = completedWeeks.length * 3;
@@ -49,6 +59,8 @@ export function Academy({ role, userName = "there" }: AcademyProps) {
     if (!completedWeeks.includes(currentWeek)) {
       const next = [...completedWeeks, currentWeek];
       setCompletedWeeks(next);
+      // Report progress to the adaptive-training engine (fire-and-forget).
+      void updateTrainingProgress({ role, week: currentWeek, completedWeeks: next });
 
       // Award progression badges (founder track only has multi-level badges)
       if (role === "founder") {
@@ -105,6 +117,12 @@ export function Academy({ role, userName = "there" }: AcademyProps) {
               <p className="text-sm text-gray-900 font-medium">
                 Hey {userName} — you're {Math.round(progressPercent)}% through the {meta.trackLabel}.
               </p>
+              {adaptivePlan?.modules?.length ? (
+                <p className="text-xs text-indigo-700 mt-1">
+                  Adaptive plan: {adaptivePlan.modules.length} modules
+                  {adaptivePlan.durationWeeks ? ` · ~${adaptivePlan.durationWeeks} weeks to MVP` : ""} · tuned by the AI engine
+                </p>
+              ) : null}
               <p className="text-sm text-gray-600 mt-0.5">
                 Today's focus: <span className="font-medium text-indigo-700">{currentLesson.title}</span>
               </p>

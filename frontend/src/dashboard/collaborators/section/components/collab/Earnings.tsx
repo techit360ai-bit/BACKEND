@@ -1,27 +1,49 @@
 // frontend/src/dashboard/collaborators/section/components/collab/Earnings.tsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import {
   cashEarnings, cashTotals as initialTotals, payouts as initialPayouts,
 } from "@/dashboard/collaborators/section/data/mockData";
+import { fetchCollaboratorEarnings, requestWithdrawal } from "@/lib/api/earnings";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/dashboard/collaborators/section/components/ui/dialog";
 
 export function Earnings() {
+  const [earnings, setEarnings] = useState(cashEarnings);
   const [totals, setTotals]     = useState(initialTotals);
   const [payoutList, setPayoutList] = useState(initialPayouts);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [amount, setAmount] = useState<number>(totals.pendingUSD);
 
-  const handleWithdraw = () => {
+  // Load from ai-router; initial state is the bundled mock so the screen renders
+  // unchanged on first paint and survives the backend being unavailable.
+  useEffect(() => {
+    let alive = true;
+    fetchCollaboratorEarnings().then((data) => {
+      if (!alive) return;
+      setEarnings(data.cashEarnings);
+      setPayoutList(data.payouts);
+      setTotals(data.totals);
+      setAmount(data.totals.pendingUSD);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const handleWithdraw = async () => {
     if (amount <= 0 || amount > totals.pendingUSD) return;
     const month = new Date().toISOString().slice(0, 7);
-    setPayoutList((cur) => [{ id: `p-${Date.now()}`, monthIso: month, amount, status: "processing" as const }, ...cur]);
-    setTotals((cur) => ({ ...cur, pendingUSD: cur.pendingUSD - amount }));
-    toast(`Withdrawal initiated — $${amount.toLocaleString()} to •••1234. Funds arrive in 1–3 business days.`);
+    const res = await requestWithdrawal({ amount, monthIso: month, idemKey: `p-${Date.now()}` });
+    if (!res.ok) {
+      toast(`Withdrawal failed${res.available != null ? ` — up to $${res.available.toLocaleString()} available` : ""}.`);
+      return;
+    }
+    const payout = res.payout ?? { id: `p-${Date.now()}`, monthIso: month, amount, status: "processing" as const };
+    setPayoutList((cur) => [payout, ...cur]);
+    setTotals((cur) => ({ ...cur, pendingUSD: res.newPendingUSD ?? cur.pendingUSD - amount }));
+    toast(`Withdrawal initiated — $${amount.toLocaleString()} to ${res.destination ?? "•••1234"}. Funds arrive in 1–3 business days.`);
     setWithdrawOpen(false);
   };
 
@@ -63,7 +85,7 @@ export function Earnings() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {cashEarnings.map((c) => (
+            {earnings.map((c) => (
               <tr key={c.projectId} className="hover:bg-slate-50">
                 <td className="px-5 py-3 text-slate-900">{c.projectName}</td>
                 <td className="px-5 py-3 text-right tabular-nums">${c.earned.toLocaleString()}</td>

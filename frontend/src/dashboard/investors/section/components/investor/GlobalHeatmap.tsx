@@ -1,16 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { mockStartups } from '../../data/mockData';
 import { Globe, Filter, MapPin, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { fetchHeatmap, FALLBACK_HEATMAP } from '@/lib/api/heatmap';
 
 export function GlobalHeatmap() {
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [selectedSector, setSelectedSector] = useState<string>('all');
 
+  // Per-region readiness comes from ai-router (the engine's geo signal); counts
+  // stay client-derived from the pipeline. Initial = fallback so first paint is
+  // unchanged and the screen survives the backend being unavailable.
+  const [regionSignal, setRegionSignal] = useState(FALLBACK_HEATMAP.regions);
+  useEffect(() => {
+    let alive = true;
+    fetchHeatmap().then((data) => { if (alive && data.regions?.length) setRegionSignal(data.regions); });
+    return () => { alive = false; };
+  }, []);
+
+  const readinessFor = (name: string) =>
+    regionSignal.find((r) => r.name === name)?.avgReadiness ?? 0;
+
   const regions = [
-    { name: 'North America', startups: mockStartups.filter(s => s.region === 'North America').length, avgReadiness: 84, color: 'text-emerald-400' },
-    { name: 'Europe', startups: mockStartups.filter(s => s.region === 'Europe').length, avgReadiness: 86, color: 'text-blue-400' },
-    { name: 'Asia', startups: mockStartups.filter(s => s.region === 'Asia').length, avgReadiness: 78, color: 'text-purple-400' },
+    { name: 'North America', startups: mockStartups.filter(s => s.region === 'North America').length, avgReadiness: readinessFor('North America'), color: 'text-emerald-400' },
+    { name: 'Europe', startups: mockStartups.filter(s => s.region === 'Europe').length, avgReadiness: readinessFor('Europe'), color: 'text-blue-400' },
+    { name: 'Asia', startups: mockStartups.filter(s => s.region === 'Asia').length, avgReadiness: readinessFor('Asia'), color: 'text-purple-400' },
   ];
 
   const sectors = ['all', 'SaaS', 'AI/ML', 'FinTech', 'BioTech', 'Infrastructure', 'Security'];

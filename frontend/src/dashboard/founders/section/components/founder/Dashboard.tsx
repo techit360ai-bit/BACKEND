@@ -1,9 +1,12 @@
 // frontend/src/dashboard/founders/section/components/founder/Dashboard.tsx
 import { Link, useNavigate } from "react-router-dom";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { ArrowRight, CheckCircle, TrendingUp, Plus } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
+import { fetchDashboardIntelligence, type DashboardIntelligence } from "@/lib/api/gsis";
+import { fetchAudioBriefing } from "@/lib/api/audio";
+import { runAnomalyScan, type RiskFlag } from "@/lib/api/alerts";
 import { formatRelative } from "@/lib/formatRelative";
 import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
@@ -37,6 +40,38 @@ export function Dashboard() {
   const [tasks, setTasks]     = useState(initialTasks);
   const [builds, setBuilds]   = useState(initialBuilds);
   const [openStage, setOpenStage] = useState<string | null>(null);
+
+  // GSIS master score + alerts from ai-router (surfaced for the first time).
+  const [intel, setIntel] = useState<DashboardIntelligence | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchDashboardIntelligence().then((d) => { if (alive) setIntel(d); });
+    return () => { alive = false; };
+  }, []);
+
+  // B4 — anomaly risk flags from the engine over this founder's execution signals.
+  const [riskFlags, setRiskFlags] = useState<RiskFlag[]>([]);
+  useEffect(() => {
+    let alive = true;
+    runAnomalyScan([{ kind: "founder_execution", source: "dashboard" }])
+      .then((r) => { if (alive) setRiskFlags(r.risk_flags ?? []); });
+    return () => { alive = false; };
+  }, []);
+
+  // B5 — momentum audio briefing (TTS) on demand.
+  const [briefingUrl, setBriefingUrl] = useState<string | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const playBriefing = async () => {
+    setBriefingLoading(true);
+    const b = await fetchAudioBriefing(`Momentum briefing for ${firstName}: keep your build moving.`);
+    setBriefingLoading(false);
+    if (b?.audio_url) {
+      setBriefingUrl(b.audio_url);
+      try { void new Audio(b.audio_url).play(); } catch { /* autoplay may be blocked */ }
+    } else {
+      toast("Audio briefing unavailable right now.");
+    }
+  };
 
   const firstName = p.name.split(" ")[0];
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -119,6 +154,75 @@ export function Dashboard() {
           </button>
         </div>
       </Link>
+
+      {/* GSIS — Global Startup Intelligence Score (from ai-router) */}
+      {intel?.gsis && (
+        <div className="border border-slate-200 bg-white rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">Global Startup Intelligence Score</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {intel.gsis.classification ?? "Master composite"} · live from the AI engine
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-bold text-violet-700 tabular-nums leading-none">
+                {Math.round(intel.gsis.gsis)}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">/ 100</p>
+            </div>
+          </div>
+          <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-4">
+            <div className="h-full bg-gradient-to-r from-violet-500 to-indigo-500"
+              style={{ width: `${Math.min(100, Math.round(intel.gsis.gsis))}%` }} />
+          </div>
+          {intel.gsis.components && (
+            <div className="grid grid-cols-3 gap-3 mt-4">
+              {Object.entries(intel.gsis.components).slice(0, 3).map(([k, v]) => (
+                <div key={k}>
+                  <p className="text-lg font-bold text-slate-900 tabular-nums">{Math.round(Number(v))}</p>
+                  <p className="text-xs text-slate-500 capitalize">{k.replace(/([A-Z])/g, " $1")}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {intel.alerts?.length > 0 && (
+            <ul className="mt-4 space-y-1.5">
+              {intel.alerts.slice(0, 3).map((a, i) => (
+                <li key={a.id ?? i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <span className="mt-0.5">•</span><span>{a.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Momentum briefing (B5) + risk alerts (B4) from the AI engine */}
+      <div className="border border-slate-200 bg-white rounded-xl p-4 flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={playBriefing}
+          disabled={briefingLoading}
+          className="text-sm px-3 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:bg-slate-300"
+        >
+          {briefingLoading ? "Preparing…" : "▶ Play momentum briefing"}
+        </button>
+        {briefingUrl && <span className="text-xs text-slate-400">Audio ready</span>}
+        {riskFlags.length > 0 && (
+          <div className="flex-1 min-w-[12rem]">
+            <p className="text-xs font-semibold text-amber-700 mb-1">Engine risk alerts</p>
+            <ul className="space-y-0.5">
+              {riskFlags.slice(0, 3).map((f, i) => (
+                <li key={i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <span className="mt-0.5">⚠</span>
+                  <span>{f.message ?? f.type ?? "Risk flag"}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
 
       {/* Journey strip */}
       <div className="border border-slate-200 bg-white rounded-xl p-6">

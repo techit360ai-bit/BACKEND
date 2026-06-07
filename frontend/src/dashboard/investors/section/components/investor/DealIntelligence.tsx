@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { mockStartups, type Startup } from '../../data/mockData';
+import { fetchDealFlow } from '@/lib/api/dealFlow';
 import {
   Filter,
   Grid3x3,
@@ -32,6 +33,24 @@ export function DealIntelligence() {
     behavioral: false,
   });
 
+  // Real EVI-I / IIS / WCRS deal-flow ranking from ai-router. When available it
+  // drives ordering; otherwise the screen falls back to its mock order.
+  const [rankMap, setRankMap] = useState<Record<string, number>>({});
+  const ranked = Object.keys(rankMap).length > 0;
+  useEffect(() => {
+    let alive = true;
+    fetchDealFlow().then((data) => {
+      if (!alive || !data?.ranking?.length) return;
+      const map: Record<string, number> = {};
+      data.ranking.forEach((e, i) => {
+        const id = e.projectId ?? e.name;
+        if (id) map[String(id)] = e.rank ?? i + 1;
+      });
+      setRankMap(map);
+    });
+    return () => { alive = false; };
+  }, []);
+
   const filteredStartups = mockStartups.filter((startup) => {
     if (startup.readinessScore < filters.minReadiness) return false;
     if (startup.executionVelocity < filters.minExecutionVelocity) return false;
@@ -44,6 +63,13 @@ export function DealIntelligence() {
     if (startup.burnEfficiency > filters.maxBurnEfficiency) return false;
     return true;
   });
+
+  // Order by backend EVI-I rank when present, else keep mock order.
+  const sortedStartups = ranked
+    ? [...filteredStartups].sort(
+        (a, b) => (rankMap[a.id] ?? 999) - (rankMap[b.id] ?? 999),
+      )
+    : filteredStartups;
 
   const toggleFilterSection = (section: keyof typeof expandedFilters) => {
     setExpandedFilters((prev) => ({ ...prev, [section]: !prev[section] }));
@@ -209,6 +235,11 @@ export function DealIntelligence() {
                 Showing <span className="text-white font-mono">{filteredStartups.length}</span> of{' '}
                 <span className="text-white font-mono">{mockStartups.length}</span> startups
               </p>
+              {ranked && (
+                <p className="text-xs text-emerald-400 mt-0.5">
+                  ● Ranked by EVI-I / WCRS · live from engine
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -237,13 +268,13 @@ export function DealIntelligence() {
           {/* Results Grid/List */}
           {viewMode === 'grid' ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredStartups.map((startup) => (
+              {sortedStartups.map((startup) => (
                 <StartupCard key={startup.id} startup={startup} />
               ))}
             </div>
           ) : (
             <div className="space-y-3">
-              {filteredStartups.map((startup) => (
+              {sortedStartups.map((startup) => (
                 <StartupListItem key={startup.id} startup={startup} />
               ))}
             </div>
