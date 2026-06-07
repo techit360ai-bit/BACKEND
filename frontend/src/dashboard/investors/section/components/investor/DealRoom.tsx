@@ -1,10 +1,23 @@
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { mockStartups } from '../../data/mockData';
 import { Shield, FileText, Users, DollarSign, Calendar, PenTool, CheckCircle } from 'lucide-react';
+import { fetchDealRoom, type DealRoomDetail } from '@/lib/api/dealRooms';
 
 export function DealRoom() {
   const { startupId } = useParams();
   const startup = mockStartups.find((s) => s.id === startupId);
+
+  // Deal-room detail (term sheet, milestones, documents, negotiation) from
+  // ai-router. Hooks must run before any early return.
+  const [detail, setDetail] = useState<DealRoomDetail | null>(null);
+  useEffect(() => {
+    if (!startupId) return;
+    let alive = true;
+    fetchDealRoom(startupId, startup ? { mrr: startup.mrr } : undefined)
+      .then((d) => { if (alive) setDetail(d); });
+    return () => { alive = false; };
+  }, [startupId, startup]);
 
   if (!startup) {
     return (
@@ -20,6 +33,38 @@ export function DealRoom() {
   }
 
   const suggestedValuation = startup.mrr * 12 * 8; // Simple ARR * 8 multiple
+
+  // Prefer backend term sheet / valuation; fall back to local ARR×8 math.
+  const ts = detail?.termSheet;
+  const valuation = detail?.valuationUSD ?? suggestedValuation;
+  const valuationM = `$${(valuation / 1000000).toFixed(1)}M`;
+  const fmtUSD = (n: number) =>
+    n >= 1000 ? `$${(n / 1000).toFixed(0)}K` : `$${n}`;
+  const investmentStr = ts ? fmtUSD(ts.investmentUSD) : '$250,000';
+  const equityStr = ts ? `${ts.equityPercent}%` : '5.2%';
+  const instrument = ts?.instrument ?? 'SAFE';
+  const discountStr = ts ? `${ts.discountPercent}%` : '20%';
+  const capStr = ts ? `$${(ts.valuationCapUSD / 1000000).toFixed(1)}M` : valuationM;
+  const boardSeat = ts?.extraTerms?.rights ?? 'Observer Rights';
+
+  const milestones = detail?.milestones ?? [
+    { milestone: 'Initial Tranche',   amount: 100000, condition: 'Upon signing',                status: 'pending' },
+    { milestone: 'Product Milestone', amount: 75000,  condition: 'Achieve 90+ Market Readiness', status: 'pending' },
+    { milestone: 'Revenue Milestone', amount: 75000,  condition: 'Reach $150K MRR',              status: 'pending' },
+  ];
+  const documents = detail?.documents ?? [
+    { name: 'Simple Agreement for Future Equity (SAFE)', status: 'ready' },
+    { name: 'Subscription Agreement',                    status: 'ready' },
+    { name: 'Investor Rights Agreement',                 status: 'draft' },
+    { name: 'Right of First Refusal Agreement',          status: 'draft' },
+  ];
+  const negotiation = detail?.negotiation ?? [
+    { step: 'Initial Discussion', state: 'completed' },
+    { step: 'Term Sheet Draft',   state: 'completed' },
+    { step: 'Due Diligence',      state: 'active' },
+    { step: 'Final Agreement',    state: 'todo' },
+    { step: 'Funds Transfer',     state: 'todo' },
+  ];
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
@@ -67,18 +112,18 @@ export function DealRoom() {
                 Term Sheet Simulator
               </h3>
               <div className="space-y-4">
-                <InputField label="Investment Amount" defaultValue="$250,000" />
-                <InputField label="Valuation" defaultValue={`$${(suggestedValuation / 1000000).toFixed(1)}M`} />
-                <InputField label="Equity %" defaultValue="5.2%" />
-                <InputField label="Instrument Type" defaultValue="SAFE" isSelect />
-                
+                <InputField label="Investment Amount" defaultValue={investmentStr} />
+                <InputField label="Valuation" defaultValue={valuationM} />
+                <InputField label="Equity %" defaultValue={equityStr} />
+                <InputField label="Instrument Type" defaultValue={instrument} isSelect />
+
                 <div className="pt-4 border-t border-gray-800">
                   <h4 className="text-sm font-semibold text-white mb-3">Key Terms</h4>
                   <div className="space-y-2 text-sm">
-                    <TermRow label="Valuation Cap" value={`$${(suggestedValuation / 1000000).toFixed(1)}M`} />
-                    <TermRow label="Discount Rate" value="20%" />
+                    <TermRow label="Valuation Cap" value={capStr} />
+                    <TermRow label="Discount Rate" value={discountStr} />
                     <TermRow label="Pro Rata Rights" value="Yes" />
-                    <TermRow label="Board Seat" value="Observer Rights" />
+                    <TermRow label="Board Seat" value={boardSeat} />
                   </div>
                 </div>
               </div>
@@ -91,24 +136,15 @@ export function DealRoom() {
                 Milestone-Based Capital Release
               </h3>
               <div className="space-y-3">
-                <MilestoneClause 
-                  milestone="Initial Tranche"
-                  amount="$100K"
-                  condition="Upon signing"
-                  status="pending"
-                />
-                <MilestoneClause 
-                  milestone="Product Milestone"
-                  amount="$75K"
-                  condition="Achieve 90+ Market Readiness"
-                  status="pending"
-                />
-                <MilestoneClause 
-                  milestone="Revenue Milestone"
-                  amount="$75K"
-                  condition="Reach $150K MRR"
-                  status="pending"
-                />
+                {milestones.map((m, i) => (
+                  <MilestoneClause
+                    key={i}
+                    milestone={m.milestone}
+                    amount={fmtUSD(Number(m.amount))}
+                    condition={m.condition}
+                    status={m.status === 'completed' ? 'completed' : 'pending'}
+                  />
+                ))}
               </div>
               <p className="text-sm text-gray-400 mt-4">
                 Automated release based on TechIT execution tracking
@@ -122,10 +158,9 @@ export function DealRoom() {
                 Document Signing
               </h3>
               <div className="space-y-2">
-                <DocumentItem name="Simple Agreement for Future Equity (SAFE)" status="ready" />
-                <DocumentItem name="Subscription Agreement" status="ready" />
-                <DocumentItem name="Investor Rights Agreement" status="draft" />
-                <DocumentItem name="Right of First Refusal Agreement" status="draft" />
+                {documents.map((d, i) => (
+                  <DocumentItem key={i} name={d.name} status={d.status === 'draft' ? 'draft' : 'ready'} />
+                ))}
               </div>
               <button className="w-full mt-4 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg transition-colors">
                 Review & Sign Documents
@@ -139,22 +174,22 @@ export function DealRoom() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-lg font-semibold text-white mb-4">Deal Overview</h3>
               <div className="space-y-4">
-                <SummaryItem 
+                <SummaryItem
                   icon={DollarSign}
                   label="Suggested Investment"
-                  value="$250K"
+                  value={investmentStr}
                   color="text-emerald-400"
                 />
-                <SummaryItem 
+                <SummaryItem
                   icon={Users}
                   label="Equity"
-                  value="5.2%"
+                  value={equityStr}
                   color="text-purple-400"
                 />
-                <SummaryItem 
+                <SummaryItem
                   icon={FileText}
                   label="Valuation"
-                  value={`$${(suggestedValuation / 1000000).toFixed(1)}M`}
+                  value={valuationM}
                   color="text-blue-400"
                 />
               </div>
@@ -193,11 +228,14 @@ export function DealRoom() {
             <div className="bg-[#111111] border border-gray-800 rounded-lg p-6">
               <h3 className="text-lg font-semibold text-white mb-4">Negotiation Status</h3>
               <div className="space-y-3">
-                <StatusStep step="Initial Discussion" completed />
-                <StatusStep step="Term Sheet Draft" completed />
-                <StatusStep step="Due Diligence" active />
-                <StatusStep step="Final Agreement" />
-                <StatusStep step="Funds Transfer" />
+                {negotiation.map((n, i) => (
+                  <StatusStep
+                    key={i}
+                    step={n.step}
+                    completed={n.state === 'completed'}
+                    active={n.state === 'active'}
+                  />
+                ))}
               </div>
             </div>
 

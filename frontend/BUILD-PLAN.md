@@ -30,8 +30,8 @@ renders offline.
 - ✅ A1 Collaborator Equity — Equity.tsx wired to GET /collaborator/equity via lib/api/equity.ts (mock fallback). TODO minor: collab Dashboard.tsx equity card still reads mock directly.
 - ✅ A2 Collaborator Earnings — Earnings.tsx wired to GET /collaborator/earnings + POST .../withdraw via lib/api/earnings.ts (mock fallback)
 - ✅ A3 Investor Capital Pools — CapitalPools.tsx wired to GET /investor/capital-pools via lib/api/capitalPools.ts (fallback fixture)
-- 🚧 A4 Investor Deal Rooms — DealRooms.tsx (list) wired to GET /investor/deal-rooms via lib/api/dealRooms.ts. TODO: DealRoom.tsx detail still computes valuation locally (backend endpoint + fetchDealRoom() ready to wire).
-- 🚧 A5 Investor Data Rooms — DataRooms.tsx summary stats wired to GET /investor/data-rooms via lib/api/dataRooms.ts. TODO: per-card flags + DataRoom.tsx detail still read mock directly.
+- ✅ A4 Investor Deal Rooms — DealRooms.tsx (list) + DealRoom.tsx (detail: term sheet, valuation, milestones, documents, negotiation stepper) both wired to /investor/deal-rooms[/{id}] via lib/api/dealRooms.ts.
+- ✅ A5 Investor Data Rooms — DataRooms.tsx summary stats + per-card compliance/AI-governance flags wired to GET /investor/data-rooms. (DataRoom.tsx detail metrics already reflect real startup fields; its illustrative docs have no backend content endpoint to wire to.)
 - ✅ A6 Investor Reputation — Reputation.tsx fully wired (score, metrics, reviews, progression, leaderboard) to GET /investor/reputation via lib/api/investorReputation.ts
 - ✅ A7 Investor Global Heatmap — GlobalHeatmap.tsx region avgReadiness wired to GET /investor/heatmap via lib/api/heatmap.ts (was hardcoded)
 
