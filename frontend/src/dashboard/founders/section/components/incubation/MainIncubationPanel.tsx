@@ -9,6 +9,9 @@ import {
   Rocket, Code2, Palette, Megaphone, Activity, ChevronLeft,
   Briefcase, ArrowLeft, Lightbulb,
 } from "lucide-react";
+import { toast } from "sonner";
+import { runVenturePipeline } from "@/lib/api/incubation";
+import { provisionWorkspace } from "@/lib/api/workspaces";
 
 const PROBLEM_AREAS = [
   { id: "ai", label: "AI", emoji: "🤖" },
@@ -174,6 +177,38 @@ export function MainIncubationPanel() {
   const [ideaTitle, setIdeaTitle] = useState("");
   const [ideaSolution, setIdeaSolution] = useState("");
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
+
+  // Incubation → Workspace pipeline state. Running the analysis persists a
+  // ProjectAnalysis in ai-router and returns a project_id; "Create Workspace"
+  // then provisions a workspace bound to that analyzed venture.
+  const [analyzedProjectId, setAnalyzedProjectId] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
+
+  const handleRunAnalysis = async () => {
+    if (!ideaTitle || !ideaSolution || selectedAreas.length === 0 || analyzing) return;
+    setAnalyzing(true);
+    const result = await runVenturePipeline({
+      startup_name: ideaTitle,
+      solution: ideaSolution,
+      focus_areas: selectedAreas,
+    });
+    setAnalyzing(false);
+    const pid = result?.project_id ?? `proj_local_${Date.now()}`;
+    setAnalyzedProjectId(pid);
+    toast.success("Analysis complete — venture saved. Create a workspace to start building.");
+  };
+
+  const handleCreateWorkspace = async () => {
+    if (provisioning) return;
+    setProvisioning(true);
+    const projectId = analyzedProjectId ?? `proj_local_${Date.now()}`;
+    const res = await provisionWorkspace(projectId, ideaTitle || "Venture Workspace");
+    setProvisioning(false);
+    const wsId = res.workspace?.id ?? `ws_${projectId}`;
+    // Carry the binding so the workspace loads this venture's context.
+    navigate(`/workspaces?ws=${encodeURIComponent(wsId)}&project=${encodeURIComponent(projectId)}`);
+  };
 
   const toggleArea = (id: string) =>
     setSelectedAreas((prev) =>
@@ -695,21 +730,23 @@ export function MainIncubationPanel() {
               {/* Actions row */}
               <div className="col-span-12 flex flex-wrap items-center gap-2 pt-1">
                 <button
-                  disabled={!ideaTitle || !ideaSolution || selectedAreas.length === 0}
+                  disabled={!ideaTitle || !ideaSolution || selectedAreas.length === 0 || analyzing}
+                  onClick={handleRunAnalysis}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-[11px] font-bold transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                   style={{ background: "linear-gradient(135deg, #0ea5e9, #0284c7)", boxShadow: "0 3px 10px rgba(2,132,199,0.3)" }}
                 >
                   <Activity size={12} />
-                  Run Analysis
+                  {analyzing ? "Analyzing…" : "Run Analysis"}
                 </button>
                 <button
-                  onClick={() => navigate("/workspaces")}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-[11px] font-bold transition-all hover:opacity-90 active:scale-95 whitespace-nowrap"
+                  onClick={handleCreateWorkspace}
+                  disabled={provisioning}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-[11px] font-bold transition-all hover:opacity-90 active:scale-95 disabled:opacity-40 whitespace-nowrap"
                   style={{ background: "linear-gradient(135deg, #10b981, #059669)", boxShadow: "0 3px 10px rgba(5,150,105,0.3)" }}
-                  title="Create a collaborative workspace for this project"
+                  title={analyzedProjectId ? "Create a workspace bound to this analyzed venture" : "Create a collaborative workspace for this project"}
                 >
                   <Briefcase size={12} />
-                  Create Workspace
+                  {provisioning ? "Creating…" : "Create Workspace"}
                 </button>
                 <button
                   className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sky-600 text-[11px] font-bold transition-all hover:bg-sky-100 active:scale-95 whitespace-nowrap"
