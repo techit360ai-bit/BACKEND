@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { mockStartups } from '../../data/mockData';
+import { fetchDataRooms } from '@/lib/api/dataRooms';
 import {
   Database,
   FileText,
@@ -39,8 +40,21 @@ export function DataRooms() {
     return matchSearch && matchSector;
   });
 
-  const totalDocs = mockStartups.length * SECTIONS.length;
-  const verifiedCount = mockStartups.filter((s) => s.complianceVerified).length;
+  // Totals from ai-router; initial values = mock-derived so first paint is
+  // unchanged and the screen survives the backend being unavailable.
+  const [totalDocs, setTotalDocs] = useState(mockStartups.length * SECTIONS.length);
+  const [verifiedCount, setVerifiedCount] = useState(
+    mockStartups.filter((s) => s.complianceVerified).length,
+  );
+  useEffect(() => {
+    let alive = true;
+    fetchDataRooms().then((data) => {
+      if (!alive) return;
+      setTotalDocs(data.totals.totalDocs);
+      setVerifiedCount(data.totals.complianceVerified);
+    });
+    return () => { alive = false; };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a]">
