@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { mockStartups } from '../../data/mockData';
+import { fetchDealRooms, fallbackDealMeta } from '@/lib/api/dealRooms';
 import {
   Shield,
   MessageSquare,
@@ -27,15 +28,6 @@ interface DealMeta {
   docs: number;
   lastActivity: string;
 }
-
-const dealMeta: Record<string, DealMeta> = {
-  '1': { status: 'active', stage: 'Term Sheet', daysOpen: 12, messages: 34, docs: 7, lastActivity: '2h ago' },
-  '2': { status: 'active', stage: 'Due Diligence', daysOpen: 8, messages: 52, docs: 11, lastActivity: '45m ago' },
-  '3': { status: 'pending', stage: 'NDA Signed', daysOpen: 3, messages: 9, docs: 2, lastActivity: '1d ago' },
-  '4': { status: 'active', stage: 'Negotiation', daysOpen: 21, messages: 78, docs: 14, lastActivity: '3h ago' },
-  '5': { status: 'closed', stage: 'Deal Closed', daysOpen: 45, messages: 120, docs: 22, lastActivity: '5d ago' },
-  '6': { status: 'pending', stage: 'Intro Call', daysOpen: 1, messages: 4, docs: 1, lastActivity: '6h ago' },
-};
 
 const statusConfig = {
   active: { label: 'Active', color: 'text-emerald-400', bg: 'bg-emerald-500/15', border: 'border-emerald-500/30', icon: CheckCircle },
@@ -66,6 +58,15 @@ function StageProgress({ stage }: { stage: string }) {
 export function DealRooms() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | DealStatus>('all');
+
+  // Deal-room metadata from ai-router; initial state = bundled fallback so the
+  // screen renders unchanged on first paint and survives the backend being down.
+  const [dealMeta, setDealMeta] = useState<Record<string, DealMeta>>(fallbackDealMeta);
+  useEffect(() => {
+    let alive = true;
+    fetchDealRooms().then((data) => { if (alive) setDealMeta(data.dealMeta); });
+    return () => { alive = false; };
+  }, []);
 
   const filtered = mockStartups.filter((s) => {
     const meta = dealMeta[s.id];
