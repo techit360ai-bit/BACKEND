@@ -1,9 +1,10 @@
 // frontend/src/dashboard/founders/section/components/founder/Dashboard.tsx
 import { Link, useNavigate } from "react-router-dom";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { toast } from "sonner";
 import { ArrowRight, CheckCircle, TrendingUp, Plus } from "lucide-react";
 import { useFounderProfile } from "@/contexts/UserContext";
+import { fetchDashboardIntelligence, type DashboardIntelligence } from "@/lib/api/gsis";
 import { formatRelative } from "@/lib/formatRelative";
 import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
@@ -37,6 +38,14 @@ export function Dashboard() {
   const [tasks, setTasks]     = useState(initialTasks);
   const [builds, setBuilds]   = useState(initialBuilds);
   const [openStage, setOpenStage] = useState<string | null>(null);
+
+  // GSIS master score + alerts from ai-router (surfaced for the first time).
+  const [intel, setIntel] = useState<DashboardIntelligence | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchDashboardIntelligence().then((d) => { if (alive) setIntel(d); });
+    return () => { alive = false; };
+  }, []);
 
   const firstName = p.name.split(" ")[0];
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
@@ -119,6 +128,49 @@ export function Dashboard() {
           </button>
         </div>
       </Link>
+
+      {/* GSIS — Global Startup Intelligence Score (from ai-router) */}
+      {intel?.gsis && (
+        <div className="border border-slate-200 bg-white rounded-xl p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-700">Global Startup Intelligence Score</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {intel.gsis.classification ?? "Master composite"} · live from the AI engine
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-bold text-violet-700 tabular-nums leading-none">
+                {Math.round(intel.gsis.gsis)}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">/ 100</p>
+            </div>
+          </div>
+          <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-4">
+            <div className="h-full bg-gradient-to-r from-violet-500 to-indigo-500"
+              style={{ width: `${Math.min(100, Math.round(intel.gsis.gsis))}%` }} />
+          </div>
+          {intel.gsis.components && (
+            <div className="grid grid-cols-3 gap-3 mt-4">
+              {Object.entries(intel.gsis.components).slice(0, 3).map(([k, v]) => (
+                <div key={k}>
+                  <p className="text-lg font-bold text-slate-900 tabular-nums">{Math.round(Number(v))}</p>
+                  <p className="text-xs text-slate-500 capitalize">{k.replace(/([A-Z])/g, " $1")}</p>
+                </div>
+              ))}
+            </div>
+          )}
+          {intel.alerts?.length > 0 && (
+            <ul className="mt-4 space-y-1.5">
+              {intel.alerts.slice(0, 3).map((a, i) => (
+                <li key={a.id ?? i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                  <span className="mt-0.5">•</span><span>{a.message}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Journey strip */}
       <div className="border border-slate-200 bg-white rounded-xl p-6">

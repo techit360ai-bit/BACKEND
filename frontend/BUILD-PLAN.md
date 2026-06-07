@@ -36,12 +36,13 @@ renders offline.
 - ✅ A7 Investor Global Heatmap — GlobalHeatmap.tsx region avgReadiness wired to GET /investor/heatmap via lib/api/heatmap.ts (was hardcoded)
 
 ### Section B — backend exists, build/own the frontend surface
-- ⬜ B1 Deal Intelligence — wire to EVI-I/deal-flow ranking
-- ⬜ B2 Founder dashboard — surface real GSIS + venture-pipeline outputs
-- ⬜ B3 Adaptive Training — wire AcademyPage + founder training
-- ⬜ B4 Anomaly/stagnation alerts — surface on dashboards
-- ⬜ B5 Audio briefing — momentum audio widget
-- ⬜ B6 Workspace AI — review_code / plan_sprint / suggest_tasks into console
+API modules created for ALL B domains (lib/api/{gsis,dealFlow,training,alerts,audio,workspace}.ts).
+- 🚧 B1 Deal Intelligence — lib/api/dealFlow.ts ready (fetchDealFlow/fetchEvi). TODO: wire DealIntelligence.tsx ranking.
+- ✅ B2 Founder dashboard — GSIS master-score card wired into Dashboard.tsx via lib/api/gsis.ts (GET /dashboard/intelligence)
+- 🚧 B3 Adaptive Training — lib/api/training.ts ready. TODO: wire AcademyPage.tsx.
+- 🚧 B4 Anomaly/stagnation alerts — lib/api/alerts.ts ready. TODO: surface widget on a dashboard.
+- 🚧 B5 Audio briefing — lib/api/audio.ts ready. TODO: add momentum audio widget.
+- 🚧 B6 Workspace AI — lib/api/workspace.ts ready. TODO: wire into Workspace MCP console (new-frontend repo / PR #6).
 
 ### Section C — LAST (per user)
 - ⬜ C Idea & Solution Hub — full problem-driven pathway frontend
