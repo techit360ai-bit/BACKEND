@@ -42,7 +42,7 @@ API modules created for ALL B domains (lib/api/{gsis,dealFlow,training,alerts,au
 - ✅ B3 Adaptive Training — shared Academy.tsx surfaces adaptive plan (generateCurriculum) + reports progress (updateTrainingProgress). Benefits founder + collaborator.
 - ✅ B4 Anomaly/stagnation alerts — founder Dashboard "Engine risk alerts" widget (runAnomalyScan over execution signals).
 - ✅ B5 Audio briefing — founder Dashboard "Play momentum briefing" widget (fetchAudioBriefing, plays TTS audio).
-- 🚧 B6 Workspace AI — lib/api/workspace.ts ready. TODO: wire into Workspace MCP console (new-frontend repo / PR #6).
+- ✅ B6 Workspace AI — wired in the **new-frontend** repo, branch `feat/workspace-ai-wiring` (off feat/workspace-mcp): lib/api/workspaceAI.ts + Composer.tsx "Suggest tasks" chips calling /workspace/tasks/suggest. (lib/api/workspace.ts in this repo remains for any techIT-side workspace use.)
 
 ### Section C — LAST (per user)
 - ⬜ C Idea & Solution Hub — full problem-driven pathway frontend
