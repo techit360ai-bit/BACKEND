@@ -1,0 +1,62 @@
+// Package postgres implements the store interfaces over PostgreSQL via pgx.
+package postgres
+
+import (
+	"context"
+	"errors"
+	"os"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
+)
+
+// Store aggregates the per-entity stores over one pool.
+type Store struct {
+	pool          *pgxpool.Pool
+	Users         *UserStore
+	Conversations *ConversationStore
+	Messages      *MessageStore
+}
+
+// Open connects a pgx pool and wires the sub-stores.
+func Open(ctx context.Context, dsn string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	s := &Store{pool: pool}
+	s.Users = &UserStore{pool: pool}
+	s.Conversations = &ConversationStore{pool: pool}
+	s.Messages = &MessageStore{pool: pool}
+	return s, nil
+}
+
+func (s *Store) Close() { s.pool.Close() }
+
+// Migrate applies a SQL file (idempotent DDL).
+func (s *Store) Migrate(ctx context.Context, path string) error {
+	sql, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, string(sql))
+	return err
+}
+
+func notFound(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	return err
+}
+
+var (
+	_ store.UserStore         = (*UserStore)(nil)
+	_ store.ConversationStore = (*ConversationStore)(nil)
+	_ store.MessageStore      = (*MessageStore)(nil)
+)
