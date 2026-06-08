@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import type { HackathonRegistration, CheckIn } from "@/contexts/UserContext";
 import { useFounderProfile } from "@/contexts/UserContext";
 import { computeMomentum } from "@/dashboard/_shared/hackathon/momentum";
+import { logHackathonCheckIn } from "@/lib/api/hackathon";
 
 interface Props {
   registration: HackathonRegistration;
@@ -67,6 +68,12 @@ export function BuildStage({ registration }: Props) {
       ...(status === "blocked" && blocker.trim() ? { blocker: blocker.trim() } : {}),
     };
     addCheckIn(registration.teamId, checkIn);
+    // Feed the org build-velocity heatmap on ai-router (best-effort).
+    void logHackathonCheckIn(registration.hackathonId, {
+      teamId: registration.teamId,
+      note: checkIn.update,
+      progressDelta: status === "on-track" ? 15 : status === "blocked" ? 3 : 8,
+    });
     toast.success("Check-in logged");
     setStatus("on-track");
     setUpdate("");

@@ -6,6 +6,7 @@ import type { HackathonRegistration, IdeaBrief } from "@/contexts/UserContext";
 import { useFounderProfile } from "@/contexts/UserContext";
 import { scoreBrief } from "@/dashboard/_shared/hackathon/scoring";
 import { momentumColor } from "@/dashboard/_shared/hackathon/momentum";
+import { submitHackathonBrief } from "@/lib/api/hackathon";
 
 interface Props {
   registration: HackathonRegistration;
@@ -141,6 +142,14 @@ export function BriefStage({ registration }: Props) {
       submittedAt: new Date().toISOString(),
     };
     submitBrief(registration.teamId, brief, scoreBrief(brief));
+    // Persist + score on ai-router so the org command-centre sees this idea
+    // (best-effort; local flow still works offline).
+    void submitHackathonBrief(registration.hackathonId, {
+      teamId: registration.teamId,
+      problem: brief.problem,
+      solution: brief.solutionSketch,
+      fields: brief,
+    });
     toast.success("Brief submitted — Build stage unlocked");
     goToBuild();
   };

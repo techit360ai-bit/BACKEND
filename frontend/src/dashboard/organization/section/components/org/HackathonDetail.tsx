@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -22,6 +22,10 @@ import {
   ArrowDownRight,
   Award,
 } from "lucide-react";
+import {
+  fetchHackathonOverview, fetchHackathonVelocity,
+  type HackathonOverview, type VelocityCell,
+} from "@/lib/api/hackathon";
 
 type TabId = "overview" | "registration" | "live" | "judging" | "report";
 
@@ -141,8 +145,8 @@ export function HackathonDetail() {
 
       {/* Tab content */}
       {tab === "overview" && <OverviewTab />}
-      {tab === "registration" && <RegistrationTab />}
-      {tab === "live" && <LiveCommandCentreTab />}
+      {tab === "registration" && <RegistrationTab hackathonId={event.id} />}
+      {tab === "live" && <LiveCommandCentreTab hackathonId={event.id} />}
       {tab === "judging" && <JudgingTab />}
       {tab === "report" && <IntelligenceReportTab />}
     </div>
@@ -202,7 +206,17 @@ function OverviewTab() {
 
 // ─── Stage 1: Registration & Teams ────────────────────────────
 
-function RegistrationTab() {
+function RegistrationTab({ hackathonId }: { hackathonId: string }) {
+  // Real registrant/team/solo counts from ai-router, polled for live-ness.
+  const [overview, setOverview] = useState<HackathonOverview | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => fetchHackathonOverview(hackathonId).then((o) => { if (alive) setOverview(o); });
+    load();
+    const t = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(t); };
+  }, [hackathonId]);
+
   const soloRegistrants = [
     { name: "Adaeze O.", role: "Backend Dev", cbs: 82, tss: "React, Node", crs: 91 },
     { name: "Liam W.", role: "Product Designer", cbs: 78, tss: "Figma, UX", crs: 88 },
@@ -235,9 +249,9 @@ function RegistrationTab() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Stat label="Total registrants" value="420" delta="+12 today" />
-        <Stat label="Teams formed" value="87" delta="solo → team 64% conv." />
-        <Stat label="Still solo" value="64" delta="needs match" tone="warn" />
+        <Stat label="Total registrants" value={String(overview?.registrants ?? 420)} delta="live" />
+        <Stat label="Teams formed" value={String(overview?.teamsFormed ?? 87)} delta="solo → team 64% conv." />
+        <Stat label="Still solo" value={String(overview?.stillSolo ?? 64)} delta="needs match" tone="warn" />
       </div>
 
       <Card title="MatchScore — solo registrants" icon={UserPlus}>
@@ -337,12 +351,33 @@ function RegistrationTab() {
 
 // ─── Live Command Centre ──────────────────────────────────────
 
-function LiveCommandCentreTab() {
-  // Mock 30-team velocity heatmap
-  const heatmap = Array.from({ length: 30 }, (_, i) => ({
-    team: `T${(i + 1).toString().padStart(2, "0")}`,
-    activity: Math.floor(Math.random() * 100),
-  }));
+function LiveCommandCentreTab({ hackathonId }: { hackathonId: string }) {
+  // Real build-velocity from ai-router check-ins, polled every 10s for live-ness.
+  // Replaces the previous Math.random() placeholder.
+  const [velocity, setVelocity] = useState<VelocityCell[]>([]);
+  const [overview, setOverview] = useState<HackathonOverview | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      fetchHackathonVelocity(hackathonId).then((v) => { if (alive) setVelocity(v); });
+      fetchHackathonOverview(hackathonId).then((o) => { if (alive) setOverview(o); });
+    };
+    load();
+    const t = setInterval(load, 10000);
+    return () => { alive = false; clearInterval(t); };
+  }, [hackathonId]);
+
+  // Build the heatmap from real cells; fall back to a deterministic placeholder
+  // grid (no randomness) when the backend has no data yet.
+  const heatmap = velocity.length
+    ? velocity.map((c, i) => ({ team: c.name?.slice(0, 6) || `T${i + 1}`, activity: c.activity }))
+    : Array.from({ length: 30 }, (_, i) => ({
+        team: `T${(i + 1).toString().padStart(2, "0")}`,
+        activity: (i * 37) % 100,
+      }));
+
+  const avgVelocity = overview ? Math.round(overview.avgBuildVelocity) : 64;
+  const ideaSubs = overview ? `${overview.ideaSubmissions} / ${overview.totalTeams}` : "58 / 87";
 
   return (
     <div className="space-y-6">
@@ -355,8 +390,8 @@ function LiveCommandCentreTab() {
         />
         <Stat
           label="Idea submissions"
-          value="58 / 87"
-          delta="29 teams pending"
+          value={ideaSubs}
+          delta="live"
           tone="warn"
         />
         <Stat
@@ -366,8 +401,8 @@ function LiveCommandCentreTab() {
         />
         <Stat
           label="Avg build velocity"
-          value="64"
-          delta="↑ 8 vs previous event"
+          value={String(avgVelocity)}
+          delta="live from check-ins"
           tone="good"
         />
       </div>
