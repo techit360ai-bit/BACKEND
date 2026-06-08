@@ -7,6 +7,7 @@ import { useFounderProfile } from "@/contexts/UserContext";
 import { fetchDashboardIntelligence, type DashboardIntelligence } from "@/lib/api/gsis";
 import { fetchAudioBriefing } from "@/lib/api/audio";
 import { runAnomalyScan, type RiskFlag } from "@/lib/api/alerts";
+import { fetchFounderProjects, type FounderProject } from "@/lib/api/projects";
 import { formatRelative } from "@/lib/formatRelative";
 import { OPPORTUNITIES } from "@/dashboard/_shared/opportunities/data";
 import type { Hackathon } from "@/dashboard/_shared/opportunities/types";
@@ -73,6 +74,19 @@ export function Dashboard() {
     }
   };
 
+  // S7 — founder venture portfolio (multiple separate startups).
+  const [ventures, setVentures] = useState<FounderProject[]>([]);
+  const [activeVentureId, setActiveVentureId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetchFounderProjects().then((list) => {
+      if (!alive) return;
+      setVentures(list);
+      setActiveVentureId((list.find((v) => v.isPrimary) ?? list[0])?.id ?? null);
+    });
+    return () => { alive = false; };
+  }, []);
+
   const firstName = p.name.split(" ")[0];
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
   const weeksBuilding = useMemo(
@@ -106,6 +120,48 @@ export function Dashboard() {
         <h1 className="text-2xl font-bold text-slate-900">Good morning, {firstName}.</h1>
         <p className="text-sm text-slate-500 mt-0.5">{today} · Week {weeksBuilding} of building</p>
       </div>
+
+      {/* Your ventures — multi-project portfolio (S7) */}
+      {ventures.length > 0 && (
+        <div className="border border-slate-200 bg-white rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-700">Your ventures</h2>
+            <button
+              type="button"
+              onClick={() => navigate("/incubation-hub")}
+              className="text-xs text-violet-600 hover:underline"
+            >
+              + Analyze a new idea
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {ventures.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setActiveVentureId(v.id)}
+                className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                  activeVentureId === v.id
+                    ? "border-violet-400 bg-violet-50"
+                    : "border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900">{v.title}</span>
+                  {v.isPrimary && <span className="text-[10px] uppercase tracking-wide text-violet-600">Primary</span>}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5">
+                  <span className="text-xs text-slate-500 capitalize">{v.stage}</span>
+                  <span className="text-xs text-slate-400">GSIS {Math.round(v.gsisScore)}</span>
+                  <span className={`text-xs ${v.hasWorkspace ? "text-emerald-600" : "text-slate-400"}`}>
+                    {v.hasWorkspace ? "● workspace" : "no workspace"}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Startup hero */}
       <Link to="/incubation-hub" className="block group border border-slate-200 bg-white rounded-xl p-6 hover:border-violet-300 transition-colors">
