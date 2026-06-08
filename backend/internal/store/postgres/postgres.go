@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,7 +40,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 
 func (s *Store) Close() { s.pool.Close() }
 
-// Migrate applies a SQL file (idempotent DDL).
+// Migrate applies a single SQL file (idempotent DDL).
 func (s *Store) Migrate(ctx context.Context, path string) error {
 	sql, err := os.ReadFile(path)
 	if err != nil {
@@ -46,6 +48,21 @@ func (s *Store) Migrate(ctx context.Context, path string) error {
 	}
 	_, err = s.pool.Exec(ctx, string(sql))
 	return err
+}
+
+// MigrateAll applies every *.sql file in dir, sorted by name, in order.
+func (s *Store) MigrateAll(ctx context.Context, dir string) error {
+	files, err := filepath.Glob(filepath.Join(dir, "*.sql"))
+	if err != nil {
+		return err
+	}
+	sort.Strings(files)
+	for _, f := range files {
+		if err := s.Migrate(ctx, f); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func notFound(err error) error {

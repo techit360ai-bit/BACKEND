@@ -83,6 +83,8 @@ type MessageStore interface {
 	// ExistsByClientMsgID reports whether a message from senderID in convID with
 	// the given clientMsgID already exists (idempotency/dedup).
 	ExistsByClientMsgID(ctx context.Context, convID, senderID, clientMsgID string) (string, bool, error)
+	// BelongsToConversation reports whether msgID is a message in convID.
+	BelongsToConversation(ctx context.Context, msgID, convID string) (bool, error)
 }
 
 // Router delivers a server->client envelope to a user's live connections.

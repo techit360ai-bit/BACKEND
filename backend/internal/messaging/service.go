@@ -17,6 +17,10 @@ import (
 // ErrNotParticipant is returned when a sender is not part of the conversation.
 var ErrNotParticipant = errors.New("not a participant")
 
+// ErrMessageNotInConversation is returned when a referenced message does not
+// belong to the conversation it is being acted on within.
+var ErrMessageNotInConversation = errors.New("message not in conversation")
+
 // Service handles DM messaging.
 type Service struct {
 	convos store.ConversationStore
@@ -125,6 +129,13 @@ func (s *Service) MarkRead(ctx context.Context, readerID string, p protocol.Read
 	}
 	if !ok {
 		return ErrNotParticipant
+	}
+	belongs, err := s.msgs.BelongsToConversation(ctx, p.MsgID, p.ConvID)
+	if err != nil {
+		return err
+	}
+	if !belongs {
+		return ErrMessageNotInConversation
 	}
 	if err := s.convos.SetReadCursor(ctx, p.ConvID, readerID, p.MsgID); err != nil {
 		return err

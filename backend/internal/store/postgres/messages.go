@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,6 +45,9 @@ func (s *MessageStore) SetReceipt(ctx context.Context, msgID, userID string, st 
 }
 
 func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, before string, limit int) ([]store.Message, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
 	q := `SELECT id, conversation_id, sender_id, type, body, created_at
 	      FROM messages WHERE conversation_id=$1`
 	args := []any{convID}
@@ -50,7 +55,7 @@ func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, befor
 		q += ` AND id < $2`
 		args = append(args, before)
 	}
-	q += ` ORDER BY id DESC LIMIT ` + itoa(limit)
+	q += ` ORDER BY id DESC LIMIT ` + strconv.Itoa(limit)
 	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -73,7 +78,7 @@ func (s *MessageStore) ExistsByClientMsgID(ctx context.Context, convID, senderID
 	}
 	var id string
 	err := s.pool.QueryRow(ctx, `SELECT id FROM messages WHERE conversation_id=$1 AND sender_id=$2 AND client_msg_id=$3`, convID, senderID, clientMsgID).Scan(&id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -82,15 +87,12 @@ func (s *MessageStore) ExistsByClientMsgID(ctx context.Context, convID, senderID
 	return id, true, nil
 }
 
-// itoa avoids importing strconv for a small bounded int.
-func itoa(n int) string {
-	if n <= 0 {
-		return "50"
+// BelongsToConversation reports whether msgID is a message in convID.
+func (s *MessageStore) BelongsToConversation(ctx context.Context, msgID, convID string) (bool, error) {
+	var x int
+	err := s.pool.QueryRow(ctx, `SELECT 1 FROM messages WHERE id=$1 AND conversation_id=$2`, msgID, convID).Scan(&x)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
 	}
-	digits := ""
-	for n > 0 {
-		digits = string(rune('0'+n%10)) + digits
-		n /= 10
-	}
-	return digits
+	return err == nil, err
 }

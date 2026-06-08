@@ -71,6 +71,53 @@ func TestSendDMDedupByClientMsgID(t *testing.T) {
 	}
 }
 
+func TestSendDMOfflineRecipientNoDeliveredReceipt(t *testing.T) {
+	svc, st, rt := newSvc()
+	ctx := context.Background()
+	c, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	// recipient u2 is NOT in rt.LocalUsers -> RouteToUser returns false (queued, not local)
+
+	res, err := svc.SendDM(ctx, "u1", protocol.SendPayload{ConvID: c.ID, ClientMsgID: "m1", Body: "hi"})
+	if err != nil {
+		t.Fatalf("SendDM: %v", err)
+	}
+	// recipient still got message.new (RouteToUser was called, returned false)
+	got := rt.Sent["u2"]
+	if len(got) == 0 || got[0].Type != protocol.TypeMessageNew {
+		t.Fatalf("recipient not routed message.new: %v", got)
+	}
+	// sender must NOT receive any delivered receipt
+	for _, e := range rt.Sent["u1"] {
+		if e.Type == protocol.TypeReceiptUpdate {
+			t.Fatalf("sender unexpectedly got delivered receipt: %+v", e)
+		}
+	}
+	_ = res
+}
+
+func TestMarkReadByNonParticipantRejected(t *testing.T) {
+	svc, st, _ := newSvc()
+	ctx := context.Background()
+	c, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	res, _ := svc.SendDM(ctx, "u1", protocol.SendPayload{ConvID: c.ID, ClientMsgID: "m1", Body: "hi"})
+	if err := svc.MarkRead(ctx, "u3", protocol.ReadUptoPayload{ConvID: c.ID, MsgID: res.MsgID}); err == nil {
+		t.Fatal("expected rejection for non-participant reader")
+	}
+}
+
+func TestMarkReadRejectsForeignMessage(t *testing.T) {
+	svc, st, _ := newSvc()
+	ctx := context.Background()
+	convA, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	convB, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u3")
+	// message lives in convB
+	resB, _ := svc.SendDM(ctx, "u1", protocol.SendPayload{ConvID: convB.ID, ClientMsgID: "mb", Body: "hi"})
+	// MarkRead in convA with a msgId from convB -> error
+	if err := svc.MarkRead(ctx, "u2", protocol.ReadUptoPayload{ConvID: convA.ID, MsgID: resB.MsgID}); err == nil {
+		t.Fatal("expected rejection for foreign message")
+	}
+}
+
 func TestMarkReadSetsCursorAndReceipt(t *testing.T) {
 	svc, st, rt := newSvc()
 	ctx := context.Background()

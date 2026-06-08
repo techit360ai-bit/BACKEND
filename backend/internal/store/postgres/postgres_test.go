@@ -24,7 +24,7 @@ func setup(t *testing.T) *Store {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := st.Migrate(context.Background(), "../migrations/0001_init.sql"); err != nil {
+	if err := st.MigrateAll(context.Background(), "../migrations"); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
@@ -53,6 +53,31 @@ func TestPostgresDMRoundTrip(t *testing.T) {
 	got, err := st.Messages.MessagesByConversation(ctx, c.ID, "", 10)
 	if err != nil || len(got) != 1 || got[0].Body != "hi" {
 		t.Fatalf("query: %v err=%v", got, err)
+	}
+}
+
+func TestGetOrCreateDMIdempotent(t *testing.T) {
+	st := setup(t)
+	ctx := context.Background()
+	// Use a fresh user pair so this test is independent of others sharing the DB.
+	const uuidC = "01890000-0000-7000-8000-0000000000cc"
+	const uuidD = "01890000-0000-7000-8000-0000000000dd"
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidC, DisplayName: "C"})
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidD, DisplayName: "D"})
+
+	c1, created1, err := st.Conversations.GetOrCreateDM(ctx, uuidC, uuidD)
+	if err != nil || !created1 {
+		t.Fatalf("first create: created=%v err=%v", created1, err)
+	}
+	// second call returns the same conversation, created=false
+	c2, created2, err := st.Conversations.GetOrCreateDM(ctx, uuidC, uuidD)
+	if err != nil || created2 || c2.ID != c1.ID {
+		t.Fatalf("second call not idempotent: id=%s (want %s) created=%v err=%v", c2.ID, c1.ID, created2, err)
+	}
+	// order-insensitive: swapping args yields the same conversation
+	c3, created3, err := st.Conversations.GetOrCreateDM(ctx, uuidD, uuidC)
+	if err != nil || created3 || c3.ID != c1.ID {
+		t.Fatalf("order-insensitive failed: id=%s (want %s) created=%v err=%v", c3.ID, c1.ID, created3, err)
 	}
 }
 

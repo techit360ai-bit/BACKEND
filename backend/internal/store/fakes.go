@@ -160,6 +160,16 @@ func (s *FakeMessageStore) ExistsByClientMsgID(_ context.Context, convID, sender
 	}
 	return "", false, nil
 }
+func (s *FakeMessageStore) BelongsToConversation(_ context.Context, msgID, convID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, m := range s.byConv[convID] {
+		if m.ID == msgID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // FakeRouter records routed envelopes per user for assertions.
 type FakeRouter struct {
