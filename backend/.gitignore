@@ -1,5 +1,6 @@
-node_modules/
-
+# Go
+/server
+*.test
+*.out
+vendor/
 .env
-
-dist/

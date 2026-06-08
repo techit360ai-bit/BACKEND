@@ -1,1 +1,0 @@
-# Database connection (e.g., db.js)
