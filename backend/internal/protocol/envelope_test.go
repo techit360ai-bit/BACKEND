@@ -46,3 +46,20 @@ func TestNewMsgIDIsTimeOrdered(t *testing.T) {
 		t.Errorf("UUIDv7 not lexically time-ordered: a=%s b=%s", a, b)
 	}
 }
+
+func TestPostPayloadDecode(t *testing.T) {
+	data := json.RawMessage(`{"kind":"update","body":"shipped v1"}`)
+	var p CreatePostPayload
+	if err := json.Unmarshal(data, &p); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if p.Kind != "update" || p.Body != "shipped v1" {
+		t.Errorf("bad payload: %+v", p)
+	}
+}
+
+func TestPostServerTypesExist(t *testing.T) {
+	if TypePostNew == "" || TypePostLiked == "" || TypePostComment == "" {
+		t.Fatal("post server type constants must be non-empty")
+	}
+}

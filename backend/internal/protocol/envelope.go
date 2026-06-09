@@ -33,6 +33,9 @@ const (
 	TypeTypingIndicator = "typing.indicator"
 	TypePresenceChanged = "presence.changed"
 	TypeError           = "error"
+	TypePostNew         = "post.new"
+	TypePostLiked       = "post.liked"
+	TypePostComment     = "post.comment"
 )
 
 // SendPayload is the data of a message.send envelope. Exactly one of ConvID or
@@ -50,6 +53,17 @@ type ReadUptoPayload struct {
 	ConvID    string `json:"convId,omitempty"`
 	ChannelID string `json:"channelId,omitempty"`
 	MsgID     string `json:"msgId"`
+}
+
+// CreatePostPayload is the body of a create-post request (REST).
+type CreatePostPayload struct {
+	Kind string `json:"kind"`
+	Body string `json:"body"`
+}
+
+// CommentPayload is the body of an add-comment request (REST).
+type CommentPayload struct {
+	Body string `json:"body"`
 }
 
 // NewMsgID returns a UUIDv7 string. UUIDv7 is time-ordered, so lexical sort
