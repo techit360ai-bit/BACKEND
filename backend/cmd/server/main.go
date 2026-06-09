@@ -1,0 +1,85 @@
+// Command server runs the TechIT messaging service: HTTP API + WebSocket gateway
+// backed by Postgres and Redis.
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/config"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/pubsub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/store/postgres"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/transport/httpapi"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/transport/ws"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	// Postgres
+	pg, err := postgres.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("postgres: %v", err)
+	}
+	defer pg.Close()
+	if err := pg.MigrateAll(ctx, "internal/store/migrations"); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+
+	// Redis pub/sub + presence
+	rps, err := pubsub.NewRedis(cfg.RedisURL)
+	if err != nil {
+		log.Fatalf("redis: %v", err)
+	}
+	defer rps.Close()
+
+	h := hub.New(rps)
+	go h.Run(ctx)
+
+	presSvc := presence.New(presence.NewRedisStore(rps.Client()), nil)
+	msgSvc := messaging.New(pg.Conversations, pg.Messages, h)
+	ver := auth.NewVerifier(cfg.JWTSecret)
+
+	gw := ws.New(ws.Deps{
+		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Presence: presSvc,
+		InsecureSkipOriginCheck: cfg.CORSOrigins == "*",
+	})
+	api := httpapi.NewRouter(httpapi.Deps{
+		Verifier: ver, Users: pg.Users, Conversations: pg.Conversations,
+		Messages: pg.Messages, Messaging: msgSvc, Presence: presSvc,
+		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1", CORSOrigins: cfg.CORSOrigins,
+	})
+
+	mux := http.NewServeMux()
+	mux.Handle("/", api)
+	mux.HandleFunc("/ws", gw.Handle)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
+	go func() {
+		log.Printf("messaging service listening on :%s", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("shutting down")
+	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shutCtx)
+}
