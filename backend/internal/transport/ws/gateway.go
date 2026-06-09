@@ -6,6 +6,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 
@@ -56,15 +57,21 @@ func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	// upsert identity from claims (self-contained in Phase 1)
-	ctx := r.Context()
-	_ = g.d.Users.Upsert(ctx, store.User{ID: claims.UserID, DisplayName: claims.Name, Role: claims.Role})
+	// The connection outlives the HTTP request, so derive its context from
+	// Background — r.Context() cancellation across a WS upgrade is library-
+	// dependent and could kill the pumps. cancel() on teardown stops them.
+	connCtx, cancel := context.WithCancel(context.Background())
+
+	// Upsert identity from claims (a precondition for sending: messages FK to
+	// users). Best-effort but logged — a failure means later sends will error.
+	if err := g.d.Users.Upsert(connCtx, store.User{ID: claims.UserID, DisplayName: claims.Name, Role: claims.Role}); err != nil {
+		log.Printf("ws: user upsert failed for %s: %v", claims.UserID, err)
+	}
 
 	c := hub.NewConn(claims.UserID)
 	g.d.Hub.Register(c)
-	_ = g.d.Presence.Online(ctx, claims.UserID)
+	_ = g.d.Presence.Online(connCtx, claims.UserID)
 
-	connCtx, cancel := context.WithCancel(ctx)
 	defer func() {
 		cancel()
 		g.d.Hub.Unregister(c)
