@@ -31,8 +31,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Postgres
-	pg, err := postgres.Open(ctx, cfg.DatabaseURL)
+	// Postgres (retry: compose healthcheck can go green during postgres' init
+	// phase before it restarts for real, so the first dials may be refused)
+	pg, err := openPostgresWithRetry(ctx, cfg.DatabaseURL, 30*time.Second)
 	if err != nil {
 		log.Fatalf("postgres: %v", err)
 	}
@@ -82,4 +83,27 @@ func main() {
 	shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutCtx)
+}
+
+// openPostgresWithRetry retries postgres.Open until it succeeds or the deadline
+// passes. Tolerates the brief window where the DB is starting/restarting.
+func openPostgresWithRetry(ctx context.Context, dsn string, within time.Duration) (*postgres.Store, error) {
+	deadline := time.Now().Add(within)
+	var lastErr error
+	for {
+		pg, err := postgres.Open(ctx, dsn)
+		if err == nil {
+			return pg, nil
+		}
+		lastErr = err
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return nil, lastErr
+		}
+		log.Printf("postgres not ready, retrying: %v", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }

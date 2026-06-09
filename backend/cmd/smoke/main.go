@@ -71,17 +71,23 @@ func fail(msg string) {
 	os.Exit(1)
 }
 
+// Smoke users are fixed UUIDs (users.id is a UUID column).
+const (
+	userA = "11111111-1111-4111-8111-111111111111"
+	userB = "22222222-2222-4222-8222-222222222222"
+)
+
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	tokA, err := devToken("smokeA")
+	tokA, err := devToken(userA)
 	must(err, "mint A")
-	tokB, err := devToken("smokeB")
+	tokB, err := devToken(userB)
 	must(err, "mint B")
 
 	// create conversation A<->B
-	resp, err := authPostJSON(ctx, "/api/v1/conversations", tokA, map[string]string{"userId": "smokeB"})
+	resp, err := authPostJSON(ctx, "/api/v1/conversations", tokA, map[string]string{"userId": userB})
 	must(err, "create conv")
 	var conv struct {
 		ID string `json:"id"`
