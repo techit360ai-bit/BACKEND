@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
@@ -21,10 +23,13 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	ver := auth.NewVerifier("s")
 	h := hub.New(pubsub.NewInMemory())
 	msg := messaging.New(st.Conversations, st.Messages, h)
+	chSvc := channel.New(st.Channels, h)
+	feedSvc := feed.New(st.Posts, h)
 	pres := presence.New(presence.NewInMemoryStore(), nil)
 	r := NewRouter(Deps{
 		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
-		Messages: st.Messages, Messaging: msg, Presence: pres, EnableDevToken: true,
+		Messages: st.Messages, Messaging: msg, Channels: chSvc, ChannelStore: st.Channels,
+		Feed: feedSvc, Presence: pres, EnableDevToken: true,
 	})
 	return r, ver, st
 }
@@ -105,5 +110,74 @@ func TestCreateConversationAndHistory(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
 	if len(hist.Messages) != 1 {
 		t.Fatalf("want 1 message, got %d (%s)", len(hist.Messages), rec.Body)
+	}
+}
+
+func TestChannelSendAndHistory(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	st.Channels.AddMember("ch1", "u1")
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	rec := httptest.NewRecorder()
+	sb, _ := json.Marshal(map[string]string{"clientMsgId": "m1", "type": "text", "body": "hi chan"})
+	req := httptest.NewRequest("POST", "/api/v1/channels/ch1/messages", bytes.NewReader(sb))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("send code=%d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/channels/ch1/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("history code=%d", rec.Code)
+	}
+	var hist struct{ Messages []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
+	if len(hist.Messages) != 1 {
+		t.Fatalf("want 1 channel message, got %d", len(hist.Messages))
+	}
+}
+
+func TestCreateAndListPosts(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	rec := httptest.NewRecorder()
+	pb, _ := json.Marshal(map[string]string{"kind": "update", "body": "shipped v1"})
+	req := httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create code=%d body=%s", rec.Code, rec.Body)
+	}
+	var created struct{ ID string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	if created.ID == "" {
+		t.Fatal("no post id")
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/posts", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	var list struct{ Posts []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if len(list.Posts) != 1 {
+		t.Fatalf("want 1 post, got %d", len(list.Posts))
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/api/v1/posts/"+created.ID+"/like", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("like code=%d", rec.Code)
 	}
 }

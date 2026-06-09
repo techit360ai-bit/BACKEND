@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
@@ -23,6 +25,9 @@ type Deps struct {
 	Conversations  store.ConversationStore
 	Messages       store.MessageStore
 	Messaging      *messaging.Service
+	Channels       *channel.Service
+	ChannelStore   store.ChannelStore
+	Feed           *feed.Service
 	Presence       *presence.Service
 	EnableDevToken bool
 	CORSOrigins    string
@@ -50,6 +55,18 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/conversations/{id}/messages", handleRESTSend(d))
 			r.Post("/conversations/{id}/read", handleMarkRead(d))
 			r.Get("/users/online", handleOnline(d))
+
+			r.Get("/channels", handleListChannels(d))
+			r.Get("/channels/{id}/messages", handleChannelHistory(d))
+			r.Post("/channels/{id}/messages", handleChannelSend(d))
+			r.Post("/channels/{id}/read", handleChannelRead(d))
+
+			r.Get("/posts", handleListPosts(d))
+			r.Post("/posts", handleCreatePost(d))
+			r.Post("/posts/{id}/like", handleLikePost(d))
+			r.Delete("/posts/{id}/like", handleUnlikePost(d))
+			r.Get("/posts/{id}/comments", handleListComments(d))
+			r.Post("/posts/{id}/comments", handleAddComment(d))
 		})
 	})
 	return r
