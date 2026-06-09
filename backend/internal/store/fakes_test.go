@@ -21,6 +21,42 @@ func TestFakeConversationGetOrCreateDMStable(t *testing.T) {
 	}
 }
 
+func TestFakeChannelSendAndQuery(t *testing.T) {
+	f := NewFakeStores()
+	ctx := context.Background()
+	f.Channels.AddMember("ch1", "u1")
+	f.Channels.AddMember("ch1", "u2")
+	m := Message{ID: "01890000-0000-7000-8000-000000000010", ChannelID: "ch1", SenderID: "u1", Type: "text", Body: "hey team"}
+	if err := f.Channels.InsertChannelMessage(ctx, m, "c1"); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, _ := f.Channels.MessagesByChannel(ctx, "ch1", "", 10)
+	if len(got) != 1 || got[0].Body != "hey team" {
+		t.Fatalf("query: %v", got)
+	}
+	members, _ := f.Channels.Members(ctx, "ch1")
+	if len(members) != 2 {
+		t.Fatalf("members: %v", members)
+	}
+}
+
+func TestFakePostLifecycle(t *testing.T) {
+	f := NewFakeStores()
+	ctx := context.Background()
+	_ = f.Posts.CreatePost(ctx, Post{ID: "p1", AuthorID: "u1", Kind: "update", Body: "hi"})
+	_ = f.Posts.Like(ctx, "p1", "u2")
+	_ = f.Posts.Like(ctx, "p1", "u2") // idempotent
+	n, _ := f.Posts.LikeCount(ctx, "p1")
+	if n != 1 {
+		t.Fatalf("like count = %d, want 1", n)
+	}
+	_ = f.Posts.AddComment(ctx, Comment{ID: "cm1", PostID: "p1", AuthorID: "u3", Body: "nice"})
+	cs, _ := f.Posts.ListComments(ctx, "p1")
+	if len(cs) != 1 {
+		t.Fatalf("comments: %v", cs)
+	}
+}
+
 func TestFakeInsertDMAndQuery(t *testing.T) {
 	f := NewFakeStores()
 	ctx := context.Background()

@@ -13,6 +13,8 @@ type FakeStores struct {
 	Users         *FakeUserStore
 	Conversations *FakeConversationStore
 	Messages      *FakeMessageStore
+	Channels      *FakeChannelStore
+	Posts         *FakePostStore
 }
 
 func NewFakeStores() *FakeStores {
@@ -20,6 +22,8 @@ func NewFakeStores() *FakeStores {
 		Users:         &FakeUserStore{m: map[string]User{}},
 		Conversations: &FakeConversationStore{convos: map[string][2]string{}, cursors: map[string]string{}},
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
+		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
+		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}},
 	}
 }
 
@@ -188,3 +192,168 @@ func (r *FakeRouter) RouteToUser(_ context.Context, userID string, env protocol.
 	r.Sent[userID] = append(r.Sent[userID], env)
 	return r.LocalUsers[userID], nil
 }
+
+// FakeChannelStore is an in-memory ChannelStore.
+type FakeChannelStore struct {
+	mu        sync.Mutex
+	members   map[string]map[string]struct{} // channelID -> set of userIDs
+	byChan    map[string][]Message
+	clientIDs map[string]string // channelID|sender|clientMsgID -> msgID
+	cursors   map[string]string // channelID|userID -> msgID
+}
+
+// AddMember is a test helper to seed membership.
+func (s *FakeChannelStore) AddMember(channelID, userID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.members[channelID] == nil {
+		s.members[channelID] = map[string]struct{}{}
+	}
+	s.members[channelID][userID] = struct{}{}
+}
+
+func (s *FakeChannelStore) ListForUser(_ context.Context, userID string) ([]Channel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Channel
+	for ch, set := range s.members {
+		if _, ok := set[userID]; ok {
+			out = append(out, Channel{ID: ch, Name: ch, Kind: "hangout"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+func (s *FakeChannelStore) Members(_ context.Context, channelID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for u := range s.members[channelID] {
+		out = append(out, u)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+func (s *FakeChannelStore) IsMember(_ context.Context, channelID, userID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.members[channelID][userID]
+	return ok, nil
+}
+func (s *FakeChannelStore) MessagesByChannel(_ context.Context, channelID, before string, limit int) ([]Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	all := s.byChan[channelID]
+	out := make([]Message, 0, len(all))
+	for i := len(all) - 1; i >= 0; i-- {
+		if before != "" && all[i].ID >= before {
+			continue
+		}
+		out = append(out, all[i])
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+func (s *FakeChannelStore) InsertChannelMessage(_ context.Context, m Message, clientMsgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byChan[m.ChannelID] = append(s.byChan[m.ChannelID], m)
+	if clientMsgID != "" {
+		s.clientIDs[m.ChannelID+"|"+m.SenderID+"|"+clientMsgID] = m.ID
+	}
+	return nil
+}
+func (s *FakeChannelStore) ExistsByClientMsgID(_ context.Context, channelID, senderID, clientMsgID string) (string, bool, error) {
+	if clientMsgID == "" {
+		return "", false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.clientIDs[channelID+"|"+senderID+"|"+clientMsgID]; ok {
+		return id, true, nil
+	}
+	return "", false, nil
+}
+func (s *FakeChannelStore) SetReadCursor(_ context.Context, channelID, userID, msgID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cursors[channelID+"|"+userID] = msgID
+	return nil
+}
+
+// FakePostStore is an in-memory PostStore.
+type FakePostStore struct {
+	mu       sync.Mutex
+	posts    map[string]Post
+	order    []string // post IDs in creation order
+	likes    map[string]map[string]struct{}
+	comments map[string][]Comment
+}
+
+func (s *FakePostStore) CreatePost(_ context.Context, p Post) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.posts[p.ID] = p
+	s.order = append(s.order, p.ID)
+	return nil
+}
+func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) ([]Post, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]Post, 0, limit)
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		if before != "" && id >= before {
+			continue
+		}
+		out = append(out, s.posts[id])
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+func (s *FakePostStore) Like(_ context.Context, postID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.likes[postID] == nil {
+		s.likes[postID] = map[string]struct{}{}
+	}
+	s.likes[postID][userID] = struct{}{}
+	return nil
+}
+func (s *FakePostStore) Unlike(_ context.Context, postID, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.likes[postID], userID)
+	return nil
+}
+func (s *FakePostStore) LikeCount(_ context.Context, postID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.likes[postID]), nil
+}
+func (s *FakePostStore) AddComment(_ context.Context, c Comment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.comments[c.PostID] = append(s.comments[c.PostID], c)
+	return nil
+}
+func (s *FakePostStore) ListComments(_ context.Context, postID string) ([]Comment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Comment(nil), s.comments[postID]...), nil
+}
+func (s *FakePostStore) PostExists(_ context.Context, postID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.posts[postID]
+	return ok, nil
+}
+
+var (
+	_ ChannelStore = (*FakeChannelStore)(nil)
+	_ PostStore    = (*FakePostStore)(nil)
+)
