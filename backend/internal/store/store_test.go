@@ -15,3 +15,12 @@ func TestMessageZeroValue(t *testing.T) {
 		t.Fatal("unexpected non-zero default")
 	}
 }
+
+func TestChannelAndPostZeroValues(t *testing.T) {
+	var c Channel
+	var p Post
+	var cm Comment
+	if c.ID != "" || p.ID != "" || cm.ID != "" {
+		t.Fatal("unexpected non-zero defaults")
+	}
+}

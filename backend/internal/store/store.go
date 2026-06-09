@@ -49,6 +49,32 @@ type Conversation struct {
 	CreatedAt time.Time
 }
 
+// Channel is a group/Hangout channel.
+type Channel struct {
+	ID        string
+	Name      string
+	Kind      string // hangout|workspace
+	CreatedAt time.Time
+}
+
+// Post is a social-feed post.
+type Post struct {
+	ID        string
+	AuthorID  string
+	Kind      string
+	Body      string
+	CreatedAt time.Time
+}
+
+// Comment is a comment on a Post.
+type Comment struct {
+	ID        string
+	PostID    string
+	AuthorID  string
+	Body      string
+	CreatedAt time.Time
+}
+
 // UserStore upserts and reads users.
 type UserStore interface {
 	Upsert(ctx context.Context, u User) error
@@ -85,6 +111,37 @@ type MessageStore interface {
 	ExistsByClientMsgID(ctx context.Context, convID, senderID, clientMsgID string) (string, bool, error)
 	// BelongsToConversation reports whether msgID is a message in convID.
 	BelongsToConversation(ctx context.Context, msgID, convID string) (bool, error)
+}
+
+// ChannelStore manages group channels, membership, and read cursors.
+type ChannelStore interface {
+	// ListForUser returns channels the user is a member of.
+	ListForUser(ctx context.Context, userID string) ([]Channel, error)
+	// Members returns the user IDs in a channel.
+	Members(ctx context.Context, channelID string) ([]string, error)
+	// IsMember reports whether userID belongs to channelID.
+	IsMember(ctx context.Context, channelID, userID string) (bool, error)
+	// MessagesByChannel returns up to limit messages with id < before
+	// (before == "" means latest), ordered by id DESC.
+	MessagesByChannel(ctx context.Context, channelID, before string, limit int) ([]Message, error)
+	// InsertChannelMessage stores a channel message (carrying clientMsgID for dedup).
+	InsertChannelMessage(ctx context.Context, m Message, clientMsgID string) error
+	// ExistsByClientMsgID reports an existing channel message id for dedup.
+	ExistsByClientMsgID(ctx context.Context, channelID, senderID, clientMsgID string) (string, bool, error)
+	// SetReadCursor advances last_read_msg_id for a member.
+	SetReadCursor(ctx context.Context, channelID, userID, msgID string) error
+}
+
+// PostStore manages feed posts, likes, and comments.
+type PostStore interface {
+	CreatePost(ctx context.Context, p Post) error
+	ListPosts(ctx context.Context, before string, limit int) ([]Post, error)
+	Like(ctx context.Context, postID, userID string) error
+	Unlike(ctx context.Context, postID, userID string) error
+	LikeCount(ctx context.Context, postID string) (int, error)
+	AddComment(ctx context.Context, c Comment) error
+	ListComments(ctx context.Context, postID string) ([]Comment, error)
+	PostExists(ctx context.Context, postID string) (bool, error)
 }
 
 // Router delivers a server->client envelope to a user's live connections.
