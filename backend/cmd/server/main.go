@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/config"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
@@ -54,15 +56,18 @@ func main() {
 
 	presSvc := presence.New(presence.NewRedisStore(rps.Client()), nil)
 	msgSvc := messaging.New(pg.Conversations, pg.Messages, h)
+	chSvc := channel.New(pg.Channels, h)
+	feedSvc := feed.New(pg.Posts, h)
 	ver := auth.NewVerifier(cfg.JWTSecret)
 
 	gw := ws.New(ws.Deps{
-		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Presence: presSvc,
+		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Channels: chSvc, Presence: presSvc,
 		InsecureSkipOriginCheck: cfg.CORSOrigins == "*",
 	})
 	api := httpapi.NewRouter(httpapi.Deps{
 		Verifier: ver, Users: pg.Users, Conversations: pg.Conversations,
-		Messages: pg.Messages, Messaging: msgSvc, Presence: presSvc,
+		Messages: pg.Messages, Messaging: msgSvc, Channels: chSvc, ChannelStore: pg.Channels,
+		Feed: feedSvc, Presence: presSvc,
 		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1", CORSOrigins: cfg.CORSOrigins,
 	})
 
