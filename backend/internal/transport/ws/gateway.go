@@ -12,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
@@ -25,6 +26,7 @@ type Deps struct {
 	Verifier  *auth.Verifier
 	Users     store.UserStore
 	Messaging *messaging.Service
+	Channels  *channel.Service
 	Presence  *presence.Service
 	// InsecureSkipOriginCheck disables same-origin enforcement (dev/CORS=*).
 	InsecureSkipOriginCheck bool
@@ -135,13 +137,26 @@ func (g *Gateway) dispatch(ctx context.Context, userID string, env protocol.Enve
 		if json.Unmarshal(env.Data, &p) != nil {
 			return
 		}
-		ack, err := g.d.Messaging.SendDM(ctx, userID, p)
+		// Route by target: channelId set -> channel send; else DM. Each branch
+		// produces its own package's AckResult; both emit a message.ack.
+		if p.ChannelID != "" {
+			a, err := g.d.Channels.SendChannel(ctx, userID, p)
+			if err != nil {
+				g.sendError(ctx, userID, "send_failed", err.Error())
+				return
+			}
+			g.send(ctx, userID, protocol.TypeMessageAck, map[string]any{
+				"clientMsgId": a.ClientMsgID, "msgId": a.MsgID, "ts": a.TS,
+			})
+			return
+		}
+		a, err := g.d.Messaging.SendDM(ctx, userID, p)
 		if err != nil {
 			g.sendError(ctx, userID, "send_failed", err.Error())
 			return
 		}
 		g.send(ctx, userID, protocol.TypeMessageAck, map[string]any{
-			"clientMsgId": ack.ClientMsgID, "msgId": ack.MsgID, "ts": ack.TS,
+			"clientMsgId": a.ClientMsgID, "msgId": a.MsgID, "ts": a.TS,
 		})
 	case protocol.TypeReadUpto:
 		var p protocol.ReadUptoPayload
@@ -152,7 +167,14 @@ func (g *Gateway) dispatch(ctx context.Context, userID string, env protocol.Enve
 			g.sendError(ctx, userID, "read_failed", err.Error())
 		}
 	case protocol.TypeTypingStart, protocol.TypeTypingStop:
-		// ephemeral; DM/channel typing relay is deferred to Plan 3. Ignore for now.
+		var p protocol.ReadUptoPayload // reuses the {convId?, channelId?} shape
+		if json.Unmarshal(env.Data, &p) != nil {
+			return
+		}
+		if p.ChannelID != "" {
+			_ = g.d.Channels.RelayTyping(ctx, userID, p.ChannelID, env.Type == protocol.TypeTypingStart)
+		}
+		// DM typing relay deferred to a later phase (needs conv participant lookup).
 	}
 }
 

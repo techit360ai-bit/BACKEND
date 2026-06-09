@@ -11,6 +11,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
@@ -28,8 +29,9 @@ func newTestGateway(t *testing.T) (*httptest.Server, *auth.Verifier, *store.Fake
 	go h.Run(ctx)
 	ver := auth.NewVerifier("test-secret")
 	msg := messaging.New(st.Conversations, st.Messages, h)
+	chSvc := channel.New(st.Channels, h)
 	pres := presence.New(presence.NewInMemoryStore(), nil)
-	gw := New(Deps{Hub: h, Verifier: ver, Users: st.Users, Messaging: msg, Presence: pres, InsecureSkipOriginCheck: true})
+	gw := New(Deps{Hub: h, Verifier: ver, Users: st.Users, Messaging: msg, Channels: chSvc, Presence: pres, InsecureSkipOriginCheck: true})
 	srv := httptest.NewServer(http.HandlerFunc(gw.Handle))
 	t.Cleanup(srv.Close)
 	return srv, ver, st
@@ -112,4 +114,38 @@ func awaitType(t *testing.T, ctx context.Context, c *websocket.Conn, want string
 		}
 	}
 	return false
+}
+
+func TestGatewayDeliversChannelMessage(t *testing.T) {
+	srv, ver, st := newTestGateway(t)
+	ctx := context.Background()
+	st.Channels.AddMember("chX", "u1")
+	st.Channels.AddMember("chX", "u2")
+	tokA, _ := ver.Mint("u1", "U1", "founder")
+	tokB, _ := ver.Mint("u2", "U2", "founder")
+
+	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	connB, _, err := websocket.Dial(dctx, wsURL(srv.URL, tokB), nil)
+	if err != nil {
+		t.Fatalf("B dial: %v", err)
+	}
+	defer connB.Close(websocket.StatusNormalClosure, "")
+	connA, _, err := websocket.Dial(dctx, wsURL(srv.URL, tokA), nil)
+	if err != nil {
+		t.Fatalf("A dial: %v", err)
+	}
+	defer connA.Close(websocket.StatusNormalClosure, "")
+	time.Sleep(100 * time.Millisecond)
+
+	send := protocol.Envelope{Type: protocol.TypeMessageSend, ID: protocol.NewMsgID()}
+	send.Data, _ = json.Marshal(protocol.SendPayload{ChannelID: "chX", ClientMsgID: "c1", Type: "text", Body: "hi chan"})
+	raw, _ := json.Marshal(send)
+	if err := connA.Write(dctx, websocket.MessageText, raw); err != nil {
+		t.Fatalf("A write: %v", err)
+	}
+	got := readEnvelope(t, dctx, connB)
+	if got.Type != protocol.TypeMessageNew {
+		t.Fatalf("B expected message.new, got %s", got.Type)
+	}
 }
