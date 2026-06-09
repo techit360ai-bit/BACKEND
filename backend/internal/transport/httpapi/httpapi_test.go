@@ -1,0 +1,109 @@
+package httpapi
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/pubsub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
+)
+
+func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
+	st := store.NewFakeStores()
+	ver := auth.NewVerifier("s")
+	h := hub.New(pubsub.NewInMemory())
+	msg := messaging.New(st.Conversations, st.Messages, h)
+	pres := presence.New(presence.NewInMemoryStore(), nil)
+	r := NewRouter(Deps{
+		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
+		Messages: st.Messages, Messaging: msg, Presence: pres, EnableDevToken: true,
+	})
+	return r, ver, st
+}
+
+func TestHealthOK(t *testing.T) {
+	r, _, _ := newAPI(t)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("health code=%d", rec.Code)
+	}
+}
+
+func TestDevTokenMints(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest("GET", "/api/v1/dev/token?userId=u1&name=U1&role=founder", nil))
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	var resp struct{ Token string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if _, err := ver.Verify(resp.Token); err != nil {
+		t.Fatalf("minted token invalid: %v", err)
+	}
+}
+
+func TestCreateConversationRequiresAuth(t *testing.T) {
+	r, _, _ := newAPI(t)
+	rec := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]string{"userId": "u2"})
+	r.ServeHTTP(rec, httptest.NewRequest("POST", "/api/v1/conversations", bytes.NewReader(body)))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401, got %d", rec.Code)
+	}
+}
+
+func TestCreateConversationAndHistory(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	rec := httptest.NewRecorder()
+	body, _ := json.Marshal(map[string]string{"userId": "u2"})
+	req := httptest.NewRequest("POST", "/api/v1/conversations", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create code=%d body=%s", rec.Code, rec.Body)
+	}
+	var conv struct{ ID string }
+	_ = json.Unmarshal(rec.Body.Bytes(), &conv)
+	if conv.ID == "" {
+		t.Fatal("no conversation id")
+	}
+
+	rec = httptest.NewRecorder()
+	sb, _ := json.Marshal(map[string]string{"clientMsgId": "m1", "body": "hi", "type": "text"})
+	req = httptest.NewRequest("POST", "/api/v1/conversations/"+conv.ID+"/messages", bytes.NewReader(sb))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("send code=%d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/conversations/"+conv.ID+"/messages", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("history code=%d", rec.Code)
+	}
+	var hist struct {
+		Messages []map[string]any
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
+	if len(hist.Messages) != 1 {
+		t.Fatalf("want 1 message, got %d (%s)", len(hist.Messages), rec.Body)
+	}
+}
