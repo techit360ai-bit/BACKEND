@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/protocol"
 )
 
@@ -70,7 +72,11 @@ func handleChannelSend(d Deps) http.HandlerFunc {
 			ChannelID: chID, ClientMsgID: body.ClientMsgID, Type: body.Type, Body: body.Body,
 		})
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			if errors.Is(err, channel.ErrNotMember) {
+				writeErr(w, http.StatusForbidden, err.Error())
+				return
+			}
+			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"clientMsgId": ack.ClientMsgID, "msgId": ack.MsgID, "ts": ack.TS})

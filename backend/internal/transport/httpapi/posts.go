@@ -2,11 +2,23 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/protocol"
 )
+
+// feedErr maps a feed-service error to an HTTP status: missing post -> 404,
+// otherwise 500.
+func feedErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, feed.ErrPostNotFound) {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, err.Error())
+}
 
 // audience returns the set of users to broadcast feed events to: the currently
 // online users (Phase 1 audience = everyone connected).
@@ -57,7 +69,7 @@ func handleLikePost(d Deps) http.HandlerFunc {
 		postID := chi.URLParam(r, "id")
 		n, err := d.Feed.Like(r.Context(), postID, me, audience(d, r))
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			feedErr(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"likeCount": n})
@@ -70,7 +82,7 @@ func handleUnlikePost(d Deps) http.HandlerFunc {
 		postID := chi.URLParam(r, "id")
 		n, err := d.Feed.Unlike(r.Context(), postID, me)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			feedErr(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"likeCount": n})
@@ -106,7 +118,7 @@ func handleAddComment(d Deps) http.HandlerFunc {
 		}
 		c, err := d.Feed.AddComment(r.Context(), postID, me, p, audience(d, r))
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			feedErr(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{

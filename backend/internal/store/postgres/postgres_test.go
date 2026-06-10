@@ -109,6 +109,12 @@ func TestPostgresChannelMessage(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].Body != "hi chan" {
 		t.Fatalf("query: %v err=%v", got, err)
 	}
+	// dedup backstop (migration 0003): a second insert with the same
+	// (channel_id, sender_id, client_msg_id) must be rejected by the unique index.
+	dup := store.Message{ID: protocol.NewMsgID(), ChannelID: chID, SenderID: uuidA, Type: "text", Body: "dup"}
+	if err := st.Channels.InsertChannelMessage(ctx, dup, "cc1"); err == nil {
+		t.Fatal("expected unique-violation on duplicate channel client_msg_id")
+	}
 }
 
 func TestPostgresPostLifecycle(t *testing.T) {
