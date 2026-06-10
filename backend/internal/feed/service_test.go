@@ -17,7 +17,7 @@ func newSvc() (*Service, *store.FakeStores, *store.FakeRouter) {
 func TestCreatePostPersistsAndBroadcasts(t *testing.T) {
 	svc, st, rt := newSvc()
 	ctx := context.Background()
-	post, err := svc.CreatePost(ctx, "u1", protocol.CreatePostPayload{Kind: "update", Body: "shipped!"}, []string{"u2", "u3"})
+	post, err := svc.CreatePost(ctx, "u1", "founder", protocol.CreatePostPayload{Kind: "update", Body: "shipped!"}, []string{"u2", "u3"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -72,5 +72,35 @@ func TestAddCommentBroadcasts(t *testing.T) {
 	}
 	if len(rt.Sent["u1"]) == 0 || rt.Sent["u1"][0].Type != protocol.TypePostComment {
 		t.Errorf("u1 missed post.comment: %v", rt.Sent["u1"])
+	}
+}
+
+func TestCreatePostStampsRoleAndAudience(t *testing.T) {
+	svc, st, rt := newSvc()
+	ctx := context.Background()
+	post, err := svc.CreatePost(ctx, "u1", "founder", protocol.CreatePostPayload{Kind: "update", Body: "hi", Audience: []string{"collaborator", "bogus"}}, []string{"u2"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if post.AuthorRole != "founder" {
+		t.Errorf("author role = %q", post.AuthorRole)
+	}
+	stored, _ := st.Posts.ListPostsByZone(ctx, "collaborator", "tribe", "", 10)
+	if len(stored) != 1 {
+		t.Fatalf("collaborator should see the targeted post, got %d", len(stored))
+	}
+	// broadcast envelope carries authorRole + audience
+	if env := rt.Sent["u2"]; len(env) == 0 || env[0].Type != protocol.TypePostNew {
+		t.Fatalf("u2 missed post.new")
+	}
+}
+
+func TestListByZoneDelegates(t *testing.T) {
+	svc, st, _ := newSvc()
+	ctx := context.Background()
+	_ = st.Posts.CreatePost(ctx, store.Post{ID: "p1", AuthorID: "f", AuthorRole: "founder", Audience: []string{"all"}, Kind: "update", Body: "x"})
+	out, err := svc.ListByZone(ctx, "investor", "global", "", 10)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("ListByZone: %v len=%d", err, len(out))
 	}
 }

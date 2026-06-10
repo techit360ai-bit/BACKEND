@@ -26,21 +26,39 @@ func New(p store.PostStore, r store.Router) *Service {
 	return &Service{posts: p, router: r, now: time.Now}
 }
 
-// CreatePost persists a post then broadcasts post.new to the audience
-// (excluding the author).
-func (s *Service) CreatePost(ctx context.Context, authorID string, p protocol.CreatePostPayload, audience []string) (store.Post, error) {
+// CreatePost persists a post (stamping author_role + sanitized target audience),
+// then broadcasts post.new to recipients (the online users) excluding the author.
+func (s *Service) CreatePost(ctx context.Context, authorID, authorRole string, p protocol.CreatePostPayload, recipients []string) (store.Post, error) {
 	kind := p.Kind
 	if kind == "" {
 		kind = "update"
 	}
-	post := store.Post{ID: protocol.NewMsgID(), AuthorID: authorID, Kind: kind, Body: p.Body, CreatedAt: s.now().UTC()}
+	post := store.Post{
+		ID:         protocol.NewMsgID(),
+		AuthorID:   authorID,
+		AuthorRole: store.NormalizeRole(authorRole),
+		Audience:   store.SanitizeAudience(p.Audience),
+		Kind:       kind,
+		Body:       p.Body,
+		CreatedAt:  s.now().UTC(),
+	}
 	if err := s.posts.CreatePost(ctx, post); err != nil {
 		return store.Post{}, err
 	}
-	s.broadcast(ctx, authorID, audience, protocol.TypePostNew, map[string]any{
-		"id": post.ID, "authorId": authorID, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt.Format(time.RFC3339),
+	s.broadcast(ctx, authorID, recipients, protocol.TypePostNew, map[string]any{
+		"id": post.ID, "authorId": authorID, "authorRole": post.AuthorRole,
+		"audience": post.Audience, "kind": post.Kind, "body": post.Body,
+		"ts": post.CreatedAt.Format(time.RFC3339),
 	})
 	return post, nil
+}
+
+// ListByZone returns posts for a viewer role and zone (delegates to the store).
+func (s *Service) ListByZone(ctx context.Context, viewerRole, zone, before string, limit int) ([]store.Post, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	return s.posts.ListPostsByZone(ctx, store.NormalizeRole(viewerRole), zone, before, limit)
 }
 
 // Like records a like (idempotent), returns the new like count, and broadcasts.
