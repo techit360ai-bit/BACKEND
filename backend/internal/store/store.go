@@ -59,11 +59,13 @@ type Channel struct {
 
 // Post is a social-feed post.
 type Post struct {
-	ID        string
-	AuthorID  string
-	Kind      string
-	Body      string
-	CreatedAt time.Time
+	ID         string
+	AuthorID   string
+	AuthorRole string
+	Audience   []string
+	Kind       string
+	Body       string
+	CreatedAt  time.Time
 }
 
 // Comment is a comment on a Post.

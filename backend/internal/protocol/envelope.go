@@ -57,8 +57,9 @@ type ReadUptoPayload struct {
 
 // CreatePostPayload is the body of a create-post request (REST).
 type CreatePostPayload struct {
-	Kind string `json:"kind"`
-	Body string `json:"body"`
+	Kind     string   `json:"kind"`
+	Body     string   `json:"body"`
+	Audience []string `json:"audience,omitempty"`
 }
 
 // CommentPayload is the body of an add-comment request (REST).

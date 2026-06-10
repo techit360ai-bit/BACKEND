@@ -24,3 +24,10 @@ func TestChannelAndPostZeroValues(t *testing.T) {
 		t.Fatal("unexpected non-zero defaults")
 	}
 }
+
+func TestPostHasRoleFields(t *testing.T) {
+	p := Post{ID: "p1", AuthorID: "u1", AuthorRole: "founder", Audience: []string{"collaborator"}, Kind: "update", Body: "x"}
+	if p.AuthorRole != "founder" || len(p.Audience) != 1 || p.Audience[0] != "collaborator" {
+		t.Fatalf("role fields not set: %+v", p)
+	}
+}
