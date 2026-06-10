@@ -18,13 +18,16 @@ type FakeStores struct {
 }
 
 func NewFakeStores() *FakeStores {
-	return &FakeStores{
+	st := &FakeStores{
 		Users:         &FakeUserStore{m: map[string]User{}},
 		Conversations: &FakeConversationStore{convos: map[string][2]string{}, cursors: map[string]string{}},
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
 		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
 		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}},
 	}
+	st.Conversations.msgs = st.Messages
+	st.Conversations.users = st.Users
+	return st
 }
 
 type FakeUserStore struct {
@@ -53,6 +56,8 @@ type FakeConversationStore struct {
 	convos  map[string][2]string // convID -> sorted pair
 	cursors map[string]string    // convID|userID -> msgID
 	seq     int
+	msgs    *FakeMessageStore
+	users   *FakeUserStore
 }
 
 func pairKey(a, b string) (string, string) {
@@ -111,6 +116,44 @@ func (s *FakeConversationStore) SetReadCursor(_ context.Context, convID, userID,
 	defer s.mu.Unlock()
 	s.cursors[convID+"|"+userID] = msgID
 	return nil
+}
+
+func (s *FakeConversationStore) SummariesForUser(ctx context.Context, userID string) ([]ConvSummary, error) {
+	ids, _ := s.ListForUser(ctx, userID)
+	out := make([]ConvSummary, 0, len(ids))
+	for _, convID := range ids {
+		parts, _ := s.Participants(ctx, convID)
+		other := ""
+		for _, u := range parts {
+			if u != userID {
+				other = u
+			}
+		}
+		msgs, _ := s.msgs.MessagesByConversation(ctx, convID, "", 1) // newest first
+		var sum ConvSummary
+		sum.ConversationID = convID
+		sum.OtherUserID = other
+		if s.users != nil {
+			if u, err := s.users.Get(ctx, other); err == nil {
+				sum.OtherName = u.DisplayName
+			}
+		}
+		if len(msgs) > 0 {
+			sum.LastBody = msgs[0].Body
+			sum.LastTS = msgs[0].CreatedAt
+			sum.LastMsgID = msgs[0].ID
+		}
+		// unread = messages strictly after the user's read cursor
+		cursor := s.cursors[convID+"|"+userID]
+		all, _ := s.msgs.MessagesByConversation(ctx, convID, "", 1000)
+		for _, m := range all {
+			if m.SenderID != userID && (cursor == "" || m.ID > cursor) {
+				sum.Unread++
+			}
+		}
+		out = append(out, sum)
+	}
+	return out, nil
 }
 
 type FakeMessageStore struct {

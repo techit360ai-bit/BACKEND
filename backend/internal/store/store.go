@@ -80,6 +80,18 @@ type Conversation struct {
 	CreatedAt time.Time
 }
 
+// ConvSummary is a read-model row for the DM list: the other participant, the
+// last message, and the unread count for the requesting user.
+type ConvSummary struct {
+	ConversationID string
+	OtherUserID    string
+	OtherName      string
+	LastBody       string
+	LastTS         time.Time
+	LastMsgID      string
+	Unread         int
+}
+
 // Channel is a group/Hangout channel.
 type Channel struct {
 	ID        string
@@ -127,6 +139,8 @@ type ConversationStore interface {
 	ListForUser(ctx context.Context, userID string) ([]string, error)
 	// SetReadCursor advances last_read_msg_id for a participant.
 	SetReadCursor(ctx context.Context, convID, userID, msgID string) error
+	// SummariesForUser returns the DM list read-model for userID, newest first.
+	SummariesForUser(ctx context.Context, userID string) ([]ConvSummary, error)
 }
 
 // MessageStore persists and reads messages and DM receipts.

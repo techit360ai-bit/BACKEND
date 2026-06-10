@@ -102,3 +102,22 @@ func TestFakeInsertDMAndQuery(t *testing.T) {
 		t.Fatalf("query: got=%v err=%v", got, err)
 	}
 }
+
+func TestFakeConversationSummaries(t *testing.T) {
+	f := NewFakeStores()
+	ctx := context.Background()
+	c, _, _ := f.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	m := Message{ID: "01890000-0000-7000-8000-000000000101", ConversationID: c.ID, SenderID: "u2", Type: "text", Body: "yo"}
+	_ = f.Messages.InsertDM(ctx, m, "u1", "x1")
+	sums, err := f.Conversations.SummariesForUser(ctx, "u1")
+	if err != nil {
+		t.Fatalf("summaries: %v", err)
+	}
+	if len(sums) != 1 {
+		t.Fatalf("want 1 summary, got %d", len(sums))
+	}
+	s := sums[0]
+	if s.ConversationID != c.ID || s.OtherUserID != "u2" || s.LastBody != "yo" || s.Unread != 1 {
+		t.Fatalf("bad summary: %+v", s)
+	}
+}
