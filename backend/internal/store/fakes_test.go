@@ -57,6 +57,38 @@ func TestFakePostLifecycle(t *testing.T) {
 	}
 }
 
+func TestFakeListPostsByZone(t *testing.T) {
+	f := NewFakeStores()
+	ctx := context.Background()
+	_ = f.Posts.CreatePost(ctx, Post{ID: "p1", AuthorID: "f1", AuthorRole: "founder", Audience: []string{"all"}, Kind: "update", Body: "founder post"})
+	_ = f.Posts.CreatePost(ctx, Post{ID: "p2", AuthorID: "c1", AuthorRole: "collaborator", Audience: []string{"all"}, Kind: "update", Body: "collab post"})
+	_ = f.Posts.CreatePost(ctx, Post{ID: "p3", AuthorID: "o1", AuthorRole: "organisation", Audience: []string{"collaborator"}, Kind: "opportunity", Body: "role open"})
+
+	// collaborator's tribe = own-role posts + posts targeting collaborator
+	tribe, _ := f.Posts.ListPostsByZone(ctx, "collaborator", "tribe", "", 50)
+	ids := map[string]bool{}
+	for _, p := range tribe {
+		ids[p.ID] = true
+	}
+	if !ids["p2"] || !ids["p3"] || ids["p1"] {
+		t.Fatalf("collaborator tribe wrong: %v", ids)
+	}
+	// global = everything
+	global, _ := f.Posts.ListPostsByZone(ctx, "collaborator", "global", "", 50)
+	if len(global) != 3 {
+		t.Fatalf("global want 3, got %d", len(global))
+	}
+}
+
+func TestNormalizeRole(t *testing.T) {
+	if NormalizeRole("") != "community" || NormalizeRole("FOUNDER") != "founder" || NormalizeRole("alien") != "community" {
+		t.Fatal("NormalizeRole bad")
+	}
+	if NormalizeRole("collaborator") != "collaborator" {
+		t.Fatal("known role dropped")
+	}
+}
+
 func TestFakeInsertDMAndQuery(t *testing.T) {
 	f := NewFakeStores()
 	ctx := context.Background()

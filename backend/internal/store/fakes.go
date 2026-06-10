@@ -315,6 +315,40 @@ func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) (
 	}
 	return out, nil
 }
+func (s *FakePostStore) ListPostsByZone(_ context.Context, viewerRole, zone, before string, limit int) ([]Post, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	matchTribe := func(p Post) bool {
+		if p.AuthorRole == viewerRole {
+			return true
+		}
+		for _, a := range p.Audience {
+			if a == viewerRole {
+				return true
+			}
+		}
+		return false
+	}
+	out := make([]Post, 0, limit)
+	for i := len(s.order) - 1; i >= 0; i-- {
+		id := s.order[i]
+		if before != "" && id >= before {
+			continue
+		}
+		p := s.posts[id]
+		if zone == "tribe" && !matchTribe(p) {
+			continue
+		}
+		out = append(out, p)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
 func (s *FakePostStore) Like(_ context.Context, postID, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

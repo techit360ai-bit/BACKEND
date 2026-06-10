@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/protocol"
@@ -12,6 +13,36 @@ import (
 
 // ErrNotFound is returned by stores when a row does not exist.
 var ErrNotFound = errors.New("not found")
+
+// KnownRoles is the closed set of viewer/author roles.
+var KnownRoles = map[string]bool{
+	"founder": true, "collaborator": true, "investor": true,
+	"organisation": true, "community": true,
+}
+
+// NormalizeRole lowercases a role and maps anything unknown/empty to "community".
+func NormalizeRole(role string) string {
+	r := strings.ToLower(strings.TrimSpace(role))
+	if KnownRoles[r] {
+		return r
+	}
+	return "community"
+}
+
+// SanitizeAudience keeps only known roles plus "all"; empty -> {"all"}.
+func SanitizeAudience(aud []string) []string {
+	out := make([]string, 0, len(aud))
+	for _, a := range aud {
+		la := strings.ToLower(strings.TrimSpace(a))
+		if la == "all" || KnownRoles[la] {
+			out = append(out, la)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"all"}
+	}
+	return out
+}
 
 // User is the minimal identity record, upserted from JWT claims on first connect.
 type User struct {
@@ -138,6 +169,10 @@ type ChannelStore interface {
 type PostStore interface {
 	CreatePost(ctx context.Context, p Post) error
 	ListPosts(ctx context.Context, before string, limit int) ([]Post, error)
+	// ListPostsByZone returns posts for a viewer role + zone, newest-first
+	// (keyset id < before; before=="" means latest). zone "tribe" = author_role
+	// matches viewer OR viewer in audience; any other zone = all posts.
+	ListPostsByZone(ctx context.Context, viewerRole, zone, before string, limit int) ([]Post, error)
 	Like(ctx context.Context, postID, userID string) error
 	Unlike(ctx context.Context, postID, userID string) error
 	LikeCount(ctx context.Context, postID string) (int, error)
