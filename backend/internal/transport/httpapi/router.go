@@ -35,7 +35,7 @@ type Deps struct {
 
 type ctxKey string
 
-const userIDKey ctxKey = "userID"
+const claimsKey ctxKey = "claims"
 
 // NewRouter builds the chi router.
 func NewRouter(d Deps) http.Handler {
@@ -86,15 +86,19 @@ func authMiddleware(v *auth.Verifier) func(http.Handler) http.Handler {
 				writeErr(w, http.StatusUnauthorized, "invalid token")
 				return
 			}
-			ctx := context.WithValue(r.Context(), userIDKey, claims.UserID)
+			ctx := context.WithValue(r.Context(), claimsKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
 func currentUser(r *http.Request) string {
-	v, _ := r.Context().Value(userIDKey).(string)
-	return v
+	c, _ := r.Context().Value(claimsKey).(auth.Claims)
+	return c.UserID
+}
+func currentRole(r *http.Request) string {
+	c, _ := r.Context().Value(claimsKey).(auth.Claims)
+	return c.Role
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

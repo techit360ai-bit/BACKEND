@@ -141,3 +141,27 @@ func TestPostgresPostLifecycle(t *testing.T) {
 		t.Fatalf("comments: %v", cs)
 	}
 }
+
+func TestPostgresListPostsByZone(t *testing.T) {
+	st := setup(t)
+	ctx := context.Background()
+	// isolate from other tests that may have inserted posts
+	if _, err := st.pool.Exec(ctx, `TRUNCATE posts CASCADE`); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidA, DisplayName: "A"})
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidB, DisplayName: "B"})
+	_ = st.Posts.CreatePost(ctx, store.Post{ID: protocol.NewMsgID(), AuthorID: uuidA, AuthorRole: "founder", Audience: []string{"all"}, Kind: "update", Body: "f"})
+	_ = st.Posts.CreatePost(ctx, store.Post{ID: protocol.NewMsgID(), AuthorID: uuidB, AuthorRole: "organisation", Audience: []string{"collaborator"}, Kind: "opportunity", Body: "o"})
+	tribe, err := st.Posts.ListPostsByZone(ctx, "collaborator", "tribe", "", 50)
+	if err != nil {
+		t.Fatalf("zone query: %v", err)
+	}
+	if len(tribe) != 1 || tribe[0].Body != "o" {
+		t.Fatalf("tribe wrong: %+v", tribe)
+	}
+	all, _ := st.Posts.ListPostsByZone(ctx, "collaborator", "global", "", 50)
+	if len(all) != 2 {
+		t.Fatalf("global want 2, got %d", len(all))
+	}
+}

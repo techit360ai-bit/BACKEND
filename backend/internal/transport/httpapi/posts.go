@@ -29,7 +29,11 @@ func audience(d Deps, r *http.Request) []string {
 
 func handleListPosts(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		posts, err := d.Feed.ListPosts(r.Context(), r.URL.Query().Get("before"), 50)
+		zone := r.URL.Query().Get("zone")
+		if zone == "" {
+			zone = "global"
+		}
+		posts, err := d.Feed.ListByZone(r.Context(), currentRole(r), zone, r.URL.Query().Get("before"), 50)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -37,7 +41,8 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		out := make([]map[string]any, 0, len(posts))
 		for _, p := range posts {
 			out = append(out, map[string]any{
-				"id": p.ID, "authorId": p.AuthorID, "kind": p.Kind, "body": p.Body, "ts": p.CreatedAt,
+				"id": p.ID, "authorId": p.AuthorID, "authorRole": p.AuthorRole,
+				"audience": p.Audience, "kind": p.Kind, "body": p.Body, "ts": p.CreatedAt,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"posts": out})
@@ -52,13 +57,14 @@ func handleCreatePost(d Deps) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, "body required")
 			return
 		}
-		post, err := d.Feed.CreatePost(r.Context(), me, p, audience(d, r))
+		post, err := d.Feed.CreatePost(r.Context(), me, currentRole(r), p, audience(d, r))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"id": post.ID, "authorId": post.AuthorID, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt,
+			"id": post.ID, "authorId": post.AuthorID, "authorRole": post.AuthorRole,
+			"audience": post.Audience, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt,
 		})
 	}
 }

@@ -181,3 +181,52 @@ func TestCreateAndListPosts(t *testing.T) {
 		t.Fatalf("like code=%d", rec.Code)
 	}
 }
+
+func TestFeedZoneFiltering(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "f1", DisplayName: "F"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "c1", DisplayName: "C"})
+	// founder posts to all; org posts targeting collaborators
+	founderTok, _ := ver.Mint("f1", "F", "founder")
+	rec := httptest.NewRecorder()
+	pb, _ := json.Marshal(map[string]any{"kind": "update", "body": "founder post"})
+	req := httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
+	req.Header.Set("Authorization", "Bearer "+founderTok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("create code=%d body=%s", rec.Code, rec.Body)
+	}
+
+	orgTok, _ := ver.Mint("o1", "O", "organisation")
+	rec = httptest.NewRecorder()
+	pb, _ = json.Marshal(map[string]any{"kind": "opportunity", "body": "role open", "audience": []string{"collaborator"}})
+	req = httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
+	req.Header.Set("Authorization", "Bearer "+orgTok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("org create code=%d body=%s", rec.Code, rec.Body)
+	}
+
+	collabTok, _ := ver.Mint("c1", "C", "collaborator")
+	// tribe: collaborator sees only the org post (targeted), not the founder all-post
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/posts?zone=tribe", nil)
+	req.Header.Set("Authorization", "Bearer "+collabTok)
+	r.ServeHTTP(rec, req)
+	var tribe struct{ Posts []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &tribe)
+	if len(tribe.Posts) != 1 || tribe.Posts[0]["body"] != "role open" {
+		t.Fatalf("tribe wrong: %s", rec.Body)
+	}
+	// global: collaborator sees both
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/posts?zone=global", nil)
+	req.Header.Set("Authorization", "Bearer "+collabTok)
+	r.ServeHTTP(rec, req)
+	var global struct{ Posts []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &global)
+	if len(global.Posts) != 2 {
+		t.Fatalf("global want 2, got %d", len(global.Posts))
+	}
+}
