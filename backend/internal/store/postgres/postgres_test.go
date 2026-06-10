@@ -165,3 +165,26 @@ func TestPostgresListPostsByZone(t *testing.T) {
 		t.Fatalf("global want 2, got %d", len(all))
 	}
 }
+
+func TestPostgresConversationSummaries(t *testing.T) {
+	st := setup(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidA, DisplayName: "Alice"})
+	_ = st.Users.Upsert(ctx, store.User{ID: uuidB, DisplayName: "Bob"})
+	c, _, _ := st.Conversations.GetOrCreateDM(ctx, uuidA, uuidB)
+	m := store.Message{ID: protocol.NewMsgID(), ConversationID: c.ID, SenderID: uuidB, Type: "text", Body: "hi alice"}
+	if err := st.Messages.InsertDM(ctx, m, uuidA, "s1"); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	sums, err := st.Conversations.SummariesForUser(ctx, uuidA)
+	if err != nil {
+		t.Fatalf("summaries: %v", err)
+	}
+	if len(sums) != 1 {
+		t.Fatalf("want 1, got %d", len(sums))
+	}
+	s := sums[0]
+	if s.OtherUserID != uuidB || s.OtherName != "Bob" || s.LastBody != "hi alice" || s.Unread != 1 {
+		t.Fatalf("bad summary: %+v", s)
+	}
+}

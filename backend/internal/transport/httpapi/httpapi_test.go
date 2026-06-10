@@ -230,3 +230,28 @@ func TestFeedZoneFiltering(t *testing.T) {
 		t.Fatalf("global want 2, got %d", len(global.Posts))
 	}
 }
+
+func TestListConversationsEndpoint(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	c, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	_ = st.Messages.InsertDM(ctx, store.Message{ID: "01890000-0000-7000-8000-0000000000f1", ConversationID: c.ID, SenderID: "u2", Type: "text", Body: "hello"}, "u1", "x")
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/conversations", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	var resp struct {
+		Conversations []map[string]any
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Conversations) != 1 {
+		t.Fatalf("want 1 conversation, got %d", len(resp.Conversations))
+	}
+}

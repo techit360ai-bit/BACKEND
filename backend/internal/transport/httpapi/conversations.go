@@ -101,3 +101,22 @@ func handleMarkRead(d Deps) http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
+
+func handleListConversations(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		me := currentUser(r)
+		sums, err := d.Conversations.SummariesForUser(r.Context(), me)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		out := make([]map[string]any, 0, len(sums))
+		for _, s := range sums {
+			out = append(out, map[string]any{
+				"id": s.ConversationID, "otherUserId": s.OtherUserID, "otherName": s.OtherName,
+				"lastBody": s.LastBody, "lastTs": s.LastTS, "lastMsgId": s.LastMsgID, "unread": s.Unread,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"conversations": out})
+	}
+}

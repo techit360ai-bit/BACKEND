@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -117,4 +118,46 @@ func (s *ConversationStore) SetReadCursor(ctx context.Context, convID, userID, m
 		return store.ErrNotFound
 	}
 	return nil
+}
+
+func (s *ConversationStore) SummariesForUser(ctx context.Context, userID string) ([]store.ConvSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT cp.conversation_id,
+		       other.user_id,
+		       COALESCE(u.display_name, ''),
+		       COALESCE(lm.body, ''),
+		       lm.created_at,
+		       COALESCE(lm.id::text, ''),
+		       (SELECT count(*) FROM messages m2
+		          WHERE m2.conversation_id = cp.conversation_id
+		            AND m2.sender_id <> $1
+		            AND (cp.last_read_msg_id IS NULL OR m2.id > cp.last_read_msg_id)) AS unread
+		FROM conversation_participants cp
+		JOIN conversation_participants other
+		  ON other.conversation_id = cp.conversation_id AND other.user_id <> cp.user_id
+		LEFT JOIN users u ON u.id = other.user_id
+		LEFT JOIN LATERAL (
+		  SELECT id, body, created_at FROM messages m
+		  WHERE m.conversation_id = cp.conversation_id
+		  ORDER BY m.id DESC LIMIT 1
+		) lm ON true
+		WHERE cp.user_id = $1
+		ORDER BY lm.created_at DESC NULLS LAST`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.ConvSummary
+	for rows.Next() {
+		var c store.ConvSummary
+		var lastTS *time.Time
+		if err := rows.Scan(&c.ConversationID, &c.OtherUserID, &c.OtherName, &c.LastBody, &lastTS, &c.LastMsgID, &c.Unread); err != nil {
+			return nil, err
+		}
+		if lastTS != nil {
+			c.LastTS = *lastTS
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
 }

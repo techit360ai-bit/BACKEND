@@ -51,6 +51,7 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware(d.Verifier))
 			r.Post("/conversations", handleCreateConversation(d))
+			r.Get("/conversations", handleListConversations(d))
 			r.Get("/conversations/{id}/messages", handleHistory(d))
 			r.Post("/conversations/{id}/messages", handleRESTSend(d))
 			r.Post("/conversations/{id}/read", handleMarkRead(d))
