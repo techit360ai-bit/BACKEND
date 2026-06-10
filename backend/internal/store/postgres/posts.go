@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,22 +14,51 @@ import (
 type PostStore struct{ pool *pgxpool.Pool }
 
 func (s *PostStore) CreatePost(ctx context.Context, p store.Post) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, kind, body, created_at) VALUES ($1,$2,$3,$4,$5)`,
-		p.ID, p.AuthorID, p.Kind, p.Body, p.CreatedAt)
+	aud := p.Audience
+	if len(aud) == 0 {
+		aud = []string{"all"}
+	}
+	role := p.AuthorRole
+	if role == "" {
+		role = "community"
+	}
+	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt)
 	return err
 }
 
 func (s *PostStore) ListPosts(ctx context.Context, before string, limit int) ([]store.Post, error) {
+	return s.queryPosts(ctx, "", "", before, limit)
+}
+
+func (s *PostStore) ListPostsByZone(ctx context.Context, viewerRole, zone, before string, limit int) ([]store.Post, error) {
+	return s.queryPosts(ctx, viewerRole, zone, before, limit)
+}
+
+// queryPosts is the shared reader. zone "tribe" filters to author_role=viewer OR
+// viewer = ANY(audience); any other zone returns all posts. Both order newest-first.
+func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before string, limit int) ([]store.Post, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, author_id, kind, body, created_at FROM posts`
-	var args []any
+	q := `SELECT id, author_id, author_role, audience, kind, body, created_at FROM posts`
+	conds := []string{}
+	args := []any{}
+	n := 0
+	if zone == "tribe" {
+		n++
+		conds = append(conds, "(author_role = $"+strconv.Itoa(n)+" OR $"+strconv.Itoa(n)+" = ANY(audience))")
+		args = append(args, viewerRole)
+	}
 	if before != "" {
-		q += ` WHERE id < $1`
+		n++
+		conds = append(conds, "id < $"+strconv.Itoa(n))
 		args = append(args, before)
 	}
-	q += ` ORDER BY id DESC LIMIT ` + strconv.Itoa(limit)
+	if len(conds) > 0 {
+		q += " WHERE " + strings.Join(conds, " AND ")
+	}
+	q += " ORDER BY id DESC LIMIT " + strconv.Itoa(limit)
 	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -37,7 +67,7 @@ func (s *PostStore) ListPosts(ctx context.Context, before string, limit int) ([]
 	var out []store.Post
 	for rows.Next() {
 		var p store.Post
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.Kind, &p.Body, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
