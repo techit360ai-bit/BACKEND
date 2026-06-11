@@ -2,6 +2,7 @@ package feed
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/protocol"
@@ -102,5 +103,25 @@ func TestListByZoneDelegates(t *testing.T) {
 	out, err := svc.ListByZone(ctx, "investor", "global", "", 10)
 	if err != nil || len(out) != 1 {
 		t.Fatalf("ListByZone: %v len=%d", err, len(out))
+	}
+}
+
+func TestCreatePostRejectsInvalidKindForRole(t *testing.T) {
+	svc, _, _ := newSvc()
+	ctx := context.Background()
+	_, err := svc.CreatePost(ctx, "u1", "collaborator",
+		protocol.CreatePostPayload{Kind: "investment-signal", Body: "x"}, nil)
+	if !errors.Is(err, ErrInvalidKind) {
+		t.Fatalf("want ErrInvalidKind, got %v", err)
+	}
+}
+
+func TestCreatePostAcceptsRoleKind(t *testing.T) {
+	svc, _, _ := newSvc()
+	ctx := context.Background()
+	post, err := svc.CreatePost(ctx, "u1", "collaborator",
+		protocol.CreatePostPayload{Kind: "role-available", Body: "hiring"}, nil)
+	if err != nil || post.Kind != "role-available" {
+		t.Fatalf("want role-available accepted, got post=%+v err=%v", post, err)
 	}
 }

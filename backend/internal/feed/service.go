@@ -15,6 +15,9 @@ import (
 // ErrPostNotFound is returned when an action targets a missing post.
 var ErrPostNotFound = errors.New("post not found")
 
+// ErrInvalidKind is returned when a post kind is not allowed for the author's role.
+var ErrInvalidKind = errors.New("invalid post kind for role")
+
 // Service handles feed posts.
 type Service struct {
 	posts  store.PostStore
@@ -29,14 +32,17 @@ func New(p store.PostStore, r store.Router) *Service {
 // CreatePost persists a post (stamping author_role + sanitized target audience),
 // then broadcasts post.new to recipients (the online users) excluding the author.
 func (s *Service) CreatePost(ctx context.Context, authorID, authorRole string, p protocol.CreatePostPayload, recipients []string) (store.Post, error) {
+	role := store.NormalizeRole(authorRole)
 	kind := p.Kind
 	if kind == "" {
 		kind = "update"
+	} else if !store.AllowedKind(role, kind) {
+		return store.Post{}, ErrInvalidKind
 	}
 	post := store.Post{
 		ID:         protocol.NewMsgID(),
 		AuthorID:   authorID,
-		AuthorRole: store.NormalizeRole(authorRole),
+		AuthorRole: role,
 		Audience:   store.SanitizeAudience(p.Audience),
 		Kind:       kind,
 		Body:       p.Body,
