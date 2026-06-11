@@ -200,7 +200,7 @@ func TestFeedZoneFiltering(t *testing.T) {
 
 	orgTok, _ := ver.Mint("o1", "O", "organisation")
 	rec = httptest.NewRecorder()
-	pb, _ = json.Marshal(map[string]any{"kind": "opportunity", "body": "role open", "audience": []string{"collaborator"}})
+	pb, _ = json.Marshal(map[string]any{"kind": "opportunity-post", "body": "role open", "audience": []string{"collaborator"}})
 	req = httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
 	req.Header.Set("Authorization", "Bearer "+orgTok)
 	r.ServeHTTP(rec, req)
@@ -253,5 +253,31 @@ func TestListConversationsEndpoint(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Conversations) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(resp.Conversations))
+	}
+}
+
+func TestCreatePostInvalidKindReturns400(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	tok, _ := ver.Mint("u1", "U1", "collaborator")
+	rec := httptest.NewRecorder()
+	pb, _ := json.Marshal(map[string]any{"kind": "investment-signal", "body": "x"})
+	req := httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 400 {
+		t.Fatalf("want 400, got %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreatePostValidRoleKindReturns200(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	tok, _ := ver.Mint("u1", "U1", "collaborator")
+	rec := httptest.NewRecorder()
+	pb, _ := json.Marshal(map[string]any{"kind": "role-available", "body": "hiring"})
+	req := httptest.NewRequest("POST", "/api/v1/posts", bytes.NewReader(pb))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("want 200, got %d body=%s", rec.Code, rec.Body)
 	}
 }

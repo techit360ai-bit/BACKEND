@@ -17,6 +17,10 @@ func feedErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if errors.Is(err, feed.ErrInvalidKind) {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	writeErr(w, http.StatusInternalServerError, err.Error())
 }
 
@@ -59,7 +63,7 @@ func handleCreatePost(d Deps) http.HandlerFunc {
 		}
 		post, err := d.Feed.CreatePost(r.Context(), me, currentRole(r), p, audience(d, r))
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			feedErr(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
