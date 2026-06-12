@@ -15,6 +15,7 @@ type FakeStores struct {
 	Messages      *FakeMessageStore
 	Channels      *FakeChannelStore
 	Posts         *FakePostStore
+	Demo          *FakeDemoStore
 }
 
 func NewFakeStores() *FakeStores {
@@ -24,6 +25,7 @@ func NewFakeStores() *FakeStores {
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
 		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
 		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}},
+		Demo:          &FakeDemoStore{events: map[string]DemoEvent{}, roster: map[string][]RosterEntry{}},
 	}
 	st.Conversations.msgs = st.Messages
 	st.Conversations.users = st.Users
