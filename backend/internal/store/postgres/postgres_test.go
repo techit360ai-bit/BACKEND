@@ -194,10 +194,12 @@ func TestPostgresDemoLifecycle(t *testing.T) {
 	st := setup(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	const host = "demo-host-1"
-	const invitee = "demo-invitee-1"
+	// Unique ids per run so the shared DB doesn't accumulate cross-run rows.
+	uniq := protocol.NewMsgID()
+	host := "host-" + uniq
+	invitee := "inv-" + uniq
 	ev := store.DemoEvent{
-		ID: protocol.NewMsgID(), HostID: host, Kind: "startup", Title: "Launch",
+		ID: uniq, HostID: host, Kind: "startup", Title: "Launch",
 		Description: "demo", Status: "draft", CreatedAt: now, UpdatedAt: now,
 	}
 	if err := st.Demo.CreateEvent(ctx, ev); err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/demo"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
@@ -25,11 +26,12 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	msg := messaging.New(st.Conversations, st.Messages, h)
 	chSvc := channel.New(st.Channels, h)
 	feedSvc := feed.New(st.Posts, h)
+	demoSvc := demo.New(st.Demo)
 	pres := presence.New(presence.NewInMemoryStore(), nil)
 	r := NewRouter(Deps{
 		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
 		Messages: st.Messages, Messaging: msg, Channels: chSvc, ChannelStore: st.Channels,
-		Feed: feedSvc, Presence: pres, EnableDevToken: true,
+		Feed: feedSvc, Demo: demoSvc, Presence: pres, EnableDevToken: true,
 	})
 	return r, ver, st
 }
@@ -279,5 +281,68 @@ func TestCreatePostValidRoleKindReturns200(t *testing.T) {
 	r.ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestDemoLifecycleHTTP(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	tok, _ := ver.Mint("host1", "Host", "founder")
+	auth := map[string]string{"Authorization": "Bearer " + tok}
+
+	do := func(method, path, body string, hdr map[string]string) *httptest.ResponseRecorder {
+		var rd *bytes.Reader
+		if body != "" {
+			rd = bytes.NewReader([]byte(body))
+		} else {
+			rd = bytes.NewReader(nil)
+		}
+		req := httptest.NewRequest(method, path, rd)
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// create
+	rec := do("POST", "/api/v1/demos", `{"kind":"startup","title":"Launch"}`, auth)
+	if rec.Code != 200 {
+		t.Fatalf("create code=%d body=%s", rec.Code, rec.Body)
+	}
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id, _ := created["id"].(string)
+	if id == "" {
+		t.Fatalf("no id in %s", rec.Body)
+	}
+
+	// list -> 1
+	rec = do("GET", "/api/v1/demos", "", auth)
+	var list struct{ Events []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if rec.Code != 200 || len(list.Events) != 1 {
+		t.Fatalf("list code=%d n=%d", rec.Code, len(list.Events))
+	}
+
+	// get (host) -> 200
+	if rec = do("GET", "/api/v1/demos/"+id, "", auth); rec.Code != 200 {
+		t.Fatalf("get code=%d", rec.Code)
+	}
+
+	// outsider GET -> 403
+	otok, _ := ver.Mint("stranger", "S", "founder")
+	if rec = do("GET", "/api/v1/demos/"+id, "", map[string]string{"Authorization": "Bearer " + otok}); rec.Code != 403 {
+		t.Fatalf("outsider want 403, got %d", rec.Code)
+	}
+
+	// invalid transition draft->live -> 400
+	if rec = do("POST", "/api/v1/demos/"+id+"/status", `{"status":"live"}`, auth); rec.Code != 400 {
+		t.Fatalf("bad transition want 400, got %d body=%s", rec.Code, rec.Body)
+	}
+
+	// missing id -> 404
+	if rec = do("GET", "/api/v1/demos/nope", "", auth); rec.Code != 404 {
+		t.Fatalf("missing want 404, got %d", rec.Code)
 	}
 }

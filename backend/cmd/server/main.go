@@ -15,6 +15,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/config"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/demo"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
@@ -58,6 +59,7 @@ func main() {
 	msgSvc := messaging.New(pg.Conversations, pg.Messages, h)
 	chSvc := channel.New(pg.Channels, h)
 	feedSvc := feed.New(pg.Posts, h)
+	demoSvc := demo.New(pg.Demo)
 	ver := auth.NewVerifier(cfg.JWTSecret)
 
 	gw := ws.New(ws.Deps{
@@ -67,7 +69,7 @@ func main() {
 	api := httpapi.NewRouter(httpapi.Deps{
 		Verifier: ver, Users: pg.Users, Conversations: pg.Conversations,
 		Messages: pg.Messages, Messaging: msgSvc, Channels: chSvc, ChannelStore: pg.Channels,
-		Feed: feedSvc, Presence: presSvc,
+		Feed: feedSvc, Demo: demoSvc, Presence: presSvc,
 		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1", CORSOrigins: cfg.CORSOrigins,
 	})
 

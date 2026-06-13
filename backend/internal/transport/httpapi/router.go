@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/auth"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/demo"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
@@ -28,6 +29,7 @@ type Deps struct {
 	Channels       *channel.Service
 	ChannelStore   store.ChannelStore
 	Feed           *feed.Service
+	Demo           *demo.Service
 	Presence       *presence.Service
 	EnableDevToken bool
 	CORSOrigins    string
@@ -68,6 +70,14 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/posts/{id}/like", handleUnlikePost(d))
 			r.Get("/posts/{id}/comments", handleListComments(d))
 			r.Post("/posts/{id}/comments", handleAddComment(d))
+
+			r.Post("/demos", handleCreateDemo(d))
+			r.Get("/demos", handleListDemos(d))
+			r.Get("/demos/{id}", handleGetDemo(d))
+			r.Patch("/demos/{id}", handleUpdateDemo(d))
+			r.Post("/demos/{id}/status", handleDemoStatus(d))
+			r.Post("/demos/{id}/invites", handleDemoInvite(d))
+			r.Post("/demos/{id}/invites/respond", handleDemoRespond(d))
 		})
 	})
 	return r
