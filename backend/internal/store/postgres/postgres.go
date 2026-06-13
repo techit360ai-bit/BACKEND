@@ -21,6 +21,7 @@ type Store struct {
 	Messages      *MessageStore
 	Channels      *ChannelStore
 	Posts         *PostStore
+	Demo          *DemoStore
 }
 
 // Open connects a pgx pool and wires the sub-stores.
@@ -39,6 +40,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	s.Messages = &MessageStore{pool: pool}
 	s.Channels = &ChannelStore{pool: pool}
 	s.Posts = &PostStore{pool: pool}
+	s.Demo = &DemoStore{pool: pool}
 	return s, nil
 }
 

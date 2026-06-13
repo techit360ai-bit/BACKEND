@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"os"
+	"time"
 	"testing"
 
 	"github.com/techit360ai-bit/new-frontend/backend/internal/protocol"
@@ -186,5 +187,49 @@ func TestPostgresConversationSummaries(t *testing.T) {
 	s := sums[0]
 	if s.OtherUserID != uuidB || s.OtherName != "Bob" || s.LastBody != "hi alice" || s.Unread != 1 {
 		t.Fatalf("bad summary: %+v", s)
+	}
+}
+
+func TestPostgresDemoLifecycle(t *testing.T) {
+	st := setup(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const host = "demo-host-1"
+	const invitee = "demo-invitee-1"
+	ev := store.DemoEvent{
+		ID: protocol.NewMsgID(), HostID: host, Kind: "startup", Title: "Launch",
+		Description: "demo", Status: "draft", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := st.Demo.CreateEvent(ctx, ev); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	got, err := st.Demo.GetEvent(ctx, ev.ID)
+	if err != nil || got.Title != "Launch" || got.Status != "draft" {
+		t.Fatalf("get: %+v err=%v", got, err)
+	}
+	for _, r := range []store.RosterEntry{
+		{EventID: ev.ID, UserID: host, RoomRole: "host", Status: "accepted", CreatedAt: now, UpdatedAt: now},
+		{EventID: ev.ID, UserID: invitee, RoomRole: "judge", Status: "invited", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := st.Demo.UpsertRoster(ctx, r); err != nil {
+			t.Fatalf("upsert roster %s: %v", r.UserID, err)
+		}
+	}
+	roster, err := st.Demo.ListRoster(ctx, ev.ID)
+	if err != nil || len(roster) != 2 {
+		t.Fatalf("list roster: n=%d err=%v", len(roster), err)
+	}
+	forUser, err := st.Demo.ListEventsForUser(ctx, invitee)
+	if err != nil || len(forUser) != 1 || forUser[0].ID != ev.ID {
+		t.Fatalf("events for invitee: %+v err=%v", forUser, err)
+	}
+	ev.Status = "scheduled"
+	ev.UpdatedAt = time.Now().UTC()
+	if err := st.Demo.UpdateEvent(ctx, ev); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got2, err := st.Demo.GetEvent(ctx, ev.ID)
+	if err != nil || got2.Status != "scheduled" {
+		t.Fatalf("get after update: %+v err=%v", got2, err)
 	}
 }
