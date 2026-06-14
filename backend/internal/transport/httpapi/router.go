@@ -14,6 +14,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/channel"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/demo"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/livekit"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
@@ -30,6 +31,7 @@ type Deps struct {
 	ChannelStore   store.ChannelStore
 	Feed           *feed.Service
 	Demo           *demo.Service
+	LiveKit        *livekit.Service
 	Presence       *presence.Service
 	EnableDevToken bool
 	CORSOrigins    string
