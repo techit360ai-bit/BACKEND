@@ -13,6 +13,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/demo"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/feed"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/hub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/livekit"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/pubsub"
@@ -27,11 +28,12 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	chSvc := channel.New(st.Channels, h)
 	feedSvc := feed.New(st.Posts, h)
 	demoSvc := demo.New(st.Demo)
+	lkSvc := livekit.New("APItest", "secretsecretsecretsecretsecret12", "wss://test.livekit.cloud")
 	pres := presence.New(presence.NewInMemoryStore(), nil)
 	r := NewRouter(Deps{
 		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
 		Messages: st.Messages, Messaging: msg, Channels: chSvc, ChannelStore: st.Channels,
-		Feed: feedSvc, Demo: demoSvc, Presence: pres, EnableDevToken: true,
+		Feed: feedSvc, Demo: demoSvc, LiveKit: lkSvc, Presence: pres, EnableDevToken: true,
 	})
 	return r, ver, st
 }
@@ -344,5 +346,102 @@ func TestDemoLifecycleHTTP(t *testing.T) {
 	// missing id -> 404
 	if rec = do("GET", "/api/v1/demos/nope", "", auth); rec.Code != 404 {
 		t.Fatalf("missing want 404, got %d", rec.Code)
+	}
+}
+
+func TestDemoRtcToken(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	hostTok, _ := ver.Mint("host1", "Host", "founder")
+	hostHdr := map[string]string{"Authorization": "Bearer " + hostTok}
+
+	do := func(method, path, body string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// create (draft) then go live
+	rec := do("POST", "/api/v1/demos", `{"kind":"startup","title":"L"}`, hostHdr)
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created["id"].(string)
+
+	// invite an audience member while still draft (host-only ok)
+	_ = do("POST", "/api/v1/demos/"+id+"/invites", `{"userId":"aud1","roomRole":"audience"}`, hostHdr)
+
+	// not live yet -> 400
+	if rec = do("POST", "/api/v1/demos/"+id+"/rtc-token", "", hostHdr); rec.Code != 400 {
+		t.Fatalf("pre-live want 400, got %d", rec.Code)
+	}
+
+	// go live
+	_ = do("POST", "/api/v1/demos/"+id+"/status", `{"status":"scheduled"}`, hostHdr)
+	_ = do("POST", "/api/v1/demos/"+id+"/status", `{"status":"live"}`, hostHdr)
+
+	// host -> 200, canPublish true, token present
+	rec = do("POST", "/api/v1/demos/"+id+"/rtc-token", "", hostHdr)
+	if rec.Code != 200 {
+		t.Fatalf("host token want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+	var hostResp struct {
+		Token      string `json:"token"`
+		URL        string `json:"url"`
+		CanPublish bool   `json:"canPublish"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &hostResp)
+	if hostResp.Token == "" || hostResp.URL == "" || !hostResp.CanPublish {
+		t.Fatalf("bad host resp: %+v", hostResp)
+	}
+
+	// audience -> 200, canPublish false
+	audTok, _ := ver.Mint("aud1", "Aud", "founder")
+	rec = do("POST", "/api/v1/demos/"+id+"/rtc-token", "", map[string]string{"Authorization": "Bearer " + audTok})
+	var audResp struct {
+		CanPublish bool `json:"canPublish"`
+	}
+	if rec.Code != 200 {
+		t.Fatalf("aud token want 200, got %d", rec.Code)
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &audResp)
+	if audResp.CanPublish {
+		t.Fatal("audience must not be allowed to publish")
+	}
+
+	// outsider -> 403
+	outTok, _ := ver.Mint("stranger", "S", "founder")
+	if rec = do("POST", "/api/v1/demos/"+id+"/rtc-token", "", map[string]string{"Authorization": "Bearer " + outTok}); rec.Code != 403 {
+		t.Fatalf("outsider want 403, got %d", rec.Code)
+	}
+}
+
+func TestDemoRtcTokenUnconfigured(t *testing.T) {
+	st := store.NewFakeStores()
+	ver := auth.NewVerifier("s")
+	demoSvc := demo.New(st.Demo)
+	r := NewRouter(Deps{
+		Verifier: ver, Users: st.Users, Demo: demoSvc,
+		LiveKit: livekit.New("", "", ""), // disabled
+	})
+	hostTok, _ := ver.Mint("host1", "Host", "founder")
+	hdr := map[string]string{"Authorization": "Bearer " + hostTok}
+	mk := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", hdr["Authorization"])
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := mk("POST", "/api/v1/demos", `{"kind":"startup","title":"L"}`)
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created["id"].(string)
+	_ = mk("POST", "/api/v1/demos/"+id+"/status", `{"status":"scheduled"}`)
+	_ = mk("POST", "/api/v1/demos/"+id+"/status", `{"status":"live"}`)
+	if rec = mk("POST", "/api/v1/demos/"+id+"/rtc-token", ""); rec.Code != 503 {
+		t.Fatalf("unconfigured want 503, got %d", rec.Code)
 	}
 }

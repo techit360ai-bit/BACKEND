@@ -80,6 +80,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/demos/{id}/status", handleDemoStatus(d))
 			r.Post("/demos/{id}/invites", handleDemoInvite(d))
 			r.Post("/demos/{id}/invites/respond", handleDemoRespond(d))
+			r.Post("/demos/{id}/rtc-token", handleDemoRtcToken(d))
 		})
 	})
 	return r
