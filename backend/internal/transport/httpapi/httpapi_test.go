@@ -17,6 +17,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/pubsub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/qa"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
 )
 
@@ -28,12 +29,13 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	chSvc := channel.New(st.Channels, h)
 	feedSvc := feed.New(st.Posts, h)
 	demoSvc := demo.New(st.Demo)
+	qaSvc := qa.New(st.QA, demoSvc, h)
 	lkSvc := livekit.New("APItest", "secretsecretsecretsecretsecret12", "wss://test.livekit.cloud")
 	pres := presence.New(presence.NewInMemoryStore(), nil)
 	r := NewRouter(Deps{
 		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
 		Messages: st.Messages, Messaging: msg, Channels: chSvc, ChannelStore: st.Channels,
-		Feed: feedSvc, Demo: demoSvc, LiveKit: lkSvc, Presence: pres, EnableDevToken: true,
+		Feed: feedSvc, Demo: demoSvc, QA: qaSvc, LiveKit: lkSvc, Presence: pres, EnableDevToken: true,
 	})
 	return r, ver, st
 }
@@ -443,5 +445,96 @@ func TestDemoRtcTokenUnconfigured(t *testing.T) {
 	_ = mk("POST", "/api/v1/demos/"+id+"/status", `{"status":"live"}`)
 	if rec = mk("POST", "/api/v1/demos/"+id+"/rtc-token", ""); rec.Code != 503 {
 		t.Fatalf("unconfigured want 503, got %d", rec.Code)
+	}
+}
+
+func TestDemoQAFlow(t *testing.T) {
+	r, ver, _ := newAPI(t)
+	hostTok, _ := ver.Mint("host1", "Host", "founder")
+	hostHdr := map[string]string{"Authorization": "Bearer " + hostTok}
+
+	do := func(method, path, body string, hdr map[string]string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, bytes.NewReader([]byte(body)))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	// create + go live
+	rec := do("POST", "/api/v1/demos", `{"kind":"startup","title":"L"}`, hostHdr)
+	var created map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &created)
+	id := created["id"].(string)
+
+	// ask before live -> 409
+	if rec = do("POST", "/api/v1/demos/"+id+"/questions", `{"body":"early?"}`, hostHdr); rec.Code != 409 {
+		t.Fatalf("pre-live ask want 409, got %d", rec.Code)
+	}
+	_ = do("POST", "/api/v1/demos/"+id+"/status", `{"status":"scheduled"}`, hostHdr)
+	_ = do("POST", "/api/v1/demos/"+id+"/status", `{"status":"live"}`, hostHdr)
+
+	// ask -> 200, question id present
+	rec = do("POST", "/api/v1/demos/"+id+"/questions", `{"body":"why this?"}`, hostHdr)
+	if rec.Code != 200 {
+		t.Fatalf("ask want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+	var q struct {
+		ID    string `json:"id"`
+		Body  string `json:"body"`
+		State string `json:"state"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &q)
+	if q.ID == "" || q.Body != "why this?" || q.State != "open" {
+		t.Fatalf("bad question: %+v", q)
+	}
+
+	// empty body -> 400
+	if rec = do("POST", "/api/v1/demos/"+id+"/questions", `{"body":"  "}`, hostHdr); rec.Code != 400 {
+		t.Fatalf("empty body want 400, got %d", rec.Code)
+	}
+
+	// upvote -> 200, votes=1, mine=true
+	rec = do("POST", "/api/v1/demos/"+id+"/questions/"+q.ID+"/upvote", "", hostHdr)
+	var uv struct {
+		Votes int  `json:"votes"`
+		Mine  bool `json:"mine"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &uv)
+	if rec.Code != 200 || uv.Votes != 1 || !uv.Mine {
+		t.Fatalf("upvote: code=%d %+v", rec.Code, uv)
+	}
+
+	// list -> 200, one question with votes=1, mine=true
+	rec = do("GET", "/api/v1/demos/"+id+"/questions", "", hostHdr)
+	var list struct {
+		Questions []struct {
+			ID    string `json:"id"`
+			Votes int    `json:"votes"`
+			Mine  bool   `json:"mine"`
+		} `json:"questions"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &list)
+	if rec.Code != 200 || len(list.Questions) != 1 || list.Questions[0].Votes != 1 || !list.Questions[0].Mine {
+		t.Fatalf("list: code=%d %+v", rec.Code, list)
+	}
+
+	// resolve -> 200, answered
+	rec = do("POST", "/api/v1/demos/"+id+"/questions/"+q.ID+"/resolve", `{"state":"answered"}`, hostHdr)
+	if rec.Code != 200 {
+		t.Fatalf("resolve want 200, got %d body=%s", rec.Code, rec.Body)
+	}
+	// invalid resolve state -> 400
+	if rec = do("POST", "/api/v1/demos/"+id+"/questions/"+q.ID+"/resolve", `{"state":"bogus"}`, hostHdr); rec.Code != 400 {
+		t.Fatalf("bad state want 400, got %d", rec.Code)
+	}
+
+	// outsider ask -> 403
+	outTok, _ := ver.Mint("stranger", "S", "founder")
+	outHdr := map[string]string{"Authorization": "Bearer " + outTok}
+	if rec = do("POST", "/api/v1/demos/"+id+"/questions", `{"body":"hi"}`, outHdr); rec.Code != 403 {
+		t.Fatalf("outsider ask want 403, got %d", rec.Code)
 	}
 }

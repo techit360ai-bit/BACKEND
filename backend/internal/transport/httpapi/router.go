@@ -17,6 +17,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/livekit"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/qa"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/store"
 )
 
@@ -31,6 +32,7 @@ type Deps struct {
 	ChannelStore   store.ChannelStore
 	Feed           *feed.Service
 	Demo           *demo.Service
+	QA             *qa.Service
 	LiveKit        *livekit.Service
 	Presence       *presence.Service
 	EnableDevToken bool
@@ -81,6 +83,10 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/demos/{id}/invites", handleDemoInvite(d))
 			r.Post("/demos/{id}/invites/respond", handleDemoRespond(d))
 			r.Post("/demos/{id}/rtc-token", handleDemoRtcToken(d))
+			r.Post("/demos/{id}/questions", handleAskQuestion(d))
+			r.Get("/demos/{id}/questions", handleListQuestions(d))
+			r.Post("/demos/{id}/questions/{qid}/upvote", handleUpvoteQuestion(d))
+			r.Post("/demos/{id}/questions/{qid}/resolve", handleResolveQuestion(d))
 		})
 	})
 	return r

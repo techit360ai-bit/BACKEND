@@ -22,6 +22,7 @@ import (
 	"github.com/techit360ai-bit/new-frontend/backend/internal/messaging"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/presence"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/pubsub"
+	"github.com/techit360ai-bit/new-frontend/backend/internal/qa"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/store/postgres"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/transport/httpapi"
 	"github.com/techit360ai-bit/new-frontend/backend/internal/transport/ws"
@@ -61,6 +62,7 @@ func main() {
 	chSvc := channel.New(pg.Channels, h)
 	feedSvc := feed.New(pg.Posts, h)
 	demoSvc := demo.New(pg.Demo)
+	qaSvc := qa.New(pg.QA, demoSvc, h)
 	lkSvc := livekit.New(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitURL)
 	ver := auth.NewVerifier(cfg.JWTSecret)
 
@@ -71,7 +73,7 @@ func main() {
 	api := httpapi.NewRouter(httpapi.Deps{
 		Verifier: ver, Users: pg.Users, Conversations: pg.Conversations,
 		Messages: pg.Messages, Messaging: msgSvc, Channels: chSvc, ChannelStore: pg.Channels,
-		Feed: feedSvc, Demo: demoSvc, LiveKit: lkSvc, Presence: presSvc,
+		Feed: feedSvc, Demo: demoSvc, QA: qaSvc, LiveKit: lkSvc, Presence: presSvc,
 		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1", CORSOrigins: cfg.CORSOrigins,
 	})
 
