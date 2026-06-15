@@ -121,6 +121,12 @@ func (s *Service) ListRoster(ctx context.Context, eventID, userID string) ([]sto
 	return s.store.ListRoster(ctx, eventID)
 }
 
+// Roster returns an event's full roster without an access check (internal
+// fan-out helper for sibling services; callers must authorize separately).
+func (s *Service) Roster(ctx context.Context, eventID string) ([]store.RosterEntry, error) {
+	return s.store.ListRoster(ctx, eventID)
+}
+
 // Transition moves an event to a new status (host only, validated state machine).
 func (s *Service) Transition(ctx context.Context, eventID, userID, to string) (store.DemoEvent, error) {
 	ev, err := s.getEvent(ctx, eventID)
