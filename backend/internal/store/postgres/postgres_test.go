@@ -235,3 +235,48 @@ func TestPostgresDemoLifecycle(t *testing.T) {
 		t.Fatalf("get after update: %+v err=%v", got2, err)
 	}
 }
+
+func TestPostgresQARoundTrip(t *testing.T) {
+	st := setup(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	// unique ids per run (shared DB persists rows across runs)
+	suffix := now.Format("150405.000000")
+	ev := store.DemoEvent{ID: "qa-ev-" + suffix, HostID: "h-" + suffix, Kind: "startup", Title: "T", Status: "live", CreatedAt: now, UpdatedAt: now}
+	if err := st.Demo.CreateEvent(ctx, ev); err != nil {
+		t.Fatalf("create event: %v", err)
+	}
+	q := store.DemoQuestion{ID: "qa-q-" + suffix, EventID: ev.ID, AskerID: "u-" + suffix, Body: "why?", State: "open", CreatedAt: now, UpdatedAt: now}
+	if err := st.QA.CreateQuestion(ctx, q); err != nil {
+		t.Fatalf("create question: %v", err)
+	}
+
+	// vote dedup via PK
+	if ins, _ := st.QA.AddVote(ctx, q.ID, "voter-"+suffix); !ins {
+		t.Fatal("first AddVote should insert")
+	}
+	if ins, _ := st.QA.AddVote(ctx, q.ID, "voter-"+suffix); ins {
+		t.Fatal("duplicate AddVote should be a no-op (PK conflict)")
+	}
+	if n, _ := st.QA.CountVotes(ctx, q.ID); n != 1 {
+		t.Fatalf("count=%d want 1", n)
+	}
+
+	// list view reflects votes + mine
+	views, err := st.QA.ListQuestions(ctx, ev.ID, "voter-"+suffix)
+	if err != nil || len(views) != 1 || views[0].Votes != 1 || !views[0].Mine {
+		t.Fatalf("list: err=%v %+v", err, views)
+	}
+
+	// remove + state transition
+	if del, _ := st.QA.RemoveVote(ctx, q.ID, "voter-"+suffix); !del {
+		t.Fatal("RemoveVote should delete")
+	}
+	if err := st.QA.SetQuestionState(ctx, q.ID, "dismissed"); err != nil {
+		t.Fatalf("set state: %v", err)
+	}
+	got, _ := st.QA.GetQuestion(ctx, q.ID)
+	if got.State != "dismissed" {
+		t.Fatalf("state=%s", got.State)
+	}
+}
