@@ -63,3 +63,12 @@ func TestPostServerTypesExist(t *testing.T) {
 		t.Fatal("post server type constants must be non-empty")
 	}
 }
+
+func TestQATypesDefined(t *testing.T) {
+	if TypeQANew == "" || TypeQAVoted == "" || TypeQAResolved == "" {
+		t.Fatal("qa.* type constants must be non-empty")
+	}
+	if TypeQANew != "qa.new" || TypeQAVoted != "qa.voted" || TypeQAResolved != "qa.resolved" {
+		t.Fatalf("unexpected qa type values: %s %s %s", TypeQANew, TypeQAVoted, TypeQAResolved)
+	}
+}

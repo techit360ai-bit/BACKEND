@@ -36,6 +36,9 @@ const (
 	TypePostNew         = "post.new"
 	TypePostLiked       = "post.liked"
 	TypePostComment     = "post.comment"
+	TypeQANew           = "qa.new"
+	TypeQAVoted         = "qa.voted"
+	TypeQAResolved      = "qa.resolved"
 )
 
 // SendPayload is the data of a message.send envelope. Exactly one of ConvID or
