@@ -1,0 +1,29 @@
+{
+  "name": "@techit/plugins-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TechIT Plugin SDK & Connector System (plugin-sdk, mcp-client, core, infra, plugins)",
+  "workspaces": [
+    "packages/*",
+    "infra/*",
+    "plugins/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "mcp:inspect": "tsx packages/mcp-client/src/inspector.ts",
+    "demo": "tsx scripts/demo.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1",
+    "zod": "^3.24.1"
+  }
+}
