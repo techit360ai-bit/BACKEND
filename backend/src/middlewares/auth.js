@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_change_in_production'
+const JWT_SECRET = process.env.JWT_SECRET
+if (!JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET environment variable is required. ' +
+    'This secret must match the value used by ai-router and ' +
+    'BACKEND/feat/messaging-backend so platform tokens verify across services.'
+  )
+}
 
 export function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization
