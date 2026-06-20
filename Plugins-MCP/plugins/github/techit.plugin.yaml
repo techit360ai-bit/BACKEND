@@ -1,0 +1,104 @@
+name: github
+version: 0.1.0
+displayName: GitHub
+
+auth:
+  kind: oauth2
+  scopes:
+    - repo
+    - read:user
+
+capabilities:
+  read: true
+  write: true
+  execute: true
+
+resources:
+  - type: repository
+    artifactType: code
+  - type: pull_request
+    artifactType: code
+  - type: issue
+    artifactType: document
+  - type: workflow
+    artifactType: workflow
+
+events:
+  transport: webhook
+  types:
+    - push
+    - pull_request
+    - workflow_run
+    - issues
+
+mcp:
+  enabled: true
+  tools:
+    - name: list_repositories
+      description: List repositories the connected account can access.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          org:
+            type: string
+        required: []
+
+    - name: read_file
+      description: Read a file's contents from a repository at a ref.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          path: { type: string }
+          ref: { type: string }
+        required: [repo, path]
+
+    - name: list_issues
+      description: List issues on a repository.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          state: { type: string }
+        required: [repo]
+
+    - name: get_pr_status
+      description: Get the status (checks, mergeability) of a pull request.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          number: { type: number }
+        required: [repo, number]
+
+    - name: create_pull_request
+      description: Open a pull request. Destructive — routed through the approval gate.
+      requiredRole: editor
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          head: { type: string }
+          base: { type: string }
+          title: { type: string }
+          body: { type: string }
+          approvalRequestId: { type: string }
+        required: [repo, head, base, title]
+
+    - name: run_workflow
+      description: Dispatch a GitHub Actions workflow. Destructive — routed through the approval gate.
+      requiredRole: admin
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          workflow: { type: string }
+          ref: { type: string }
+          approvalRequestId: { type: string }
+        required: [repo, workflow, ref]
