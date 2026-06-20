@@ -6,11 +6,14 @@
  */
 
 import type { Actor, AgentDefinition, Role } from '@techit/core';
-import { InMemoryApprovalStore, InMemoryContributionSink } from '@techit/core';
-import { InMemoryAuditLogger } from '@techit/infra-audit';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
+import {
+  FileApprovalStore,
+  FileAuditLogger,
+  FileContributionSink,
+} from './file-store.js';
 
 const WS = 'ws-acme';
 
@@ -51,9 +54,12 @@ function toContext(input: ActorInput | undefined): CallContext {
 }
 
 async function build(): Promise<TechitService> {
-  const audit = new InMemoryAuditLogger();
-  const approvals = new InMemoryApprovalStore();
-  const contributions = new InMemoryContributionSink();
+  // Persistent stores backed by backend/data/plugins-mcp.json (override path
+  // with MCP_DATA_FILE env). Audit log + approval queue + contribution feed
+  // all survive restarts; the previous In-Memory stores reset on every boot.
+  const audit = new FileAuditLogger();
+  const approvals = new FileApprovalStore();
+  const contributions = new FileContributionSink();
   const runtime = createRuntime({ audit, approvals, contributions });
   const registry = new MCPRegistry();
   await registerGithubPlugin({ runtime, registry, workspaceId: WS });
@@ -80,14 +86,18 @@ async function build(): Promise<TechitService> {
   };
 
   // Seed a little activity so the dashboards aren't empty on first load.
-  await service.invoke('github', 'list_repositories', {});
-  await service.invoke('github', 'list_issues', { repo: 'acme/app' });
-  await service.invoke(
-    'github',
-    'create_pull_request',
-    { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
-    { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'] },
-  );
+  // Only run when the audit log is empty (fresh database) — without this guard
+  // every restart would append three more rows, polluting the persistent log.
+  if (audit.entries().length === 0) {
+    await service.invoke('github', 'list_repositories', {});
+    await service.invoke('github', 'list_issues', { repo: 'acme/app' });
+    await service.invoke(
+      'github',
+      'create_pull_request',
+      { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
+      { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'] },
+    );
+  }
 
   return service;
 }

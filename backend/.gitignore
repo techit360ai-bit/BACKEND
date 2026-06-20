@@ -3,3 +3,8 @@ node_modules/
 .env
 
 dist/
+
+# Local file-backed stores. Schema lives in code; data is per-environment.
+data/db.json
+data/plugins-mcp.json
+data/plugins-mcp.json.tmp
