@@ -8,8 +8,14 @@
  *   GET  /api/audit           → immutable audit log
  *   GET  /api/contributions   → execution-intelligence feed
  *   GET  /api/approvals       → approval requests (pending/approved/rejected)
- *   POST /api/invoke          → { plugin, tool, params, actor? } → structured Result
- *   POST /api/approvals/:id/approve → { decidedBy? } → approve then re-invoke client-side
+ *   POST /api/invoke          → { plugin, tool, params } → structured Result
+ *   POST /api/approvals/:id/approve → approve then re-invoke client-side
+ *
+ * Auth: pass `opts.resolveActor` to gate every route on a verified JWT (or any
+ * authenticator the backend chooses). When set, requests that don't produce an
+ * actor get 401. When unset, the legacy body.actor + ws-acme fallback runs
+ * (DEV ONLY — never enable in production: it lets any caller pick their own
+ * role).
  */
 
 import { getTechitService } from './techit-service.js';
@@ -18,6 +24,7 @@ import { getTechitService } from './techit-service.js';
 interface Req {
   body: Record<string, unknown>;
   params: Record<string, string>;
+  headers?: Record<string, string | string[] | undefined>;
 }
 interface Res {
   json(body: unknown): void;
@@ -28,32 +35,92 @@ interface App {
   post(path: string, handler: (req: Req, res: Res) => void): void;
 }
 
-export async function mountTechitApi(app: App, base = '/api'): Promise<void> {
-  const svc = await getTechitService();
+export interface ResolvedActor {
+  actor: {
+    id: string;
+    kind: 'human' | 'agent';
+    role: string;
+    toolsAllowed?: string[];
+  };
+  /** Tenant scope from the auth token. Reserved for future per-workspace routing. */
+  workspaceId?: string;
+}
 
-  app.get(`${base}/health`, (_req, res) => res.json({ ok: true, workspaceId: svc.workspaceId }));
-  app.get(`${base}/tools`, (_req, res) => res.json(svc.listTools()));
-  app.get(`${base}/audit`, (_req, res) => res.json(svc.audit()));
-  app.get(`${base}/contributions`, (_req, res) => res.json(svc.contributions()));
-  app.get(`${base}/approvals`, (_req, res) => res.json(svc.approvals()));
+export interface MountOptions {
+  /**
+   * Per-request authenticator. Synchronous or async. Return null to reject the
+   * request with 401. Without this option the routes accept body-supplied
+   * actors — only suitable for local dev.
+   */
+  resolveActor?: (req: Req) => ResolvedActor | null | Promise<ResolvedActor | null>;
+}
+
+export async function mountTechitApi(app: App, base = '/api', opts: MountOptions = {}): Promise<void> {
+  const svc = await getTechitService();
+  const { resolveActor } = opts;
+
+  async function gate(req: Req, res: Res): Promise<ResolvedActor | null> {
+    if (!resolveActor) {
+      // Legacy mode (dev only): construct a permissive actor from body.actor.
+      const bodyActor = (req.body?.actor as ResolvedActor['actor'] | undefined) ?? {
+        id: 'founder',
+        kind: 'human',
+        role: 'owner',
+      };
+      return { actor: bodyActor };
+    }
+    const resolved = await resolveActor(req);
+    if (!resolved) {
+      res.status(401).json({
+        ok: false,
+        error: { code: 'unauthenticated', error: 'Missing or invalid token' },
+      });
+      return null;
+    }
+    return resolved;
+  }
+
+  app.get(`${base}/health`, async (req, res) => {
+    if (!(await gate(req, res))) return;
+    res.json({ ok: true, workspaceId: svc.workspaceId });
+  });
+  app.get(`${base}/tools`, async (req, res) => {
+    if (!(await gate(req, res))) return;
+    res.json(svc.listTools());
+  });
+  app.get(`${base}/audit`, async (req, res) => {
+    if (!(await gate(req, res))) return;
+    res.json(svc.audit());
+  });
+  app.get(`${base}/contributions`, async (req, res) => {
+    if (!(await gate(req, res))) return;
+    res.json(svc.contributions());
+  });
+  app.get(`${base}/approvals`, async (req, res) => {
+    if (!(await gate(req, res))) return;
+    res.json(svc.approvals());
+  });
 
   app.post(`${base}/invoke`, async (req, res) => {
-    const { plugin, tool, params, actor } = req.body as {
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    const { plugin, tool, params } = req.body as {
       plugin?: string;
       tool?: string;
       params?: unknown;
-      actor?: Parameters<typeof svc.invoke>[3];
     };
     if (!plugin || !tool) {
       res.status(400).json({ ok: false, error: { code: 'invalid_input', error: 'plugin and tool are required' } });
       return;
     }
-    const result = await svc.invoke(plugin, tool, params ?? {}, actor);
+    const result = await svc.invoke(plugin, tool, params ?? {}, resolved.actor);
     res.json(result);
   });
 
   app.post(`${base}/approvals/:id/approve`, async (req, res) => {
-    const decidedBy = typeof req.body?.decidedBy === 'string' ? req.body.decidedBy : undefined;
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    const decidedBy = resolved.actor.id;
     const out = await svc.approve(req.params.id, decidedBy);
     res.json(out);
   });
