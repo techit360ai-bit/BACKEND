@@ -8,9 +8,17 @@
  * matches the pattern used by BACKEND/main's auth db.json). Override with the
  * `MCP_DATA_FILE` env var.
  *
- * Concurrency model: synchronous write-on-mutation with atomic rename. Fine
- * for the current single-process Node service; if/when the backend scales
- * horizontally, swap these for a real datastore behind the same interfaces.
+ * Concurrency model: synchronous write-on-mutation with atomic rename. Safe
+ * within a single Node process — write() has no awaits, so each invocation
+ * runs to completion before the event loop yields to the next /api/mcp/invoke
+ * handler. Verified by tests/file-store-concurrent.test.ts (100 parallel writes
+ * land 100 entries; no losses).
+ *
+ * **Not** safe across multiple processes (cluster mode, multiple replicas
+ * behind a load balancer). Two replicas mutating their own in-memory cache
+ * will overwrite each other's tmp + rename. Swap for a real datastore behind
+ * the same AuditLogger / ApprovalStore / ContributionSink interfaces before
+ * scaling horizontally.
  */
 
 import {
