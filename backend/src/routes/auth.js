@@ -1,17 +1,50 @@
 import { Router } from 'express'
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import { signup, signin, session, signout } from '../controllers/authController.js'
 import { sendOtp, verifyOtp } from '../controllers/otpController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
 const router = Router()
 
-router.post('/signup',      signup)
-router.post('/signin',      signin)
+// Per-IP rate limits on the credential-touching endpoints. The OTP controller
+// already has a per-email cooldown (60s); this defends the endpoint itself
+// against brute force / OTP enumeration that varies the email per request.
+//
+// `ipKeyGenerator` handles IPv6 normalisation that express-rate-limit v8
+// requires (default behavior changed to refuse plain `req.ip` for IPv6 hosts).
+const baseLimit = (opts) => rateLimit({
+  ...opts,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+  validate: { trustProxy: false, xForwardedForHeader: false },
+})
+
+const signinLimit = baseLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { error: 'Too many sign-in attempts. Please wait a minute and try again.' },
+})
+
+const otpLimit = baseLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  message: { error: 'Too many OTP requests. Please wait before requesting another code.' },
+})
+
+const signupLimit = baseLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many sign-up attempts from this IP. Please try again later.' },
+})
+
+router.post('/signup',      signupLimit, signup)
+router.post('/signin',      signinLimit, signin)
 router.get('/session',      requireAuth, session)
 router.post('/signout',     requireAuth, signout)
 
 // OTP email verification
-router.post('/send-otp',    sendOtp)
+router.post('/send-otp',    otpLimit, sendOtp)
 router.post('/verify-otp',  verifyOtp)
 
 export default router
