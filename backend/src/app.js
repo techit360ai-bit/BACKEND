@@ -32,14 +32,18 @@ await mountTechitApi(app, '/api/mcp', {
     if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
     try {
       const claims = jwt.verify(auth.slice(7), JWT_SECRET)
+      const workspaceId = typeof claims.workspaceId === 'string' ? claims.workspaceId : undefined
       return {
         actor: {
           id: String(claims.sub ?? 'unknown'),
           kind: claims.kind === 'agent' ? 'agent' : 'human',
           role: String(claims.role ?? 'viewer'),
           toolsAllowed: Array.isArray(claims.toolsAllowed) ? claims.toolsAllowed : undefined,
+          // Plumb workspaceId onto the actor so techit-service.toContext() can
+          // scope the invocation per-tenant instead of the seed 'ws-acme' (#9).
+          workspaceId,
         },
-        workspaceId: typeof claims.workspaceId === 'string' ? claims.workspaceId : undefined,
+        workspaceId,
       }
     } catch {
       return null
