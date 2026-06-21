@@ -2,7 +2,20 @@ import { Resend } from 'resend'
 import { randomInt } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Lazy-initialize the Resend client so module load stays side-effect free.
+// The Resend constructor throws when no API key is set; eager construction here
+// brought the whole service down at boot for any caller — including the ones
+// who never touch /api/auth/send-otp. Defer until sendOtp is actually called.
+let _resend
+function getResend() {
+  if (_resend) return _resend
+  const key = process.env.RESEND_API_KEY
+  if (!key) {
+    throw new Error('RESEND_API_KEY is required to send OTP emails')
+  }
+  _resend = new Resend(key)
+  return _resend
+}
 
 const FROM      = process.env.FROM_EMAIL         || 'TechIT <onboarding@resend.dev>'
 const EXPIRES   = parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10)
@@ -58,7 +71,7 @@ export async function sendOtp(req, res) {
 
   // ── Send email via Resend ─────────────────────────────────────────────────
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from:    FROM,
       to:      [email],
       subject: 'Your TechIT verification code',
