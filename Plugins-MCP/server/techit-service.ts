@@ -15,12 +15,19 @@ import {
   FileContributionSink,
 } from './file-store.js';
 
+// Default workspaceId used for the demo-seed activity in build() and as a
+// fallback when a caller doesn't supply one. Production traffic should
+// always come through mount.ts with a verified JWT claim — see
+// resolveActor in app.js, which sets ActorInput.workspaceId from the token.
 const WS = 'ws-acme';
 
 export interface ActorInput {
   id?: string;
   kind?: 'human' | 'agent';
   role?: Role;
+  /** Tenant scope from the verified JWT (workspaceId claim). Falls back to WS
+   *  when omitted — only happens for the in-process seed activity. */
+  workspaceId?: string;
   /** For agents: explicit tool allow-list (`<plugin>.<tool>`). */
   toolsAllowed?: string[];
 }
@@ -39,18 +46,19 @@ function toContext(input: ActorInput | undefined): CallContext {
   const role: Role = input?.role ?? 'owner';
   const kind = input?.kind ?? 'human';
   const id = input?.id ?? (kind === 'agent' ? 'coding-agent' : 'founder');
-  const actor: Actor = { id, kind, workspaceId: WS, role };
+  const workspaceId = input?.workspaceId ?? WS;
+  const actor: Actor = { id, kind, workspaceId, role };
   if (kind === 'agent') {
     const agent: AgentDefinition = {
       id,
       name: id,
-      workspaceId: WS,
+      workspaceId,
       toolsAllowed: input?.toolsAllowed ?? [],
       maxRole: role,
     };
-    return { actor, agent, resourceWorkspaceId: WS };
+    return { actor, agent, resourceWorkspaceId: workspaceId };
   }
-  return { actor, resourceWorkspaceId: WS };
+  return { actor, resourceWorkspaceId: workspaceId };
 }
 
 async function build(): Promise<TechitService> {
