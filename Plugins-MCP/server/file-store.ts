@@ -69,8 +69,21 @@ function load(): FileShape {
       approvalDecisions: parsed.approvalDecisions ?? {},
       contributions: parsed.contributions ?? [],
     };
-  } catch {
+  } catch (err) {
     // Corrupt or unreadable file → start fresh rather than crash the service.
+    // But ALWAYS log the failure: silent reset hides incidents where the
+    // audit trail was wiped (operator needs to know it happened, and what
+    // the file looked like at the time so it can be recovered from backup).
+    const message = err instanceof Error ? err.message : String(err);
+    // Using console.error (not a structured logger) because file-store.ts has
+    // no logger dependency. The backend host's stderr is captured by the
+    // platform's log aggregator already.
+    console.error(
+      `[plugins-mcp file-store] failed to parse ${DATA_PATH}: ${message}. ` +
+      `Resetting in-memory cache to empty; the on-disk file is preserved ` +
+      `but new writes will overwrite it. Recover from backup if the audit ` +
+      `trail mattered.`,
+    );
     cache = { audit: [], approvalRequests: [], approvalDecisions: {}, contributions: [] };
   }
   return cache;
