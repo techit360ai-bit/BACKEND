@@ -7,6 +7,9 @@ export default defineConfig({
     env: {
       JWT_SECRET: 'test_jwt_secret_do_not_use_in_production',
       BCRYPT_ROUNDS: '2',
+      // Isolate the Plugins-MCP file-store away from backend/data/plugins-mcp.json
+      // so the suite never reads or writes the production-like fixture.
+      MCP_DATA_FILE: '/tmp/vitest-mcp-store.json',
     },
     coverage: {
       reporter: ['text', 'lcov'],

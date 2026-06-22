@@ -12,12 +12,20 @@ const router = Router()
 //
 // `ipKeyGenerator` handles IPv6 normalisation that express-rate-limit v8
 // requires (default behavior changed to refuse plain `req.ip` for IPv6 hosts).
+//
+// Test bypass: vitest sets NODE_ENV=test by default. supertest in a tight
+// loop would otherwise trip the 5/min signin limit (the auth.test.js suite
+// alone fires 18 POSTs). The skip predicate keeps production behaviour
+// unchanged.
+const IS_TEST = process.env.NODE_ENV === 'test'
+
 const baseLimit = (opts) => rateLimit({
   ...opts,
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip),
   validate: { trustProxy: false, xForwardedForHeader: false },
+  skip: () => IS_TEST,
 })
 
 const signinLimit = baseLimit({
