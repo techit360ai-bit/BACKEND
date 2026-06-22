@@ -73,6 +73,7 @@ describe('POST /api/auth/signup', () => {
       firstName: 'New',
       lastName: 'User',
       role: 'founder',
+      otpVerified: true,
     })
 
     expect(res.status).toBe(201)
@@ -92,6 +93,7 @@ describe('POST /api/auth/signup', () => {
       password: 'Secret@99',
       firstName: 'A',
       lastName: 'B',
+      otpVerified: true,
     })
 
     expect(res.status).toBe(201)
@@ -106,6 +108,7 @@ describe('POST /api/auth/signup', () => {
       password: 'Secret@99',
       firstName: 'A',
       lastName: 'B',
+      otpVerified: true,
     })
 
     expect(res.status).toBe(201)
@@ -121,6 +124,7 @@ describe('POST /api/auth/signup', () => {
       password: 'Secret@99',
       firstName: 'A',
       lastName: 'B',
+      otpVerified: true,
     })
 
     expect(res.body.profile.creditBalance).toBe(0)
@@ -137,6 +141,7 @@ describe('POST /api/auth/signup', () => {
       password: 'Secret@99',
       firstName: 'Alice',
       lastName: 'Again',
+      otpVerified: true,
     })
 
     expect(res.status).toBe(409)
