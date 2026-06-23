@@ -7,8 +7,16 @@ import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
 
+// CORS allow-list — comma-separated origins via env, defaults to local Vite
+// dev ports. Production MUST set CORS_ORIGINS to the deployed frontend(s);
+// without this env var, a real-domain frontend gets blocked at the browser.
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:4173'],
+  origin: CORS_ORIGINS,
   credentials: true,
 }))
 app.use(express.json())
