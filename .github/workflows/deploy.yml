@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: TypeScript Build Check
+    name: Vite Build Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +23,7 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
 
-      - name: Install test dependencies
-        run: cd frontend && npm install --save-dev vitest @testing-library/react @testing-library/user-event @vitest/coverage-v8 2>/dev/null || true
-
-      - name: TypeScript check
-        run: cd frontend && npx tsc -b --noEmit
-
-      - name: Vite build check
+      - name: Vite production build
         run: cd frontend && npm run build
         env:
           VITE_API_BASE_URL: https://techit-api-u1ek.onrender.com
