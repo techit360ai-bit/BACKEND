@@ -2,6 +2,8 @@ import express from 'express'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
 import authRoutes from './routes/auth.js'
+import fileRoutes from './routes/files.js'
+import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -24,6 +26,8 @@ app.use(express.json())
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/notifications', notificationRoutes)
+app.use('/api/files', fileRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
 // invoke + approve. Mounted under /api/mcp so it never collides with the

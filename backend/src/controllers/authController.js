@@ -14,8 +14,13 @@ if (!JWT_SECRET) {
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
 
-function makeToken(userId) {
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+function makeToken(userId, profile = null) {
+  const claims = {
+    sub: userId,
+    role: profile?.role || 'founder',
+    workspaceId: profile?.workspaceId || `user-${userId}`,
+  }
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
 }
 
 function buildProfile(data, now) {
@@ -87,7 +92,7 @@ export async function signup(req, res) {
   writeDb(db)
 
   return res.status(201).json({
-    token: makeToken(id),
+    token: makeToken(id, profile),
     user: { id, email, user_metadata: {} },
     profile,
   })
@@ -114,14 +119,16 @@ export async function signin(req, res) {
   const profile = db.profiles.find(p => p.id === user.id) || null
 
   return res.json({
-    token: makeToken(user.id),
+    token: makeToken(user.id, profile),
     user: { id: user.id, email: user.email, user_metadata: {} },
     profile,
   })
 }
 
 export function session(req, res) {
-  return res.json({ user: req.user })
+  const db = readDb()
+  const profile = db.profiles.find(p => p.id === req.user.id) || null
+  return res.json({ user: req.user, profile })
 }
 
 export function signout(_req, res) {
