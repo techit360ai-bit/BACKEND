@@ -10,6 +10,8 @@ const INITIAL = {
   users: [],
   profiles: [],
   otps: [],
+  emailVerifications: [],
+  passwordResets: [],
   notifications: [],
   files: [],
   mentorshipRooms: [],

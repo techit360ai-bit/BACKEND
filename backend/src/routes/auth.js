@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
-import { signup, signin, session, signout } from '../controllers/authController.js'
+import { forgotPassword, resetPassword, signup, signin, session, signout } from '../controllers/authController.js'
 import { sendOtp, verifyOtp } from '../controllers/otpController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
@@ -50,6 +50,8 @@ router.post('/signup',      signupLimit, signup)
 router.post('/signin',      signinLimit, signin)
 router.get('/session',      requireAuth, session)
 router.post('/signout',     requireAuth, signout)
+router.post('/forgot-password', signinLimit, forgotPassword)
+router.post('/reset-password',  signinLimit, resetPassword)
 
 // OTP email verification
 router.post('/send-otp',    otpLimit, sendOtp)

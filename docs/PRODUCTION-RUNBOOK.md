@@ -15,7 +15,7 @@ For deploying the TechIT platform (BACKEND + ai-router + new-frontend) to a host
 | Generated `JWT_SECRET` | secrets manager | 32-byte random hex. `python3 -c "import secrets; print(secrets.token_hex(32))"`. **Same value** for BACKEND/main, BACKEND/feat/messaging-backend, ai-router, and Plugins-MCP — they all verify with it. |
 | PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router only. BACKEND/main uses `db.json` (file-based). |
 | Redis 7 | Upstash / ElastiCache / self-hosted | ai-router Celery broker + Plugins-MCP cache. Not needed by BACKEND/main. |
-| `RESEND_API_KEY` | secrets manager | OTP email (BACKEND/main only). Lazy-init since fix/lazy-resend-init (#5) — missing key no longer crashes boot, but `/auth/send-otp` returns 502 until it's set. |
+| `RESEND_API_KEY` | secrets manager | OTP and password-reset email (BACKEND/main only). Lazy-init since fix/lazy-resend-init (#5) — missing key no longer crashes boot, but email-sending endpoints require it. |
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | secrets manager | ai-router only. Webhook signature is verified on every event. |
 | LLM provider keys | secrets manager | At minimum `OPENAI_API_KEY` + `ANTHROPIC_API_KEY`. Optional: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `COHERE_API_KEY`. ai-router only. |
 | Domain + TLS for each service | DNS + ACM/Let's Encrypt | Three public hostnames typically: `api.<domain>` (BACKEND), `ai.<domain>` (ai-router), `app.<domain>` (frontend). |
@@ -44,6 +44,7 @@ NODE_ENV=production
 PORT=3000
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
+FRONTEND_URL=https://app.<domain>        # used in password reset links
 MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json   # persistent volume; survives restarts
 ```
 
@@ -51,10 +52,19 @@ Health check: `GET /` → `{"status":"TechIT API running"}` (200).
 
 Smoke test (1 min):
 ```bash
-# create a real user
+# request and verify an OTP, then create a real user with the proof token
+curl -X POST https://api.<domain>/api/auth/send-otp \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@x.test"}'
+
+curl -X POST https://api.<domain>/api/auth/verify-otp \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"smoke@x.test","code":"<code-from-email>"}'
+export EMAIL_VERIFICATION_TOKEN=...
+
 curl -X POST https://api.<domain>/api/auth/signup \
   -H 'Content-Type: application/json' \
-  -d '{"email":"smoke@x.test","password":"hunter2!","firstName":"S","lastName":"T","otpVerified":true}'
+  -d '{"email":"smoke@x.test","password":"hunter2!","firstName":"S","lastName":"T","emailVerificationToken":"'"$EMAIL_VERIFICATION_TOKEN"'"}'
 # returns { token, user, profile }
 export TOKEN=...
 
@@ -188,7 +198,7 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | BACKEND/main exits at boot with `JWT_SECRET environment variable is required` | env var not set | Set it. No fallback by design (#1, was `'fallback_secret_change_in_production'`). |
-| BACKEND/main 502s on `/auth/send-otp` | `RESEND_API_KEY` missing | Set it. Other endpoints unaffected (#5 lazy-init). |
+| BACKEND/main cannot send OTP or password-reset emails | `RESEND_API_KEY` missing or invalid | Set it. Other endpoints unaffected (#5 lazy-init). |
 | ai-router exits at boot with `ALLOW_DEMO_AUTH=true is forbidden in ENVIRONMENT=production` | demo-auth left on by accident | Set `ALLOW_DEMO_AUTH=false` or unset it. C3 guardrail. |
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
 | Frontend logs `401` on every call after a deploy | mismatched `JWT_SECRET` between BACKEND and ai-router/messaging | Compare secret values across services; **same string everywhere**. |

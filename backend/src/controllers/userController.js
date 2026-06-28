@@ -3,8 +3,7 @@ import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/ap
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
-  'avatarUrl', 'bio', 'role', 'secondaryRoles', 'creditBalance', 'credibilityScore',
-  'isVerified', 'isOnboarded', 'startupStage', 'industries', 'experience',
+  'avatarUrl', 'bio', 'secondaryRoles', 'isOnboarded', 'startupStage', 'industries', 'experience',
   'skills', 'weeklyHours', 'riskTolerance', 'investmentFocus', 'ticketSize',
   'orgName', 'orgType', 'website', 'linkedinUrl', 'githubUrl', 'portfolioUrl',
   'timezone', 'certifications',
