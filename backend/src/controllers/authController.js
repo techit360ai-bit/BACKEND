@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
+import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -159,13 +160,18 @@ async function sendPasswordResetEmail(email, resetUrl) {
 
 export async function signup(req, res) {
   const {
-    email, password, firstName, lastName,
+    email: rawEmail, password, firstName, lastName,
     phone = '', country = '', countryCode = '', role = 'founder',
     emailVerificationToken,
   } = req.body
+  const email = normalizeEmail(rawEmail)
 
   if (!email || !password || !firstName || !lastName) {
     return res.status(400).json({ error: 'Email, password, first name, and last name are required' })
+  }
+
+  if (!isAllowedRole(role)) {
+    return res.status(400).json({ error: 'Role is invalid' })
   }
 
   if (!emailVerificationToken) {
@@ -198,7 +204,8 @@ export async function signup(req, res) {
 }
 
 export async function signin(req, res) {
-  const { email, password } = req.body
+  const { email: rawEmail, password } = req.body
+  const email = normalizeEmail(rawEmail)
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' })
@@ -235,7 +242,8 @@ export function signout(_req, res) {
 }
 
 export async function forgotPassword(req, res) {
-  const { email } = req.body
+  const { email: rawEmail } = req.body
+  const email = normalizeEmail(rawEmail)
   if (!email) {
     return res.status(400).json({ error: 'Email is required' })
   }
@@ -277,7 +285,8 @@ export async function forgotPassword(req, res) {
 }
 
 export async function resetPassword(req, res) {
-  const { email, token, password } = req.body
+  const { email: rawEmail, token, password } = req.body
+  const email = normalizeEmail(rawEmail)
   if (!email || !token || !password) {
     return res.status(400).json({ error: 'Email, token, and password are required' })
   }

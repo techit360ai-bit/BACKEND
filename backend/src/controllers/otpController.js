@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomInt, randomUUID } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
+import { normalizeEmail } from '../utils/authInputs.js'
 
 // Lazy-initialize the Resend client so module load stays side-effect free.
 // The Resend constructor throws when no API key is set; eager construction here
@@ -46,7 +47,7 @@ function cleanExpiredVerifications(records) {
 
 // ── POST /api/auth/send-otp ───────────────────────────────────────────────────
 export async function sendOtp(req, res) {
-  const { email } = req.body
+  const email = normalizeEmail(req.body.email)
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ error: 'A valid email is required' })
   }
@@ -136,7 +137,8 @@ export async function sendOtp(req, res) {
 
 // ── POST /api/auth/verify-otp ─────────────────────────────────────────────────
 export function verifyOtp(req, res) {
-  const { email, code } = req.body
+  const email = normalizeEmail(req.body.email)
+  const { code } = req.body
   if (!email || !code) {
     return res.status(400).json({ error: 'Email and code are required' })
   }
