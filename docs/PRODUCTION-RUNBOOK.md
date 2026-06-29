@@ -12,7 +12,7 @@ For deploying the TechIT platform (BACKEND + ai-router + new-frontend) to a host
 
 | Item | Where | Notes |
 |---|---|---|
-| Node.js 22.5+ | runtime image | Required for BACKEND's built-in `node:sqlite` durable store. |
+| Node.js 22.12+ | runtime image | Required for BACKEND's built-in `node:sqlite` durable store and current frontend/tooling dependencies in the root lockfile. |
 | Generated `JWT_SECRET` | secrets manager | 32-byte random hex. `python3 -c "import secrets; print(secrets.token_hex(32))"`. **Same value** for BACKEND/main, BACKEND/messaging-backend, ai-router, and Plugins-MCP — they all verify with it. |
 | PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router uses pgvector. BACKEND/messaging-backend also uses PostgreSQL 16 for messaging/demo state. |
 | Persistent disk for BACKEND SQLite | mounted volume | Required for Node auth/profile/notification/file metadata. Do not store it in the repository checkout or ephemeral container filesystem. |
