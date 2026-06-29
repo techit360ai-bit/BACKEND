@@ -11,7 +11,7 @@
  * Authors register one handler per tool via `handle(name, fn)`.
  */
 
-import type { ContributionKind } from '@techit/core';
+import type { ApprovalRequest, ContributionKind } from '@techit/core';
 import type { MCPAdapter } from '../contract/mcp-adapter.js';
 import {
   type CallContext,
@@ -24,7 +24,7 @@ import type { ManifestMCPTool } from '../manifest/schema.js';
 import type { SdkRuntime } from '../runtime.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
-import { requestApproval } from '../hooks/approval.js';
+import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
 import { emitContribution } from '../hooks/contribution.js';
 
 export type ToolHandler = (params: Record<string, unknown>) => Promise<unknown>;
@@ -95,12 +95,20 @@ export abstract class BaseMCPServer implements MCPAdapter {
       return err('permission_denied', 'tool not permitted', decision.detail ?? decision.reason);
     }
 
+    let approvedRequest: ApprovalRequest | undefined;
     if (entry.spec.destructive) {
       const approvalId = typeof p.approvalRequestId === 'string' ? p.approvalRequestId : undefined;
-      const approved = approvalId
-        ? (await this.runtime.approvals.get(approvalId))?.status === 'approved'
-        : false;
-      if (!approved) {
+      if (approvalId) {
+        const approval = await validateApproval(this.runtime, this.ctx, approvalId, qualified);
+        if (!approval.ok) {
+          recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+            reason: `approval_${approval.reason}`,
+            approvalRequestId: approvalId,
+          });
+          return err('permission_denied', 'approval request is not valid for this execution', approval.reason);
+        }
+        approvedRequest = approval.request;
+      } else {
         const request = await requestApproval(
           this.runtime,
           this.ctx,
@@ -116,6 +124,9 @@ export abstract class BaseMCPServer implements MCPAdapter {
     }
 
     try {
+      if (approvedRequest) {
+        await consumeApproval(this.runtime, approvedRequest, this.ctx.actor.id);
+      }
       const data = await entry.handler(p);
       recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'success');
       const kind = entry.contribution ?? 'ai_action';

@@ -6,7 +6,7 @@
  * ApprovalDecision of `approved`.
  */
 
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'used';
 
 export interface ApprovalRequest {
   readonly id: string;
@@ -22,7 +22,7 @@ export interface ApprovalRequest {
 export interface ApprovalDecision {
   readonly requestId: string;
   readonly decidedBy: string; // human actor id
-  readonly status: 'approved' | 'rejected';
+  readonly status: Exclude<ApprovalStatus, 'pending'>;
   readonly decidedAt: string;
   readonly comment?: string;
 }

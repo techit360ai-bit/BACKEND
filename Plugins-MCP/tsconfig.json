@@ -3,7 +3,8 @@
   "include": [
     "packages/*/src/**/*.ts",
     "infra/*/src/**/*.ts",
-    "plugins/*/**/*.ts"
+    "plugins/*/**/*.ts",
+    "server/**/*.ts"
   ],
   "exclude": ["node_modules", "**/dist"]
 }

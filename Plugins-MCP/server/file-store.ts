@@ -45,6 +45,7 @@ import type {
 
 const DEFAULT_PATH = join(process.cwd(), 'backend', 'data', 'plugins-mcp.json');
 const DATA_PATH = process.env.MCP_DATA_FILE || DEFAULT_PATH;
+const PRODUCTION_ENVS = new Set(['production', 'staging']);
 
 interface FileShape {
   audit: AuditEntry[];
@@ -54,6 +55,19 @@ interface FileShape {
 }
 
 let cache: FileShape | undefined;
+
+export function validateMcpStoreConfig(): void {
+  const env = (process.env.NODE_ENV || 'development').toLowerCase();
+  if (!PRODUCTION_ENVS.has(env)) return;
+
+  if (!process.env.MCP_DATA_FILE) {
+    throw new Error('MCP_DATA_FILE is required in production/staging and must point at persistent storage.');
+  }
+  if (process.env.MCP_ALLOW_FILE_STORE === 'true') return;
+  throw new Error(
+    'File-backed MCP persistence is not allowed in production/staging unless MCP_ALLOW_FILE_STORE=true is explicitly set.',
+  );
+}
 
 function load(): FileShape {
   if (cache) return cache;
@@ -101,6 +115,7 @@ let auditSeq = 0;
 
 export class FileAuditLogger implements AuditLogger {
   constructor() {
+    validateMcpStoreConfig();
     load();
   }
 
@@ -127,6 +142,10 @@ export class FileAuditLogger implements AuditLogger {
   entries(): readonly AuditEntry[] {
     return load().audit.slice();
   }
+
+  entriesForWorkspace(workspaceId: string): readonly AuditEntry[] {
+    return load().audit.filter((entry) => entry.workspaceId === workspaceId);
+  }
 }
 
 export class FileApprovalStore implements ApprovalStore {
@@ -134,6 +153,7 @@ export class FileApprovalStore implements ApprovalStore {
   readonly requests = new Map<string, ApprovalRequest>();
 
   constructor() {
+    validateMcpStoreConfig();
     const data = load();
     for (const req of data.approvalRequests) this.requests.set(req.id, req);
   }
@@ -159,6 +179,10 @@ export class FileApprovalStore implements ApprovalStore {
   get(requestId: string): ApprovalRequest | undefined {
     return this.requests.get(requestId);
   }
+
+  listForWorkspace(workspaceId: string): ApprovalRequest[] {
+    return [...this.requests.values()].filter((req) => req.workspaceId === workspaceId);
+  }
 }
 
 export class FileContributionSink implements ContributionSink {
@@ -166,11 +190,16 @@ export class FileContributionSink implements ContributionSink {
   readonly events: ContributionEvent[];
 
   constructor() {
+    validateMcpStoreConfig();
     this.events = load().contributions;
   }
 
   emit(event: ContributionEvent): void {
     this.events.push(event);
     persist();
+  }
+
+  eventsForWorkspace(workspaceId: string): ContributionEvent[] {
+    return this.events.filter((event) => event.workspaceId === workspaceId);
   }
 }

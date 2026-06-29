@@ -9,7 +9,7 @@
  * (the MCP client does this on every invoke). Until bound it uses a system ctx.
  */
 
-import type { ContributionKind, Role } from '@techit/core';
+import type { ApprovalRequest, ContributionKind, Role } from '@techit/core';
 import type { Connector } from '../contract/connector.js';
 import {
   type AuthToken,
@@ -22,7 +22,7 @@ import {
 import type { SdkRuntime } from '../runtime.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
-import { requestApproval } from '../hooks/approval.js';
+import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
 import { emitContribution } from '../hooks/contribution.js';
 
 export interface ActionPolicy {
@@ -124,12 +124,20 @@ export abstract class BaseConnector implements Connector {
       return err('permission_denied', 'action not permitted', decision.detail ?? decision.reason);
     }
 
+    let approvedRequest: ApprovalRequest | undefined;
     if (policy.destructive) {
       const approvalId = this.approvalIdFor(params);
-      const approved = approvalId
-        ? (await this.runtime.approvals.get(approvalId))?.status === 'approved'
-        : false;
-      if (!approved) {
+      if (approvalId) {
+        const approval = await validateApproval(this.runtime, this.ctx, approvalId, qualifiedAction);
+        if (!approval.ok) {
+          recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'denied', undefined, {
+            reason: `approval_${approval.reason}`,
+            approvalRequestId: approvalId,
+          });
+          return err('permission_denied', 'approval request is not valid for this execution', approval.reason);
+        }
+        approvedRequest = approval.request;
+      } else {
         const request = await requestApproval(
           this.runtime,
           this.ctx,
@@ -145,6 +153,9 @@ export abstract class BaseConnector implements Connector {
     }
 
     try {
+      if (approvedRequest) {
+        await consumeApproval(this.runtime, approvedRequest, this.ctx.actor.id);
+      }
       const data = await run();
       recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'success');
       if (policy.contribution) {

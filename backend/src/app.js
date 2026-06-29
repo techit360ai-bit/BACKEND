@@ -37,6 +37,13 @@ app.use('/api/files', fileRoutes)
 // the SAME platform secret as /api/auth so users can't self-declare roles by
 // stuffing them into the request body (the SDK's legacy fallback mode).
 const JWT_SECRET = process.env.JWT_SECRET
+function mcpRoleFromClaim(role) {
+  if (['viewer', 'editor', 'admin', 'owner'].includes(role)) return role
+  if (role === 'admin') return 'admin'
+  if (role === 'founder' || role === 'organisation') return 'owner'
+  if (role === 'collaborator') return 'editor'
+  return 'viewer'
+}
 await mountTechitApi(app, '/api/mcp', {
   resolveActor(req) {
     if (!JWT_SECRET) return null
@@ -49,7 +56,7 @@ await mountTechitApi(app, '/api/mcp', {
         actor: {
           id: String(claims.sub ?? 'unknown'),
           kind: claims.kind === 'agent' ? 'agent' : 'human',
-          role: String(claims.role ?? 'viewer'),
+          role: mcpRoleFromClaim(String(claims.role ?? 'viewer')),
           toolsAllowed: Array.isArray(claims.toolsAllowed) ? claims.toolsAllowed : undefined,
           // Plumb workspaceId onto the actor so techit-service.toContext() can
           // scope the invocation per-tenant instead of the seed 'ws-acme' (#9).
