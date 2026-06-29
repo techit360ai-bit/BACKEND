@@ -1,0 +1,140 @@
+// Package feed orchestrates the social feed: create posts, like/unlike, and
+// comment, persisting each then broadcasting post.* envelopes to an audience.
+package feed
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+)
+
+// ErrPostNotFound is returned when an action targets a missing post.
+var ErrPostNotFound = errors.New("post not found")
+
+// ErrInvalidKind is returned when a post kind is not allowed for the author's role.
+var ErrInvalidKind = errors.New("invalid post kind for role")
+
+// Service handles feed posts.
+type Service struct {
+	posts  store.PostStore
+	router store.Router
+	now    func() time.Time
+}
+
+func New(p store.PostStore, r store.Router) *Service {
+	return &Service{posts: p, router: r, now: time.Now}
+}
+
+// CreatePost persists a post (stamping author_role + sanitized target audience),
+// then broadcasts post.new to recipients (the online users) excluding the author.
+func (s *Service) CreatePost(ctx context.Context, authorID, authorRole string, p protocol.CreatePostPayload, recipients []string) (store.Post, error) {
+	role := store.NormalizeRole(authorRole)
+	kind := p.Kind
+	if kind == "" {
+		kind = "update"
+	} else if !store.AllowedKind(role, kind) {
+		return store.Post{}, ErrInvalidKind
+	}
+	post := store.Post{
+		ID:         protocol.NewMsgID(),
+		AuthorID:   authorID,
+		AuthorRole: role,
+		Audience:   store.SanitizeAudience(p.Audience),
+		Kind:       kind,
+		Body:       p.Body,
+		CreatedAt:  s.now().UTC(),
+	}
+	if err := s.posts.CreatePost(ctx, post); err != nil {
+		return store.Post{}, err
+	}
+	s.broadcast(ctx, authorID, recipients, protocol.TypePostNew, map[string]any{
+		"id": post.ID, "authorId": authorID, "authorRole": post.AuthorRole,
+		"audience": post.Audience, "kind": post.Kind, "body": post.Body,
+		"ts": post.CreatedAt.Format(time.RFC3339),
+	})
+	return post, nil
+}
+
+// ListByZone returns posts for a viewer role and zone (delegates to the store).
+func (s *Service) ListByZone(ctx context.Context, viewerRole, zone, before string, limit int) ([]store.Post, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	return s.posts.ListPostsByZone(ctx, store.NormalizeRole(viewerRole), zone, before, limit)
+}
+
+// Like records a like (idempotent), returns the new like count, and broadcasts.
+func (s *Service) Like(ctx context.Context, postID, userID string, audience []string) (int, error) {
+	ok, err := s.posts.PostExists(ctx, postID)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, ErrPostNotFound
+	}
+	if err := s.posts.Like(ctx, postID, userID); err != nil {
+		return 0, err
+	}
+	n, err := s.posts.LikeCount(ctx, postID)
+	if err != nil {
+		return 0, err
+	}
+	s.broadcast(ctx, userID, audience, protocol.TypePostLiked, map[string]any{
+		"postId": postID, "userId": userID, "likeCount": n,
+	})
+	return n, nil
+}
+
+// Unlike removes a like (idempotent) and returns the new count.
+func (s *Service) Unlike(ctx context.Context, postID, userID string) (int, error) {
+	if err := s.posts.Unlike(ctx, postID, userID); err != nil {
+		return 0, err
+	}
+	return s.posts.LikeCount(ctx, postID)
+}
+
+// AddComment persists a comment then broadcasts post.comment.
+func (s *Service) AddComment(ctx context.Context, postID, authorID string, p protocol.CommentPayload, audience []string) (store.Comment, error) {
+	ok, err := s.posts.PostExists(ctx, postID)
+	if err != nil {
+		return store.Comment{}, err
+	}
+	if !ok {
+		return store.Comment{}, ErrPostNotFound
+	}
+	c := store.Comment{ID: protocol.NewMsgID(), PostID: postID, AuthorID: authorID, Body: p.Body, CreatedAt: s.now().UTC()}
+	if err := s.posts.AddComment(ctx, c); err != nil {
+		return store.Comment{}, err
+	}
+	s.broadcast(ctx, authorID, audience, protocol.TypePostComment, map[string]any{
+		"id": c.ID, "postId": postID, "authorId": authorID, "body": c.Body, "ts": c.CreatedAt.Format(time.RFC3339),
+	})
+	return c, nil
+}
+
+// ListPosts returns recent posts (keyset paginated).
+func (s *Service) ListPosts(ctx context.Context, before string, limit int) ([]store.Post, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	return s.posts.ListPosts(ctx, before, limit)
+}
+
+// ListComments returns a post's comments.
+func (s *Service) ListComments(ctx context.Context, postID string) ([]store.Comment, error) {
+	return s.posts.ListComments(ctx, postID)
+}
+
+func (s *Service) broadcast(ctx context.Context, actor string, audience []string, typ string, data map[string]any) {
+	raw, _ := json.Marshal(data)
+	env := protocol.Envelope{Type: typ, ID: protocol.NewMsgID(), TS: time.Now().UTC().Format(time.RFC3339), Data: raw}
+	for _, u := range audience {
+		if u != actor {
+			_, _ = s.router.RouteToUser(ctx, u, env)
+		}
+	}
+}

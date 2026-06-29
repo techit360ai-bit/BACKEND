@@ -17,6 +17,9 @@ build/
 .next/
 out/
 
+# Runtime data generated when Plugins-MCP is mounted from backend/
+backend/backend/data/
+
 # Debug logs
 npm-debug.log*
 yarn-debug.log*

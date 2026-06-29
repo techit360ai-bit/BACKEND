@@ -13,14 +13,14 @@ For deploying the TechIT platform (BACKEND + ai-router + new-frontend) to a host
 | Item | Where | Notes |
 |---|---|---|
 | Node.js 22.5+ | runtime image | Required for BACKEND's built-in `node:sqlite` durable store. |
-| Generated `JWT_SECRET` | secrets manager | 32-byte random hex. `python3 -c "import secrets; print(secrets.token_hex(32))"`. **Same value** for BACKEND/main, BACKEND/feat/messaging-backend, ai-router, and Plugins-MCP — they all verify with it. |
-| PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router only. |
+| Generated `JWT_SECRET` | secrets manager | 32-byte random hex. `python3 -c "import secrets; print(secrets.token_hex(32))"`. **Same value** for BACKEND/main, BACKEND/messaging-backend, ai-router, and Plugins-MCP — they all verify with it. |
+| PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router uses pgvector. BACKEND/messaging-backend also uses PostgreSQL 16 for messaging/demo state. |
 | Persistent disk for BACKEND SQLite | mounted volume | Required for Node auth/profile/notification/file metadata. Do not store it in the repository checkout or ephemeral container filesystem. |
-| Redis 7 | Upstash / ElastiCache / self-hosted | ai-router Celery broker + Plugins-MCP cache. Not needed by BACKEND/main. |
+| Redis 7 | Upstash / ElastiCache / self-hosted | ai-router Celery broker + Plugins-MCP cache, plus BACKEND/messaging-backend pub/sub and presence. Not needed by BACKEND/main. |
 | `RESEND_API_KEY` | secrets manager | OTP and password-reset email (BACKEND/main only). Lazy-init since fix/lazy-resend-init (#5) — missing key no longer crashes boot, but email-sending endpoints require it. |
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | secrets manager | ai-router only. Webhook signature is verified on every event. |
 | LLM provider keys | secrets manager | At minimum `OPENAI_API_KEY` + `ANTHROPIC_API_KEY`. Optional: `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `COHERE_API_KEY`. ai-router only. |
-| Domain + TLS for each service | DNS + ACM/Let's Encrypt | Three public hostnames typically: `api.<domain>` (BACKEND), `ai.<domain>` (ai-router), `app.<domain>` (frontend). |
+| Domain + TLS for each service | DNS + ACM/Let's Encrypt | Four public hostnames typically: `api.<domain>` (BACKEND), `ai.<domain>` (ai-router), `messaging.<domain>` (Go messaging), `app.<domain>` (frontend). |
 
 ---
 
@@ -152,13 +152,12 @@ curl -o /dev/null -w '%{http_code}\n' https://ai.<domain>/api/v1/dashboard/intel
 
 If you see 200 without a token: ai-router booted in demo mode despite `ENVIRONMENT=production`. The startup guardrail should have prevented this — investigate before letting any user touch the platform.
 
-### 1.3 BACKEND `feat/messaging-backend` (Go messaging)
+### 1.3 BACKEND `messaging-backend/` (Go messaging)
 
 Same `JWT_SECRET` again. Can deploy in parallel with ai-router; just must be after BACKEND/main.
 
 ```bash
-cd BACKEND
-git checkout feat/messaging-backend
+cd BACKEND/messaging-backend
 go build -o server ./cmd/server
 ./server
 ```
@@ -166,6 +165,7 @@ go build -o server ./cmd/server
 Env vars:
 ```
 JWT_SECRET=<same value as BACKEND/main>
+ENVIRONMENT=production
 DATABASE_URL=postgres://...:5432/techit_msg
 REDIS_URL=redis://...:6379
 LIVEKIT_API_KEY=<optional>
@@ -173,6 +173,15 @@ LIVEKIT_API_SECRET=<optional>
 LIVEKIT_URL=wss://<livekit-host>
 CORS_ORIGINS=https://app.<domain>
 PORT=8080
+ENABLE_DEV_TOKEN=0
+```
+
+Migration check before start:
+
+```bash
+cd BACKEND/messaging-backend
+DATABASE_URL=postgres://...:5432/techit_msg go run ./cmd/migrate -mode=dry-run
+DATABASE_URL=postgres://...:5432/techit_msg go run ./cmd/migrate -mode=apply
 ```
 
 Health check: `GET /health` → 200.
@@ -228,6 +237,7 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 | BACKEND/main cannot send OTP or password-reset emails | `RESEND_API_KEY` missing or invalid | Set it. Other endpoints unaffected (#5 lazy-init). |
 | ai-router exits at boot with `ALLOW_DEMO_AUTH=true is forbidden in ENVIRONMENT=production` | demo-auth left on by accident | Set `ALLOW_DEMO_AUTH=false` or unset it. C3 guardrail. |
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
+| BACKEND/messaging-backend exits with `ENABLE_DEV_TOKEN=1 is forbidden in production` | local smoke-test token endpoint enabled in prod | Set `ENABLE_DEV_TOKEN=0` or unset it. |
 | Frontend logs `401` on every call after a deploy | mismatched `JWT_SECRET` between BACKEND and ai-router/messaging | Compare secret values across services; **same string everywhere**. |
 | `/api/mcp/tools` returns 401 | client not forwarding Bearer, or JWT didn't include the verified actor shape | Inspect `Authorization` header; verify `resolveActor` in `backend/src/app.js` returns non-null for valid tokens. |
 | Audit log empty after restart | `MCP_DATA_FILE` not on a persistent volume | Point it at a real mount (e.g. `/var/lib/techit/plugins-mcp.json`); F3 file-store reads on boot. |
