@@ -1,14 +1,47 @@
-name: TECHIT Messaging Backend — Test and Deploy
+name: TECHIT Backend Services
 
 on:
   push:
-    branches: [feat/messaging-backend]
+    branches: [main, wave5/go-messaging-backend]
+    paths:
+      - "backend/**"
+      - "messaging-backend/**"
+      - "Plugins-MCP/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/backend.yml"
   pull_request:
-    branches: [feat/messaging-backend]
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "messaging-backend/**"
+      - "Plugins-MCP/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/backend.yml"
 
 jobs:
-  test:
-    name: Go Tests
+  node-backend:
+    name: Node Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Node backend tests
+        run: npm test --prefix backend
+
+  go-messaging-unit:
+    name: Go Messaging Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,23 +50,69 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.23"
-          cache-dependency-path: backend/go.sum
+          cache-dependency-path: messaging-backend/go.sum
 
       - name: Run tests
-        run: cd backend && go test ./... -short -timeout 30s
+        run: cd messaging-backend && go test ./... -short -timeout 30s
         env:
           JWT_SECRET: test-secret-ci-only
           DATABASE_URL: ""
           REDIS_URL: ""
 
-  deploy:
-    name: Deploy to Render
+  go-messaging-integration:
+    name: Go Messaging Integration Tests
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/feat/messaging-backend' && github.event_name == 'push'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: techit_msg
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 56379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache-dependency-path: messaging-backend/go.sum
+
+      - name: Dry-run PostgreSQL migrations
+        run: cd messaging-backend && go run ./cmd/migrate -mode=dry-run
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:55432/techit_msg?sslmode=disable
+
+      - name: Run DB-backed integration tests
+        run: cd messaging-backend && go test -tags=integration ./... -timeout 60s
+        env:
+          JWT_SECRET: test-secret-ci-only
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55432/techit_msg?sslmode=disable
+          TEST_REDIS_URL: redis://localhost:56379
+
+  deploy:
+    name: Deploy Messaging to Render
+    runs-on: ubuntu-latest
+    needs: [node-backend, go-messaging-unit, go-messaging-integration]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
       - name: Trigger Render deploy
         run: |
           curl -s -X POST "${{ secrets.RENDER_MESSAGING_DEPLOY_HOOK }}" \
             -o /dev/null -w "HTTP %{http_code}\n"
-          echo "✅ Messaging backend deploy triggered"
+          echo "Messaging backend deploy triggered"

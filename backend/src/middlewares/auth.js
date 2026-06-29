@@ -6,7 +6,7 @@ if (!JWT_SECRET) {
   throw new Error(
     'JWT_SECRET environment variable is required. ' +
     'This secret must match the value used by ai-router and ' +
-    'BACKEND/feat/messaging-backend so platform tokens verify across services.'
+    'BACKEND/messaging-backend so platform tokens verify across services.'
   )
 }
 

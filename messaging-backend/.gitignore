@@ -1,0 +1,6 @@
+# Go
+/server
+*.test
+*.out
+vendor/
+.env
