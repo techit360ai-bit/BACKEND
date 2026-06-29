@@ -9,11 +9,11 @@ import { normalizeEmail } from '../utils/authInputs.js'
 // who never touch /api/auth/send-otp. Defer until sendOtp is actually called.
 let _resend
 function getResend() {
-  if (_resend) return _resend
   const key = process.env.RESEND_API_KEY
   if (!key) {
     throw new Error('RESEND_API_KEY is required to send OTP emails')
   }
+  if (_resend) return _resend
   _resend = new Resend(key)
   return _resend
 }
@@ -78,9 +78,6 @@ export async function sendOtp(req, res) {
   const expiresAt = new Date(now + EXPIRES * 60 * 1000).toISOString()
   const sentAt    = new Date(now).toISOString()
 
-  db.otps.push({ email, code, expiresAt, sentAt, attempts: 0 })
-  writeDb(db)
-
   // ── Send email via Resend ─────────────────────────────────────────────────
   try {
     await getResend().emails.send({
@@ -131,6 +128,9 @@ export async function sendOtp(req, res) {
     console.error('[OTP] Resend error:', err.message)
     return res.status(502).json({ error: 'Failed to send email. Please try again.' })
   }
+
+  db.otps.push({ email, code, expiresAt, sentAt, attempts: 0 })
+  writeDb(db)
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })
 }
