@@ -44,15 +44,43 @@ Env vars:
 JWT_SECRET=<32-byte hex>                 # required, no fallback
 NODE_ENV=production
 PORT=3000
+CORS_ORIGINS=https://app.<domain>        # comma-separated browser origins
 DB_DRIVER=sqlite
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
 FRONTEND_URL=https://app.<domain>        # used in password reset links
 MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json   # persistent volume; survives restarts
+MCP_ALLOW_FILE_STORE=true                # explicit single-replica file-store acknowledgement
+MCP_ALLOW_STUB_CONNECTORS=true           # demo connector bridge until real provider wiring lands
+MCP_APPROVAL_TTL_MS=900000
 ```
 
 Health check: `GET /` → `{"status":"TechIT API running"}` (200).
+
+Env contract check before deploy:
+
+```bash
+cd BACKEND
+NODE_ENV=production \
+ENVIRONMENT=production \
+PORT=3000 \
+JWT_SECRET=<32-byte-hex-or-longer-shared-secret> \
+CORS_ORIGINS=https://app.<domain> \
+FRONTEND_URL=https://app.<domain> \
+DB_DRIVER=sqlite \
+SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite \
+RESEND_API_KEY=<resend key> \
+FROM_EMAIL="TechIT <noreply@yourdomain.com>" \
+MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json \
+MCP_ALLOW_FILE_STORE=true \
+MCP_ALLOW_STUB_CONNECTORS=true \
+MCP_APPROVAL_TTL_MS=900000 \
+DATABASE_URL=postgres://...:5432/techit_msg \
+REDIS_URL=redis://...:6379 \
+ENABLE_DEV_TOKEN=0 \
+npm run env:check
+```
 
 Migration check before start:
 

@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "topology": "techit-backend-services",
+  "services": [
+    {
+      "name": "node-backend",
+      "path": "backend",
+      "runtime": "nodejs-22",
+      "startCommand": "npm run start --prefix backend",
+      "envFile": "backend/.env.example",
+      "requiredEnv": [
+        "NODE_ENV",
+        "PORT",
+        "JWT_SECRET",
+        "CORS_ORIGINS",
+        "FRONTEND_URL",
+        "DB_DRIVER",
+        "SQLITE_DB_PATH",
+        "RESEND_API_KEY",
+        "FROM_EMAIL",
+        "MCP_DATA_FILE"
+      ],
+      "healthCheck": {
+        "method": "GET",
+        "path": "/",
+        "expectedStatus": 200
+      },
+      "dependencies": [
+        "sqlite-persistent-volume",
+        "plugins-mcp"
+      ]
+    },
+    {
+      "name": "plugins-mcp",
+      "path": "Plugins-MCP",
+      "runtime": "nodejs-22",
+      "mount": "node-backend:/api/mcp",
+      "envFile": "Plugins-MCP/.env.example",
+      "requiredEnv": [
+        "NODE_ENV",
+        "JWT_SECRET",
+        "MCP_DATA_FILE",
+        "MCP_ALLOW_FILE_STORE",
+        "MCP_ALLOW_STUB_CONNECTORS",
+        "MCP_APPROVAL_TTL_MS"
+      ],
+      "healthCheck": {
+        "method": "GET",
+        "path": "/api/mcp/health",
+        "authenticatedExpectedStatus": 200,
+        "unauthenticatedExpectedStatus": 401
+      },
+      "dependencies": [
+        "node-backend",
+        "persistent-volume"
+      ]
+    },
+    {
+      "name": "messaging-backend",
+      "path": "messaging-backend",
+      "runtime": "go-1.23",
+      "startCommand": "go build -o server ./cmd/server && ./server",
+      "envFile": "messaging-backend/.env.example",
+      "requiredEnv": [
+        "ENVIRONMENT",
+        "PORT",
+        "JWT_SECRET",
+        "DATABASE_URL",
+        "REDIS_URL",
+        "CORS_ORIGINS",
+        "ENABLE_DEV_TOKEN"
+      ],
+      "healthCheck": {
+        "method": "GET",
+        "path": "/health",
+        "expectedStatus": 200
+      },
+      "dependencies": [
+        "postgres-messaging",
+        "redis-messaging",
+        "node-backend"
+      ]
+    },
+    {
+      "name": "postgres-messaging",
+      "image": "postgres:16",
+      "provides": [
+        "DATABASE_URL"
+      ],
+      "healthCheck": {
+        "command": "pg_isready"
+      }
+    },
+    {
+      "name": "redis-messaging",
+      "image": "redis:7",
+      "provides": [
+        "REDIS_URL"
+      ],
+      "healthCheck": {
+        "command": "redis-cli ping"
+      }
+    },
+    {
+      "name": "livekit",
+      "optional": true,
+      "requiredEnvWhenEnabled": [
+        "LIVEKIT_URL",
+        "LIVEKIT_API_KEY",
+        "LIVEKIT_API_SECRET"
+      ]
+    }
+  ]
+}
