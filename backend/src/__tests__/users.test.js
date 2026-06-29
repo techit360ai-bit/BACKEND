@@ -156,7 +156,7 @@ describe('PATCH /api/users/me', () => {
     expect(res.body.isOnboarded).toBe(true)
   })
 
-  it('silently ignores disallowed fields (id, email, createdAt)', async () => {
+  it('silently ignores disallowed identity and authorization fields', async () => {
     const profile = { ...BASE_PROFILE }
     readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
@@ -167,6 +167,10 @@ describe('PATCH /api/users/me', () => {
         id: 'hacked-id',
         email: 'hacker@evil.com',
         createdAt: '1970-01-01',
+        role: 'organisation',
+        isVerified: true,
+        creditBalance: 999999,
+        credibilityScore: 100,
         bio: 'Legit update',
       })
 
@@ -174,6 +178,10 @@ describe('PATCH /api/users/me', () => {
     expect(res.body.id).toBe('user-uuid-1')
     expect(res.body.email).toBe('alice@example.com')
     expect(res.body.createdAt).toBe('2026-01-01T00:00:00.000Z')
+    expect(res.body.role).toBe('founder')
+    expect(res.body.isVerified).toBe(false)
+    expect(res.body.creditBalance).toBe(0)
+    expect(res.body.credibilityScore).toBe(0)
     expect(res.body.bio).toBe('Legit update')
   })
 

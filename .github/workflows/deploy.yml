@@ -1,43 +1,15 @@
-name: TECHIT Frontend — Test and Deploy
+name: Frontend Deploy Disabled
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  build:
-    name: Vite Build Check
+  reference-only:
+    name: BACKEND/frontend is reference-only
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        run: cd frontend && npm ci
-
-      - name: Vite production build (skip tsc)
-        run: cd frontend && npx vite build
-        env:
-          VITE_API_BASE_URL: https://techit-api-u1ek.onrender.com
-          VITE_MESSAGING_BASE_URL: https://techit-messaging.onrender.com
-          VITE_MESSAGING_WS_URL: wss://techit-messaging.onrender.com/ws
-
-  deploy-frontend:
-    name: Deploy Frontend to Render
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Trigger Render deploy
+      - name: Explain source of truth
         run: |
-          curl -s -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK }}" \
-            -o /dev/null -w "HTTP %{http_code}\n"
-          echo "✅ Frontend deploy triggered"
+          echo "BACKEND/frontend is migration/reference material only."
+          echo "Use the new-frontend repo for active frontend CI and deployment."
+          exit 1

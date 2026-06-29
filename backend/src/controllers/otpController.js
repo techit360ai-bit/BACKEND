@@ -1,5 +1,5 @@
 import { Resend } from 'resend'
-import { randomInt } from 'crypto'
+import { createHash, randomBytes, randomInt, randomUUID } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
 
 // Lazy-initialize the Resend client so module load stays side-effect free.
@@ -21,6 +21,7 @@ const FROM      = process.env.FROM_EMAIL         || 'TechIT <onboarding@resend.d
 const EXPIRES   = parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10)
 const RESEND_COOLDOWN_SECONDS = 60   // minimum gap between sends per email
 const MAX_ATTEMPTS = 5               // wrong guesses before OTP is invalidated
+const VERIFICATION_EXPIRES_MINUTES = parseInt(process.env.EMAIL_VERIFICATION_EXPIRES_MINUTES || '15', 10)
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -29,9 +30,18 @@ function generateCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0')
 }
 
-function cleanExpired(otps) {
+function cleanExpired(otps = []) {
   const now = Date.now()
   return otps.filter(o => new Date(o.expiresAt).getTime() > now)
+}
+
+function tokenHash(token) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function cleanExpiredVerifications(records) {
+  const now = Date.now()
+  return records.filter(r => !r.consumedAt && new Date(r.expiresAt).getTime() > now)
 }
 
 // ── POST /api/auth/send-otp ───────────────────────────────────────────────────
@@ -46,6 +56,7 @@ export async function sendOtp(req, res) {
 
   // Purge expired records first
   db.otps = cleanExpired(db.otps)
+  db.emailVerifications = cleanExpiredVerifications(db.emailVerifications || [])
 
   // Cooldown check — prevent spamming
   const recent = db.otps.find(o => o.email === email)
@@ -157,7 +168,27 @@ export function verifyOtp(req, res) {
 
   // ✅ Valid — remove it so it can't be reused
   db.otps = db.otps.filter(o => o.email !== email)
+  db.emailVerifications = cleanExpiredVerifications(db.emailVerifications || [])
+
+  const verificationToken = `${randomUUID()}.${randomBytes(32).toString('base64url')}`
+  const now = Date.now()
+  db.emailVerifications = [
+    ...db.emailVerifications.filter(r => r.email !== email),
+    {
+      id: randomUUID(),
+      email,
+      tokenHash: tokenHash(verificationToken),
+      expiresAt: new Date(now + VERIFICATION_EXPIRES_MINUTES * 60 * 1000).toISOString(),
+      consumedAt: null,
+      createdAt: new Date(now).toISOString(),
+    },
+  ]
   writeDb(db)
 
-  return res.json({ verified: true, message: 'Email verified successfully' })
+  return res.json({
+    verified: true,
+    verificationToken,
+    expiresIn: VERIFICATION_EXPIRES_MINUTES * 60,
+    message: 'Email verified successfully',
+  })
 }

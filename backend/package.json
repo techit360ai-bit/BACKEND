@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node --import tsx src/index.js",
     "dev": "node --import tsx --watch src/index.js",
+    "db:migrate": "node --no-warnings scripts/migrate-db.js up",
+    "db:migrate:dry-run": "node --no-warnings scripts/migrate-db.js up --dry-run",
+    "db:rollback:dry-run": "node --no-warnings scripts/migrate-db.js down --dry-run",
     "test": "vitest run",
     "test:watch": "vitest"
   },
