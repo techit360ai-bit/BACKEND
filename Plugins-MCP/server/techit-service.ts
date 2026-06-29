@@ -13,6 +13,7 @@ import {
   FileApprovalStore,
   FileAuditLogger,
   FileContributionSink,
+  validateMcpStoreConfig,
 } from './file-store.js';
 
 // Default workspaceId used for the demo-seed activity in build() and as a
@@ -35,11 +36,14 @@ export interface ActorInput {
 export interface TechitService {
   workspaceId: string;
   listTools(): { plugin: string; tool: unknown }[];
-  audit(): unknown[];
-  contributions(): unknown[];
-  approvals(): unknown[];
+  audit(workspaceId?: string): unknown[];
+  contributions(workspaceId?: string): unknown[];
+  approvals(workspaceId?: string): unknown[];
   invoke(plugin: string, tool: string, params: unknown, actor?: ActorInput): Promise<Result>;
-  approve(requestId: string, decidedBy?: string): Promise<{ approved: boolean }>;
+  approve(
+    requestId: string,
+    actor?: ActorInput,
+  ): Promise<{ approved: true } | { approved: false; reason: string }>;
 }
 
 function toContext(input: ActorInput | undefined): CallContext {
@@ -62,6 +66,9 @@ function toContext(input: ActorInput | undefined): CallContext {
 }
 
 async function build(): Promise<TechitService> {
+  validateProductionConfig();
+  validateMcpStoreConfig();
+
   // Persistent stores backed by backend/data/plugins-mcp.json (override path
   // with MCP_DATA_FILE env). Audit log + approval queue + contribution feed
   // all survive restarts; the previous In-Memory stores reset on every boot.
@@ -76,16 +83,25 @@ async function build(): Promise<TechitService> {
   const service: TechitService = {
     workspaceId: WS,
     listTools: () => client.listTools(),
-    audit: () => [...audit.entries()],
-    contributions: () => [...contributions.events],
-    approvals: () => [...approvals.requests.values()],
+    audit: (workspaceId) => workspaceId ? [...audit.entriesForWorkspace(workspaceId)] : [...audit.entries()],
+    contributions: (workspaceId) => workspaceId
+      ? [...contributions.eventsForWorkspace(workspaceId)]
+      : [...contributions.events],
+    approvals: (workspaceId) => workspaceId
+      ? approvals.listForWorkspace(workspaceId)
+      : [...approvals.requests.values()],
     invoke: (plugin, tool, params, actor) => client.invoke(plugin, tool, params, toContext(actor)),
-    approve: async (requestId, decidedBy = 'founder') => {
+    approve: async (requestId, actor = { id: 'founder', role: 'owner', kind: 'human', workspaceId: WS }) => {
       const req = await approvals.get(requestId);
-      if (!req) return { approved: false };
+      if (!req) return { approved: false, reason: 'not_found' };
+      const ctx = toContext(actor);
+      if (ctx.actor.kind !== 'human') return { approved: false, reason: 'human_required' };
+      if (!['admin', 'owner'].includes(ctx.actor.role)) return { approved: false, reason: 'insufficient_role' };
+      if (req.workspaceId !== ctx.actor.workspaceId) return { approved: false, reason: 'workspace_mismatch' };
+      if (req.status !== 'pending') return { approved: false, reason: `already_${req.status}` };
       await approvals.decide({
         requestId,
-        decidedBy,
+        decidedBy: ctx.actor.id,
         status: 'approved',
         decidedAt: new Date().toISOString(),
       });
@@ -115,4 +131,13 @@ let singleton: Promise<TechitService> | undefined;
 export function getTechitService(): Promise<TechitService> {
   if (!singleton) singleton = build();
   return singleton;
+}
+
+function validateProductionConfig(): void {
+  const env = (process.env.NODE_ENV || 'development').toLowerCase();
+  if (!['production', 'staging'].includes(env)) return;
+  if (process.env.MCP_ALLOW_STUB_CONNECTORS === 'true') return;
+  throw new Error(
+    'MCP production/staging requires real connector wiring; set MCP_ALLOW_STUB_CONNECTORS=true only for an explicit demo deployment.',
+  );
 }

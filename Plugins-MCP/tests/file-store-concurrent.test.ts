@@ -80,3 +80,32 @@ test('interleaved writes from two FileAuditLogger instances share the file', asy
   const onDisk = JSON.parse(readFileSync(dataFile, 'utf-8'));
   expect(onDisk.audit.length).toBe(4);
 });
+
+test('production requires explicit persistent MCP file-store opt-in', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  process.env.MCP_DATA_FILE = dataFile;
+  delete process.env.MCP_ALLOW_FILE_STORE;
+  try {
+    const mod = await import('../server/file-store.js?prod=' + Date.now());
+    expect(() => mod.validateMcpStoreConfig()).toThrow(/MCP_ALLOW_FILE_STORE/);
+  } finally {
+    process.env.NODE_ENV = previousNodeEnv;
+    process.env.MCP_DATA_FILE = dataFile;
+  }
+});
+
+test('production accepts file-store only with explicit path and opt-in', async () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  process.env.MCP_DATA_FILE = dataFile;
+  process.env.MCP_ALLOW_FILE_STORE = 'true';
+  try {
+    const mod = await import('../server/file-store.js?prodok=' + Date.now());
+    expect(() => mod.validateMcpStoreConfig()).not.toThrow();
+  } finally {
+    process.env.NODE_ENV = previousNodeEnv;
+    delete process.env.MCP_ALLOW_FILE_STORE;
+    process.env.MCP_DATA_FILE = dataFile;
+  }
+});

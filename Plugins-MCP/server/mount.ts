@@ -18,6 +18,7 @@
  * role).
  */
 
+import type { Role } from '@techit/core';
 import { getTechitService } from './techit-service.js';
 
 // Minimal structural types so this file needs no @types/express here.
@@ -39,8 +40,9 @@ export interface ResolvedActor {
   actor: {
     id: string;
     kind: 'human' | 'agent';
-    role: string;
+    role: Role;
     toolsAllowed?: string[];
+    workspaceId?: string;
   };
   /** Tenant scope from the auth token. Reserved for future per-workspace routing. */
   workspaceId?: string;
@@ -81,24 +83,28 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
   }
 
   app.get(`${base}/health`, async (req, res) => {
-    if (!(await gate(req, res))) return;
-    res.json({ ok: true, workspaceId: svc.workspaceId });
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    res.json({ ok: true, workspaceId: resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId });
   });
   app.get(`${base}/tools`, async (req, res) => {
     if (!(await gate(req, res))) return;
     res.json(svc.listTools());
   });
   app.get(`${base}/audit`, async (req, res) => {
-    if (!(await gate(req, res))) return;
-    res.json(svc.audit());
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    res.json(svc.audit(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
   app.get(`${base}/contributions`, async (req, res) => {
-    if (!(await gate(req, res))) return;
-    res.json(svc.contributions());
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    res.json(svc.contributions(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
   app.get(`${base}/approvals`, async (req, res) => {
-    if (!(await gate(req, res))) return;
-    res.json(svc.approvals());
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    res.json(svc.approvals(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
 
   app.post(`${base}/invoke`, async (req, res) => {
@@ -120,8 +126,20 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
   app.post(`${base}/approvals/:id/approve`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
-    const decidedBy = resolved.actor.id;
-    const out = await svc.approve(req.params.id, decidedBy);
+    const requestId = req.params.id;
+    if (!requestId) {
+      res.status(400).json({ approved: false, reason: 'missing_request_id' });
+      return;
+    }
+    const out = await svc.approve(requestId, {
+      ...resolved.actor,
+      workspaceId: resolved.workspaceId ?? resolved.actor.workspaceId,
+    });
+    if (!out.approved) {
+      const status = out.reason === 'not_found' ? 404 : 403;
+      res.status(status).json(out);
+      return;
+    }
     res.json(out);
   });
 }
