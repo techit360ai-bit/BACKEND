@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
+import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
 import notificationRoutes from './routes/notifications.js'
@@ -8,6 +9,31 @@ import userRoutes from './routes/users.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
+
+function shouldLogRequests() {
+  return process.env.NODE_ENV !== 'test' || process.env.LOG_REQUESTS === '1'
+}
+
+app.use((req, res, next) => {
+  const requestId = req.get('x-request-id') || randomUUID()
+  const startedAt = Date.now()
+  req.id = requestId
+  res.setHeader('X-Request-Id', requestId)
+
+  res.on('finish', () => {
+    if (!shouldLogRequests()) return
+    console.info(JSON.stringify({
+      event: 'http_request',
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    }))
+  })
+
+  next()
+})
 
 // CORS allow-list — comma-separated origins via env, defaults to local Vite
 // dev ports. Production MUST set CORS_ORIGINS to the deployed frontend(s);
@@ -72,9 +98,16 @@ await mountTechitApi(app, '/api/mcp', {
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 
-app.use((err, _req, res, _next) => {
-  console.error(err.stack)
-  res.status(500).json({ error: 'Internal server error' })
+app.use((err, req, res, _next) => {
+  console.error(JSON.stringify({
+    event: 'http_error',
+    requestId: req.id,
+    method: req.method,
+    path: req.originalUrl,
+    error: err.message,
+    stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
+  }))
+  res.status(500).json({ error: 'Internal server error', requestId: req.id })
 })
 
 export default app
