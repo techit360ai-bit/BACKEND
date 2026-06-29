@@ -14,6 +14,9 @@ vi.mock('../config/database.js', () => ({
 import { readDb, writeDb } from '../config/database.js'
 
 const MOCK_HASH = '$2a$02$test.hash.that.matches.Test.1234567890'
+const { resendSend } = vi.hoisted(() => ({
+  resendSend: vi.fn(async () => ({ id: 'email-1' })),
+}))
 
 function makeDb(overrides = {}) {
   return {
@@ -75,8 +78,18 @@ vi.mock('bcryptjs', () => ({
   },
 }))
 
+vi.mock('resend', () => ({
+  Resend: vi.fn(function Resend() {
+    return {
+      emails: { send: resendSend },
+    }
+  }),
+}))
+
 beforeEach(() => {
   vi.clearAllMocks()
+  process.env.RESEND_API_KEY = 're_test_key'
+  resendSend.mockResolvedValue({ id: 'email-1' })
   writeDb.mockImplementation(() => {})
 })
 
@@ -300,6 +313,59 @@ describe('POST /api/auth/signup', () => {
       email: 'a@b.com', password: 'Secret@99', firstName: 'A',
     })
     expect(res.status).toBe(400)
+  })
+})
+
+// ── POST /api/auth/send-otp ──────────────────────────────────────────────────
+
+describe('POST /api/auth/send-otp', () => {
+  it('sends an OTP email and stores the pending code only after delivery succeeds', async () => {
+    readDb.mockReturnValue(makeDb())
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: '  OTP@EXAMPLE.COM ',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.message).toMatch(/sent/i)
+    expect(resendSend).toHaveBeenCalledOnce()
+    expect(resendSend.mock.calls[0][0].to).toEqual(['otp@example.com'])
+    expect(writeDb).toHaveBeenCalledOnce()
+    const written = writeDb.mock.calls[0][0]
+    expect(written.otps).toHaveLength(1)
+    expect(written.otps[0].email).toBe('otp@example.com')
+    expect(written.otps[0].code).toMatch(/^\d{6}$/)
+  })
+
+  it('does not persist an OTP when email delivery fails', async () => {
+    readDb.mockReturnValue(makeDb())
+    resendSend.mockRejectedValue(new Error('resend offline'))
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(res.body.error).toMatch(/failed to send/i)
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
+  })
+
+  it('does not persist an OTP when mail credentials are missing', async () => {
+    delete process.env.RESEND_API_KEY
+    readDb.mockReturnValue(makeDb())
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
   })
 })
 
