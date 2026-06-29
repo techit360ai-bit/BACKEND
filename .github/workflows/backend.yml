@@ -7,6 +7,8 @@ on:
       - "backend/**"
       - "messaging-backend/**"
       - "Plugins-MCP/**"
+      - "scripts/**"
+      - "docs/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/backend.yml"
@@ -16,6 +18,8 @@ on:
       - "backend/**"
       - "messaging-backend/**"
       - "Plugins-MCP/**"
+      - "scripts/**"
+      - "docs/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/backend.yml"
@@ -36,6 +40,27 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Validate deployment env contract
+        run: npm run env:check
+        env:
+          NODE_ENV: production
+          ENVIRONMENT: production
+          PORT: "3000"
+          JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          CORS_ORIGINS: https://app.techit.example
+          FRONTEND_URL: https://app.techit.example
+          DB_DRIVER: sqlite
+          SQLITE_DB_PATH: /tmp/techit/backend/techit.sqlite
+          RESEND_API_KEY: re_ci_contract_value
+          FROM_EMAIL: TechIT <noreply@techit.example>
+          MCP_DATA_FILE: /tmp/techit/plugins-mcp.json
+          MCP_ALLOW_FILE_STORE: "true"
+          MCP_ALLOW_STUB_CONNECTORS: "true"
+          MCP_APPROVAL_TTL_MS: "900000"
+          DATABASE_URL: postgres://techit:secret@postgres.example:5432/techit_msg?sslmode=require
+          REDIS_URL: rediss://redis.example:6379
+          ENABLE_DEV_TOKEN: "0"
 
       - name: Run Node backend tests
         run: npm test --prefix backend

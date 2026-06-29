@@ -14,6 +14,8 @@
     "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
+    "env:check": "node scripts/validate-env.mjs",
+    "smoke:deploy": "node scripts/smoke.mjs",
     "install:all": "npm install"
   },
   "devDependencies": {
