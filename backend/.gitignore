@@ -8,3 +8,6 @@ dist/
 data/db.json
 data/plugins-mcp.json
 data/plugins-mcp.json.tmp
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal

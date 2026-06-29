@@ -12,8 +12,10 @@ For deploying the TechIT platform (BACKEND + ai-router + new-frontend) to a host
 
 | Item | Where | Notes |
 |---|---|---|
+| Node.js 22.5+ | runtime image | Required for BACKEND's built-in `node:sqlite` durable store. |
 | Generated `JWT_SECRET` | secrets manager | 32-byte random hex. `python3 -c "import secrets; print(secrets.token_hex(32))"`. **Same value** for BACKEND/main, BACKEND/feat/messaging-backend, ai-router, and Plugins-MCP — they all verify with it. |
-| PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router only. BACKEND/main uses `db.json` (file-based). |
+| PostgreSQL 16 + pgvector | Cloud SQL / RDS / Supabase / self-hosted | ai-router only. |
+| Persistent disk for BACKEND SQLite | mounted volume | Required for Node auth/profile/notification/file metadata. Do not store it in the repository checkout or ephemeral container filesystem. |
 | Redis 7 | Upstash / ElastiCache / self-hosted | ai-router Celery broker + Plugins-MCP cache. Not needed by BACKEND/main. |
 | `RESEND_API_KEY` | secrets manager | OTP and password-reset email (BACKEND/main only). Lazy-init since fix/lazy-resend-init (#5) — missing key no longer crashes boot, but email-sending endpoints require it. |
 | `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` | secrets manager | ai-router only. Webhook signature is verified on every event. |
@@ -42,6 +44,8 @@ Env vars:
 JWT_SECRET=<32-byte hex>                 # required, no fallback
 NODE_ENV=production
 PORT=3000
+DB_DRIVER=sqlite
+SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
 FRONTEND_URL=https://app.<domain>        # used in password reset links
@@ -49,6 +53,27 @@ MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json   # persistent volume; survives r
 ```
 
 Health check: `GET /` → `{"status":"TechIT API running"}` (200).
+
+Migration check before start:
+
+```bash
+cd BACKEND/backend
+SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate:dry-run
+SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate
+SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:rollback:dry-run
+```
+
+Backup and restore:
+
+```bash
+# backup
+sqlite3 /var/lib/techit/backend/techit.sqlite ".backup '/backups/techit-backend-$(date +%Y%m%d%H%M%S).sqlite'"
+
+# restore during maintenance window
+systemctl stop techit-backend
+cp /backups/<backup>.sqlite /var/lib/techit/backend/techit.sqlite
+systemctl start techit-backend
+```
 
 Smoke test (1 min):
 ```bash
@@ -198,6 +223,8 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | BACKEND/main exits at boot with `JWT_SECRET environment variable is required` | env var not set | Set it. No fallback by design (#1, was `'fallback_secret_change_in_production'`). |
+| BACKEND/main exits with `DB_DRIVER=json is not allowed in production` | production is configured for the development JSON fixture | Set `DB_DRIVER=sqlite` and `SQLITE_DB_PATH` to a persistent volume. |
+| BACKEND/main exits with `SQLITE_DB_PATH is required` | production SQLite path omitted | Set `SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite` or equivalent persistent path. |
 | BACKEND/main cannot send OTP or password-reset emails | `RESEND_API_KEY` missing or invalid | Set it. Other endpoints unaffected (#5 lazy-init). |
 | ai-router exits at boot with `ALLOW_DEMO_AUTH=true is forbidden in ENVIRONMENT=production` | demo-auth left on by accident | Set `ALLOW_DEMO_AUTH=false` or unset it. C3 guardrail. |
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
