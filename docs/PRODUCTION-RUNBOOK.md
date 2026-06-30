@@ -255,6 +255,16 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 
 ---
 
+## 2.1 Observability checks
+
+Every BACKEND response includes an `X-Request-Id` header. Operators should copy that value from failed browser/API calls and search service logs for the same request ID.
+
+When `LOG_REQUESTS=1` is enabled, successful requests emit structured `http_request` JSON logs with `requestId`, `method`, `path`, `statusCode`, and `durationMs`. Unhandled errors emit structured `http_error` JSON logs with the same `requestId`; production logs omit stack traces.
+
+Before promoting a release, make one authenticated request with a known `X-Request-Id`, then confirm the response header and log record match. If request IDs or structured logs are missing, stop the rollout because incident diagnosis will be impaired.
+
+---
+
 ## 3. Common issues and diagnosis
 
 | Symptom | Likely cause | Fix |
