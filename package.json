@@ -15,6 +15,8 @@
     "dev:backend": "npm run dev --prefix backend",
     "dev:frontend": "npm run dev --prefix frontend",
     "env:check": "node scripts/validate-env.mjs",
+    "security:gates": "node scripts/validate-security-gates.mjs",
+    "security:check": "npm test --prefix backend && npm test --prefix Plugins-MCP && npm run typecheck --prefix Plugins-MCP",
     "smoke:deploy": "node scripts/smoke.mjs",
     "install:all": "npm install"
   },
