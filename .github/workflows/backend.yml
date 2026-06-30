@@ -62,6 +62,9 @@ jobs:
           REDIS_URL: rediss://redis.example:6379
           ENABLE_DEV_TOKEN: "0"
 
+      - name: Validate messaging branch reconciliation
+        run: npm run messaging:reconcile
+
       - name: Run Node backend tests
         run: npm test --prefix backend
 
