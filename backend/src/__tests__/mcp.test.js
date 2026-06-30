@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
-import app from '../app.js'
+import app, { mcpRoleFromClaim } from '../app.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
@@ -12,6 +12,13 @@ function token({ sub = 'user-1', role = 'founder', workspaceId = `ws-${Date.now(
 function auth(value) {
   return { Authorization: `Bearer ${value}` }
 }
+
+describe('MCP role mapping', () => {
+  it('maps platform organization spellings to MCP owner permissions', () => {
+    expect(mcpRoleFromClaim('organisation')).toBe('owner')
+    expect(mcpRoleFromClaim('organization')).toBe('owner')
+  })
+})
 
 describe('/api/mcp authenticated integration', () => {
   it('requires a bearer token', async () => {
@@ -103,5 +110,29 @@ describe('/api/mcp authenticated integration', () => {
     expect(replay.body.ok).toBe(false)
     expect(replay.body.error.code).toBe('permission_denied')
     expect(replay.body.error.detail).toBe('used')
+  })
+
+  it('allows organization-spelled platform owners to approve MCP actions', async () => {
+    const workspaceId = `ws-org-${Date.now()}`
+    const organizationToken = token({ sub: 'org-1', role: 'organization', workspaceId })
+    const params = { repo: 'havitec/techit', head: 'feat/org-mcp', base: 'main', title: 'Org MCP gate' }
+
+    const pending = await request(app)
+      .post('/api/mcp/invoke')
+      .set(auth(organizationToken))
+      .send({ plugin: 'github', tool: 'create_pull_request', params })
+
+    expect(pending.status).toBe(200)
+    expect(pending.body.ok).toBe(false)
+    expect(pending.body.error.code).toBe('pending_approval')
+    const approvalRequestId = pending.body.approvalRequestId
+    expect(approvalRequestId).toBeTruthy()
+
+    const approved = await request(app)
+      .post(`/api/mcp/approvals/${approvalRequestId}/approve`)
+      .set(auth(organizationToken))
+
+    expect(approved.status).toBe(200)
+    expect(approved.body).toEqual({ approved: true })
   })
 })
