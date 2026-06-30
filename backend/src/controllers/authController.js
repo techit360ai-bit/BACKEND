@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb, writeDb } from '../config/database.js'
+import { readDb, updateDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
@@ -106,21 +106,21 @@ function makePasswordResetToken() {
   return `${randomUUID()}.${randomBytes(32).toString('base64url')}`
 }
 
-async function persistPasswordReset(db, user) {
+function makePasswordResetRecord(user) {
   const resetToken = makePasswordResetToken()
   const now = Date.now()
-  db.passwordResets = cleanPasswordResets(db.passwordResets)
-    .filter(r => r.userId !== user.id)
-  db.passwordResets.push({
-    id: randomUUID(),
-    userId: user.id,
-    email: user.email,
-    tokenHash: hashToken(resetToken),
-    expiresAt: new Date(now + RESET_EXPIRES_MINUTES * 60 * 1000).toISOString(),
-    consumedAt: null,
-    createdAt: new Date(now).toISOString(),
-  })
-  return resetToken
+  return {
+    resetToken,
+    record: {
+      id: randomUUID(),
+      userId: user.id,
+      email: user.email,
+      tokenHash: hashToken(resetToken),
+      expiresAt: new Date(now + RESET_EXPIRES_MINUTES * 60 * 1000).toISOString(),
+      consumedAt: null,
+      createdAt: new Date(now).toISOString(),
+    },
+  }
 }
 
 async function sendPasswordResetEmail(email, resetUrl) {
@@ -178,23 +178,27 @@ export async function signup(req, res) {
     return res.status(400).json({ error: 'Email must be verified before creating an account' })
   }
 
-  const db = readDb()
-  if (db.users.find(u => u.email === email)) {
-    return res.status(409).json({ error: 'Email already in use' })
-  }
-
-  if (!consumeEmailVerification(db, email, emailVerificationToken)) {
-    return res.status(400).json({ error: 'Email verification is invalid or expired' })
-  }
-
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
   const id = randomUUID()
   const now = new Date().toISOString()
-
-  db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
   const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role }, now)
-  db.profiles.push(profile)
-  writeDb(db)
+  const result = updateDb(db => {
+    if (db.users.find(u => u.email === email)) {
+      return { status: 409, error: 'Email already in use' }
+    }
+
+    if (!consumeEmailVerification(db, email, emailVerificationToken)) {
+      return { status: 400, error: 'Email verification is invalid or expired' }
+    }
+
+    db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
+    db.profiles.push(profile)
+    return { status: 201, profile }
+  })
+
+  if (result.status !== 201) {
+    return res.status(result.status).json({ error: result.error })
+  }
 
   return res.status(201).json({
     token: makeToken(id, profile),
@@ -252,7 +256,8 @@ export async function forgotPassword(req, res) {
   const user = db.users.find(u => u.email === email)
   let resetToken = null
   if (user) {
-    resetToken = await persistPasswordReset(db, user)
+    const reset = makePasswordResetRecord(user)
+    resetToken = reset.resetToken
     if (process.env.NODE_ENV === 'production') {
       try {
         const resetUrl = `${FRONTEND_URL}/reset-password?email=${encodeURIComponent(user.email)}&token=${encodeURIComponent(resetToken)}`
@@ -266,7 +271,15 @@ export async function forgotPassword(req, res) {
         })
       }
     }
-    writeDb(db)
+    const persisted = updateDb(current => {
+      const freshUser = current.users.find(u => u.id === user.id && u.email === email)
+      if (!freshUser) return false
+      current.passwordResets = cleanPasswordResets(current.passwordResets)
+        .filter(r => r.userId !== user.id)
+      current.passwordResets.push(reset.record)
+      return true
+    })
+    if (!persisted) resetToken = null
   }
 
   const body = {
@@ -291,25 +304,31 @@ export async function resetPassword(req, res) {
     return res.status(400).json({ error: 'Email, token, and password are required' })
   }
 
-  const db = readDb()
-  db.passwordResets = cleanPasswordResets(db.passwordResets)
-
-  const tokenHash = hashToken(token)
-  const record = db.passwordResets.find(r => r.email === email && r.tokenHash === tokenHash)
-  if (!record) {
-    return res.status(400).json({ error: 'Password reset token is invalid or expired' })
-  }
-
-  const user = db.users.find(u => u.id === record.userId && u.email === email)
-  if (!user) {
-    return res.status(400).json({ error: 'Password reset token is invalid or expired' })
-  }
-
   const now = new Date().toISOString()
-  user.passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
-  user.updatedAt = now
-  record.consumedAt = now
-  writeDb(db)
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
+  const result = updateDb(db => {
+    db.passwordResets = cleanPasswordResets(db.passwordResets)
+
+    const tokenHash = hashToken(token)
+    const record = db.passwordResets.find(r => r.email === email && r.tokenHash === tokenHash)
+    if (!record) {
+      return { ok: false }
+    }
+
+    const user = db.users.find(u => u.id === record.userId && u.email === email)
+    if (!user) {
+      return { ok: false }
+    }
+
+    user.passwordHash = passwordHash
+    user.updatedAt = now
+    record.consumedAt = now
+    return { ok: true }
+  })
+
+  if (!result.ok) {
+    return res.status(400).json({ error: 'Password reset token is invalid or expired' })
+  }
 
   return res.json({ message: 'Password reset successfully' })
 }

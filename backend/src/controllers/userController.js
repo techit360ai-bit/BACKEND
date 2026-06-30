@@ -1,4 +1,4 @@
-import { readDb, writeDb } from '../config/database.js'
+import { readDb, updateDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 
 const UPDATABLE = new Set([
@@ -17,18 +17,19 @@ export function getMe(req, res) {
 }
 
 export function updateMe(req, res) {
-  const db = readDb()
-  const idx = db.profiles.findIndex(p => p.id === req.user.id)
-  if (idx === -1) return res.status(404).json({ error: 'Profile not found' })
-
   const updates = {}
   for (const [key, value] of Object.entries(req.body)) {
     if (UPDATABLE.has(key)) updates[key] = value
   }
 
-  db.profiles[idx] = { ...db.profiles[idx], ...updates, updatedAt: new Date().toISOString() }
-  writeDb(db)
-  return res.json(db.profiles[idx])
+  const result = updateDb(db => {
+    const idx = db.profiles.findIndex(p => p.id === req.user.id)
+    if (idx === -1) return null
+    db.profiles[idx] = { ...db.profiles[idx], ...updates, updatedAt: new Date().toISOString() }
+    return db.profiles[idx]
+  })
+  if (!result) return res.status(404).json({ error: 'Profile not found' })
+  return res.json(result)
 }
 
 function publicProfile(profile, db, viewerId) {
@@ -87,31 +88,33 @@ export function getUserProfile(req, res) {
 }
 
 export function connectUser(req, res) {
-  const db = readDb()
-  const target = db.profiles.find(p => p.id === req.params.id || p.username === req.params.id)
-  const actor = db.profiles.find(p => p.id === req.user.id)
-  if (!target) return res.status(404).json({ error: 'Profile not found' })
-  if (target.id === req.user.id) return res.status(400).json({ error: 'Cannot connect with yourself' })
-  const exists = db.notifications.some(n =>
-    n.userId === target.id &&
-    n.actorId === req.user.id &&
-    n.type === 'collab' &&
-    n.linkTo === `/feed/profile/${req.user.id}`
-  )
-  if (!exists) {
-    db.notifications.push({
-      id: createId('notif'),
-      userId: target.id,
-      actorId: req.user.id,
-      type: 'collab',
-      read: false,
-      content: 'wants to connect with you',
-      author: userName(actor),
-      avatar: avatarGradient(req.user.id),
-      linkTo: `/feed/profile/${req.user.id}`,
-      createdAt: nowIso(),
-    })
-    writeDb(db)
-  }
+  const result = updateDb(db => {
+    const target = db.profiles.find(p => p.id === req.params.id || p.username === req.params.id)
+    const actor = db.profiles.find(p => p.id === req.user.id)
+    if (!target) return { status: 404, error: 'Profile not found' }
+    if (target.id === req.user.id) return { status: 400, error: 'Cannot connect with yourself' }
+    const exists = db.notifications.some(n =>
+      n.userId === target.id &&
+      n.actorId === req.user.id &&
+      n.type === 'collab' &&
+      n.linkTo === `/feed/profile/${req.user.id}`
+    )
+    if (!exists) {
+      db.notifications.push({
+        id: createId('notif'),
+        userId: target.id,
+        actorId: req.user.id,
+        type: 'collab',
+        read: false,
+        content: 'wants to connect with you',
+        author: userName(actor),
+        avatar: avatarGradient(req.user.id),
+        linkTo: `/feed/profile/${req.user.id}`,
+        createdAt: nowIso(),
+      })
+    }
+    return { status: 200 }
+  })
+  if (result.status !== 200) return res.status(result.status).json({ error: result.error })
   return res.json({ ok: true })
 }

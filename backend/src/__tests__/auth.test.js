@@ -9,9 +9,10 @@ const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 vi.mock('../config/database.js', () => ({
   readDb: vi.fn(),
   writeDb: vi.fn(),
+  updateDb: vi.fn(),
 }))
 
-import { readDb, writeDb } from '../config/database.js'
+import { readDb, updateDb, writeDb } from '../config/database.js'
 
 const MOCK_HASH = '$2a$02$test.hash.that.matches.Test.1234567890'
 const { resendSend } = vi.hoisted(() => ({
@@ -91,6 +92,13 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = 're_test_key'
   resendSend.mockResolvedValue({ id: 'email-1' })
   writeDb.mockImplementation(() => {})
+  updateDb.mockImplementation(mutator => {
+    const db = readDb()
+    const before = JSON.stringify(db)
+    const result = mutator(db)
+    if (JSON.stringify(db) !== before) writeDb(db)
+    return result
+  })
 })
 
 // ── POST /api/auth/signup ──────────────────────────────────────────────────────
