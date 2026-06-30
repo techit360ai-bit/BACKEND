@@ -63,10 +63,10 @@ app.use('/api/files', fileRoutes)
 // the SAME platform secret as /api/auth so users can't self-declare roles by
 // stuffing them into the request body (the SDK's legacy fallback mode).
 const JWT_SECRET = process.env.JWT_SECRET
-function mcpRoleFromClaim(role) {
+export function mcpRoleFromClaim(role) {
   if (['viewer', 'editor', 'admin', 'owner'].includes(role)) return role
   if (role === 'admin') return 'admin'
-  if (role === 'founder' || role === 'organisation') return 'owner'
+  if (role === 'founder' || role === 'organisation' || role === 'organization') return 'owner'
   if (role === 'collaborator') return 'editor'
   return 'viewer'
 }
