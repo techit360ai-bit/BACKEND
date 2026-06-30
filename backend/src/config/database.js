@@ -221,6 +221,10 @@ function writeJsonDb(data) {
 
 function readSqliteDb() {
   const db = getSqliteDb()
+  return readSqliteCollections(db)
+}
+
+function readSqliteCollections(db) {
   const data = cloneInitial()
   const rows = db.prepare('SELECT name, value FROM app_collections').all()
   for (const row of rows) {
@@ -233,6 +237,10 @@ function readSqliteDb() {
 
 function writeSqliteDb(data) {
   const db = getSqliteDb()
+  writeSqliteCollections(db, data)
+}
+
+function writeSqliteCollections(db, data, { transaction = true } = {}) {
   const normalized = normalizeDb(data)
   const stmt = db.prepare(`
     INSERT INTO app_collections (name, value, updated_at)
@@ -242,13 +250,45 @@ function writeSqliteDb(data) {
       updated_at = excluded.updated_at
   `)
 
-  db.exec('BEGIN IMMEDIATE')
+  if (transaction) db.exec('BEGIN IMMEDIATE')
   try {
     const now = new Date().toISOString()
     for (const key of Object.keys(INITIAL)) {
       stmt.run(key, JSON.stringify(normalized[key]), now)
     }
+    if (transaction) db.exec('COMMIT')
+  } catch (err) {
+    if (transaction) {
+      try { db.exec('ROLLBACK') } catch {}
+    }
+    throw err
+  }
+}
+
+function assertSyncMutation(result) {
+  if (result && typeof result.then === 'function') {
+    throw new Error('updateDb mutator must be synchronous')
+  }
+}
+
+function updateJsonDb(mutator) {
+  const data = readJsonDb()
+  const result = mutator(data)
+  assertSyncMutation(result)
+  writeJsonDb(data)
+  return result
+}
+
+function updateSqliteDb(mutator) {
+  const db = getSqliteDb()
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const data = readSqliteCollections(db)
+    const result = mutator(data)
+    assertSyncMutation(result)
+    writeSqliteCollections(db, data, { transaction: false })
     db.exec('COMMIT')
+    return result
   } catch (err) {
     try { db.exec('ROLLBACK') } catch {}
     throw err
@@ -278,6 +318,10 @@ export function readDb() {
 export function writeDb(data) {
   if (currentDriver() === 'sqlite') writeSqliteDb(data)
   else writeJsonDb(data)
+}
+
+export function updateDb(mutator) {
+  return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
 
 export function closeDbForTests() {

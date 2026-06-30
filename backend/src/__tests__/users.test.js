@@ -8,9 +8,10 @@ const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 vi.mock('../config/database.js', () => ({
   readDb: vi.fn(),
   writeDb: vi.fn(),
+  updateDb: vi.fn(),
 }))
 
-import { readDb, writeDb } from '../config/database.js'
+import { readDb, updateDb, writeDb } from '../config/database.js'
 
 function validToken(userId = 'user-uuid-1') {
   return jwt.sign({ sub: userId }, TEST_SECRET, { expiresIn: '1h' })
@@ -64,6 +65,13 @@ const BASE_PROFILE = {
 beforeEach(() => {
   vi.clearAllMocks()
   writeDb.mockImplementation(() => {})
+  updateDb.mockImplementation(mutator => {
+    const db = readDb()
+    const before = JSON.stringify(db)
+    const result = mutator(db)
+    if (JSON.stringify(db) !== before) writeDb(db)
+    return result
+  })
 })
 
 // ── GET /api/users/me ─────────────────────────────────────────────────────────

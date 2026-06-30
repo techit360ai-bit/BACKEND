@@ -7,6 +7,7 @@ import {
   migrateSqlite,
   readDb,
   rollbackLatestSqliteMigration,
+  updateDb,
   validateDatabaseConfig,
   writeDb,
 } from '../config/database.js'
@@ -128,6 +129,70 @@ describe('database persistence adapter', () => {
       'notif-2',
       'notif-3',
       'notif-4',
+    ])
+  })
+
+  it('applies updateDb mutations atomically and returns the mutator result', () => {
+    const result = updateDb(db => {
+      db.notifications.push({
+        id: 'notif-atomic',
+        userId: 'user-1',
+        type: 'milestone',
+        read: false,
+        content: 'Atomic',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })
+      return { id: 'notif-atomic' }
+    })
+
+    expect(result).toEqual({ id: 'notif-atomic' })
+    expect(readDb().notifications.map(n => n.id)).toContain('notif-atomic')
+  })
+
+  it('rolls back updateDb mutations when the mutator throws', () => {
+    expect(() => updateDb(db => {
+      db.notifications.push({
+        id: 'notif-rolled-back',
+        userId: 'user-1',
+        type: 'milestone',
+        read: false,
+        content: 'Rolled back',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })
+      throw new Error('abort mutation')
+    })).toThrow(/abort mutation/)
+
+    expect(readDb().notifications.map(n => n.id)).not.toContain('notif-rolled-back')
+  })
+
+  it('rejects async updateDb mutators to avoid holding transactions across awaits', () => {
+    expect(() => updateDb(async () => ({ ok: true }))).toThrow(/must be synchronous/i)
+  })
+
+  it('preserves overlapping updateDb writes against the same collection', async () => {
+    await Promise.all(Array.from({ length: 5 }, (_, index) => new Promise(resolve => {
+      setImmediate(() => {
+        updateDb(db => {
+          db.notifications.push({
+            id: `notif-update-${index}`,
+            userId: 'user-1',
+            type: 'milestone',
+            read: false,
+            content: `Event ${index}`,
+            createdAt: '2026-01-01T00:00:00.000Z',
+          })
+        })
+        resolve()
+      })
+    })))
+
+    const db = readDb()
+    expect(db.notifications.map(n => n.id).sort()).toEqual([
+      'notif-update-0',
+      'notif-update-1',
+      'notif-update-2',
+      'notif-update-3',
+      'notif-update-4',
     ])
   })
 
