@@ -76,6 +76,13 @@ function requireAbsolutePath(env, name) {
   if (!path.isAbsolute(value)) fail(`${name} must be an absolute path to persistent storage`);
 }
 
+function requireProductionEmailSender(env, name) {
+  const value = requireValue(env, name);
+  if (/@resend\.dev\b/i.test(value)) {
+    fail(`${name} must use a verified sender domain, not resend.dev, in production/staging`);
+  }
+}
+
 function validateManifest() {
   const manifest = readJson(MANIFEST_PATH);
   if (manifest.version !== 1) fail("deployment manifest version must be 1");
@@ -115,7 +122,7 @@ function validateNodeBackend(env) {
   }
   requireAbsolutePath(env, "SQLITE_DB_PATH");
   requireValue(env, "RESEND_API_KEY");
-  requireValue(env, "FROM_EMAIL");
+  requireProductionEmailSender(env, "FROM_EMAIL");
   requireAbsolutePath(env, "MCP_DATA_FILE");
 }
 

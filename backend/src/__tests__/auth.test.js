@@ -5,6 +5,7 @@ import { createHash } from 'crypto'
 import app from '../app.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
+const TEST_NODE_ENV = process.env.NODE_ENV || 'test'
 
 vi.mock('../config/database.js', () => ({
   readDb: vi.fn(),
@@ -89,8 +90,10 @@ vi.mock('resend', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  process.env.NODE_ENV = TEST_NODE_ENV
   process.env.RESEND_API_KEY = 're_test_key'
-  resendSend.mockResolvedValue({ id: 'email-1' })
+  delete process.env.FROM_EMAIL
+  resendSend.mockResolvedValue({ data: { id: 'email-1' }, error: null, headers: null })
   writeDb.mockImplementation(() => {})
   updateDb.mockImplementation(mutator => {
     const db = readDb()
@@ -361,6 +364,43 @@ describe('POST /api/auth/send-otp', () => {
     error.mockRestore()
   })
 
+  it('does not persist an OTP when Resend returns an error response', async () => {
+    readDb.mockReturnValue(makeDb())
+    resendSend.mockResolvedValue({
+      data: null,
+      error: { name: 'validation_error', message: 'Invalid from address' },
+      headers: null,
+    })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(res.body.error).toMatch(/failed to send/i)
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
+  })
+
+  it('does not use the Resend test sender for production OTP email', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.FROM_EMAIL = 'TechIT <onboarding@resend.dev>'
+    readDb.mockReturnValue(makeDb())
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(resendSend).not.toHaveBeenCalled()
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
+  })
+
   it('does not persist an OTP when mail credentials are missing', async () => {
     delete process.env.RESEND_API_KEY
     readDb.mockReturnValue(makeDb())
@@ -622,6 +662,29 @@ describe('Password recovery', () => {
     expect(res.body.message).toMatch(/if an account exists/i)
     expect(res.body.resetToken).toBeUndefined()
     expect(writeDb).not.toHaveBeenCalled()
+  })
+
+  it('does not persist a password reset token when Resend returns an error response in production', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.FROM_EMAIL = 'TechIT <noreply@techit.example>'
+    resendSend.mockResolvedValue({
+      data: null,
+      error: { name: 'validation_error', message: 'Invalid from address' },
+      headers: null,
+    })
+    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/forgot-password').send({
+      email: 'alice@example.com',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.message).toMatch(/if an account exists/i)
+    expect(res.body.resetToken).toBeUndefined()
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
   })
 
   it('resets the password and consumes the reset token', async () => {

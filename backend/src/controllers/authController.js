@@ -4,6 +4,7 @@ import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readDb, updateDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
+import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -16,7 +17,6 @@ if (!JWT_SECRET) {
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
 const RESET_EXPIRES_MINUTES = parseInt(process.env.PASSWORD_RESET_EXPIRES_MINUTES || '30', 10)
-const FROM = process.env.FROM_EMAIL || 'TechIT <onboarding@resend.dev>'
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '')
 
 let _resend
@@ -124,8 +124,8 @@ function makePasswordResetRecord(user) {
 }
 
 async function sendPasswordResetEmail(email, resetUrl) {
-  await getResend().emails.send({
-    from: FROM,
+  const delivery = await getResend().emails.send({
+    from: configuredFromEmail('password reset emails'),
     to: [email],
     subject: 'Reset your TechIT password',
     html: `
@@ -156,6 +156,7 @@ async function sendPasswordResetEmail(email, resetUrl) {
       </html>
     `,
   })
+  assertEmailAccepted(delivery, 'password reset email')
 }
 
 export async function signup(req, res) {
