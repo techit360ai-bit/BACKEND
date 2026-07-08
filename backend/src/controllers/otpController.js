@@ -2,6 +2,11 @@ import { Resend } from 'resend'
 import { createHash, randomBytes, randomInt, randomUUID } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
 import { normalizeEmail } from '../utils/authInputs.js'
+import {
+  assertEmailAccepted,
+  configuredFromEmail,
+  describeEmailProviderError,
+} from '../utils/emailDelivery.js'
 
 // Lazy-initialize the Resend client so module load stays side-effect free.
 // The Resend constructor throws when no API key is set; eager construction here
@@ -18,7 +23,6 @@ function getResend() {
   return _resend
 }
 
-const FROM      = process.env.FROM_EMAIL         || 'TechIT <onboarding@resend.dev>'
 const EXPIRES   = parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10)
 const RESEND_COOLDOWN_SECONDS = 60   // minimum gap between sends per email
 const MAX_ATTEMPTS = 5               // wrong guesses before OTP is invalidated
@@ -80,8 +84,8 @@ export async function sendOtp(req, res) {
 
   // ── Send email via Resend ─────────────────────────────────────────────────
   try {
-    await getResend().emails.send({
-      from:    FROM,
+    const delivery = await getResend().emails.send({
+      from:    configuredFromEmail('OTP emails'),
       to:      [email],
       subject: 'Your TechIT verification code',
       html: `
@@ -124,8 +128,13 @@ export async function sendOtp(req, res) {
         </html>
       `,
     })
+    assertEmailAccepted(delivery, 'OTP email')
   } catch (err) {
-    console.error('[OTP] Resend error:', err.message)
+    console.error(JSON.stringify({
+      event: 'otp_email_send_failed',
+      requestId: req.id,
+      error: describeEmailProviderError(err),
+    }))
     return res.status(502).json({ error: 'Failed to send email. Please try again.' })
   }
 
