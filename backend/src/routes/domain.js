@@ -13,6 +13,7 @@ import {
   founderProjects,
   genericCreatePost,
   genericListGet,
+  genericPatchItem,
   hackathonBrief,
   hackathonCheckIn,
   hackathonCreate,
@@ -42,6 +43,7 @@ import {
   watchlistAdd,
   workspaceContextGet,
   workspaceItemCreate,
+  workspaceItemPatch,
   workspaceItems,
   workspaceProvision,
   workspaces,
@@ -113,12 +115,16 @@ router.post('/workspaces/provision', workspaceProvision)
 router.get('/workspaces/:workspaceId/context', workspaceContextGet)
 router.get('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItems)
 router.post('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemCreate)
+router.patch('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItems)
 router.post('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemCreate)
+router.patch('/workspaces/:workspaceId/agents/:itemId', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItems)
 router.post('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemCreate)
+router.patch('/workspaces/:workspaceId/connectors/:itemId', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItems)
 router.post('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemCreate)
+router.patch('/workspaces/:workspaceId/reports/:itemId', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemPatch)
 
 router.get('/wallet/summary', walletSummaryGet)
 router.get('/wallet/usage', bindCollection('usageEvents', 'usage', 'usageEvent', 'usage'), walletListGet)
@@ -131,6 +137,7 @@ router.post('/wallet/payment-intents', walletPaymentIntent)
 
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
 router.post('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericCreatePost)
+router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericPatchItem)
 router.get('/files', bindCollection('files', 'files', 'file', 'file'), genericListGet)
 router.get('/notifications/preferences', notificationPrefsGet)
 router.patch('/notifications/preferences', notificationPrefsPatch)

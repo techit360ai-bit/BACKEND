@@ -198,6 +198,14 @@ export function createWorkspaceCollectionItem(userId, workspaceId, name, body, p
   })
 }
 
+export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body) {
+  return updateDb(db => {
+    const workspace = findOwned(db, 'workspaces', workspaceId, userId)
+    if (!workspace) return null
+    return patchOwned(db, name, itemId, userId, { ...body, workspaceId })
+  })
+}
+
 export function collaboratorEquity(userId) {
   const db = readDb()
   const holdings = listOwned(db, 'equityGrants', userId, 'collaboratorId')
@@ -567,6 +575,10 @@ export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
   return updateDb(db => insertOwned(db, name, userId, body, prefix, field))
 }
 
+export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
+  return updateDb(db => patchOwned(db, name, itemId, userId, body, field))
+}
+
 export function getNotificationPreferences(userId) {
   const db = readDb()
   return collection(db, 'notificationPreferences').find(row => row.userId === userId) || { userId, preferences: {} }
@@ -582,4 +594,3 @@ export function updateNotificationPreferences(userId, body) {
     return idx === -1 ? rows[rows.length - 1] : rows[idx]
   })
 }
-

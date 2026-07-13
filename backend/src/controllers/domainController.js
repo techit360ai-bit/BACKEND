@@ -11,6 +11,7 @@ import {
   createWorkspaceCollectionItem,
   genericCreate,
   genericList,
+  genericPatch,
   getAnalysis,
   getHackathon,
   getIntake,
@@ -25,6 +26,7 @@ import {
   listProjects,
   listWatchlist,
   listWorkspaceCollection,
+  patchWorkspaceCollectionItem,
   listWorkspaces,
   logHackathonCheckIn,
   organizationDashboard,
@@ -108,6 +110,18 @@ export function workspaceItemCreate(req, res) {
   )
   if (!row) return notFound(res, 'Workspace not found')
   return created(res, { [req.itemKey]: row })
+}
+
+export function workspaceItemPatch(req, res) {
+  const row = patchWorkspaceCollectionItem(
+    req.user.id,
+    req.params.workspaceId,
+    req.collectionName,
+    req.params.itemId,
+    req.body,
+  )
+  if (!row) return notFound(res, 'Workspace item not found')
+  return res.json({ [req.itemKey]: row })
 }
 
 export function equity(req, res) {
@@ -282,6 +296,12 @@ export function genericCreatePost(req, res) {
   return created(res, { [req.itemKey]: genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix) })
 }
 
+export function genericPatchItem(req, res) {
+  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId, req.body)
+  if (!row) return notFound(res, 'Record not found')
+  return res.json({ [req.itemKey]: row })
+}
+
 export function notificationPrefsGet(req, res) {
   return res.json(getNotificationPreferences(req.user.id))
 }
@@ -289,4 +309,3 @@ export function notificationPrefsGet(req, res) {
 export function notificationPrefsPatch(req, res) {
   return res.json(updateNotificationPreferences(req.user.id, req.body))
 }
-

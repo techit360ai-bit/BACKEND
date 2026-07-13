@@ -185,6 +185,53 @@ describe('domain live-data endpoints', () => {
     expect(context.body.venture.investment_score).toBe(80)
   })
 
+  it('patches owned workspace collection items and generic opportunity records', async () => {
+    const db = makeDb({
+      workspaces: [{ id: 'workspace_1', ownerId: 'user-uuid-1', projectId: 'project_live', name: 'Live Workspace' }],
+      workspaceTasks: [{
+        id: 'task_1',
+        ownerId: 'user-uuid-1',
+        workspaceId: 'workspace_1',
+        title: 'Ship live task',
+        status: 'pending',
+        deadline: '2026-07-15',
+      }],
+      opportunities: [{
+        id: 'opp_1',
+        ownerId: 'user-uuid-1',
+        title: 'Live Opportunity',
+        status: 'open',
+      }],
+    })
+    readDb.mockReturnValue(db)
+
+    const taskPatch = await request(app)
+      .patch('/api/domain/workspaces/workspace_1/tasks/task_1')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ status: 'completed', deadline: '2026-07-16' })
+
+    expect(taskPatch.status).toBe(200)
+    expect(taskPatch.body.task.status).toBe('completed')
+    expect(taskPatch.body.task.workspaceId).toBe('workspace_1')
+    expect(db.workspaceTasks[0].deadline).toBe('2026-07-16')
+
+    const otherUserPatch = await request(app)
+      .patch('/api/domain/workspaces/workspace_1/tasks/task_1')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ status: 'completed' })
+
+    expect(otherUserPatch.status).toBe(404)
+
+    const oppPatch = await request(app)
+      .patch('/api/domain/opportunities/opp_1')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ status: 'applied' })
+
+    expect(oppPatch.status).toBe(200)
+    expect(oppPatch.body.opportunity.status).toBe('applied')
+    expect(db.opportunities[0].ownerId).toBe('user-uuid-1')
+  })
+
   it('aggregates hackathon command-center metrics from persisted team activity', async () => {
     const db = makeDb()
     readDb.mockReturnValue(db)
