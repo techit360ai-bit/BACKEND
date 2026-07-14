@@ -147,6 +147,68 @@ export function updateProject(userId, projectId, body) {
   return updateDb(db => patchOwned(db, 'projects', projectId, userId, body))
 }
 
+function profileDisplayName(profile, fallback = 'TechIT member') {
+  if (!profile) return fallback
+  const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim()
+  return fullName || profile.name || profile.username || profile.email || fallback
+}
+
+function profileRole(profile, fallback = 'member') {
+  if (!profile) return fallback
+  if (Array.isArray(profile.roles) && profile.roles.length > 0) return String(profile.roles[0])
+  return String(profile.role || fallback)
+}
+
+export function listEndorsements(userId) {
+  const db = readDb()
+  const endorsements = collection(db, 'endorsements')
+    .filter(row => row.subjectId === userId)
+    .sort(byNewest)
+    .map(row => {
+      const authorProfile = collection(db, 'profiles').find(profile => profile.id === row.authorId)
+      return {
+        ...row,
+        authorName: profileDisplayName(authorProfile, row.authorName),
+        authorRole: profileRole(authorProfile, row.authorRole),
+      }
+    })
+  return { endorsements }
+}
+
+export function createEndorsement(userId, body) {
+  return updateDb(db => {
+    const subjectId = String(body.subjectUserId || '').trim()
+    const quote = String(body.quote || '').trim()
+    if (!subjectId) return { ok: false, error: 'subject_user_required' }
+    if (!quote) return { ok: false, error: 'quote_required' }
+    if (subjectId === userId) return { ok: false, error: 'self_endorsement_not_allowed' }
+
+    const subjectExists =
+      collection(db, 'users').some(user => user.id === subjectId) ||
+      collection(db, 'profiles').some(profile => profile.id === subjectId)
+    if (!subjectExists) return { ok: false, error: 'subject_user_not_found' }
+
+    const authorProfile = collection(db, 'profiles').find(profile => profile.id === userId)
+    const projectId = String(body.projectId || '').trim()
+    const project = projectId
+      ? collection(db, 'projects').find(row =>
+          row.id === projectId &&
+          (row.ownerId === userId || row.ownerId === subjectId || isRecordVisible(row, userId))
+        )
+      : null
+    if (projectId && !project) return { ok: false, error: 'project_not_found' }
+    const endorsement = insertOwned(db, 'endorsements', userId, {
+      subjectId,
+      authorName: profileDisplayName(authorProfile),
+      authorRole: profileRole(authorProfile),
+      quote,
+      projectId: project?.id || null,
+      projectName: project?.title || '',
+    }, 'endorsement', 'authorId')
+    return { ok: true, endorsement }
+  })
+}
+
 export function listWorkspaces(userId) {
   const db = readDb()
   return { workspaces: listOwned(db, 'workspaces', userId) }

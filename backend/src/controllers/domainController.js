@@ -4,6 +4,7 @@ import {
   collaboratorEquity,
   createAnalysis,
   createHackathon,
+  createEndorsement,
   createIntake,
   createInvestorCollection,
   createPaymentIntent,
@@ -21,6 +22,7 @@ import {
   investorCollection,
   investorDealFlow,
   listAnalyses,
+  listEndorsements,
   listHackathons,
   listIntakes,
   listProjects,
@@ -76,6 +78,19 @@ export function founderProjectPatch(req, res) {
   const project = updateProject(req.user.id, req.params.projectId, req.body)
   if (!project) return notFound(res, 'Project not found')
   return res.json({ project })
+}
+
+export function endorsements(req, res) {
+  return res.json(listEndorsements(req.user.id))
+}
+
+export function endorsementCreate(req, res) {
+  const result = createEndorsement(req.user.id, req.body)
+  if (!result.ok) {
+    const status = ['subject_user_not_found', 'project_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json(result)
+  }
+  return created(res, result)
 }
 
 export function workspaces(req, res) {

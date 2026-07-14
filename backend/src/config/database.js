@@ -18,6 +18,7 @@ const INITIAL = {
   passwordResets: [],
   notifications: [],
   files: [],
+  endorsements: [],
   mentorshipRooms: [],
   mentorshipMentees: [],
   mentorshipTasks: [],

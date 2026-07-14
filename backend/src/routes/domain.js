@@ -6,6 +6,8 @@ import {
   dealFlow,
   earnings,
   earningsWithdraw,
+  endorsementCreate,
+  endorsements,
   equity,
   equityDilution,
   founderProjectCreate,
@@ -67,6 +69,9 @@ function bindCollection(collectionName, responseKey, itemKey, itemPrefix) {
 router.get('/founder/projects', founderProjects)
 router.post('/founder/projects', founderProjectCreate)
 router.patch('/founder/projects/:projectId', founderProjectPatch)
+
+router.get('/endorsements', endorsements)
+router.post('/endorsements', endorsementCreate)
 
 router.get('/collaborator/equity', equity)
 router.post('/collaborator/equity/dilution', equityDilution)

@@ -31,6 +31,7 @@ function makeDb(overrides = {}) {
     profiles: [makeProfile(), makeProfile('user-uuid-2', 'bob@example.com')],
     notifications: [],
     files: [],
+    endorsements: [],
     projects: [],
     workspaces: [],
     projectAnalyses: [],
@@ -129,6 +130,71 @@ describe('domain live-data endpoints', () => {
 
     expect(own.body.projects).toHaveLength(1)
     expect(other.body.projects).toEqual([])
+  })
+
+  it('persists endorsements for real users and only lists those received by the authenticated user', async () => {
+    const db = makeDb({
+      projects: [{
+        id: 'project_live',
+        ownerId: 'user-uuid-2',
+        title: 'Live Collaboration',
+        visibility: 'public',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }],
+    })
+    readDb.mockReturnValue(db)
+
+    const create = await request(app)
+      .post('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        subjectUserId: 'user-uuid-2',
+        quote: 'Delivered the persisted release on time.',
+        projectId: 'project_live',
+      })
+
+    expect(create.status).toBe(201)
+    expect(create.body.endorsement.authorId).toBe('user-uuid-1')
+    expect(create.body.endorsement.subjectId).toBe('user-uuid-2')
+    expect(create.body.endorsement.authorName).toBe('Alice Smith')
+    expect(create.body.endorsement.projectName).toBe('Live Collaboration')
+
+    const authorView = await request(app)
+      .get('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${validToken()}`)
+    const subjectView = await request(app)
+      .get('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+
+    expect(authorView.body.endorsements).toEqual([])
+    expect(subjectView.body.endorsements).toHaveLength(1)
+    expect(subjectView.body.endorsements[0].quote).toBe('Delivered the persisted release on time.')
+  })
+
+  it('rejects self-endorsements and unknown endorsement targets', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+    const token = validToken()
+
+    const self = await request(app)
+      .post('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subjectUserId: 'user-uuid-1', quote: 'Self review' })
+    const missing = await request(app)
+      .post('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subjectUserId: 'missing-user', quote: 'Unknown review' })
+    const missingProject = await request(app)
+      .post('/api/domain/endorsements')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ subjectUserId: 'user-uuid-2', quote: 'Project review', projectId: 'missing-project' })
+
+    expect(self.status).toBe(400)
+    expect(self.body.error).toBe('self_endorsement_not_allowed')
+    expect(missing.status).toBe(404)
+    expect(missingProject.status).toBe(404)
+    expect(missingProject.body.error).toBe('project_not_found')
+    expect(db.endorsements).toEqual([])
   })
 
   it('persists incubation intake and promotes it into a real project', async () => {
