@@ -930,6 +930,7 @@ export function hackathonAggregates(userId, hackathonId) {
   const hackathon = getHackathon(userId, hackathonId)
   if (!hackathon) return null
   const teams = collection(db, 'hackathonTeams').filter(row => row.hackathonId === hackathonId)
+  const members = collection(db, 'hackathonMembers').filter(row => row.hackathonId === hackathonId)
   const briefs = collection(db, 'hackathonBriefs').filter(row => row.hackathonId === hackathonId)
   const checkIns = collection(db, 'hackathonCheckIns').filter(row => row.hackathonId === hackathonId)
   const scores = collection(db, 'hackathonScores').filter(row => row.hackathonId === hackathonId)
@@ -949,8 +950,8 @@ export function hackathonAggregates(userId, hackathonId) {
     overview: {
       hackathonId,
       status: hackathon.status || 'draft',
-      registrants: collection(db, 'hackathonMembers').filter(row => row.hackathonId === hackathonId).length,
-      teamsFormed: teams.filter(row => !row.isSolo).length,
+      registrants: teams.length + members.length,
+      teamsFormed: teams.length,
       stillSolo: teams.filter(row => row.isSolo).length,
       ideaSubmissions: briefs.length,
       totalTeams: teams.length,

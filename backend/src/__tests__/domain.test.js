@@ -331,6 +331,8 @@ describe('domain live-data endpoints', () => {
     const leaderboard = await request(app).get(`/api/domain/hackathons/${hackathonId}/leaderboard`).set('Authorization', `Bearer ${token}`)
 
     expect(overview.status).toBe(200)
+    expect(overview.body.registrants).toBe(3)
+    expect(overview.body.teamsFormed).toBe(1)
     expect(overview.body.totalTeams).toBe(1)
     expect(overview.body.ideaSubmissions).toBe(1)
     expect(overview.body.avgBuildVelocity).toBeGreaterThan(0)
