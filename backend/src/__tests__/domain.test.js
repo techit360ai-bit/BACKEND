@@ -367,10 +367,20 @@ describe('domain live-data endpoints', () => {
         endDate: '2026-08-04',
         durationHours: 48,
         prizePool: '$10,000',
+        eligibility: 'Open to verified builders',
+        prizes: [{ rank: '1st place', amount: '$10,000' }],
+        judgingDimensions: ['problem_clarity', 'technical_execution', 'commercial_viability'],
+        mentorPool: 6,
+        partners: ['Live Partner'],
         tags: ['Build'],
       })
 
     const hackathonId = created.body.hackathon.id
+    const organizerCatalog = await request(app)
+      .get('/api/domain/hackathons?scope=owned')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+    expect(organizerCatalog.body.hackathons[0].ownerId).toBe('user-uuid-1')
+
     const catalog = await request(app)
       .get('/api/domain/hackathons')
       .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
@@ -379,6 +389,14 @@ describe('domain live-data endpoints', () => {
       title: 'Persisted Build Sprint',
       summary: 'A database-backed hackathon.',
       durationHours: 48,
+      eligibility: 'Open to verified builders',
+      prizes: [{ rank: '1st place', amount: '$10,000' }],
+      judgingDimensions: ['problem_clarity', 'technical_execution', 'commercial_viability'],
+      mentorPool: 6,
+      partners: ['Live Partner'],
+      registrants: 0,
+      teamsFormed: 0,
+      stillSolo: 0,
     })
 
     const registered = await request(app)
@@ -401,6 +419,15 @@ describe('domain live-data endpoints', () => {
       stage: 'registered',
     })
     const teamId = registered.body.registration.teamId
+    const detail = await request(app)
+      .get(`/api/domain/hackathons/${hackathonId}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+    expect(detail.body.hackathon).toMatchObject({
+      id: hackathonId,
+      registrants: 1,
+      teamsFormed: 1,
+      stillSolo: 1,
+    })
 
     const targetedInvite = await request(app)
       .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/invitations`)

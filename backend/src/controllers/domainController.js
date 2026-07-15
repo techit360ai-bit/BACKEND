@@ -226,7 +226,7 @@ export function analysisGet(req, res) {
 }
 
 export function hackathons(req, res) {
-  return res.json(listHackathons(req.user.id))
+  return res.json(listHackathons(req.user.id, { ownedOnly: req.query.scope === 'owned' }))
 }
 
 export function hackathonRegistrations(req, res) {
