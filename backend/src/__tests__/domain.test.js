@@ -564,4 +564,25 @@ describe('domain live-data endpoints', () => {
     expect(summary.body.creditBalance).toBe(25)
     expect(summary.body.pendingPayments).toBe(1)
   })
+
+  it('persists role-scoped notification preferences without overwriting another role', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+    const token = validToken()
+
+    await request(app)
+      .patch('/api/domain/notifications/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'founder', preferences: { quietHours: 'weekends' } })
+    const collaborator = await request(app)
+      .patch('/api/domain/notifications/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'collaborator', preferences: { quietHours: 'off' } })
+
+    expect(collaborator.status).toBe(200)
+    expect(collaborator.body.preferences).toEqual({
+      founder: { quietHours: 'weekends' },
+      collaborator: { quietHours: 'off' },
+    })
+  })
 })

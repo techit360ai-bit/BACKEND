@@ -989,7 +989,12 @@ export function updateNotificationPreferences(userId, body) {
   return updateDb(db => {
     const rows = collection(db, 'notificationPreferences')
     const idx = rows.findIndex(row => row.userId === userId)
-    const next = { userId, preferences: body.preferences || body, updatedAt: nowIso() }
+    const currentPreferences = idx === -1 ? {} : cleanObject(rows[idx].preferences)
+    const scope = String(body.scope || '').trim()
+    const preferences = scope
+      ? { ...currentPreferences, [scope]: cleanObject(body.preferences) }
+      : cleanObject(body.preferences || body)
+    const next = { userId, preferences, updatedAt: nowIso() }
     if (idx === -1) rows.push({ id: createId('prefs'), createdAt: nowIso(), ...next })
     else rows[idx] = { ...rows[idx], ...next }
     return idx === -1 ? rows[rows.length - 1] : rows[idx]

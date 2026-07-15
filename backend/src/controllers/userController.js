@@ -6,7 +6,13 @@ const UPDATABLE = new Set([
   'avatarUrl', 'bio', 'secondaryRoles', 'isOnboarded', 'startupStage', 'industries', 'experience',
   'skills', 'weeklyHours', 'riskTolerance', 'investmentFocus', 'ticketSize',
   'orgName', 'orgType', 'website', 'linkedinUrl', 'githubUrl', 'portfolioUrl',
-  'timezone', 'certifications',
+  'timezone', 'certifications', 'title', 'twitterUrl',
+  'yearsBuilding', 'founderType', 'oneLiner', 'foundingYear', 'logoEmoji',
+  'currentTeamSize', 'openRoles', 'compensationOffered', 'equityRangeMin', 'equityRangeMax',
+  'launchStatus', 'users', 'revenueMonthly', 'fundingRaised', 'leadInvestor',
+  'nextMilestone', 'whyBuilding', 'winningIn3Years', 'unfairAdvantage', 'ownershipPhilosophy',
+  'yearsExperience', 'discipline', 'subSkills', 'techStack', 'earliestStart',
+  'commitmentStyle', 'equityPreference', 'minCashFloor', 'vestingComfort',
 ])
 
 export function getMe(req, res) {

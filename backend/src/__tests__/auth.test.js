@@ -618,6 +618,56 @@ describe('POST /api/auth/signout', () => {
   })
 })
 
+describe('POST /api/auth/change-password', () => {
+  it('verifies the current password and persists the replacement hash', async () => {
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
+
+    expect(res.status).toBe(200)
+    expect(writeDb).toHaveBeenCalledOnce()
+    expect(writeDb.mock.calls[0][0].users[0].passwordHash).toBe('hashed::NewSecret@99')
+  })
+
+  it('rejects an incorrect current password without writing', async () => {
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'WrongPass', newPassword: 'NewSecret@99' })
+
+    expect(res.status).toBe(401)
+    expect(writeDb).not.toHaveBeenCalled()
+  })
+
+  it('requires authentication and an eight-character replacement password', async () => {
+    const unauthenticated = await request(app)
+      .post('/api/auth/change-password')
+      .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
+    expect(unauthenticated.status).toBe(401)
+
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+    const short = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'CurrentPass', newPassword: 'short' })
+    expect(short.status).toBe(400)
+  })
+})
+
 // ── Password recovery ────────────────────────────────────────────────────────
 
 describe('Password recovery', () => {

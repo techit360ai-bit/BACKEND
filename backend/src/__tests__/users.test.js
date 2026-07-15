@@ -276,6 +276,35 @@ describe('PATCH /api/users/me', () => {
     expect(res.body.industries).toEqual(['FinTech', 'AI'])
     expect(res.body.investmentFocus).toEqual(['Seed'])
   })
+
+  it('persists role-specific settings fields without allowing authorization changes', async () => {
+    const profile = { ...BASE_PROFILE }
+    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+
+    const res = await request(app)
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        title: 'Founder and engineer',
+        yearsBuilding: 4,
+        openRoles: ['Backend Engineer'],
+        discipline: 'Engineering',
+        techStack: ['TypeScript'],
+        equityPreference: 60,
+        role: 'investor',
+      })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      title: 'Founder and engineer',
+      yearsBuilding: 4,
+      openRoles: ['Backend Engineer'],
+      discipline: 'Engineering',
+      techStack: ['TypeScript'],
+      equityPreference: 60,
+      role: 'founder',
+    })
+  })
 })
 
 // ── 404 fallback ──────────────────────────────────────────────────────────────
