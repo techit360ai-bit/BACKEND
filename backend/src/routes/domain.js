@@ -20,15 +20,21 @@ import {
   hackathonCheckIn,
   hackathonCreate,
   hackathonGet,
+  hackathonInviteAccept,
+  hackathonInviteGet,
+  hackathonInvitationCreate,
   hackathonLeaderboard,
   hackathonOverview,
   hackathonPipeline,
   hackathonRegister,
+  hackathonRegistrations,
   hackathons,
   hackathonTeamStatus,
+  hackathonTeamPatch,
   hackathonVelocity,
   hackathonWorkspace,
   hackathonReport,
+  hackathonFinal,
   intakeCreate,
   intakeGet,
   intakePromote,
@@ -103,6 +109,7 @@ router.get('/incubation/analyses/:analysisId', analysisGet)
 
 router.get('/hackathons', hackathons)
 router.post('/hackathons', hackathonCreate)
+router.get('/hackathons/registrations', hackathonRegistrations)
 router.get('/hackathons/:hackathonId/overview', hackathonOverview)
 router.get('/hackathons/:hackathonId/velocity', hackathonVelocity)
 router.get('/hackathons/:hackathonId/leaderboard', hackathonLeaderboard)
@@ -110,6 +117,11 @@ router.get('/hackathons/:hackathonId/pipeline', hackathonPipeline)
 router.post('/hackathons/:hackathonId/register', hackathonRegister)
 router.post('/hackathons/:hackathonId/brief', hackathonBrief)
 router.post('/hackathons/:hackathonId/checkin', hackathonCheckIn)
+router.post('/hackathons/:hackathonId/teams/:teamId/invitations', hackathonInvitationCreate)
+router.get('/hackathons/:hackathonId/teams/:teamId/invite', hackathonInviteGet)
+router.post('/hackathons/:hackathonId/teams/:teamId/invite', hackathonInviteAccept)
+router.patch('/hackathons/:hackathonId/teams/:teamId', hackathonTeamPatch)
+router.post('/hackathons/:hackathonId/teams/:teamId/final', hackathonFinal)
 router.get('/hackathons/:hackathonId/teams/:teamId/status', hackathonTeamStatus)
 router.post('/hackathons/:hackathonId/teams/:teamId/workspace', hackathonWorkspace)
 router.post('/hackathons/:hackathonId/teams/:teamId/report', hackathonReport)

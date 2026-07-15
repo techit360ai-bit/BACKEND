@@ -131,16 +131,50 @@ export function listProjects(userId) {
 }
 
 export function createProject(userId, body) {
-  return updateDb(db => ({ project: insertOwned(db, 'projects', userId, {
-    title: String(body.title || '').trim(),
-    tagline: body.tagline || '',
-    industry: body.industry || '',
-    stage: body.stage || 'idea',
-    isPrimary: Boolean(body.isPrimary),
-    gsisScore: Number(body.gsisScore || 0),
-    hasWorkspace: Boolean(body.hasWorkspace),
-    origin: body.origin,
-  }, 'project') }))
+  return updateDb(db => {
+    const origin = cleanObject(body.origin)
+    const promotedTeam = origin.kind === 'hackathon_promote'
+      ? collection(db, 'hackathonTeams').find(team =>
+          team.id === origin.teamId &&
+          team.hackathonId === origin.hackathonId &&
+          team.leaderId === userId
+        )
+      : null
+    if (origin.kind === 'hackathon_promote' && !promotedTeam) {
+      return { ok: false, error: 'hackathon_team_not_found' }
+    }
+
+    const project = insertOwned(db, 'projects', userId, {
+      title: String(body.title || '').trim(),
+      tagline: body.tagline || '',
+      industry: body.industry || '',
+      stage: body.stage || 'idea',
+      isPrimary: Boolean(body.isPrimary),
+      gsisScore: Number(body.gsisScore || 0),
+      hasWorkspace: Boolean(body.hasWorkspace || promotedTeam?.workspaceId),
+      origin,
+    }, 'project')
+
+    if (promotedTeam) {
+      promotedTeam.promotedProjectId = project.id
+      promotedTeam.projectId = project.id
+      promotedTeam.updatedAt = nowIso()
+      const binding = collection(db, 'hackathonTeamWorkspaces')
+        .filter(row => row.teamId === promotedTeam.id)
+        .sort(byNewest)[0]
+      if (binding) {
+        binding.projectId = project.id
+        binding.updatedAt = nowIso()
+        const workspace = collection(db, 'workspaces').find(row => row.id === binding.workspaceId && row.ownerId === userId)
+        if (workspace) {
+          workspace.projectId = project.id
+          workspace.updatedAt = nowIso()
+        }
+      }
+    }
+
+    return { ok: true, project }
+  })
 }
 
 export function updateProject(userId, projectId, body) {
@@ -445,6 +479,20 @@ export function createHackathon(userId, body) {
     theme: body.theme || '',
     status: body.status || 'draft',
     visibility: body.visibility || 'private',
+    organizer: cleanObject(body.organizer),
+    organizerName: body.organizerName || '',
+    poster: body.poster || '',
+    summary: body.summary || body.description || '',
+    applyDeadline: body.applyDeadline || '',
+    publishedAt: body.publishedAt || nowIso(),
+    tags: Array.isArray(body.tags) ? body.tags : [],
+    featured: Boolean(body.featured),
+    startDate: body.startDate || '',
+    endDate: body.endDate || '',
+    durationHours: Number(body.durationHours || 0),
+    prizePool: body.prizePool || '',
+    partners: Array.isArray(body.partners) ? body.partners : [],
+    hackathonStatus: body.hackathonStatus || body.status || 'upcoming',
   }, 'hack') }))
 }
 
@@ -458,11 +506,17 @@ export function registerHackathon(userId, hackathonId, body) {
   return updateDb(db => {
     const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
     if (!hackathon) return null
+    const existing = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.leaderId === userId)
+    if (existing) return { ok: true, team: existing, registration: hackathonRegistration(db, existing, userId) }
     const team = insertOwned(db, 'hackathonTeams', userId, {
       hackathonId,
       name: body.name || body.teamName || 'Untitled team',
       isSolo: !Array.isArray(body.members) || body.members.length <= 1,
       status: 'registered',
+      teamSize: Math.max(1, Number(body.teamSize || 1)),
+      inviteToken: String(body.inviteToken || ''),
+      openRoles: Array.isArray(body.openRoles) ? body.openRoles : [],
+      rosterClosed: false,
     }, 'team', 'leaderId')
     for (const member of Array.isArray(body.members) ? body.members : []) {
       collection(db, 'hackathonMembers').push({
@@ -475,7 +529,251 @@ export function registerHackathon(userId, hackathonId, body) {
         createdAt: nowIso(),
       })
     }
-    return { ok: true, team }
+    return { ok: true, team, registration: hackathonRegistration(db, team, userId) }
+  })
+}
+
+function hackathonRegistration(db, team, userId) {
+  const members = collection(db, 'hackathonMembers').filter(row => row.teamId === team.id)
+  const currentMember = members.find(row => row.userId === userId)
+  const brief = collection(db, 'hackathonBriefs').filter(row => row.teamId === team.id).sort(byNewest)[0] || null
+  const score = collection(db, 'hackathonScores').filter(row => row.teamId === team.id).sort(byNewest)[0] || null
+  const checkIns = collection(db, 'hackathonCheckIns').filter(row => row.teamId === team.id).sort(byNewest)
+  const final = collection(db, 'hackathonFinalSubmissions').filter(row => row.teamId === team.id).sort(byNewest)[0] || null
+  const workspace = collection(db, 'hackathonTeamWorkspaces').filter(row => row.teamId === team.id).sort(byNewest)[0] || null
+  const openRoles = Array.isArray(team.openRoles) ? team.openRoles : []
+  const stage = final
+    ? 'submitted-final'
+    : checkIns.length > 0 || workspace
+      ? 'building'
+      : brief
+        ? 'submitted'
+        : 'registered'
+  const fallbackScore = score ? {
+    overall: Number(score.composite || score.platformAvg || 0),
+    problemClarity: Number(score.problemClarityScore || 0),
+    innovationGap: Number(score.teamMomentumScore || 0),
+    initialImpact: Math.min(100, Number(score.demoReadinessHours || 0) * 6),
+    critiques: { problemClarity: [], innovationGap: [], initialImpact: [] },
+  } : undefined
+
+  return {
+    hackathonId: team.hackathonId,
+    teamId: team.id,
+    teamName: team.name,
+    teamSize: Math.max(Number(team.teamSize || 0), members.length + 1 + openRoles.length),
+    role: team.leaderId === userId ? 'leader' : currentMember ? 'member' : 'viewer',
+    inviteToken: team.leaderId === userId ? team.inviteToken || '' : '',
+    registeredAt: team.createdAt,
+    members: members.map(member => ({
+      collaboratorId: member.userId || member.id,
+      name: member.name || '',
+      role: member.role || '',
+      acceptedAt: member.createdAt,
+    })),
+    openRoles,
+    stage,
+    rosterClosed: Boolean(team.rosterClosed),
+    brief: brief ? { ...(brief.fields || {}), submittedAt: brief.createdAt } : undefined,
+    briefScore: score?.uiScore || fallbackScore,
+    checkIns: checkIns.map(checkIn => ({
+      id: checkIn.id,
+      loggedAt: checkIn.createdAt,
+      status: checkIn.status || 'on-track',
+      update: checkIn.note || checkIn.update || '',
+      ...(checkIn.blocker ? { blocker: checkIn.blocker } : {}),
+    })),
+    finalSubmission: final?.submission,
+    judgeFeedback: final?.judgeFeedback,
+    workspaceId: workspace?.workspaceId || team.workspaceId,
+    promotedProjectId: team.promotedProjectId,
+  }
+}
+
+export function listHackathonRegistrations(userId) {
+  const db = readDb()
+  const memberTeamIds = new Set(
+    collection(db, 'hackathonMembers')
+      .filter(row => row.userId === userId)
+      .map(row => row.teamId)
+  )
+  const registrations = collection(db, 'hackathonTeams')
+    .filter(team => team.leaderId === userId || memberTeamIds.has(team.id))
+    .sort(byNewest)
+    .map(team => hackathonRegistration(db, team, userId))
+  return { registrations }
+}
+
+function profileHasRole(profile, role) {
+  const roles = [
+    profile?.role,
+    ...(Array.isArray(profile?.secondaryRoles) ? profile.secondaryRoles : []),
+    ...(Array.isArray(profile?.roles) ? profile.roles : []),
+  ].map(value => String(value || '').toLowerCase())
+  return roles.includes(role)
+}
+
+function publicHackathonInvitation(invitation) {
+  return {
+    id: invitation.id,
+    hackathonId: invitation.hackathonId,
+    teamId: invitation.teamId,
+    collaboratorId: invitation.collaboratorId,
+    role: invitation.role,
+    status: invitation.status,
+    createdAt: invitation.createdAt,
+    updatedAt: invitation.updatedAt,
+  }
+}
+
+export function createHackathonInvitation(userId, hackathonId, teamId, body) {
+  return updateDb(db => {
+    const team = collection(db, 'hackathonTeams').find(row =>
+      row.id === teamId && row.hackathonId === hackathonId && row.leaderId === userId
+    )
+    if (!team) return { ok: false, error: 'team_not_found' }
+    if (team.rosterClosed) return { ok: false, error: 'roster_closed' }
+
+    const collaboratorId = String(body.collaboratorId || '').trim()
+    const role = String(body.role || '').trim()
+    if (!collaboratorId) return { ok: false, error: 'collaborator_required' }
+    if (collaboratorId === userId) return { ok: false, error: 'self_invitation_not_allowed' }
+    const profile = collection(db, 'profiles').find(row => row.id === collaboratorId)
+    if (!profile || !profileHasRole(profile, 'collaborator')) {
+      return { ok: false, error: 'collaborator_not_found' }
+    }
+    const openRoles = Array.isArray(team.openRoles) ? team.openRoles : []
+    if (!role || !openRoles.includes(role)) return { ok: false, error: 'role_unavailable' }
+    const members = collection(db, 'hackathonMembers').filter(row => row.teamId === teamId)
+    if (members.some(member => member.userId === collaboratorId)) {
+      return { ok: false, error: 'already_member' }
+    }
+    if (members.length + 1 >= Number(team.teamSize || 1)) return { ok: false, error: 'team_full' }
+
+    const existing = collection(db, 'hackathonInvitations').find(row =>
+      row.teamId === teamId &&
+      row.collaboratorId === collaboratorId &&
+      row.role === role &&
+      row.status === 'pending'
+    )
+    if (existing) return { ok: true, invitation: publicHackathonInvitation(existing) }
+
+    const inviterProfile = collection(db, 'profiles').find(row => row.id === userId)
+    const token = createId('hinvite')
+    const invitation = insertOwned(db, 'hackathonInvitations', userId, {
+      hackathonId,
+      teamId,
+      collaboratorId,
+      role,
+      status: 'pending',
+      token,
+    }, 'hackinvite', 'inviterId')
+    collection(db, 'notifications').push({
+      id: createId('notif'),
+      userId: collaboratorId,
+      actorId: userId,
+      type: 'collab',
+      read: false,
+      content: `invited you to join ${team.name} as ${role}`,
+      author: profileDisplayName(inviterProfile),
+      linkTo: `/h/${hackathonId}/team/${teamId}?token=${encodeURIComponent(token)}`,
+      invitationId: invitation.id,
+      createdAt: nowIso(),
+    })
+    return { ok: true, invitation: publicHackathonInvitation(invitation) }
+  })
+}
+
+function targetedHackathonInvitation(db, hackathonId, teamId, token, userId) {
+  return collection(db, 'hackathonInvitations').find(row =>
+    row.hackathonId === hackathonId &&
+    row.teamId === teamId &&
+    row.token === token &&
+    row.collaboratorId === userId &&
+    row.status === 'pending'
+  ) || null
+}
+
+export function getHackathonInvite(userId, hackathonId, teamId, token) {
+  const db = readDb()
+  const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId)
+  const team = collection(db, 'hackathonTeams').find(row => row.id === teamId && row.hackathonId === hackathonId)
+  if (!hackathon || !team) return { ok: false, error: 'invite_not_found' }
+  const invitation = targetedHackathonInvitation(db, hackathonId, teamId, token, userId)
+  if (!token || (team.inviteToken !== token && !invitation)) {
+    return { ok: false, error: 'invite_token_invalid' }
+  }
+  const leaderProfile = collection(db, 'profiles').find(profile => profile.id === team.leaderId)
+  const registration = hackathonRegistration(db, team, userId)
+  return {
+    ok: true,
+    invite: {
+      hackathon,
+      teamId,
+      teamName: team.name,
+      teamSize: registration.teamSize,
+      memberCount: registration.members.length + 1,
+      openRoles: registration.openRoles,
+      rosterClosed: registration.rosterClosed,
+      isLeader: team.leaderId === userId,
+      leaderName: profileDisplayName(leaderProfile, 'Team leader'),
+      invitationId: invitation?.id || '',
+      invitedRole: invitation?.role || '',
+    },
+  }
+}
+
+export function acceptHackathonInvite(userId, hackathonId, teamId, body) {
+  return updateDb(db => {
+    const team = collection(db, 'hackathonTeams').find(row => row.id === teamId && row.hackathonId === hackathonId)
+    if (!team) return { ok: false, error: 'invite_not_found' }
+    const token = String(body.token || '')
+    const invitation = targetedHackathonInvitation(db, hackathonId, teamId, token, userId)
+    if (!token || (team.inviteToken !== token && !invitation)) {
+      return { ok: false, error: 'invite_token_invalid' }
+    }
+    if (team.leaderId === userId) return { ok: false, error: 'leader_already_member' }
+    if (team.rosterClosed) return { ok: false, error: 'roster_closed' }
+
+    const members = collection(db, 'hackathonMembers').filter(row => row.teamId === teamId)
+    const existing = members.find(row => row.userId === userId)
+    if (existing) return { ok: true, registration: hackathonRegistration(db, team, userId) }
+    if (members.length + 1 >= Number(team.teamSize || 1)) return { ok: false, error: 'team_full' }
+
+    const role = String(invitation?.role || body.role || '').trim()
+    const openRoles = Array.isArray(team.openRoles) ? team.openRoles : []
+    if (!role || !openRoles.includes(role)) return { ok: false, error: 'role_unavailable' }
+    const profile = collection(db, 'profiles').find(row => row.id === userId)
+    collection(db, 'hackathonMembers').push({
+      id: createId('member'),
+      hackathonId,
+      teamId,
+      userId,
+      name: profileDisplayName(profile),
+      role,
+      createdAt: nowIso(),
+    })
+    team.openRoles = openRoles.filter(item => item !== role)
+    team.isSolo = false
+    team.updatedAt = nowIso()
+    if (invitation) {
+      invitation.status = 'accepted'
+      invitation.acceptedAt = nowIso()
+      invitation.updatedAt = invitation.acceptedAt
+    }
+    return { ok: true, registration: hackathonRegistration(db, team, userId) }
+  })
+}
+
+export function patchHackathonTeam(userId, hackathonId, teamId, body) {
+  return updateDb(db => {
+    const team = collection(db, 'hackathonTeams').find(row =>
+      row.id === teamId && row.hackathonId === hackathonId && row.leaderId === userId
+    )
+    if (!team) return null
+    if (typeof body.rosterClosed === 'boolean') team.rosterClosed = body.rosterClosed
+    team.updatedAt = nowIso()
+    return { ok: true, registration: hackathonRegistration(db, team, userId) }
   })
 }
 
@@ -497,12 +795,13 @@ export function submitHackathonBrief(userId, hackathonId, body) {
       demoReadinessHours,
       platformAvg,
       composite: Number(body.composite || platformAvg),
+      uiScore: cleanObject(body.briefScore),
     }, 'hscore', 'createdBy')
     const brief = insertOwned(db, 'hackathonBriefs', userId, { hackathonId, teamId: team.id, problem, solution, fields: body.fields || {}, scoreId: score.id }, 'brief', 'createdBy')
     team.hasBrief = true
     team.status = team.status === 'registered' ? 'building' : team.status
     team.updatedAt = nowIso()
-    return { ok: true, brief, score }
+    return { ok: true, brief, score, registration: hackathonRegistration(db, team, userId) }
   })
 }
 
@@ -515,13 +814,41 @@ export function logHackathonCheckIn(userId, hackathonId, body) {
       hackathonId,
       teamId: team.id,
       note: body.note || '',
+      status: body.status || 'on-track',
+      blocker: body.blocker || '',
       progressDelta,
       activityScore: Math.max(0, Math.min(100, progressDelta * 5)),
     }, 'checkin', 'createdBy')
     team.status = team.status === 'registered' ? 'building' : team.status
     team.updatedAt = nowIso()
-    return { ok: true, checkIn }
+    return { ok: true, checkIn, registration: hackathonRegistration(db, team, userId) }
   })
+}
+
+export function submitHackathonFinal(userId, hackathonId, teamId, body) {
+  return updateDb(db => {
+    const team = collection(db, 'hackathonTeams').find(row =>
+      row.hackathonId === hackathonId && row.id === teamId && teamOwnedBy(row, userId)
+    )
+    if (!team) return null
+    const existing = collection(db, 'hackathonFinalSubmissions')
+      .filter(row => row.teamId === teamId)
+      .sort(byNewest)[0]
+    if (existing) return { ok: true, finalSubmission: existing, registration: hackathonRegistration(db, team, userId) }
+    const finalSubmission = insertOwned(db, 'hackathonFinalSubmissions', userId, {
+      hackathonId,
+      teamId,
+      submission: cleanObject(body.submission),
+      judgeFeedback: cleanObject(body.judgeFeedback),
+    }, 'final', 'createdBy')
+    team.status = 'submitted-final'
+    team.updatedAt = nowIso()
+    return { ok: true, finalSubmission, registration: hackathonRegistration(db, team, userId) }
+  })
+}
+
+function teamOwnedBy(team, userId) {
+  return team.leaderId === userId || team.ownerId === userId
 }
 
 export function hackathonStatus(userId, hackathonId, teamId) {
@@ -538,6 +865,18 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
   return updateDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === teamId && row.leaderId === userId)
     if (!team) return null
+    const existingBinding = collection(db, 'hackathonTeamWorkspaces')
+      .filter(row => row.teamId === teamId)
+      .sort(byNewest)[0]
+    if (existingBinding) {
+      return {
+        ok: true,
+        project: collection(db, 'projects').find(row => row.id === existingBinding.projectId) || null,
+        workspace: collection(db, 'workspaces').find(row => row.id === existingBinding.workspaceId) || null,
+        binding: existingBinding,
+        registration: hackathonRegistration(db, team, userId),
+      }
+    }
     const project = insertOwned(db, 'projects', userId, {
       title: body.projectTitle || team.name,
       stage: 'idea',
@@ -553,7 +892,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
     team.hasWorkspace = true
     team.projectId = project.id
     team.workspaceId = workspace.id
-    return { ok: true, project, workspace, binding }
+    return { ok: true, project, workspace, binding, registration: hackathonRegistration(db, team, userId) }
   })
 }
 

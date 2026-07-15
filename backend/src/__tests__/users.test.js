@@ -133,6 +133,58 @@ describe('GET /api/users/me', () => {
   })
 })
 
+describe('GET /api/users', () => {
+  it('returns safe live collaborator directory fields and excludes the authenticated user', async () => {
+    const collaborator = {
+      ...BASE_PROFILE,
+      id: 'user-uuid-2',
+      email: 'builder@example.com',
+      firstName: 'Live',
+      lastName: 'Builder',
+      role: 'collaborator',
+      bio: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      credibilityScore: 81,
+      isVerified: true,
+    }
+    readDb.mockReturnValue({
+      users: [BASE_USER, { ...BASE_USER, id: collaborator.id, email: collaborator.email }],
+      profiles: [BASE_PROFILE, collaborator],
+      feedPosts: [],
+      feedComments: [],
+      notifications: [],
+    })
+
+    const res = await request(app)
+      .get('/api/users?role=collaborator')
+      .set('Authorization', `Bearer ${validToken()}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.users).toEqual([{
+      id: 'user-uuid-2',
+      name: 'Live Builder',
+      role: 'collaborator',
+      title: '',
+      headline: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      location: 'Nigeria',
+      avatarUrl: '',
+      credibilityScore: 81,
+      isVerified: true,
+    }])
+    expect(res.body.users[0]).not.toHaveProperty('email')
+  })
+
+  it('requires authentication', async () => {
+    const res = await request(app).get('/api/users?role=collaborator')
+    expect(res.status).toBe(401)
+  })
+})
+
 // ── PATCH /api/users/me ───────────────────────────────────────────────────────
 
 describe('PATCH /api/users/me', () => {

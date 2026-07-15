@@ -4,6 +4,7 @@ import {
   collaboratorEquity,
   createAnalysis,
   createHackathon,
+  createHackathonInvitation,
   createEndorsement,
   createIntake,
   createInvestorCollection,
@@ -15,6 +16,7 @@ import {
   genericPatch,
   getAnalysis,
   getHackathon,
+  getHackathonInvite,
   getIntake,
   getNotificationPreferences,
   hackathonAggregates,
@@ -24,6 +26,7 @@ import {
   listAnalyses,
   listEndorsements,
   listHackathons,
+  listHackathonRegistrations,
   listIntakes,
   listProjects,
   listWatchlist,
@@ -35,11 +38,14 @@ import {
   promoteIntake,
   provisionHackathonWorkspace,
   provisionWorkspace,
+  patchHackathonTeam,
   recordDilution,
   registerHackathon,
+  acceptHackathonInvite,
   reportHackathonTeam,
   requestWithdrawal,
   submitHackathonBrief,
+  submitHackathonFinal,
   updateNotificationPreferences,
   updateProject,
   walletList,
@@ -71,7 +77,9 @@ export function founderProjects(req, res) {
 export function founderProjectCreate(req, res) {
   const title = requireTitle(req, res)
   if (!title) return
-  return created(res, createProject(req.user.id, { ...req.body, title }))
+  const result = createProject(req.user.id, { ...req.body, title })
+  if (!result.ok) return res.status(404).json(result)
+  return created(res, result)
 }
 
 export function founderProjectPatch(req, res) {
@@ -221,6 +229,10 @@ export function hackathons(req, res) {
   return res.json(listHackathons(req.user.id))
 }
 
+export function hackathonRegistrations(req, res) {
+  return res.json(listHackathonRegistrations(req.user.id))
+}
+
 export function hackathonCreate(req, res) {
   return created(res, createHackathon(req.user.id, req.body))
 }
@@ -237,6 +249,49 @@ export function hackathonRegister(req, res) {
   return created(res, result)
 }
 
+export function hackathonInviteGet(req, res) {
+  const result = getHackathonInvite(
+    req.user.id,
+    req.params.hackathonId,
+    req.params.teamId,
+    String(req.query.token || ''),
+  )
+  if (!result.ok) {
+    const status = result.error === 'invite_token_invalid' ? 403 : 404
+    return res.status(status).json(result)
+  }
+  return res.json(result)
+}
+
+export function hackathonInvitationCreate(req, res) {
+  const result = createHackathonInvitation(
+    req.user.id,
+    req.params.hackathonId,
+    req.params.teamId,
+    req.body,
+  )
+  if (!result.ok) {
+    const status = ['team_not_found', 'collaborator_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json(result)
+  }
+  return created(res, result)
+}
+
+export function hackathonInviteAccept(req, res) {
+  const result = acceptHackathonInvite(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+  if (!result.ok) {
+    const status = ['invite_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json(result)
+  }
+  return created(res, result)
+}
+
+export function hackathonTeamPatch(req, res) {
+  const result = patchHackathonTeam(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+  if (!result) return notFound(res, 'Team not found')
+  return res.json(result)
+}
+
 export function hackathonBrief(req, res) {
   const result = submitHackathonBrief(req.user.id, req.params.hackathonId, req.body)
   if (!result) return notFound(res, 'Team not found')
@@ -245,6 +300,12 @@ export function hackathonBrief(req, res) {
 
 export function hackathonCheckIn(req, res) {
   const result = logHackathonCheckIn(req.user.id, req.params.hackathonId, req.body)
+  if (!result) return notFound(res, 'Team not found')
+  return created(res, result)
+}
+
+export function hackathonFinal(req, res) {
+  const result = submitHackathonFinal(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }

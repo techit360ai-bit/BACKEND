@@ -51,11 +51,13 @@ function makeDb(overrides = {}) {
     hackathons: [],
     hackathonTeams: [],
     hackathonMembers: [],
+    hackathonInvitations: [],
     hackathonBriefs: [],
     hackathonCheckIns: [],
     hackathonScores: [],
     hackathonTeamWorkspaces: [],
     hackathonTeamReports: [],
+    hackathonFinalSubmissions: [],
     opportunities: [],
     workspaceTasks: [],
     workspaceAgents: [],
@@ -334,6 +336,216 @@ describe('domain live-data endpoints', () => {
     expect(overview.body.avgBuildVelocity).toBeGreaterThan(0)
     expect(velocity.body.teams[0].teamId).toBe(teamId)
     expect(leaderboard.body.leaderboard[0].teamId).toBe(teamId)
+  })
+
+  it('persists the full hackathon registration, invitation, workspace, submission, and promotion flow', async () => {
+    const db = makeDb({
+      users: [
+        makeUser('user-uuid-1', 'org@example.com'),
+        makeUser('user-uuid-2', 'founder@example.com'),
+        makeUser('user-uuid-3', 'builder@example.com'),
+      ],
+      profiles: [
+        makeProfile('user-uuid-1', 'org@example.com', 'organisation'),
+        { ...makeProfile('user-uuid-2', 'founder@example.com', 'founder'), firstName: 'Founding', lastName: 'Lead' },
+        { ...makeProfile('user-uuid-3', 'builder@example.com', 'collaborator'), firstName: 'Live', lastName: 'Builder' },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const created = await request(app)
+      .post('/api/domain/hackathons')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+      .send({
+        title: 'Persisted Build Sprint',
+        theme: 'Ship a live product',
+        summary: 'A database-backed hackathon.',
+        visibility: 'public',
+        status: 'upcoming',
+        applyDeadline: '2026-08-01',
+        startDate: '2026-08-02',
+        endDate: '2026-08-04',
+        durationHours: 48,
+        prizePool: '$10,000',
+        tags: ['Build'],
+      })
+
+    const hackathonId = created.body.hackathon.id
+    const catalog = await request(app)
+      .get('/api/domain/hackathons')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(catalog.body.hackathons[0]).toMatchObject({
+      id: hackathonId,
+      title: 'Persisted Build Sprint',
+      summary: 'A database-backed hackathon.',
+      durationHours: 48,
+    })
+
+    const registered = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/register`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({
+        teamName: 'Persistent Team',
+        teamSize: 2,
+        inviteToken: 'invite-live',
+        openRoles: ['Backend Engineer'],
+      })
+
+    expect(registered.status).toBe(201)
+    expect(registered.body.registration).toMatchObject({
+      hackathonId,
+      teamName: 'Persistent Team',
+      teamSize: 2,
+      role: 'leader',
+      openRoles: ['Backend Engineer'],
+      stage: 'registered',
+    })
+    const teamId = registered.body.registration.teamId
+
+    const targetedInvite = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/invitations`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ collaboratorId: 'user-uuid-3', role: 'Backend Engineer' })
+    expect(targetedInvite.status).toBe(201)
+    expect(targetedInvite.body.invitation).toMatchObject({
+      hackathonId,
+      teamId,
+      collaboratorId: 'user-uuid-3',
+      role: 'Backend Engineer',
+      status: 'pending',
+    })
+    expect(targetedInvite.body.invitation).not.toHaveProperty('token')
+    expect(db.hackathonMembers).toHaveLength(0)
+    expect(db.notifications[0]).toMatchObject({
+      userId: 'user-uuid-3',
+      actorId: 'user-uuid-2',
+      type: 'collab',
+      read: false,
+    })
+    const targetedToken = db.hackathonInvitations[0].token
+    expect(db.notifications[0].linkTo).toContain(encodeURIComponent(targetedToken))
+
+    const wrongRecipient = await request(app)
+      .get(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/invite?token=${encodeURIComponent(targetedToken)}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+    expect(wrongRecipient.status).toBe(403)
+    expect(wrongRecipient.body.error).toBe('invite_token_invalid')
+
+    const invite = await request(app)
+      .get(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/invite?token=${encodeURIComponent(targetedToken)}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(invite.status).toBe(200)
+    expect(invite.body.invite).toMatchObject({
+      teamName: 'Persistent Team',
+      leaderName: 'Founding Lead',
+      openRoles: ['Backend Engineer'],
+      isLeader: false,
+      invitedRole: 'Backend Engineer',
+    })
+
+    const accepted = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/invite`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+      .send({ token: targetedToken, role: 'Backend Engineer' })
+    expect(accepted.status).toBe(201)
+    expect(accepted.body.registration.role).toBe('member')
+    expect(accepted.body.registration.openRoles).toEqual([])
+    expect(db.hackathonInvitations[0].status).toBe('accepted')
+
+    const roster = await request(app)
+      .patch(`/api/domain/hackathons/${hackathonId}/teams/${teamId}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ rosterClosed: true })
+    expect(roster.body.registration.rosterClosed).toBe(true)
+
+    const briefScore = {
+      overall: 82,
+      problemClarity: 84,
+      innovationGap: 80,
+      initialImpact: 81,
+      critiques: { problemClarity: [], innovationGap: [], initialImpact: [] },
+    }
+    await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/brief`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({
+        teamId,
+        problem: 'A sufficiently clear persisted problem statement.',
+        solution: 'A persisted solution.',
+        fields: { problem: 'A sufficiently clear persisted problem statement.', targetUser: 'Builders' },
+        briefScore,
+      })
+    await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/checkin`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ teamId, note: 'Shipped the API.', status: 'on-track', progressDelta: 15 })
+
+    const submission = {
+      demoUrl: 'https://example.com/demo',
+      deckUrl: 'https://example.com/deck',
+      videoUrl: 'https://example.com/video',
+      summary: 'A persisted final submission that survives application reloads.',
+      submittedAt: '2026-08-04T10:00:00.000Z',
+    }
+    const judgeFeedback = {
+      placement: 1,
+      cohortSize: 1,
+      comments: ['Persisted result'],
+      judgedAt: '2026-08-04T10:01:00.000Z',
+    }
+    const final = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/final`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ submission, judgeFeedback })
+    expect(final.status).toBe(201)
+    expect(final.body.registration.stage).toBe('submitted-final')
+
+    const leaderRegistrations = await request(app)
+      .get('/api/domain/hackathons/registrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    const memberRegistrations = await request(app)
+      .get('/api/domain/hackathons/registrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+
+    expect(leaderRegistrations.body.registrations[0]).toMatchObject({
+      teamId,
+      role: 'leader',
+      rosterClosed: true,
+      briefScore,
+      finalSubmission: submission,
+      judgeFeedback,
+    })
+    expect(leaderRegistrations.body.registrations[0].checkIns[0].update).toBe('Shipped the API.')
+    expect(memberRegistrations.body.registrations[0]).toMatchObject({
+      teamId,
+      role: 'member',
+    })
+
+    const provisioned = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/workspace`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({})
+    const provisionedAgain = await request(app)
+      .post(`/api/domain/hackathons/${hackathonId}/teams/${teamId}/workspace`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({})
+    expect(provisioned.status).toBe(201)
+    expect(provisionedAgain.body.workspace.id).toBe(provisioned.body.workspace.id)
+    expect(db.workspaces).toHaveLength(1)
+    expect(db.hackathonTeamWorkspaces).toHaveLength(1)
+
+    const promoted = await request(app)
+      .post('/api/domain/founder/projects')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({
+        title: 'Persistent Team Startup',
+        stage: 'mvp',
+        origin: { kind: 'hackathon_promote', hackathonId, teamId },
+      })
+    expect(promoted.status).toBe(201)
+    expect(db.hackathonTeams[0].promotedProjectId).toBe(promoted.body.project.id)
+    expect(db.hackathonTeamWorkspaces[0].projectId).toBe(promoted.body.project.id)
+    expect(db.workspaces[0].projectId).toBe(promoted.body.project.id)
   })
 
   it('persists wallet payment intents and derives pending payment counts from storage', async () => {

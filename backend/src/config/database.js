@@ -52,6 +52,7 @@ const INITIAL = {
   hackathons: [],
   hackathonTeams: [],
   hackathonMembers: [],
+  hackathonInvitations: [],
   hackathonBriefs: [],
   hackathonCheckIns: [],
   hackathonScores: [],

@@ -79,6 +79,43 @@ function publicProfile(profile, db, viewerId) {
   }
 }
 
+function hasDirectoryRole(profile, role) {
+  if (!role) return true
+  const roles = [
+    profile.role,
+    ...(Array.isArray(profile.secondaryRoles) ? profile.secondaryRoles : []),
+    ...(Array.isArray(profile.roles) ? profile.roles : []),
+  ].map(value => String(value || '').toLowerCase())
+  return roles.includes(role)
+}
+
+function directoryProfile(profile) {
+  return {
+    id: profile.id,
+    name: userName(profile),
+    role: profile.role || 'collaborator',
+    title: profile.title || profile.discipline || '',
+    headline: profile.bio || '',
+    skills: Array.isArray(profile.skills) ? profile.skills : [],
+    weeklyHours: Number(profile.weeklyHours || 0),
+    timezone: profile.timezone || '',
+    location: profile.country || '',
+    avatarUrl: profile.avatarUrl || '',
+    credibilityScore: Number(profile.credibilityScore || 0),
+    isVerified: Boolean(profile.isVerified),
+  }
+}
+
+export function listUsers(req, res) {
+  const requestedRole = String(req.query.role || '').trim().toLowerCase()
+  const db = readDb()
+  const users = db.profiles
+    .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
+    .map(directoryProfile)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return res.json({ users })
+}
+
 export function getUserProfile(req, res) {
   const db = readDb()
   const id = req.params.id === 'me' ? req.user.id : req.params.id
