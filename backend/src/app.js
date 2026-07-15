@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
 import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
+import domainRoutes from './routes/domain.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
@@ -52,6 +53,7 @@ app.use(express.json())
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/domain', domainRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
 

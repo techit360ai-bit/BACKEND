@@ -246,6 +246,34 @@ export function signout(_req, res) {
   return res.json({ message: 'Signed out' })
 }
 
+export async function changePassword(req, res) {
+  const currentPassword = String(req.body.currentPassword || '')
+  const newPassword = String(req.body.newPassword || '')
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' })
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' })
+  }
+
+  const db = readDb()
+  const user = db.users.find(row => row.id === req.user.id)
+  if (!user || !await bcrypt.compare(currentPassword, user.passwordHash)) {
+    return res.status(401).json({ error: 'Current password is incorrect' })
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS)
+  const updated = updateDb(current => {
+    const target = current.users.find(row => row.id === req.user.id)
+    if (!target) return false
+    target.passwordHash = passwordHash
+    target.updatedAt = new Date().toISOString()
+    return true
+  })
+  if (!updated) return res.status(404).json({ error: 'User not found' })
+  return res.json({ message: 'Password updated successfully' })
+}
+
 export async function forgotPassword(req, res) {
   const { email: rawEmail } = req.body
   const email = normalizeEmail(rawEmail)

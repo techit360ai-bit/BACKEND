@@ -133,6 +133,58 @@ describe('GET /api/users/me', () => {
   })
 })
 
+describe('GET /api/users', () => {
+  it('returns safe live collaborator directory fields and excludes the authenticated user', async () => {
+    const collaborator = {
+      ...BASE_PROFILE,
+      id: 'user-uuid-2',
+      email: 'builder@example.com',
+      firstName: 'Live',
+      lastName: 'Builder',
+      role: 'collaborator',
+      bio: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      credibilityScore: 81,
+      isVerified: true,
+    }
+    readDb.mockReturnValue({
+      users: [BASE_USER, { ...BASE_USER, id: collaborator.id, email: collaborator.email }],
+      profiles: [BASE_PROFILE, collaborator],
+      feedPosts: [],
+      feedComments: [],
+      notifications: [],
+    })
+
+    const res = await request(app)
+      .get('/api/users?role=collaborator')
+      .set('Authorization', `Bearer ${validToken()}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.users).toEqual([{
+      id: 'user-uuid-2',
+      name: 'Live Builder',
+      role: 'collaborator',
+      title: '',
+      headline: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      location: 'Nigeria',
+      avatarUrl: '',
+      credibilityScore: 81,
+      isVerified: true,
+    }])
+    expect(res.body.users[0]).not.toHaveProperty('email')
+  })
+
+  it('requires authentication', async () => {
+    const res = await request(app).get('/api/users?role=collaborator')
+    expect(res.status).toBe(401)
+  })
+})
+
 // ── PATCH /api/users/me ───────────────────────────────────────────────────────
 
 describe('PATCH /api/users/me', () => {
@@ -223,6 +275,35 @@ describe('PATCH /api/users/me', () => {
     expect(res.status).toBe(200)
     expect(res.body.industries).toEqual(['FinTech', 'AI'])
     expect(res.body.investmentFocus).toEqual(['Seed'])
+  })
+
+  it('persists role-specific settings fields without allowing authorization changes', async () => {
+    const profile = { ...BASE_PROFILE }
+    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+
+    const res = await request(app)
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        title: 'Founder and engineer',
+        yearsBuilding: 4,
+        openRoles: ['Backend Engineer'],
+        discipline: 'Engineering',
+        techStack: ['TypeScript'],
+        equityPreference: 60,
+        role: 'investor',
+      })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      title: 'Founder and engineer',
+      yearsBuilding: 4,
+      openRoles: ['Backend Engineer'],
+      discipline: 'Engineering',
+      techStack: ['TypeScript'],
+      equityPreference: 60,
+      role: 'founder',
+    })
   })
 })
 
