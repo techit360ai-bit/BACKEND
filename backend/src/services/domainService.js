@@ -467,9 +467,25 @@ export function getAnalysis(userId, analysisId) {
   return findOwned(db, 'ventureAnalyses', analysisId, userId)
 }
 
-export function listHackathons(userId) {
+function hackathonWithCounts(db, hackathon) {
+  const teams = collection(db, 'hackathonTeams').filter(row => row.hackathonId === hackathon.id)
+  const members = collection(db, 'hackathonMembers').filter(row => row.hackathonId === hackathon.id)
+  return {
+    ...hackathon,
+    registrants: teams.length + members.length,
+    teamsFormed: teams.length,
+    stillSolo: teams.filter(row => row.isSolo).length,
+  }
+}
+
+export function listHackathons(userId, { ownedOnly = false } = {}) {
   const db = readDb()
-  return { hackathons: collection(db, 'hackathons').filter(row => isRecordVisible(row, userId)).sort(byNewest) }
+  return {
+    hackathons: collection(db, 'hackathons')
+      .filter(row => ownedOnly ? row.ownerId === userId : isRecordVisible(row, userId))
+      .sort(byNewest)
+      .map(row => hackathonWithCounts(db, row)),
+  }
 }
 
 export function createHackathon(userId, body) {
@@ -492,6 +508,10 @@ export function createHackathon(userId, body) {
     durationHours: Number(body.durationHours || 0),
     prizePool: body.prizePool || '',
     partners: Array.isArray(body.partners) ? body.partners : [],
+    eligibility: body.eligibility || '',
+    prizes: Array.isArray(body.prizes) ? body.prizes.map(cleanObject) : [],
+    judgingDimensions: Array.isArray(body.judgingDimensions) ? body.judgingDimensions : [],
+    mentorPool: Number(body.mentorPool || 0),
     hackathonStatus: body.hackathonStatus || body.status || 'upcoming',
   }, 'hack') }))
 }
@@ -499,7 +519,7 @@ export function createHackathon(userId, body) {
 export function getHackathon(userId, hackathonId) {
   const db = readDb()
   const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
-  return hackathon || null
+  return hackathon ? hackathonWithCounts(db, hackathon) : null
 }
 
 export function registerHackathon(userId, hackathonId, body) {
@@ -910,6 +930,7 @@ export function hackathonAggregates(userId, hackathonId) {
   const hackathon = getHackathon(userId, hackathonId)
   if (!hackathon) return null
   const teams = collection(db, 'hackathonTeams').filter(row => row.hackathonId === hackathonId)
+  const members = collection(db, 'hackathonMembers').filter(row => row.hackathonId === hackathonId)
   const briefs = collection(db, 'hackathonBriefs').filter(row => row.hackathonId === hackathonId)
   const checkIns = collection(db, 'hackathonCheckIns').filter(row => row.hackathonId === hackathonId)
   const scores = collection(db, 'hackathonScores').filter(row => row.hackathonId === hackathonId)
@@ -929,8 +950,8 @@ export function hackathonAggregates(userId, hackathonId) {
     overview: {
       hackathonId,
       status: hackathon.status || 'draft',
-      registrants: collection(db, 'hackathonMembers').filter(row => row.hackathonId === hackathonId).length,
-      teamsFormed: teams.filter(row => !row.isSolo).length,
+      registrants: teams.length + members.length,
+      teamsFormed: teams.length,
       stillSolo: teams.filter(row => row.isSolo).length,
       ideaSubmissions: briefs.length,
       totalTeams: teams.length,
