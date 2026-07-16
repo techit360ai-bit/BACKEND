@@ -134,6 +134,51 @@ describe('domain live-data endpoints', () => {
     expect(other.body.projects).toEqual([])
   })
 
+  it('persists organization projects in an organization-owned scope', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const create = await request(app)
+      .post('/api/domain/organization/projects')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({
+        title: 'Portfolio Platform',
+        industry: 'SaaS',
+        stage: 'validation',
+        status: 'on-track',
+        progress: 42,
+      })
+
+    expect(create.status).toBe(201)
+    expect(create.body.project).toMatchObject({
+      title: 'Portfolio Platform',
+      organizationId: 'user-uuid-1',
+      stage: 'validation',
+      progress: 42,
+    })
+    expect(db.projects[0].ownerId).toBeUndefined()
+
+    const update = await request(app)
+      .patch(`/api/domain/organization/projects/${create.body.project.id}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+      .send({ stage: 'development', progress: 68 })
+    const own = await request(app)
+      .get('/api/domain/organization/projects')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    const other = await request(app)
+      .get('/api/domain/organization/projects')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2', 'organization')}`)
+    const founder = await request(app)
+      .get('/api/domain/organization/projects')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'founder')}`)
+
+    expect(update.status).toBe(200)
+    expect(update.body.project).toMatchObject({ stage: 'development', progress: 68 })
+    expect(own.body.projects).toHaveLength(1)
+    expect(other.body.projects).toEqual([])
+    expect(founder.status).toBe(403)
+  })
+
   it('persists endorsements for real users and only lists those received by the authenticated user', async () => {
     const db = makeDb({
       projects: [{
