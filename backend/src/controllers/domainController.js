@@ -8,6 +8,7 @@ import {
   createEndorsement,
   createIntake,
   createInvestorCollection,
+  createOrganizationProject,
   createPaymentIntent,
   createProject,
   createWorkspaceCollectionItem,
@@ -28,6 +29,7 @@ import {
   listHackathons,
   listHackathonRegistrations,
   listIntakes,
+  listOrganizationProjects,
   listProjects,
   listWatchlist,
   listWorkspaceCollection,
@@ -47,6 +49,7 @@ import {
   submitHackathonBrief,
   submitHackathonFinal,
   updateNotificationPreferences,
+  updateOrganizationProject,
   updateProject,
   walletList,
   walletSummary,
@@ -167,6 +170,22 @@ export function earningsWithdraw(req, res) {
 
 export function orgDashboard(req, res) {
   return res.json(organizationDashboard(req.user.id))
+}
+
+export function organizationProjects(req, res) {
+  return res.json(listOrganizationProjects(req.user.id))
+}
+
+export function organizationProjectCreate(req, res) {
+  const title = requireTitle(req, res)
+  if (!title) return
+  return created(res, createOrganizationProject(req.user.id, { ...req.body, title }))
+}
+
+export function organizationProjectPatch(req, res) {
+  const project = updateOrganizationProject(req.user.id, req.params.projectId, req.body)
+  if (!project) return notFound(res, 'Project not found')
+  return res.json({ project })
 }
 
 export function dealFlow(req, res) {

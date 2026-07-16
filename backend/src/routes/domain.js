@@ -44,6 +44,9 @@ import {
   notificationPrefsGet,
   notificationPrefsPatch,
   orgDashboard,
+  organizationProjectCreate,
+  organizationProjectPatch,
+  organizationProjects,
   walletListGet,
   walletPaymentIntent,
   walletSummaryGet,
@@ -57,6 +60,7 @@ import {
   workspaces,
 } from '../controllers/domainController.js'
 import { requireAuth } from '../middlewares/auth.js'
+import { requireRole } from '../utils/roleGuards.js'
 
 const router = Router()
 
@@ -85,6 +89,9 @@ router.get('/collaborator/earnings', earnings)
 router.post('/collaborator/earnings/withdraw', earningsWithdraw)
 
 router.get('/organization/dashboard', orgDashboard)
+router.get('/organization/projects', requireRole('organization', 'organisation'), organizationProjects)
+router.post('/organization/projects', requireRole('organization', 'organisation'), organizationProjectCreate)
+router.patch('/organization/projects/:projectId', requireRole('organization', 'organisation'), organizationProjectPatch)
 
 router.get('/investor/deal-flow', dealFlow)
 router.get('/investor/watchlist', watchlist)

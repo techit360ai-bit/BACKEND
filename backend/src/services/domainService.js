@@ -181,6 +181,33 @@ export function updateProject(userId, projectId, body) {
   return updateDb(db => patchOwned(db, 'projects', projectId, userId, body))
 }
 
+export function listOrganizationProjects(userId) {
+  const db = readDb()
+  return { projects: listOwned(db, 'projects', userId, 'organizationId') }
+}
+
+export function createOrganizationProject(userId, body) {
+  return updateDb(db => ({
+    project: insertOwned(db, 'projects', userId, {
+      title: String(body.title || '').trim(),
+      tagline: body.tagline || '',
+      industry: body.industry || '',
+      stage: body.stage || 'idea',
+      status: body.status || 'planned',
+      progress: Number(body.progress || 0),
+      teamName: body.teamName || '',
+      memberCount: Number(body.memberCount || 0),
+      marketReadyScore: Number(body.marketReadyScore || 0),
+      aiLevel: body.aiLevel || '',
+      hasWorkspace: Boolean(body.hasWorkspace),
+    }, 'project', 'organizationId'),
+  }))
+}
+
+export function updateOrganizationProject(userId, projectId, body) {
+  return updateDb(db => patchOwned(db, 'projects', projectId, userId, body, 'organizationId'))
+}
+
 function profileDisplayName(profile, fallback = 'TechIT member') {
   if (!profile) return fallback
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim()
