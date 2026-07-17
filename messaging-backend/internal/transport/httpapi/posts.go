@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/feed"
@@ -37,7 +38,16 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		if zone == "" {
 			zone = "global"
 		}
-		posts, err := d.Feed.ListByZone(r.Context(), currentRole(r), zone, r.URL.Query().Get("before"), 50)
+		limit := 50
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 200 {
+				writeErr(w, http.StatusBadRequest, "limit must be between 1 and 200")
+				return
+			}
+			limit = parsed
+		}
+		posts, err := d.Feed.ListByZone(r.Context(), currentRole(r), zone, r.URL.Query().Get("before"), limit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return

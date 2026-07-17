@@ -4,7 +4,18 @@ import (
 	"testing"
 )
 
+func clearConfigEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"PORT", "DATABASE_URL", "REDIS_URL", "JWT_SECRET", "CORS_ORIGINS",
+		"ENVIRONMENT", "APP_ENV", "NODE_ENV", "ENABLE_DEV_TOKEN",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("JWT_SECRET", "s3cret")
 	cfg, err := Load()
 	if err != nil {
@@ -25,6 +36,7 @@ func TestLoadDefaults(t *testing.T) {
 }
 
 func TestLoadRequiresJWTSecret(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("JWT_SECRET", "")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error when JWT_SECRET is empty")
@@ -32,6 +44,7 @@ func TestLoadRequiresJWTSecret(t *testing.T) {
 }
 
 func TestLoadOverrides(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("JWT_SECRET", "x")
 	t.Setenv("PORT", "9999")
 	t.Setenv("DATABASE_URL", "postgres://u@h/db")
@@ -48,10 +61,37 @@ func TestLoadOverrides(t *testing.T) {
 }
 
 func TestLoadRejectsDevTokenInProduction(t *testing.T) {
+	clearConfigEnv(t)
 	t.Setenv("JWT_SECRET", "x")
 	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("DATABASE_URL", "postgres://u@h/db")
+	t.Setenv("REDIS_URL", "redis://h:6379")
 	t.Setenv("ENABLE_DEV_TOKEN", "1")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error when ENABLE_DEV_TOKEN is on in production")
+	}
+}
+
+func TestLoadRequiresDurableStoresOutsideDevelopment(t *testing.T) {
+	for _, environment := range []string{"staging", "production"} {
+		t.Run(environment+" database", func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("JWT_SECRET", "x")
+			t.Setenv("ENVIRONMENT", environment)
+			t.Setenv("REDIS_URL", "redis://h:6379")
+			if _, err := Load(); err == nil || err.Error() != "DATABASE_URL is required outside development and test" {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+
+		t.Run(environment+" redis", func(t *testing.T) {
+			clearConfigEnv(t)
+			t.Setenv("JWT_SECRET", "x")
+			t.Setenv("ENVIRONMENT", environment)
+			t.Setenv("DATABASE_URL", "postgres://u@h/db")
+			if _, err := Load(); err == nil || err.Error() != "REDIS_URL is required outside development and test" {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }
