@@ -173,6 +173,25 @@ func TestChannelSendAndHistory(t *testing.T) {
 	}
 }
 
+func TestChannelReadRejectsNonMember(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	st.Channels.AddMember("ch-private", "u1")
+	tok, _ := ver.Mint("u2", "U2", "collaborator")
+
+	body, _ := json.Marshal(map[string]string{"msgId": "01890000-0000-7000-8000-0000000000f1"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/channels/ch-private/read", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", rec.Code, rec.Body)
+	}
+}
+
 func TestCreateAndListPosts(t *testing.T) {
 	r, ver, st := newAPI(t)
 	ctx := context.Background()
