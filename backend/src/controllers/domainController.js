@@ -2,7 +2,9 @@ import {
   addWatchlist,
   collaboratorEarnings,
   collaboratorEquity,
+  countersignContract,
   createAnalysis,
+  createContract,
   createHackathon,
   createHackathonInvitation,
   createEndorsement,
@@ -16,6 +18,8 @@ import {
   genericList,
   genericPatch,
   getAnalysis,
+  getCollaboratorScores,
+  getContract,
   getHackathon,
   getHackathonInvite,
   getIntake,
@@ -25,6 +29,8 @@ import {
   investorCollection,
   investorDealFlow,
   listAnalyses,
+  listContracts,
+  listContributions,
   listEndorsements,
   listHackathons,
   listHackathonRegistrations,
@@ -46,6 +52,7 @@ import {
   acceptHackathonInvite,
   reportHackathonTeam,
   requestWithdrawal,
+  signContract,
   submitHackathonBrief,
   submitHackathonFinal,
   updateNotificationPreferences,
@@ -166,6 +173,14 @@ export function earningsWithdraw(req, res) {
   const result = requestWithdrawal(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
+}
+
+export function contributions(req, res) {
+  return res.json(listContributions(req.user.id))
+}
+
+export function collaboratorScores(req, res) {
+  return res.json(getCollaboratorScores(req.user.id))
 }
 
 export function orgDashboard(req, res) {
@@ -403,4 +418,37 @@ export function notificationPrefsGet(req, res) {
 
 export function notificationPrefsPatch(req, res) {
   return res.json(updateNotificationPreferences(req.user.id, req.body))
+}
+
+export function contracts(req, res) {
+  return res.json(listContracts(req.user.id))
+}
+
+export function contractCreate(req, res) {
+  const result = createContract(req.user.id, req.body)
+  if (!result.ok) {
+    const status = ['collaborator_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json(result)
+  }
+  return created(res, result)
+}
+
+export function contractGet(req, res) {
+  const contract = getContract(req.user.id, req.params.id)
+  if (!contract) return notFound(res, 'Contract not found')
+  return res.json({ contract })
+}
+
+export function contractSign(req, res) {
+  const result = signContract(req.user.id, req.params.id)
+  if (!result) return notFound(res, 'Contract not found')
+  if (!result.ok) return res.status(400).json(result)
+  return res.json(result)
+}
+
+export function contractCountersign(req, res) {
+  const result = countersignContract(req.user.id, req.params.id)
+  if (!result) return notFound(res, 'Contract not found')
+  if (!result.ok) return res.status(400).json(result)
+  return res.json(result)
 }

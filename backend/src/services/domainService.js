@@ -1048,3 +1048,137 @@ export function updateNotificationPreferences(userId, body) {
     return idx === -1 ? rows[rows.length - 1] : rows[idx]
   })
 }
+
+export function listContributions(userId) {
+  const db = readDb()
+  return { contributions: listOwned(db, 'contributions', userId, 'collaboratorId') }
+}
+
+export function getCollaboratorScores(userId) {
+  const db = readDb()
+  const contributions = listOwned(db, 'contributions', userId, 'collaboratorId')
+  const verified = contributions.filter(c => c.verified)
+
+  // CBS = Collaborator Build Score (0-100)
+  // Based on: number of projects, milestones shipped, consistency
+  const projectCount = new Set(verified.map(c => c.projectId)).size
+  const totalMilestones = verified.reduce((sum, c) => sum + Number(c.milestonesShipped || 0), 0)
+  const cbs = Math.min(100, Math.round((projectCount * 15) + (totalMilestones * 5)))
+
+  // TSS = Technical Specialisation Score
+  // Depth per skill based on verified project contributions
+  const tss = {}
+  for (const contrib of verified) {
+    const techs = Array.isArray(contrib.technologies) ? contrib.technologies : []
+    for (const tech of techs) {
+      tss[tech] = (tss[tech] || 0) + 10
+    }
+  }
+  // Cap each skill at 100
+  for (const key of Object.keys(tss)) {
+    tss[key] = Math.min(100, tss[key])
+  }
+
+  // CRS = Collaboration Reliability Score (0-100)
+  // Ratio of verified completions to all contributions
+  const total = contributions.length
+  const crs = total === 0 ? 0 : Math.round((verified.length / total) * 100)
+
+  return { scores: { cbs, tss, crs } }
+}
+
+export function createContract(userId, body) {
+  return updateDb(db => {
+    const collaboratorId = String(body.collaboratorId || '').trim()
+    if (!collaboratorId) return { ok: false, error: 'collaborator_required' }
+    if (collaboratorId === userId) return { ok: false, error: 'self_contract_not_allowed' }
+
+    const collaboratorExists =
+      collection(db, 'users').some(user => user.id === collaboratorId) ||
+      collection(db, 'profiles').some(profile => profile.id === collaboratorId)
+    if (!collaboratorExists) return { ok: false, error: 'collaborator_not_found' }
+
+    const contract = insertOwned(db, 'contracts', userId, {
+      collaboratorId,
+      collaboratorName: String(body.collaboratorName || '').trim(),
+      projectName: String(body.projectName || '').trim(),
+      role: String(body.role || '').trim(),
+      equityPercent: Number(body.equityPercent || 0),
+      weeklyHours: Number(body.weeklyHours || 0),
+      skills: Array.isArray(body.skills) ? body.skills : [],
+      vestingMonths: Number(body.vestingMonths || 48),
+      cliffMonths: Number(body.cliffMonths || 12),
+      status: 'draft',
+      founderSignedAt: null,
+      founderSignature: null,
+      collaboratorSignedAt: null,
+      collaboratorSignature: null,
+    }, 'contract', 'founderId')
+
+    return { ok: true, contract }
+  })
+}
+
+export function listContracts(userId) {
+  const db = readDb()
+  const contracts = collection(db, 'contracts').filter(row =>
+    row.founderId === userId || row.collaboratorId === userId
+  ).sort(byNewest)
+  return { contracts }
+}
+
+export function getContract(userId, contractId) {
+  const db = readDb()
+  const contract = collection(db, 'contracts').find(row =>
+    row.id === contractId && (row.founderId === userId || row.collaboratorId === userId)
+  )
+  return contract || null
+}
+
+export function signContract(userId, contractId) {
+  return updateDb(db => {
+    const contract = collection(db, 'contracts').find(row =>
+      row.id === contractId && row.collaboratorId === userId
+    )
+    if (!contract) return null
+    if (contract.collaboratorSignedAt) {
+      return { ok: false, error: 'already_signed' }
+    }
+
+    contract.collaboratorSignedAt = nowIso()
+    contract.collaboratorSignature = userId
+    contract.updatedAt = nowIso()
+
+    if (contract.founderSignedAt && contract.founderSignature) {
+      contract.status = 'active'
+    } else {
+      contract.status = 'pending-countersign'
+    }
+
+    return { ok: true, contract }
+  })
+}
+
+export function countersignContract(userId, contractId) {
+  return updateDb(db => {
+    const contract = collection(db, 'contracts').find(row =>
+      row.id === contractId && row.founderId === userId
+    )
+    if (!contract) return null
+    if (contract.founderSignedAt) {
+      return { ok: false, error: 'already_signed' }
+    }
+
+    contract.founderSignedAt = nowIso()
+    contract.founderSignature = userId
+    contract.updatedAt = nowIso()
+
+    if (contract.collaboratorSignedAt && contract.collaboratorSignature) {
+      contract.status = 'active'
+    } else {
+      contract.status = 'pending-signature'
+    }
+
+    return { ok: true, contract }
+  })
+}

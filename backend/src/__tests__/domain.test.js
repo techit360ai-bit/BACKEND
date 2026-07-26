@@ -27,8 +27,8 @@ function makeProfile(id = 'user-uuid-1', email = 'alice@example.com', role = 'fo
 
 function makeDb(overrides = {}) {
   return {
-    users: [makeUser(), makeUser('user-uuid-2', 'bob@example.com')],
-    profiles: [makeProfile(), makeProfile('user-uuid-2', 'bob@example.com')],
+    users: [makeUser(), makeUser('user-uuid-2', 'bob@example.com'), makeUser('user-uuid-3', 'carol@example.com')],
+    profiles: [makeProfile(), makeProfile('user-uuid-2', 'bob@example.com'), makeProfile('user-uuid-3', 'carol@example.com', 'collaborator')],
     notifications: [],
     files: [],
     endorsements: [],
@@ -39,6 +39,7 @@ function makeDb(overrides = {}) {
     dilutionEvents: [],
     collaboratorEarnings: [],
     payouts: [],
+    contributions: [],
     organizationDashboards: [],
     investorWatchlists: [],
     dealFlowSnapshots: [],
@@ -73,6 +74,7 @@ function makeDb(overrides = {}) {
     invoices: [],
     notificationPreferences: [],
     settingsEvents: [],
+    contracts: [],
     ...overrides,
   }
 }
@@ -658,5 +660,431 @@ describe('domain live-data endpoints', () => {
       founder: { quietHours: 'weekends' },
       collaborator: { quietHours: 'off' },
     })
+  })
+
+  it('creates a contract draft with correct shape and ownership', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const create = await request(app)
+      .post('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        collaboratorId: 'user-uuid-2',
+        collaboratorName: 'Bob',
+        projectName: 'Test Project',
+        role: 'Backend Engineer',
+        equityPercent: 5,
+        weeklyHours: 20,
+        skills: ['Node.js', 'PostgreSQL'],
+        vestingMonths: 48,
+        cliffMonths: 12,
+      })
+
+    expect(create.status).toBe(201)
+    expect(create.body.contract).toMatchObject({
+      founderId: 'user-uuid-1',
+      collaboratorId: 'user-uuid-2',
+      collaboratorName: 'Bob',
+      projectName: 'Test Project',
+      role: 'Backend Engineer',
+      equityPercent: 5,
+      weeklyHours: 20,
+      skills: ['Node.js', 'PostgreSQL'],
+      vestingMonths: 48,
+      cliffMonths: 12,
+      status: 'draft',
+      founderSignedAt: null,
+      founderSignature: null,
+      collaboratorSignedAt: null,
+      collaboratorSignature: null,
+    })
+    expect(create.body.contract.id).toMatch(/^contract_/)
+    expect(db.contracts).toHaveLength(1)
+  })
+
+  it('lists contracts for both founder and collaborator', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const founderView = await request(app)
+      .get('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+    const collaboratorView = await request(app)
+      .get('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    const otherUserView = await request(app)
+      .get('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3')}`)
+
+    expect(founderView.status).toBe(200)
+    expect(founderView.body.contracts).toHaveLength(1)
+    expect(founderView.body.contracts[0].id).toBe('contract_1')
+
+    expect(collaboratorView.status).toBe(200)
+    expect(collaboratorView.body.contracts).toHaveLength(1)
+    expect(collaboratorView.body.contracts[0].id).toBe('contract_1')
+
+    expect(otherUserView.status).toBe(200)
+    expect(otherUserView.body.contracts).toEqual([])
+  })
+
+  it('allows collaborator to sign contract and updates status', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const sign = await request(app)
+      .patch('/api/domain/contracts/contract_1/sign')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+
+    expect(sign.status).toBe(200)
+    expect(sign.body.contract.collaboratorSignedAt).toBeTruthy()
+    expect(sign.body.contract.collaboratorSignature).toBe('user-uuid-2')
+    expect(sign.body.contract.status).toBe('pending-countersign')
+    expect(db.contracts[0].status).toBe('pending-countersign')
+  })
+
+  it('allows founder to countersign contract and updates status', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const countersign = await request(app)
+      .patch('/api/domain/contracts/contract_1/countersign')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    expect(countersign.status).toBe(200)
+    expect(countersign.body.contract.founderSignedAt).toBeTruthy()
+    expect(countersign.body.contract.founderSignature).toBe('user-uuid-1')
+    expect(countersign.body.contract.status).toBe('pending-signature')
+    expect(db.contracts[0].status).toBe('pending-signature')
+  })
+
+  it('makes contract active when both parties have signed', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    await request(app)
+      .patch('/api/domain/contracts/contract_1/countersign')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    const sign = await request(app)
+      .patch('/api/domain/contracts/contract_1/sign')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+
+    expect(sign.status).toBe(200)
+    expect(sign.body.contract.status).toBe('active')
+    expect(db.contracts[0].status).toBe('active')
+    expect(db.contracts[0].founderSignedAt).toBeTruthy()
+    expect(db.contracts[0].collaboratorSignedAt).toBeTruthy()
+  })
+
+  it('prevents unauthorized user from signing another user contract', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const unauthorizedSign = await request(app)
+      .patch('/api/domain/contracts/contract_1/sign')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3')}`)
+
+    expect(unauthorizedSign.status).toBe(404)
+    expect(db.contracts[0].collaboratorSignedAt).toBeNull()
+  })
+
+  it('rejects self-contract creation', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const selfContract = await request(app)
+      .post('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        collaboratorId: 'user-uuid-1',
+        collaboratorName: 'Alice',
+        projectName: 'Self Project',
+        role: 'Developer',
+        equityPercent: 5,
+        weeklyHours: 20,
+        skills: [],
+      })
+
+    expect(selfContract.status).toBe(400)
+    expect(selfContract.body.error).toBe('self_contract_not_allowed')
+    expect(db.contracts).toEqual([])
+  })
+
+  it('rejects contract creation with unknown collaborator', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const unknownCollaborator = await request(app)
+      .post('/api/domain/contracts')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        collaboratorId: 'unknown-user',
+        collaboratorName: 'Unknown',
+        projectName: 'Test Project',
+        role: 'Developer',
+        equityPercent: 5,
+        weeklyHours: 20,
+        skills: [],
+      })
+
+    expect(unknownCollaborator.status).toBe(404)
+    expect(unknownCollaborator.body.error).toBe('collaborator_not_found')
+    expect(db.contracts).toEqual([])
+  })
+
+  it('gets single contract only if user is party to it', async () => {
+    const db = makeDb({
+      contracts: [
+        {
+          id: 'contract_1',
+          founderId: 'user-uuid-1',
+          collaboratorId: 'user-uuid-2',
+          collaboratorName: 'Bob',
+          projectName: 'Project A',
+          role: 'Developer',
+          equityPercent: 3,
+          weeklyHours: 15,
+          skills: [],
+          vestingMonths: 48,
+          cliffMonths: 12,
+          status: 'draft',
+          founderSignedAt: null,
+          founderSignature: null,
+          collaboratorSignedAt: null,
+          collaboratorSignature: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const founderGet = await request(app)
+      .get('/api/domain/contracts/contract_1')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+    const collaboratorGet = await request(app)
+      .get('/api/domain/contracts/contract_1')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    const unauthorizedGet = await request(app)
+      .get('/api/domain/contracts/contract_1')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3')}`)
+
+    expect(founderGet.status).toBe(200)
+    expect(founderGet.body.contract.id).toBe('contract_1')
+
+    expect(collaboratorGet.status).toBe(200)
+    expect(collaboratorGet.body.contract.id).toBe('contract_1')
+
+    expect(unauthorizedGet.status).toBe(404)
+  })
+
+  it('returns empty contributions and zero scores for new collaborators', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const token = validToken()
+    const contributions = await request(app)
+      .get('/api/domain/collaborator/contributions')
+      .set('Authorization', `Bearer ${token}`)
+    const scores = await request(app)
+      .get('/api/domain/collaborator/scores')
+      .set('Authorization', `Bearer ${token}`)
+
+    expect(contributions.status).toBe(200)
+    expect(contributions.body.contributions).toEqual([])
+    expect(scores.status).toBe(200)
+    expect(scores.body.scores.cbs).toBe(0)
+    expect(scores.body.scores.tss).toEqual({})
+    expect(scores.body.scores.crs).toBe(0)
+  })
+
+  it('calculates CBS, TSS, and CRS based on verified contributions', async () => {
+    const db = makeDb({
+      contributions: [
+        {
+          id: 'contrib_1',
+          collaboratorId: 'user-uuid-1',
+          projectId: 'proj_1',
+          projectName: 'Project Alpha',
+          role: 'Backend Developer',
+          startDate: '2026-01-01',
+          endDate: '2026-06-01',
+          milestonesShipped: 5,
+          gsisChange: 10,
+          technologies: ['Node.js', 'PostgreSQL'],
+          verified: true,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+        {
+          id: 'contrib_2',
+          collaboratorId: 'user-uuid-1',
+          projectId: 'proj_2',
+          projectName: 'Project Beta',
+          role: 'Full Stack Developer',
+          startDate: '2026-02-01',
+          endDate: null,
+          milestonesShipped: 3,
+          gsisChange: 5,
+          technologies: ['Node.js', 'React'],
+          verified: true,
+          createdAt: '2026-02-01T00:00:00.000Z',
+          updatedAt: '2026-07-01T00:00:00.000Z',
+        },
+        {
+          id: 'contrib_3',
+          collaboratorId: 'user-uuid-1',
+          projectId: 'proj_3',
+          projectName: 'Project Gamma',
+          role: 'Contributor',
+          startDate: '2026-03-01',
+          endDate: null,
+          milestonesShipped: 0,
+          gsisChange: 0,
+          technologies: [],
+          verified: false,
+          createdAt: '2026-03-01T00:00:00.000Z',
+          updatedAt: '2026-03-01T00:00:00.000Z',
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const contributions = await request(app)
+      .get('/api/domain/collaborator/contributions')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+    const scores = await request(app)
+      .get('/api/domain/collaborator/scores')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    expect(contributions.status).toBe(200)
+    expect(contributions.body.contributions).toHaveLength(3)
+
+    expect(scores.status).toBe(200)
+    // CBS: 2 verified projects * 15 + 8 total milestones * 5 = 30 + 40 = 70
+    expect(scores.body.scores.cbs).toBe(70)
+    // TSS: Node.js appears twice (20), PostgreSQL once (10), React once (10)
+    expect(scores.body.scores.tss['Node.js']).toBe(20)
+    expect(scores.body.scores.tss['PostgreSQL']).toBe(10)
+    expect(scores.body.scores.tss['React']).toBe(10)
+    // CRS: 2 verified out of 3 total = 67%
+    expect(scores.body.scores.crs).toBe(67)
   })
 })
