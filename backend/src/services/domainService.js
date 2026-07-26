@@ -1182,3 +1182,32 @@ export function countersignContract(userId, contractId) {
     return { ok: true, contract }
   })
 }
+
+export function applyToOpportunity(userId, opportunityId, body) {
+  return updateDb(db => {
+    const opportunity = collection(db, 'opportunities').find(row => row.id === opportunityId)
+    if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
+
+    const existing = collection(db, 'opportunityApplications').find(row =>
+      row.applicantId === userId && row.opportunityId === opportunityId
+    )
+    if (existing) return { ok: false, error: 'already_applied' }
+
+    const application = insertOwned(db, 'opportunityApplications', userId, {
+      opportunityId,
+      opportunityTitle: opportunity.title || opportunity.name || '',
+      message: String(body.message || '').trim(),
+      status: 'pending',
+    }, 'application', 'applicantId')
+
+    return { ok: true, application }
+  })
+}
+
+export function listApplications(userId) {
+  const db = readDb()
+  const applications = collection(db, 'opportunityApplications')
+    .filter(row => row.applicantId === userId)
+    .sort(byNewest)
+  return { applications }
+}

@@ -67,3 +67,12 @@ export function markAllNotificationsRead(req, res) {
   writeDb(db)
   return res.json({ ok: true })
 }
+
+export function deleteNotification(req, res) {
+  const db = readDb()
+  const before = db.notifications.length
+  db.notifications = db.notifications.filter(n => !(n.id === req.params.id && n.userId === req.user.id))
+  if (db.notifications.length === before) return res.status(404).json({ error: 'Notification not found' })
+  writeDb(db)
+  return res.json({ ok: true })
+}

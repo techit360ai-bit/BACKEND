@@ -57,6 +57,8 @@ import {
   walletListGet,
   walletPaymentIntent,
   walletSummaryGet,
+  applicationsList,
+  opportunityApply,
   watchlist,
   watchlistAdd,
   workspaceContextGet,
@@ -177,6 +179,8 @@ router.post('/wallet/payment-intents', walletPaymentIntent)
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
 router.post('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericCreatePost)
 router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericPatchItem)
+router.post('/opportunities/:id/apply', opportunityApply)
+router.get('/applications', applicationsList)
 router.get('/files', bindCollection('files', 'files', 'file', 'file'), genericListGet)
 router.get('/notifications/preferences', notificationPrefsGet)
 router.patch('/notifications/preferences', notificationPrefsPatch)

@@ -56,6 +56,8 @@ import {
   submitHackathonBrief,
   submitHackathonFinal,
   updateNotificationPreferences,
+  applyToOpportunity,
+  listApplications,
   updateOrganizationProject,
   updateProject,
   walletList,
@@ -451,4 +453,17 @@ export function contractCountersign(req, res) {
   if (!result) return notFound(res, 'Contract not found')
   if (!result.ok) return res.status(400).json(result)
   return res.json(result)
+}
+
+export function opportunityApply(req, res) {
+  const result = applyToOpportunity(req.user.id, req.params.id, req.body)
+  if (!result.ok) {
+    const status = result.error === 'opportunity_not_found' ? 404 : 400
+    return res.status(status).json(result)
+  }
+  return created(res, result)
+}
+
+export function applicationsList(req, res) {
+  return res.json(listApplications(req.user.id))
 }

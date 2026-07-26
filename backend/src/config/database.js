@@ -76,6 +76,7 @@ const INITIAL = {
   notificationPreferences: [],
   settingsEvents: [],
   contracts: [],
+  opportunityApplications: [],
 }
 
 let sqliteDb = null
