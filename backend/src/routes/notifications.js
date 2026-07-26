@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import {
   createNotification,
+  deleteNotification,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -13,5 +14,6 @@ router.get('/', requireAuth, listNotifications)
 router.post('/', requireAuth, createNotification)
 router.post('/read-all', requireAuth, markAllNotificationsRead)
 router.patch('/:id/read', requireAuth, markNotificationRead)
+router.delete('/:id', requireAuth, deleteNotification)
 
 export default router
