@@ -4,8 +4,10 @@ import jwt from 'jsonwebtoken'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
+import githubRoutes from './routes/github.js'
 import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
+import videoRoutes from './routes/video.js'
 import domainRoutes from './routes/domain.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -56,6 +58,8 @@ app.use('/api/users', userRoutes)
 app.use('/api/domain', domainRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
+app.use('/api/github', githubRoutes)
+app.use('/api/video', videoRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
 // invoke + approve. Mounted under /api/mcp so it never collides with the
