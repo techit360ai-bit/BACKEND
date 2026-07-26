@@ -35,6 +35,7 @@ const INITIAL = {
   dilutionEvents: [],
   collaboratorEarnings: [],
   payouts: [],
+  contributions: [],
   organizationDashboards: [],
   investorWatchlists: [],
   dealFlowSnapshots: [],
@@ -74,6 +75,7 @@ const INITIAL = {
   invoices: [],
   notificationPreferences: [],
   settingsEvents: [],
+  contracts: [],
 }
 
 let sqliteDb = null

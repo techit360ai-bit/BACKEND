@@ -3,6 +3,13 @@ import {
   analyses,
   analysisCreate,
   analysisGet,
+  collaboratorScores,
+  contractCountersign,
+  contractCreate,
+  contractGet,
+  contracts,
+  contractSign,
+  contributions,
   dealFlow,
   earnings,
   earningsWithdraw,
@@ -83,10 +90,18 @@ router.patch('/founder/projects/:projectId', founderProjectPatch)
 router.get('/endorsements', endorsements)
 router.post('/endorsements', endorsementCreate)
 
+router.get('/contracts', contracts)
+router.post('/contracts', contractCreate)
+router.get('/contracts/:id', contractGet)
+router.patch('/contracts/:id/sign', contractSign)
+router.patch('/contracts/:id/countersign', contractCountersign)
+
 router.get('/collaborator/equity', equity)
 router.post('/collaborator/equity/dilution', equityDilution)
 router.get('/collaborator/earnings', earnings)
 router.post('/collaborator/earnings/withdraw', earningsWithdraw)
+router.get('/collaborator/contributions', contributions)
+router.get('/collaborator/scores', collaboratorScores)
 
 router.get('/organization/dashboard', orgDashboard)
 router.get('/organization/projects', requireRole('organization', 'organisation'), organizationProjects)
