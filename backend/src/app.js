@@ -8,6 +8,7 @@ import githubRoutes from './routes/github.js'
 import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
 import videoRoutes from './routes/video.js'
+import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -60,6 +61,7 @@ app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)
 app.use('/api/video', videoRoutes)
+app.use('/api/context', contextRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
 // invoke + approve. Mounted under /api/mcp so it never collides with the

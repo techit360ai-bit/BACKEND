@@ -81,6 +81,10 @@ const INITIAL = {
   githubOauthStates: [],
   videoLessons: [],
   videoProgress: [],
+  userStateMachine: [],
+  userContextCheckpoints: [],
+  userSuggestions: [],
+  userSessionLogs: [],
 }
 
 let sqliteDb = null
