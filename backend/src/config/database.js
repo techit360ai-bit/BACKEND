@@ -85,6 +85,7 @@ const INITIAL = {
   userContextCheckpoints: [],
   userSuggestions: [],
   userSessionLogs: [],
+  adminUsers: [],
 }
 
 let sqliteDb = null

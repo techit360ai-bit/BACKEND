@@ -8,6 +8,7 @@ import githubRoutes from './routes/github.js'
 import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
 import videoRoutes from './routes/video.js'
+import adminRoutes from './routes/admin.js'
 import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
@@ -54,6 +55,7 @@ app.use(cors({
 app.use(express.json())
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
+app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/domain', domainRoutes)
