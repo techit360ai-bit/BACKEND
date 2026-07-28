@@ -58,6 +58,7 @@ import {
   walletPaymentIntent,
   walletSummaryGet,
   applicationsList,
+  incubationPublish,
   opportunityApply,
   watchlist,
   watchlistAdd,
@@ -127,6 +128,7 @@ router.get('/incubation/intakes', intakes)
 router.post('/incubation/intakes', intakeCreate)
 router.get('/incubation/intakes/:intakeId', intakeGet)
 router.post('/incubation/intakes/:intakeId/promote', intakePromote)
+router.post('/incubation/publish', incubationPublish)
 router.get('/incubation/analyses', analyses)
 router.post('/incubation/analyses', analysisCreate)
 router.get('/incubation/analyses/:analysisId', analysisGet)

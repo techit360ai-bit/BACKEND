@@ -58,6 +58,7 @@ import {
   updateNotificationPreferences,
   applyToOpportunity,
   listApplications,
+  publishProject,
   updateOrganizationProject,
   updateProject,
   walletList,
@@ -466,4 +467,10 @@ export function opportunityApply(req, res) {
 
 export function applicationsList(req, res) {
   return res.json(listApplications(req.user.id))
+}
+
+export function incubationPublish(req, res) {
+  const result = publishProject(req.user.id, req.body)
+  if (!result.ok) return res.status(400).json(result)
+  return created(res, result)
 }
