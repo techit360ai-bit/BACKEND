@@ -466,6 +466,44 @@ export function promoteIntake(userId, intakeId, body = {}) {
   })
 }
 
+export function publishProject(userId, body) {
+  return updateDb(db => {
+    const projectId = String(body.projectId || '').trim()
+    if (!projectId) return { ok: false, error: 'projectId_required' }
+    const project = findOwned(db, 'projects', projectId, userId)
+    if (!project) return { ok: false, error: 'project_not_found' }
+    const existing = collection(db, 'dealFlowSnapshots').find(
+      row => row.projectId === projectId && row.ownerId === userId
+    )
+    if (existing) return { ok: true, snapshotId: existing.id, alreadyPublished: true }
+    const analysis = latestByProject(db, projectId)
+    const blueprint = analysis?.blueprint || {}
+    const snapshot = insertOwned(db, 'dealFlowSnapshots', userId, {
+      projectId,
+      startupName: project.title,
+      name: project.title,
+      sector: project.industry || '',
+      industry: project.industry || '',
+      region: project.region || project.location || '',
+      visibility: 'public',
+      gsisScore: Number(blueprint.gsis_score || project.gsisScore || 0),
+      eviI: Number(blueprint.evi_i_score || project.eviI || 0),
+      rankScore: Number(blueprint.rank_score || blueprint.gsis_score || project.gsisScore || 0),
+      readinessScore: Number(blueprint.market_readiness_score || project.marketReadinessScore || 0),
+      investmentScore: Number(blueprint.investment_score || project.investmentScore || 0),
+      unicornScore: Number(blueprint.unicorn_potential_score || project.unicornPotentialScore || 0),
+      executionVelocity: Number(blueprint.evi_i || project.eviScore || 0),
+      founderReliability: Number(project.founderReliabilityScore || 0),
+      mrr: Number(project.mrr || 0),
+      riskLevel: project.riskLevel || 'unknown',
+    }, 'snapshot')
+    project.visibility = 'public'
+    project.publishedAt = nowIso()
+    project.updatedAt = nowIso()
+    return { ok: true, snapshotId: snapshot.id }
+  })
+}
+
 export function listAnalyses(userId) {
   const db = readDb()
   return { analyses: listOwned(db, 'ventureAnalyses', userId) }
