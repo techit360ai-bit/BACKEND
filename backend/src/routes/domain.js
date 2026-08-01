@@ -53,6 +53,15 @@ import {
   orgDashboard,
   orgCohortHealth,
   orgInterventions,
+  orgImpact,
+  orgKpiTargets,
+  orgKpiTargetSave,
+  orgDemoDayPipeline,
+  orgDemoDayPublish,
+  orgInvestorMatches,
+  orgDemoDayEvents,
+  orgDemoDayEventCreate,
+  orgDemoDayAnalytics,
   organizationProjectCreate,
   organizationProjectPatch,
   organizationProjects,
@@ -114,6 +123,15 @@ router.post('/organization/projects', requireRole('organization', 'organisation'
 router.patch('/organization/projects/:projectId', requireRole('organization', 'organisation'), organizationProjectPatch)
 router.get('/organization/cohort-health', requireRole('organization', 'organisation'), orgCohortHealth)
 router.get('/organization/interventions', requireRole('organization', 'organisation'), orgInterventions)
+router.get('/organization/impact', requireRole('organization', 'organisation'), orgImpact)
+router.get('/organization/kpi-targets', requireRole('organization', 'organisation'), orgKpiTargets)
+router.post('/organization/kpi-targets', requireRole('organization', 'organisation'), orgKpiTargetSave)
+router.get('/organization/demo-day/pipeline', requireRole('organization', 'organisation'), orgDemoDayPipeline)
+router.post('/organization/demo-day/publish', requireRole('organization', 'organisation'), orgDemoDayPublish)
+router.get('/organization/demo-day/matches/:projectId', requireRole('organization', 'organisation'), orgInvestorMatches)
+router.get('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEvents)
+router.post('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEventCreate)
+router.get('/organization/demo-day/analytics', requireRole('organization', 'organisation'), orgDemoDayAnalytics)
 
 router.get('/investor/deal-flow', dealFlow)
 router.get('/investor/watchlist', watchlist)

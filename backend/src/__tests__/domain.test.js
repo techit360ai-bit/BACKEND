@@ -263,6 +263,54 @@ describe('domain live-data endpoints', () => {
     expect(res.body.recommendations[0].recommendation).toBeTruthy()
   })
 
+  it('aggregates impact metrics from real org projects', async () => {
+    const db = makeDb({
+      projects: [
+        { id: 'p1', organizationId: 'user-uuid-1', title: 'A', stage: 'growth', mrr: 3000, memberCount: 5, progress: 60, marketReadyScore: 70 },
+        { id: 'p2', organizationId: 'user-uuid-1', title: 'B', stage: 'idea', mrr: 0, memberCount: 2, progress: 20, marketReadyScore: 30 },
+        { id: 'pX', organizationId: 'user-uuid-2', title: 'Other', stage: 'growth', mrr: 9000, memberCount: 9 },
+      ],
+    })
+    readDb.mockReturnValue(db)
+    const res = await request(app)
+      .get('/api/domain/organization/impact')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    expect(res.status).toBe(200)
+    expect(res.body.metrics).toMatchObject({ startups: 2, productsLaunched: 1, totalMrr: 3000, jobs: 7 })
+    expect(res.body.charts.revenueByStartup).toHaveLength(1)
+  })
+
+  it('publishes an org-owned project to deal flow (org-scoped) and is idempotent', async () => {
+    const db = makeDb({
+      projects: [{ id: 'p1', organizationId: 'user-uuid-1', title: 'A', industry: 'SaaS', gsisScore: 80, mrr: 1000, marketReadyScore: 65 }],
+    })
+    readDb.mockReturnValue(db)
+    const first = await request(app)
+      .post('/api/domain/organization/demo-day/publish')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({ projectId: 'p1' })
+    expect(first.status).toBe(200)
+    expect(first.body.ok).toBe(true)
+    expect(db.dealFlowSnapshots.find(s => s.projectId === 'p1' && s.organizationId === 'user-uuid-1')).toBeTruthy()
+    const second = await request(app)
+      .post('/api/domain/organization/demo-day/publish')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({ projectId: 'p1' })
+    expect(second.body.alreadyPublished).toBe(true)
+  })
+
+  it('computes demo-day readiness checklist from real fields', async () => {
+    const db = makeDb({
+      projects: [{ id: 'p1', organizationId: 'user-uuid-1', title: 'A', gsisScore: 75, marketReadyScore: 60, mrr: 500, progress: 55, hasWorkspace: true }],
+    })
+    readDb.mockReturnValue(db)
+    const res = await request(app)
+      .get('/api/domain/organization/demo-day/pipeline?threshold=70')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+    expect(res.status).toBe(200)
+    expect(res.body.pipeline[0]).toMatchObject({ id: 'p1', investorReady: true, readyPct: 100 })
+  })
+
   it('persists endorsements for real users and only lists those received by the authenticated user', async () => {
     const db = makeDb({
       projects: [{

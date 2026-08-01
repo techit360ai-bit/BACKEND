@@ -38,6 +38,15 @@ import {
   listOrganizationProjects,
   organizationCohortHealth,
   organizationInterventions,
+  organizationImpact,
+  organizationKpiTargets,
+  saveOrganizationKpiTarget,
+  demoDayPipeline,
+  publishOrganizationProject,
+  investorMatches,
+  organizationDemoDayEvents,
+  createOrganizationDemoDayEvent,
+  organizationDemoDayAnalytics,
   listProjects,
   listWatchlist,
   listWorkspaceCollection,
@@ -215,6 +224,48 @@ export function orgCohortHealth(req, res) {
 
 export async function orgInterventions(req, res) {
   return res.json(await organizationInterventions(req.user.id, req.user.token))
+}
+
+export function orgImpact(req, res) {
+  return res.json(organizationImpact(req.user.id, { template: req.query.template }))
+}
+
+export function orgKpiTargets(req, res) {
+  return res.json(organizationKpiTargets(req.user.id))
+}
+
+export function orgKpiTargetSave(req, res) {
+  const result = saveOrganizationKpiTarget(req.user.id, req.body)
+  if (!result.ok) return res.status(400).json(result)
+  return res.json(result)
+}
+
+export function orgDemoDayPipeline(req, res) {
+  return res.json(demoDayPipeline(req.user.id, { threshold: req.query.threshold }))
+}
+
+export function orgDemoDayPublish(req, res) {
+  const result = publishOrganizationProject(req.user.id, req.body)
+  if (!result.ok) return res.status(result.error === 'project_not_found' ? 404 : 400).json(result)
+  return res.json(result)
+}
+
+export function orgInvestorMatches(req, res) {
+  return res.json(investorMatches(req.user.id, req.params.projectId))
+}
+
+export function orgDemoDayEvents(req, res) {
+  return res.json(organizationDemoDayEvents(req.user.id))
+}
+
+export function orgDemoDayEventCreate(req, res) {
+  const result = createOrganizationDemoDayEvent(req.user.id, req.body)
+  if (!result.ok) return res.status(400).json(result)
+  return created(res, result)
+}
+
+export function orgDemoDayAnalytics(req, res) {
+  return res.json(organizationDemoDayAnalytics(req.user.id))
 }
 
 export function dealFlow(req, res) {
