@@ -364,6 +364,216 @@ export async function organizationInterventions(userId, token) {
   return { recommendations, aiAvailable: aiUsed }
 }
 
+// --- Organization Intelligence: Impact Reporting ----------------------------
+
+function groupCount(rows, key) {
+  const map = new Map()
+  for (const row of rows) {
+    const k = String(row[key] || 'unspecified')
+    map.set(k, (map.get(k) || 0) + 1)
+  }
+  return [...map.entries()].map(([name, value]) => ({ name, value }))
+}
+
+const LAUNCHED_STAGES = ['launched', 'growth', 'scaling', 'scale', 'series-a', 'seriesa']
+
+/**
+ * Aggregate portfolio impact from an org's real projects. Every metric is a
+ * count/sum of persisted fields — nothing fabricated. Metrics with no backing
+ * field (users acquired, milestones) are intentionally omitted, not invented.
+ */
+export function organizationImpact(userId, { template = 'quarterly' } = {}) {
+  const db = readDb()
+  const projects = listOwned(db, 'projects', userId, 'organizationId')
+
+  const metrics = {
+    startups: projects.length,
+    productsLaunched: projects.filter(p => LAUNCHED_STAGES.includes(String(p.stage || '').toLowerCase())).length,
+    totalMrr: Math.round(projects.reduce((s, p) => s + Number(p.mrr || 0), 0)),
+    jobs: projects.reduce((s, p) => s + Number(p.memberCount || 0), 0),
+    avgProgress: projects.length
+      ? Math.round(projects.reduce((s, p) => s + Number(p.progress || 0), 0) / projects.length)
+      : 0,
+    avgMarketReady: projects.length
+      ? Math.round(projects.reduce((s, p) => s + Number(p.marketReadyScore || 0), 0) / projects.length)
+      : 0,
+  }
+
+  const charts = {
+    stageProgression: groupCount(projects, 'stage'),
+    industryBreakdown: groupCount(projects, 'industry'),
+    revenueByStartup: projects
+      .filter(p => Number(p.mrr || 0) > 0)
+      .map(p => ({ name: p.title || 'Untitled', mrr: Number(p.mrr) }))
+      .sort((a, b) => b.mrr - a.mrr),
+  }
+
+  return { template, metrics, charts, generatedAt: nowIso() }
+}
+
+// KPI targets are user-set data, so they are persisted (org-scoped), not derived.
+export function organizationKpiTargets(userId) {
+  const db = readDb()
+  return { targets: listOwned(db, 'orgKpiTargets', userId, 'organizationId') }
+}
+
+export function saveOrganizationKpiTarget(userId, body) {
+  return updateDb(db => {
+    const metric = String(body.metric || '').trim()
+    if (!metric) return { ok: false, error: 'metric_required' }
+    const target = Number(body.target || 0)
+    const existing = collection(db, 'orgKpiTargets').find(
+      row => row.organizationId === userId && row.metric === metric,
+    )
+    if (existing) {
+      existing.target = target
+      existing.label = body.label || existing.label || metric
+      existing.updatedAt = nowIso()
+      return { ok: true, target: existing }
+    }
+    return {
+      ok: true,
+      target: insertOwned(db, 'orgKpiTargets', userId, {
+        metric, target, label: body.label || metric,
+      }, 'kpi', 'organizationId'),
+    }
+  })
+}
+
+// --- Organization Intelligence: Demo Day Pipeline ---------------------------
+
+/**
+ * Investor-readiness pipeline for an org's projects. Readiness + checklist are
+ * derived from real fields; publish state is read from real dealFlowSnapshots.
+ */
+export function demoDayPipeline(userId, { threshold = 70 } = {}) {
+  const db = readDb()
+  const th = Number(threshold) || 70
+  const projects = listOwned(db, 'projects', userId, 'organizationId')
+  const snapshots = collection(db, 'dealFlowSnapshots')
+
+  const pipeline = projects.map(p => {
+    const gsisScore = Number(p.gsisScore || 0)
+    const published = Boolean(
+      snapshots.find(s => s.projectId === p.id && (s.organizationId === userId || s.ownerId === userId)),
+    )
+    const checklist = [
+      { key: 'gsis', label: `GSIS ≥ ${th}`, met: gsisScore >= th },
+      { key: 'marketReady', label: 'Market-ready ≥ 60', met: Number(p.marketReadyScore || 0) >= 60 },
+      { key: 'traction', label: 'Has MRR', met: Number(p.mrr || 0) > 0 },
+      { key: 'progress', label: 'Progress ≥ 50%', met: Number(p.progress || 0) >= 50 },
+      { key: 'workspace', label: 'Workspace provisioned', met: Boolean(p.hasWorkspace) },
+    ]
+    return {
+      id: p.id, title: p.title || 'Untitled', industry: p.industry || '', stage: p.stage || 'idea',
+      gsisScore, mrr: Number(p.mrr || 0), investorReady: gsisScore >= th, published,
+      checklist, readyPct: Math.round((checklist.filter(c => c.met).length / checklist.length) * 100),
+    }
+  }).sort((a, b) => b.gsisScore - a.gsisScore)
+
+  return { threshold: th, pipeline }
+}
+
+// Org-scoped publish. The existing publishProject is ownerId-scoped and cannot
+// publish organizationId-owned projects, so this is a dedicated org path.
+export function publishOrganizationProject(userId, body) {
+  return updateDb(db => {
+    const projectId = String(body.projectId || '').trim()
+    if (!projectId) return { ok: false, error: 'projectId_required' }
+    const project = findOwned(db, 'projects', projectId, userId, 'organizationId')
+    if (!project) return { ok: false, error: 'project_not_found' }
+    const existing = collection(db, 'dealFlowSnapshots').find(
+      row => row.projectId === projectId && row.organizationId === userId,
+    )
+    if (existing) return { ok: true, snapshotId: existing.id, alreadyPublished: true }
+    const snapshot = insertOwned(db, 'dealFlowSnapshots', userId, {
+      projectId,
+      startupName: project.title,
+      name: project.title,
+      sector: project.industry || '',
+      industry: project.industry || '',
+      gsisScore: Number(project.gsisScore || 0),
+      rankScore: Number(project.gsisScore || 0),
+      readinessScore: Number(project.marketReadyScore || 0),
+      mrr: Number(project.mrr || 0),
+      visibility: 'public',
+      publishedByOrg: true,
+    }, 'snapshot', 'organizationId')
+    project.visibility = 'public'
+    project.publishedAt = nowIso()
+    project.updatedAt = nowIso()
+    return { ok: true, snapshotId: snapshot.id }
+  })
+}
+
+// Investor matchmaking over real investor profiles (role 'investor').
+export function investorMatches(userId, projectId) {
+  const db = readDb()
+  const project = findOwned(db, 'projects', projectId, userId, 'organizationId')
+  if (!project) return { projectId, matches: [] }
+  const investors = collection(db, 'profiles').filter(p => {
+    const role = String(p.role || '').toLowerCase()
+    const roles = Array.isArray(p.roles) ? p.roles.map(r => String(r).toLowerCase()) : []
+    return role === 'investor' || roles.includes('investor')
+  })
+  const matches = investors.map(inv => {
+    const industries = Array.isArray(inv.industries) ? inv.industries : []
+    let score = 0
+    const reasons = []
+    if (industries.map(String).includes(project.industry)) { score += 50; reasons.push('Sector match') }
+    if (String(inv.stagePreference || inv.stage || '') === project.stage) { score += 30; reasons.push('Stage match') }
+    if (Number(inv.checkSize || 0) > 0) { score += 20; reasons.push('Active check size') }
+    return {
+      investorId: inv.id,
+      name: inv.name || [inv.firstName, inv.lastName].filter(Boolean).join(' ') || 'Investor',
+      score, reasons,
+    }
+  }).filter(m => m.score > 0).sort((a, b) => b.score - a.score)
+  return { projectId, matches }
+}
+
+export function organizationDemoDayEvents(userId) {
+  const db = readDb()
+  return { events: listOwned(db, 'orgDemoDayEvents', userId, 'organizationId') }
+}
+
+export function createOrganizationDemoDayEvent(userId, body) {
+  return updateDb(db => {
+    const title = String(body.title || '').trim()
+    if (!title) return { ok: false, error: 'title_required' }
+    return {
+      ok: true,
+      event: insertOwned(db, 'orgDemoDayEvents', userId, {
+        title,
+        date: body.date || '',
+        format: body.format || 'in-person',
+        slots: Number(body.slots || 0),
+        projectIds: Array.isArray(body.projectIds) ? body.projectIds : [],
+      }, 'demoday', 'organizationId'),
+    }
+  })
+}
+
+// Post-event analytics from real watchlist rows against this org's snapshots.
+export function organizationDemoDayAnalytics(userId) {
+  const db = readDb()
+  const snapshots = collection(db, 'dealFlowSnapshots').filter(s => s.organizationId === userId)
+  const watchlists = collection(db, 'investorWatchlists')
+  const projectIds = new Set(snapshots.map(s => s.projectId))
+  const watched = watchlists.filter(w => projectIds.has(w.projectId))
+  const byProject = snapshots.map(s => ({
+    projectId: s.projectId,
+    startupName: s.startupName || s.name || 'Untitled',
+    watchers: watchlists.filter(w => w.projectId === s.projectId).length,
+  })).sort((a, b) => b.watchers - a.watchers)
+  return {
+    publishedCount: snapshots.length,
+    totalWatchlisted: watched.length,
+    byProject,
+  }
+}
+
+
 function profileDisplayName(profile, fallback = 'TechIT member') {
   if (!profile) return fallback
   const fullName = [profile.firstName, profile.lastName].filter(Boolean).join(' ').trim()
