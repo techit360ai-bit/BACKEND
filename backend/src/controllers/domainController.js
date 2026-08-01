@@ -36,6 +36,8 @@ import {
   listHackathonRegistrations,
   listIntakes,
   listOrganizationProjects,
+  organizationCohortHealth,
+  organizationInterventions,
   listProjects,
   listWatchlist,
   listWorkspaceCollection,
@@ -204,6 +206,15 @@ export function organizationProjectPatch(req, res) {
   const project = updateOrganizationProject(req.user.id, req.params.projectId, req.body)
   if (!project) return notFound(res, 'Project not found')
   return res.json({ project })
+}
+
+export function orgCohortHealth(req, res) {
+  const { stage, riskLevel } = req.query
+  return res.json(organizationCohortHealth(req.user.id, { stage, riskLevel }))
+}
+
+export async function orgInterventions(req, res) {
+  return res.json(await organizationInterventions(req.user.id, req.user.token))
 }
 
 export function dealFlow(req, res) {

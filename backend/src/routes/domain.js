@@ -51,6 +51,8 @@ import {
   notificationPrefsGet,
   notificationPrefsPatch,
   orgDashboard,
+  orgCohortHealth,
+  orgInterventions,
   organizationProjectCreate,
   organizationProjectPatch,
   organizationProjects,
@@ -110,6 +112,8 @@ router.get('/organization/dashboard', orgDashboard)
 router.get('/organization/projects', requireRole('organization', 'organisation'), organizationProjects)
 router.post('/organization/projects', requireRole('organization', 'organisation'), organizationProjectCreate)
 router.patch('/organization/projects/:projectId', requireRole('organization', 'organisation'), organizationProjectPatch)
+router.get('/organization/cohort-health', requireRole('organization', 'organisation'), orgCohortHealth)
+router.get('/organization/interventions', requireRole('organization', 'organisation'), orgInterventions)
 
 router.get('/investor/deal-flow', dealFlow)
 router.get('/investor/watchlist', watchlist)

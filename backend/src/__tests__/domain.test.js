@@ -181,6 +181,88 @@ describe('domain live-data endpoints', () => {
     expect(founder.status).toBe(403)
   })
 
+  it('aggregates cohort health from real org projects with derived bands and alerts', async () => {
+    const now = Date.now()
+    const daysAgo = (d) => new Date(now - d * 86400000).toISOString()
+    const db = makeDb({
+      projects: [
+        {
+          id: 'proj_healthy', organizationId: 'user-uuid-1', title: 'Healthy Co',
+          industry: 'SaaS', stage: 'growth', gsisScore: 82, progress: 70,
+          marketReadyScore: 75, mrr: 5000, memberCount: 6, updatedAt: daysAgo(1),
+        },
+        {
+          id: 'proj_stale', organizationId: 'user-uuid-1', title: 'Stale Co',
+          industry: 'Fintech', stage: 'validation', gsisScore: 55, progress: 40,
+          marketReadyScore: 50, mrr: 0, memberCount: 3, updatedAt: daysAgo(20),
+        },
+        {
+          id: 'proj_red', organizationId: 'user-uuid-1', title: 'Struggling Co',
+          industry: 'Health', stage: 'idea', gsisScore: 30, progress: 15,
+          marketReadyScore: 20, mrr: 0, memberCount: 1, updatedAt: daysAgo(40),
+        },
+        // Different org — must NOT appear.
+        {
+          id: 'proj_other', organizationId: 'user-uuid-2', title: 'Other Org Co',
+          industry: 'SaaS', stage: 'growth', gsisScore: 90, updatedAt: daysAgo(1),
+        },
+      ],
+    })
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .get('/api/domain/organization/cohort-health')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.cohort).toHaveLength(3)
+    // Ranked by GSIS desc.
+    expect(res.body.cohort.map((r) => r.id)).toEqual(['proj_healthy', 'proj_stale', 'proj_red'])
+    // Derived bands.
+    const byId = Object.fromEntries(res.body.cohort.map((r) => [r.id, r]))
+    expect(byId.proj_healthy.band).toBe('green')
+    expect(byId.proj_stale.band).toBe('amber')
+    expect(byId.proj_red.band).toBe('red')
+    // Derived inactivity.
+    expect(byId.proj_red.daysInactive).toBeGreaterThanOrEqual(39)
+    // Summary + alerts derived from real fields.
+    expect(res.body.summary).toMatchObject({ total: 3, green: 1, amber: 1, red: 1 })
+    expect(res.body.alerts.length).toBeGreaterThan(0)
+    expect(res.body.alerts.some((a) => a.type === 'low_gsis')).toBe(true)
+    expect(res.body.alerts.some((a) => a.type === 'inactivity')).toBe(true)
+  })
+
+  it('returns an empty cohort for an org with no projects', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+    const res = await request(app)
+      .get('/api/domain/organization/cohort-health')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
+    expect(res.status).toBe(200)
+    expect(res.body.cohort).toEqual([])
+    expect(res.body.summary).toMatchObject({ total: 0, avgGsis: 0 })
+  })
+
+  it('returns rule-based interventions with aiAvailable:false when ai-router is unreachable', async () => {
+    const db = makeDb({
+      projects: [{
+        id: 'proj_red', organizationId: 'user-uuid-1', title: 'Struggling Co',
+        industry: 'Health', stage: 'idea', gsisScore: 30, progress: 15,
+        marketReadyScore: 20, updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+      }],
+    })
+    readDb.mockReturnValue(db)
+    // ai-router is not running in tests -> computeGsisNarrative returns null.
+    const res = await request(app)
+      .get('/api/domain/organization/interventions')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    expect(res.status).toBe(200)
+    expect(res.body.aiAvailable).toBe(false)
+    expect(res.body.recommendations).toHaveLength(1)
+    expect(res.body.recommendations[0]).toMatchObject({ projectId: 'proj_red', source: 'rule' })
+    expect(res.body.recommendations[0].recommendation).toBeTruthy()
+  })
+
   it('persists endorsements for real users and only lists those received by the authenticated user', async () => {
     const db = makeDb({
       projects: [{

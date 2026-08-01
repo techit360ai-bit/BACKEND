@@ -32,6 +32,9 @@ export function requireAuth(req, res, next) {
     email: user.email,
     role: payload.role || profile?.role || 'founder',
     workspaceId: payload.workspaceId || `user-${user.id}`,
+    // Raw platform JWT, so controllers can forward it to ai-router
+    // (which verifies the same JWT_SECRET). See aiRouterClient.js.
+    token,
     user_metadata: {},
   }
   next()
