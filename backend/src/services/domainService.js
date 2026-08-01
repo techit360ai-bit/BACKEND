@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
+import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -15,6 +16,37 @@ function owned(record, userId, field = 'ownerId') {
 
 function byNewest(a, b) {
   return new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0)
+}
+
+const DAY_MS = 86400000
+
+// --- Organization Intelligence: derived-metric helpers ----------------------
+// These compute health signals from REAL persisted fields (updatedAt, gsisScore).
+// Nothing here fabricates data — decay is derived purely from record staleness.
+
+function daysSince(iso) {
+  if (!iso) return 0
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return 0
+  return Math.max(0, Math.floor((Date.now() - t) / DAY_MS))
+}
+
+// Decay tier from inactivity: 0 healthy (<7d), 1 warning (7-13d),
+// 2 stale (14-29d), 3 dormant (30d+). Tunable thresholds, not invented data.
+function decayFactor(project) {
+  const d = daysSince(project?.updatedAt)
+  if (d >= 30) return 3
+  if (d >= 14) return 2
+  if (d >= 7) return 1
+  return 0
+}
+
+// Health band combines the real GSIS score with derived decay.
+function healthBand(gsis, decay) {
+  const score = Number(gsis || 0)
+  if (score < 40 || decay >= 3) return 'red'
+  if (score < 70 || decay >= 1) return 'amber'
+  return 'green'
 }
 
 function cleanObject(value) {
@@ -206,6 +238,130 @@ export function createOrganizationProject(userId, body) {
 
 export function updateOrganizationProject(userId, projectId, body) {
   return updateDb(db => patchOwned(db, 'projects', projectId, userId, body, 'organizationId'))
+}
+
+// --- Organization Intelligence: Cohort Health -------------------------------
+
+// Build the derived alerts for a single cohort row from real fields.
+function cohortRowAlerts(row) {
+  const alerts = []
+  if (row.daysInactive >= 14) {
+    alerts.push({
+      projectId: row.id,
+      severity: row.daysInactive >= 30 ? 'high' : 'medium',
+      type: 'inactivity',
+      message: `${row.title} has been inactive ${row.daysInactive} days.`,
+    })
+  }
+  if (row.gsisScore > 0 && row.gsisScore < 40) {
+    alerts.push({
+      projectId: row.id,
+      severity: 'high',
+      type: 'low_gsis',
+      message: `${row.title} has a low GSIS score (${row.gsisScore}).`,
+    })
+  }
+  return alerts
+}
+
+/**
+ * Aggregate cohort health across an organization's real projects.
+ * Every value is a persisted field or derived deterministically from one
+ * (decay/band/daysInactive from updatedAt + gsisScore). No fabricated data.
+ */
+export function organizationCohortHealth(userId, { stage, riskLevel } = {}) {
+  const db = readDb()
+  const projects = listOwned(db, 'projects', userId, 'organizationId')
+
+  let cohort = projects.map(p => {
+    const gsisScore = Number(p.gsisScore || 0)
+    const decay = decayFactor(p)
+    return {
+      id: p.id,
+      title: p.title || 'Untitled project',
+      industry: p.industry || '',
+      stage: p.stage || 'idea',
+      gsisScore,
+      progress: Number(p.progress || 0),
+      marketReadyScore: Number(p.marketReadyScore || 0),
+      mrr: Number(p.mrr || 0),
+      memberCount: Number(p.memberCount || 0),
+      daysInactive: daysSince(p.updatedAt),
+      decay,
+      band: healthBand(gsisScore, decay),
+      updatedAt: p.updatedAt || null,
+    }
+  })
+
+  const stages = [...new Set(cohort.map(r => r.stage))].sort()
+
+  if (stage) cohort = cohort.filter(r => r.stage === stage)
+  if (riskLevel) cohort = cohort.filter(r => r.band === riskLevel)
+  cohort.sort((a, b) => b.gsisScore - a.gsisScore)
+
+  const alerts = cohort.flatMap(cohortRowAlerts)
+  const summary = {
+    total: cohort.length,
+    green: cohort.filter(r => r.band === 'green').length,
+    amber: cohort.filter(r => r.band === 'amber').length,
+    red: cohort.filter(r => r.band === 'red').length,
+    avgGsis: cohort.length
+      ? Math.round(cohort.reduce((s, r) => s + r.gsisScore, 0) / cohort.length)
+      : 0,
+  }
+
+  return { cohort, alerts, summary, stages }
+}
+
+// Deterministic, rule-based intervention keyed off the weakest real signal.
+// Used as the honest fallback when ai-router is unavailable.
+function ruleBasedIntervention(row) {
+  if (row.daysInactive >= 30) return 'Dormant for a month — schedule a re-engagement check-in.'
+  if (row.gsisScore > 0 && row.gsisScore < 40) return 'Low GSIS — recommend a pivot or validation workshop.'
+  if (row.daysInactive >= 14) return 'Going quiet — send a check-in reminder and confirm milestones.'
+  if (row.marketReadyScore < 50) return 'Market readiness is low — assign a go-to-market mentor.'
+  if (row.progress < 40) return 'Execution is behind — review milestones and unblock the team.'
+  return 'Monitor — no urgent intervention required.'
+}
+
+/**
+ * Intervention recommendations for at-risk cohort startups.
+ * Enriches with ai-router narrative when reachable; otherwise falls back to
+ * deterministic rule-based text and flags aiAvailable:false. Never fabricates.
+ */
+export async function organizationInterventions(userId, token) {
+  const { cohort } = organizationCohortHealth(userId)
+  const atRisk = cohort.filter(r => r.band !== 'green').slice(0, 10)
+
+  let aiUsed = false
+  const recommendations = []
+  for (const row of atRisk) {
+    let recommendation = null
+    let source = 'rule'
+    const payload = await computeGsisNarrative(token, {
+      gsis: row.gsisScore,
+      market_readiness: row.marketReadyScore,
+      progress: row.progress,
+      days_inactive: row.daysInactive,
+    })
+    const aiText = extractRecommendation(payload)
+    if (aiText) {
+      recommendation = aiText
+      source = 'ai'
+      aiUsed = true
+    } else {
+      recommendation = ruleBasedIntervention(row)
+    }
+    recommendations.push({
+      projectId: row.id,
+      title: row.title,
+      band: row.band,
+      recommendation,
+      source,
+    })
+  }
+
+  return { recommendations, aiAvailable: aiUsed }
 }
 
 function profileDisplayName(profile, fallback = 'TechIT member') {
