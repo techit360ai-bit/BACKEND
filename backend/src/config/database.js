@@ -86,6 +86,18 @@ const INITIAL = {
   userSuggestions: [],
   userSessionLogs: [],
   adminUsers: [],
+  organizationMarketplace: [],
+  organizationTalent: [],
+  organizationSettings: [],
+  organizationIntegrations: [],
+  organizationPrograms: [],
+  organizationAiOperations: [],
+  organizationMarketReadiness: [],
+  consentRecords: [],
+  dataSubjectRequests: [],
+  dataResidencyPreferences: [],
+  subprocessors: [],
+  breachRecords: [],
 }
 
 let sqliteDb = null

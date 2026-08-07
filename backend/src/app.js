@@ -11,6 +11,7 @@ import videoRoutes from './routes/video.js'
 import adminRoutes from './routes/admin.js'
 import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
+import complianceRoutes from './routes/compliance.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
@@ -59,6 +60,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/domain', domainRoutes)
+app.use('/api/compliance', complianceRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)
