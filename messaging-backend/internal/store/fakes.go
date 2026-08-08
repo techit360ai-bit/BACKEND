@@ -463,3 +463,5 @@ var (
 
 func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for id := range s.follows[userID] { out = append(out, id) }; return out, nil }
 func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.controls[userID] == nil { s.controls[userID] = map[string]struct{}{} }; key := creatorID+":"+control; if enabled { s.controls[userID][key] = struct{}{} } else { delete(s.controls[userID], key) }; return nil }
+func (s *FakePostStore) FeedEventCount(_ context.Context, userID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, event := range s.events { if event.UserID == userID { count++ } }; return count, nil }
+func (s *FakePostStore) CreatorPostCount(_ context.Context, creatorID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, post := range s.posts { if post.AuthorID == creatorID { count++ } }; return count, nil }

@@ -148,7 +148,17 @@ func handleCreatorControl(d Deps, control string, enabled bool) http.HandlerFunc
 	}
 }
 func handleFeedEvent(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }; if len(body.Metadata) == 0 { body.Metadata = json.RawMessage(`{}`) }; if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true}) }
+	return func(w http.ResponseWriter, r *http.Request) { var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }; switch body.EventType { case "impression", "open", "like", "comment", "share", "save", "dismiss": default: writeErr(w, http.StatusBadRequest, "unsupported event type"); return }; body.Metadata = sanitizeFeedMetadata(body.Metadata); if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true}) }
+}
+
+func sanitizeFeedMetadata(raw json.RawMessage) json.RawMessage {
+	var input map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &input) != nil { return json.RawMessage(`{}`) }
+	allowed := map[string]bool{"category": true, "position": true, "rankingVersion": true, "surface": true}
+	clean := map[string]any{}
+	for key, value := range input { if allowed[key] { clean[key] = value } }
+	out, err := json.Marshal(clean); if err != nil { return json.RawMessage(`{}`) }
+	return out
 }
 func handleFollowUser(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.FollowUser(r.Context(), currentUser(r), chi.URLParam(r, "userId"), true); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"following": true}) }

@@ -208,6 +208,8 @@ type PostStore interface {
 	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
 	FollowedUserIDs(ctx context.Context, userID string) ([]string, error)
 	SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error
+	FeedEventCount(ctx context.Context, userID string) (int, error)
+	CreatorPostCount(ctx context.Context, creatorID string) (int, error)
 }
 
 type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }

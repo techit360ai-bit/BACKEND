@@ -98,15 +98,15 @@ func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone
 	if limit <= 0 || limit > 200 { limit = 50 }
 	posts, err := s.ListByZone(ctx, viewerRole, zone, before, limit*4)
 	if err != nil { return nil, err }
+	eventCount, _ := s.posts.FeedEventCount(ctx, viewerID)
+	followed, _ := s.posts.FollowedUserIDs(ctx, viewerID)
+	coldStart := eventCount < 5 && len(followed) == 0
 	if category == "following" {
-		followed, followErr := s.posts.FollowedUserIDs(ctx, viewerID)
-		if followErr == nil {
-			allowed := map[string]struct{}{viewerID: {}}
-			for _, id := range followed { allowed[id] = struct{}{} }
-			kept := posts[:0]
-			for _, post := range posts { if _, ok := allowed[post.AuthorID]; ok { kept = append(kept, post) } }
-			posts = kept
-		}
+		allowed := map[string]struct{}{viewerID: {}}
+		for _, id := range followed { allowed[id] = struct{}{} }
+		kept := posts[:0]
+		for _, post := range posts { if _, ok := allowed[post.AuthorID]; ok { kept = append(kept, post) } }
+		posts = kept
 	}
 	suppressed, err := s.posts.SuppressedPostIDs(ctx, viewerID)
 	if err != nil { suppressed = nil }
@@ -131,12 +131,17 @@ func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone
 		if post.AuthorRole == store.NormalizeRole(viewerRole) { roleMatch = 1 }
 		opportunity := 0.0
 		if post.Kind == "opportunity-post" || post.Kind == "investment-signal" || post.Kind == "role-available" || post.Kind == "collab-call" { opportunity = 1 }
-		score := freshness*0.35 + engagement*0.25 + roleMatch*0.15 + opportunity*0.15 + 0.10
+		exploration := 0.0
+		creatorPosts, creatorErr := s.posts.CreatorPostCount(ctx, post.AuthorID)
+		if creatorErr == nil && creatorPosts <= 2 && (coldStart || category == "for-you" || category == "ai-recommendations" || category == "") { exploration = 1 }
+		score := freshness*0.32 + engagement*0.23 + roleMatch*0.15 + opportunity*0.15 + exploration*0.05 + 0.10
 		reason := "Fresh activity from the TechIT community"
 		if roleMatch > 0 { reason = "Relevant to your role and community" } else if opportunity > 0 { reason = "Actionable opportunity" }
-		post.RankingVersion = "feed-v3"
+		post.RankingVersion = "feed-v5"
 		post.RecommendationReason = reason
 		post.MatchedSignals = []string{store.CategoryForKind(post.Kind)}
+		if coldStart { post.MatchedSignals = append(post.MatchedSignals, "cold-start") }
+		if exploration > 0 { post.MatchedSignals = append(post.MatchedSignals, "exploration") }
 		scoredPosts = append(scoredPosts, scoredPost{post: post, score: score, reason: reason})
 	}
 	sort.SliceStable(scoredPosts, func(i, j int) bool { return scoredPosts[i].score > scoredPosts[j].score })

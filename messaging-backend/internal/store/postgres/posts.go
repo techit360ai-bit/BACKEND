@@ -163,3 +163,15 @@ func (s *PostStore) SetCreatorControl(ctx context.Context, userID, creatorID, co
 	if enabled { _, err := s.pool.Exec(ctx, `INSERT INTO feed_creator_controls (user_id,creator_id,control) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, userID, creatorID, control); return err }
 	_, err := s.pool.Exec(ctx, `DELETE FROM feed_creator_controls WHERE user_id=$1 AND creator_id=$2 AND control=$3`, userID, creatorID, control); return err
 }
+
+func (s *PostStore) FeedEventCount(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_events WHERE user_id=$1`, userID).Scan(&count)
+	return count, err
+}
+
+func (s *PostStore) CreatorPostCount(ctx context.Context, creatorID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM posts WHERE author_id=$1`, creatorID).Scan(&count)
+	return count, err
+}
