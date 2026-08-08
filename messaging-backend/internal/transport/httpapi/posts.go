@@ -45,6 +45,7 @@ func handleListPosts(d Deps) http.HandlerFunc {
 			zone = "global"
 		}
 		category := r.URL.Query().Get("category")
+		categoryProvided := category != ""
 		if category == "" {
 			// Existing URLs remain stable while gaining canonical discovery labels.
 			switch zone { case "tribe": category = "following"; case "global": category = "for-you" }
@@ -58,7 +59,12 @@ func handleListPosts(d Deps) http.HandlerFunc {
 			}
 			limit = parsed
 		}
-		posts, err := d.Feed.ListByCategory(r.Context(), currentUser(r), currentRole(r), zone, category, r.URL.Query().Get("before"), limit)
+		// Preserve the legacy tribe zone contract: an omitted category means
+		// role/audience filtering, while an explicit Following category opts into
+		// persisted follow filtering.
+		serviceCategory := category
+		if zone == "tribe" && !categoryProvided { serviceCategory = "" }
+		posts, err := d.Feed.ListByCategory(r.Context(), currentUser(r), currentRole(r), zone, serviceCategory, r.URL.Query().Get("before"), limit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
