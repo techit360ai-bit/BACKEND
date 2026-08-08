@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ func NewFakeStores() *FakeStores {
 		Conversations: &FakeConversationStore{convos: map[string][2]string{}, cursors: map[string]string{}},
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
 		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
-		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}, saves: map[string]map[string]struct{}{}, feedback: map[string]map[string]struct{}{}, follows: map[string]map[string]struct{}{}},
+		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}, saves: map[string]map[string]struct{}{}, feedback: map[string]map[string]struct{}{}, follows: map[string]map[string]struct{}{}, controls: map[string]map[string]struct{}{}},
 		Demo:          &FakeDemoStore{events: map[string]DemoEvent{}, roster: map[string][]RosterEntry{}},
 		QA:            &FakeQAStore{questions: map[string]DemoQuestion{}, order: nil, votes: map[string]map[string]struct{}{}},
 	}
@@ -343,14 +344,15 @@ type FakePostStore struct {
 	feedback map[string]map[string]struct{}
 	follows map[string]map[string]struct{}
 	events []FeedEvent
+	controls map[string]map[string]struct{}
 }
 
 func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.saves[postID] == nil { s.saves[postID] = map[string]struct{}{} }; if saved { s.saves[postID][userID] = struct{}{} } else { delete(s.saves[postID], userID) }; return nil }
-func (s *FakePostStore) SetPostFeedback(_ context.Context, postID, userID, feedback string) error { s.mu.Lock(); defer s.mu.Unlock(); if s.feedback[postID] == nil { s.feedback[postID] = map[string]struct{}{} }; s.feedback[postID][userID+":"+feedback] = struct{}{}; return nil }
+func (s *FakePostStore) SetPostFeedback(_ context.Context, postID, userID, feedback string) error { s.mu.Lock(); defer s.mu.Unlock(); if s.feedback[postID] == nil { s.feedback[postID] = map[string]struct{}{} }; key := userID+":"+feedback; if _, exists := s.feedback[postID][key]; !exists && feedback == "report" { p := s.posts[postID]; p.AbuseScore++; if p.AbuseScore >= 5 { p.ModerationStatus = "blocked" } else if p.AbuseScore >= 3 { p.ModerationStatus = "pending_review" }; s.posts[postID] = p }; s.feedback[postID][key] = struct{}{}; return nil }
 func (s *FakePostStore) FollowUser(_ context.Context, followerID, followeeID string, following bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.follows[followerID] == nil { s.follows[followerID] = map[string]struct{}{} }; if following { s.follows[followerID][followeeID] = struct{}{} } else { delete(s.follows[followerID], followeeID) }; return nil }
 func (s *FakePostStore) IsFollowing(_ context.Context, followerID, followeeID string) (bool, error) { s.mu.Lock(); defer s.mu.Unlock(); _, ok := s.follows[followerID][followeeID]; return ok, nil }
 func (s *FakePostStore) RecordFeedEvent(_ context.Context, event FeedEvent) error { s.mu.Lock(); defer s.mu.Unlock(); s.events = append(s.events, event); return nil }
-func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for postID, values := range s.feedback { for key := range values { if len(key) > len(userID) && key[:len(userID)] == userID && (key[len(userID):] == ":hide" || key[len(userID):] == ":not_interested" || key[len(userID):] == ":block") { out = append(out, postID); break } } }; return out, nil }
+func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for postID, values := range s.feedback { for key := range values { if len(key) > len(userID) && key[:len(userID)] == userID && (key[len(userID):] == ":hide" || key[len(userID):] == ":not_interested" || key[len(userID):] == ":block") { out = append(out, postID); break } } }; for key := range s.controls[userID] { parts := strings.SplitN(key, ":", 2); if len(parts) == 2 && (parts[1] == "mute" || parts[1] == "block") { for id, p := range s.posts { if p.AuthorID == parts[0] { out = append(out, id) } } } }; return out, nil }
 
 func (s *FakePostStore) CreatePost(_ context.Context, p Post) error {
 	s.mu.Lock()
@@ -375,7 +377,7 @@ func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) (
 		if before != "" && id >= before {
 			continue
 		}
-		post := s.posts[id]; if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) { continue }; out = append(out, post)
+		post := s.posts[id]; if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) { continue }; if post.ModerationStatus == "blocked" || post.AbuseScore >= 5 { continue }; out = append(out, post)
 		if len(out) >= limit {
 			break
 		}
@@ -405,7 +407,7 @@ func (s *FakePostStore) ListPostsByZone(_ context.Context, viewerRole, zone, bef
 		if before != "" && id >= before {
 			continue
 		}
-		p := s.posts[id]; if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) { continue }
+		p := s.posts[id]; if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) { continue }; if p.ModerationStatus == "blocked" || p.AbuseScore >= 5 { continue }
 		if zone == "tribe" && !matchTribe(p) {
 			continue
 		}
@@ -458,3 +460,6 @@ var (
 	_ ChannelStore = (*FakeChannelStore)(nil)
 	_ PostStore    = (*FakePostStore)(nil)
 )
+
+func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for id := range s.follows[userID] { out = append(out, id) }; return out, nil }
+func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.controls[userID] == nil { s.controls[userID] = map[string]struct{}{} }; key := creatorID+":"+control; if enabled { s.controls[userID][key] = struct{}{} } else { delete(s.controls[userID], key) }; return nil }

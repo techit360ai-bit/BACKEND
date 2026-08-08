@@ -68,7 +68,7 @@ func handleListPosts(d Deps) http.HandlerFunc {
 			out = append(out, map[string]any{
 				"id": p.ID, "authorId": p.AuthorID, "authorRole": p.AuthorRole,
 				"audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "ts": p.CreatedAt, "expiresAt": p.ExpiresAt,
-				"recommendationReason": p.RecommendationReason, "matchedSignals": p.MatchedSignals, "rankingVersion": p.RankingVersion,
+				"recommendationReason": p.RecommendationReason, "matchedSignals": p.MatchedSignals, "rankingVersion": p.RankingVersion, "moderationStatus": p.ModerationStatus,
 			})
 		}
 		nextCursor := ""
@@ -130,7 +130,16 @@ func handleUnsavePost(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.SavePost(r.Context(), chi.URLParam(r, "id"), currentUser(r), false); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"saved": false}) }
 }
 func handlePostFeedback(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { var body struct{ Feedback string `json:"feedback"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.Feedback == "" { writeErr(w, http.StatusBadRequest, "feedback required"); return }; if err := d.Feed.SetPostFeedback(r.Context(), chi.URLParam(r, "id"), currentUser(r), body.Feedback); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"feedback": body.Feedback}) }
+	return func(w http.ResponseWriter, r *http.Request) { var body struct{ Feedback string `json:"feedback"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.Feedback == "" { writeErr(w, http.StatusBadRequest, "feedback required"); return }; switch body.Feedback { case "hide", "not_interested", "mute", "block", "report": default: writeErr(w, http.StatusBadRequest, "unsupported feedback"); return }; if err := d.Feed.SetPostFeedback(r.Context(), chi.URLParam(r, "id"), currentUser(r), body.Feedback); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"feedback": body.Feedback}) }
+}
+
+func handleCreatorControl(d Deps, control string, enabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		creatorID := chi.URLParam(r, "userId")
+		if creatorID == currentUser(r) { writeErr(w, http.StatusBadRequest, "cannot control your own account"); return }
+		if err := d.Feed.SetCreatorControl(r.Context(), currentUser(r), creatorID, control, enabled); err != nil { feedErr(w, err); return }
+		writeJSON(w, http.StatusOK, map[string]any{control: enabled})
+	}
 }
 func handleFeedEvent(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }; if len(body.Metadata) == 0 { body.Metadata = json.RawMessage(`{}`) }; if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true}) }

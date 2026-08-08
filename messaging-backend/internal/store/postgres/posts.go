@@ -22,8 +22,8 @@ func (s *PostStore) CreatePost(ctx context.Context, p store.Post) error {
 	if role == "" {
 		role = "community"
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt, p.ExpiresAt, p.ContentFingerprint)
+	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint, moderation_status, abuse_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE(NULLIF($10,''),'visible'),$11)`,
+		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt, p.ExpiresAt, p.ContentFingerprint, p.ModerationStatus, p.AbuseScore)
 	return err
 }
 
@@ -41,10 +41,10 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint FROM posts`
+	q := `SELECT id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint, moderation_status, abuse_score FROM posts`
 	// Expired opportunities/posts are never eligible for discovery. Posts with
 	// no expiry remain valid indefinitely.
-	conds := []string{"(expires_at IS NULL OR expires_at > now())"}
+	conds := []string{"(expires_at IS NULL OR expires_at > now())", "moderation_status <> 'blocked'", "abuse_score < 5"}
 	args := []any{}
 	n := 0
 	if zone == "tribe" {
@@ -69,7 +69,7 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	var out []store.Post
 	for rows.Next() {
 		var p store.Post
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint); err != nil {
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
@@ -131,7 +131,12 @@ func (s *PostStore) SavePost(ctx context.Context, postID, userID string, saved b
 }
 
 func (s *PostStore) SetPostFeedback(ctx context.Context, postID, userID, feedback string) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_feedback (post_id,user_id,feedback) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, postID, userID, feedback); return err
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_feedback (post_id,user_id,feedback) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING` , postID, userID, feedback)
+	if err != nil { return err }
+	if feedback == "report" {
+		_, err = s.pool.Exec(ctx, `UPDATE posts SET abuse_score = abuse_score + 1, moderation_status = CASE WHEN abuse_score + 1 >= 5 THEN 'blocked' WHEN abuse_score + 1 >= 3 THEN 'pending_review' ELSE moderation_status END WHERE id=$1`, postID)
+	}
+	return err
 }
 
 func (s *PostStore) FollowUser(ctx context.Context, followerID, followeeID string, following bool) error {
@@ -145,6 +150,16 @@ func (s *PostStore) RecordFeedEvent(ctx context.Context, event store.FeedEvent) 
 }
 
 func (s *PostStore) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT post_id FROM feed_post_feedback WHERE user_id=$1 AND feedback IN ('hide','not_interested','block')`, userID); if err != nil { return nil, err }; defer rows.Close()
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT p.id FROM posts p LEFT JOIN feed_creator_controls c ON c.creator_id=p.author_id AND c.user_id=$1 WHERE (EXISTS (SELECT 1 FROM feed_post_feedback f WHERE f.post_id=p.id AND f.user_id=$1 AND f.feedback IN ('hide','not_interested','block')) OR c.control IS NOT NULL)`, userID); if err != nil { return nil, err }; defer rows.Close()
 	var out []string; for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { return nil, err }; out = append(out, id) }; return out, rows.Err()
+}
+
+func (s *PostStore) FollowedUserIDs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT followee_id FROM feed_follows WHERE follower_id=$1`, userID); if err != nil { return nil, err }; defer rows.Close()
+	var out []string; for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { return nil, err }; out = append(out, id) }; return out, rows.Err()
+}
+
+func (s *PostStore) SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error {
+	if enabled { _, err := s.pool.Exec(ctx, `INSERT INTO feed_creator_controls (user_id,creator_id,control) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, userID, creatorID, control); return err }
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_creator_controls WHERE user_id=$1 AND creator_id=$2 AND control=$3`, userID, creatorID, control); return err
 }
