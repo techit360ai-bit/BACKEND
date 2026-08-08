@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/feed"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
 )
 
 // feedErr maps a feed-service error to an HTTP status: missing post -> 404,
@@ -38,6 +39,11 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		if zone == "" {
 			zone = "global"
 		}
+		category := r.URL.Query().Get("category")
+		if category == "" {
+			// Existing URLs remain stable while gaining canonical discovery labels.
+			switch zone { case "tribe": category = "following"; case "global": category = "for-you" }
+		}
 		limit := 50
 		if raw := r.URL.Query().Get("limit"); raw != "" {
 			parsed, err := strconv.Atoi(raw)
@@ -47,7 +53,7 @@ func handleListPosts(d Deps) http.HandlerFunc {
 			}
 			limit = parsed
 		}
-		posts, err := d.Feed.ListByZone(r.Context(), currentRole(r), zone, r.URL.Query().Get("before"), limit)
+		posts, err := d.Feed.ListByCategory(r.Context(), currentRole(r), zone, category, r.URL.Query().Get("before"), limit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, err.Error())
 			return
@@ -56,10 +62,12 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		for _, p := range posts {
 			out = append(out, map[string]any{
 				"id": p.ID, "authorId": p.AuthorID, "authorRole": p.AuthorRole,
-				"audience": p.Audience, "kind": p.Kind, "body": p.Body, "ts": p.CreatedAt,
+				"audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "ts": p.CreatedAt,
 			})
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"posts": out})
+		nextCursor := ""
+		if len(posts) == limit { nextCursor = posts[len(posts)-1].ID }
+		writeJSON(w, http.StatusOK, map[string]any{"posts": out, "category": category, "nextCursor": nextCursor, "hasMore": nextCursor != ""})
 	}
 }
 

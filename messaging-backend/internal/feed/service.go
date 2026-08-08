@@ -67,6 +67,18 @@ func (s *Service) ListByZone(ctx context.Context, viewerRole, zone, before strin
 	return s.posts.ListPostsByZone(ctx, store.NormalizeRole(viewerRole), zone, before, limit)
 }
 
+// ListByCategory preserves the existing zone store contract while exposing
+// the additive discovery taxonomy to the HTTP API.
+func (s *Service) ListByCategory(ctx context.Context, viewerRole, zone, category, before string, limit int) ([]store.Post, error) {
+	posts, err := s.ListByZone(ctx, viewerRole, zone, before, limit)
+	if err != nil { return nil, err }
+	filtered := make([]store.Post, 0, len(posts))
+	for _, post := range posts {
+		if store.MatchesCategory(post.Kind, category) { filtered = append(filtered, post) }
+	}
+	return filtered, nil
+}
+
 // Like records a like (idempotent), returns the new like count, and broadcasts.
 func (s *Service) Like(ctx context.Context, postID, userID string, audience []string) (int, error) {
 	ok, err := s.posts.PostExists(ctx, postID)
