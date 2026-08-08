@@ -28,7 +28,7 @@ func NewFakeStores() *FakeStores {
 		Conversations: &FakeConversationStore{convos: map[string][2]string{}, cursors: map[string]string{}},
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
 		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
-		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}, saves: map[string]map[string]struct{}{}, feedback: map[string]map[string]struct{}{}, follows: map[string]map[string]struct{}{}, controls: map[string]map[string]struct{}{}},
+		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}, saves: map[string]map[string]struct{}{}, feedback: map[string]map[string]struct{}{}, follows: map[string]map[string]struct{}{}, controls: map[string]map[string]struct{}{}, discoveryProfiles: map[string]DiscoveryProfile{}},
 		Demo:          &FakeDemoStore{events: map[string]DemoEvent{}, roster: map[string][]RosterEntry{}},
 		QA:            &FakeQAStore{questions: map[string]DemoQuestion{}, order: nil, votes: map[string]map[string]struct{}{}},
 	}
@@ -346,6 +346,7 @@ type FakePostStore struct {
 	events []FeedEvent
 	controls map[string]map[string]struct{}
 	rankingDecisions []RankingDecision
+	discoveryProfiles map[string]DiscoveryProfile
 }
 
 func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.saves[postID] == nil { s.saves[postID] = map[string]struct{}{} }; if saved { s.saves[postID][userID] = struct{}{} } else { delete(s.saves[postID], userID) }; return nil }
@@ -468,3 +469,11 @@ func (s *FakePostStore) FeedEventCount(_ context.Context, userID string) (int, e
 func (s *FakePostStore) CreatorPostCount(_ context.Context, creatorID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, post := range s.posts { if post.AuthorID == creatorID { count++ } }; return count, nil }
 func (s *FakePostStore) RecordRankingDecisions(_ context.Context, decisions []RankingDecision) error { s.mu.Lock(); defer s.mu.Unlock(); s.rankingDecisions = append(s.rankingDecisions, decisions...); return nil }
 func (s *FakePostStore) ListRankingDecisions(_ context.Context, userID string, limit int) ([]RankingDecision, error) { s.mu.Lock(); defer s.mu.Unlock(); if limit <= 0 || limit > 100 { limit = 50 }; out := make([]RankingDecision, 0, limit); for i := len(s.rankingDecisions)-1; i >= 0 && len(out) < limit; i-- { if s.rankingDecisions[i].UserID == userID { out = append(out, s.rankingDecisions[i]) } }; return out, nil }
+func (s *FakePostStore) ListModerationQueue(_ context.Context, limit int) ([]Post, error) { s.mu.Lock(); defer s.mu.Unlock(); if limit <= 0 || limit > 100 { limit = 50 }; out := []Post{}; for _, p := range s.posts { if (p.ModerationStatus == "pending_review" || p.AbuseScore > 0) && len(out) < limit { out = append(out, p) } }; return out, nil }
+func (s *FakePostStore) ReviewPost(_ context.Context, postID, reviewerID, status, reason string) error { s.mu.Lock(); defer s.mu.Unlock(); p := s.posts[postID]; p.ModerationStatus = status; s.posts[postID] = p; return nil }
+func (s *FakePostStore) SaveCount(_ context.Context, postID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return len(s.saves[postID]), nil }
+func (s *FakePostStore) ShareCount(_ context.Context, postID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); n := 0; for _, e := range s.events { if e.PostID == postID && e.EventType == "share" { n++ } }; return n, nil }
+func (s *FakePostStore) GetDiscoveryProfile(_ context.Context, userID string) (DiscoveryProfile, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.discoveryProfiles[userID], nil }
+func (s *FakePostStore) UpsertDiscoveryProfile(_ context.Context, p DiscoveryProfile) error { s.mu.Lock(); defer s.mu.Unlock(); s.discoveryProfiles[p.UserID] = p; return nil }
+func (s *FakePostStore) RankingMetrics(_ context.Context) ([]RankingMetrics, error) { return []RankingMetrics{}, nil }
+func (s *FakePostStore) PostInteractionCount(_ context.Context,userID,postID string)(int,error){s.mu.Lock();defer s.mu.Unlock();n:=0;for _,e:=range s.events{if e.UserID==userID&&e.PostID==postID&&(e.EventType=="open"||e.EventType=="like"||e.EventType=="comment"||e.EventType=="save"||e.EventType=="share"){n++}};return n,nil}
