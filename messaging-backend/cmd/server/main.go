@@ -60,6 +60,7 @@ func main() {
 	msgSvc := messaging.New(pg.Conversations, pg.Messages, h)
 	chSvc := channel.New(pg.Channels, h)
 	feedSvc := feed.New(pg.Posts, h)
+	feedSvc.SetCache(feed.NewRedisCache(rps.Client()))
 	demoSvc := demo.New(pg.Demo)
 	qaSvc := qa.New(pg.QA, demoSvc, h)
 	lkSvc := livekit.New(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitURL)
