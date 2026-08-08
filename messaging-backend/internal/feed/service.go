@@ -98,6 +98,16 @@ func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone
 	if limit <= 0 || limit > 200 { limit = 50 }
 	posts, err := s.ListByZone(ctx, viewerRole, zone, before, limit*4)
 	if err != nil { return nil, err }
+	if category == "following" {
+		followed, followErr := s.posts.FollowedUserIDs(ctx, viewerID)
+		if followErr == nil {
+			allowed := map[string]struct{}{viewerID: {}}
+			for _, id := range followed { allowed[id] = struct{}{} }
+			kept := posts[:0]
+			for _, post := range posts { if _, ok := allowed[post.AuthorID]; ok { kept = append(kept, post) } }
+			posts = kept
+		}
+	}
 	suppressed, err := s.posts.SuppressedPostIDs(ctx, viewerID)
 	if err != nil { suppressed = nil }
 	blocked := map[string]struct{}{}; for _, id := range suppressed { blocked[id] = struct{}{} }
@@ -240,6 +250,7 @@ func (s *Service) SetPostFeedback(ctx context.Context, postID, userID, feedback 
 func (s *Service) FollowUser(ctx context.Context, followerID, followeeID string, following bool) error { return s.posts.FollowUser(ctx, followerID, followeeID, following) }
 func (s *Service) RecordEvent(ctx context.Context, event store.FeedEvent) error { return s.posts.RecordFeedEvent(ctx, event) }
 func (s *Service) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) { return s.posts.SuppressedPostIDs(ctx, userID) }
+func (s *Service) SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error { return s.posts.SetCreatorControl(ctx, userID, creatorID, control, enabled) }
 
 func (s *Service) broadcast(ctx context.Context, actor string, audience []string, typ string, data map[string]any) {
 	raw, _ := json.Marshal(data)

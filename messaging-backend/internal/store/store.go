@@ -111,6 +111,8 @@ type Post struct {
 	CreatedAt  time.Time
 	ExpiresAt *time.Time
 	ContentFingerprint string
+	ModerationStatus string
+	AbuseScore int
 	RecommendationReason string
 	MatchedSignals []string
 	RankingVersion string
@@ -204,6 +206,8 @@ type PostStore interface {
 	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
 	RecordFeedEvent(ctx context.Context, event FeedEvent) error
 	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
+	FollowedUserIDs(ctx context.Context, userID string) ([]string, error)
+	SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error
 }
 
 type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }
