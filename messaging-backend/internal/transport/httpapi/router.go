@@ -76,6 +76,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/posts/{id}/save", handleUnsavePost(d))
 			r.Post("/posts/{id}/feedback", handlePostFeedback(d))
 			r.Post("/feed/events", handleFeedEvent(d))
+			r.Get("/feed/ranking/audit", handleRankingAudit(d))
 			r.Post("/users/{userId}/follow", handleFollowUser(d))
 			r.Delete("/users/{userId}/follow", handleUnfollowUser(d))
 			r.Post("/users/{userId}/mute", handleCreatorControl(d, "mute", true))
