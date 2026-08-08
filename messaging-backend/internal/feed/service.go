@@ -137,7 +137,7 @@ func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone
 		score := freshness*0.32 + engagement*0.23 + roleMatch*0.15 + opportunity*0.15 + exploration*0.05 + 0.10
 		reason := "Fresh activity from the TechIT community"
 		if roleMatch > 0 { reason = "Relevant to your role and community" } else if opportunity > 0 { reason = "Actionable opportunity" }
-		post.RankingVersion = "feed-v5"
+		post.RankingVersion = "feed-v6"
 		post.RecommendationReason = reason
 		post.MatchedSignals = []string{store.CategoryForKind(post.Kind)}
 		if coldStart { post.MatchedSignals = append(post.MatchedSignals, "cold-start") }
@@ -150,13 +150,23 @@ func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone
 	}
 	creatorCount := map[string]int{}
 	out := make([]store.Post, 0, limit)
+	decisions := make([]store.RankingDecision, 0, limit)
+	variant := rankingVariant(viewerID, category)
 	for _, item := range scoredPosts {
 		if creatorCount[item.post.AuthorID] >= 2 { continue }
 		creatorCount[item.post.AuthorID]++
 		out = append(out, item.post)
+		decisions = append(decisions, store.RankingDecision{ID: protocol.NewMsgID(), UserID: viewerID, PostID: item.post.ID, Category: category, RankingVersion: item.post.RankingVersion, Variant: variant, Score: item.score, Signals: append([]string(nil), item.post.MatchedSignals...), CreatedAt: s.now().UTC()})
 		if len(out) >= limit { break }
 	}
+	_ = s.posts.RecordRankingDecisions(ctx, decisions)
 	return out, nil
+}
+
+func rankingVariant(userID, category string) string {
+	digest := sha256.Sum256([]byte(userID + "|" + category + "|feed-v6"))
+	if digest[0]%2 == 0 { return "control" }
+	return "treatment"
 }
 
 // balanceCategories interleaves the highest-ranked post from each available
@@ -256,6 +266,7 @@ func (s *Service) FollowUser(ctx context.Context, followerID, followeeID string,
 func (s *Service) RecordEvent(ctx context.Context, event store.FeedEvent) error { return s.posts.RecordFeedEvent(ctx, event) }
 func (s *Service) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) { return s.posts.SuppressedPostIDs(ctx, userID) }
 func (s *Service) SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error { return s.posts.SetCreatorControl(ctx, userID, creatorID, control, enabled) }
+func (s *Service) ListRankingDecisions(ctx context.Context, userID string, limit int) ([]store.RankingDecision, error) { return s.posts.ListRankingDecisions(ctx, userID, limit) }
 
 func (s *Service) broadcast(ctx context.Context, actor string, audience []string, typ string, data map[string]any) {
 	raw, _ := json.Marshal(data)

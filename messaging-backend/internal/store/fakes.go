@@ -345,6 +345,7 @@ type FakePostStore struct {
 	follows map[string]map[string]struct{}
 	events []FeedEvent
 	controls map[string]map[string]struct{}
+	rankingDecisions []RankingDecision
 }
 
 func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.saves[postID] == nil { s.saves[postID] = map[string]struct{}{} }; if saved { s.saves[postID][userID] = struct{}{} } else { delete(s.saves[postID], userID) }; return nil }
@@ -465,3 +466,5 @@ func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]str
 func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.controls[userID] == nil { s.controls[userID] = map[string]struct{}{} }; key := creatorID+":"+control; if enabled { s.controls[userID][key] = struct{}{} } else { delete(s.controls[userID], key) }; return nil }
 func (s *FakePostStore) FeedEventCount(_ context.Context, userID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, event := range s.events { if event.UserID == userID { count++ } }; return count, nil }
 func (s *FakePostStore) CreatorPostCount(_ context.Context, creatorID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, post := range s.posts { if post.AuthorID == creatorID { count++ } }; return count, nil }
+func (s *FakePostStore) RecordRankingDecisions(_ context.Context, decisions []RankingDecision) error { s.mu.Lock(); defer s.mu.Unlock(); s.rankingDecisions = append(s.rankingDecisions, decisions...); return nil }
+func (s *FakePostStore) ListRankingDecisions(_ context.Context, userID string, limit int) ([]RankingDecision, error) { s.mu.Lock(); defer s.mu.Unlock(); if limit <= 0 || limit > 100 { limit = 50 }; out := make([]RankingDecision, 0, limit); for i := len(s.rankingDecisions)-1; i >= 0 && len(out) < limit; i-- { if s.rankingDecisions[i].UserID == userID { out = append(out, s.rankingDecisions[i]) } }; return out, nil }

@@ -147,6 +147,15 @@ func handleCreatorControl(d Deps, control string, enabled bool) http.HandlerFunc
 		writeJSON(w, http.StatusOK, map[string]any{control: enabled})
 	}
 }
+
+func handleRankingAudit(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		limit := 50
+		if raw := r.URL.Query().Get("limit"); raw != "" { parsed, err := strconv.Atoi(raw); if err != nil || parsed < 1 || parsed > 100 { writeErr(w, http.StatusBadRequest, "limit must be between 1 and 100"); return }; limit = parsed }
+		decisions, err := d.Feed.ListRankingDecisions(r.Context(), currentUser(r), limit); if err != nil { feedErr(w, err); return }
+		writeJSON(w, http.StatusOK, map[string]any{"decisions": decisions, "rankingVersion": "feed-v6"})
+	}
+}
 func handleFeedEvent(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }; switch body.EventType { case "impression", "open", "like", "comment", "share", "save", "dismiss": default: writeErr(w, http.StatusBadRequest, "unsupported event type"); return }; body.Metadata = sanitizeFeedMetadata(body.Metadata); if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true}) }
 }

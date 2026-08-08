@@ -210,9 +210,12 @@ type PostStore interface {
 	SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error
 	FeedEventCount(ctx context.Context, userID string) (int, error)
 	CreatorPostCount(ctx context.Context, creatorID string) (int, error)
+	RecordRankingDecisions(ctx context.Context, decisions []RankingDecision) error
+	ListRankingDecisions(ctx context.Context, userID string, limit int) ([]RankingDecision, error)
 }
 
 type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }
+type RankingDecision struct { ID, UserID, PostID, Category, RankingVersion, Variant string; Score float64; Signals []string; CreatedAt time.Time }
 
 // Router delivers a server->client envelope to a user's live connections.
 // Implemented by the hub in Plan 2; the messaging service depends only on this.

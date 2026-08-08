@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -174,4 +175,20 @@ func (s *PostStore) CreatorPostCount(ctx context.Context, creatorID string) (int
 	var count int
 	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM posts WHERE author_id=$1`, creatorID).Scan(&count)
 	return count, err
+}
+
+func (s *PostStore) RecordRankingDecisions(ctx context.Context, decisions []store.RankingDecision) error {
+	for _, decision := range decisions {
+		signals, err := json.Marshal(decision.Signals); if err != nil { return err }
+		if _, err := s.pool.Exec(ctx, `INSERT INTO feed_ranking_decisions (id,user_id,post_id,category,ranking_version,variant,score,signals,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, decision.ID, decision.UserID, decision.PostID, decision.Category, decision.RankingVersion, decision.Variant, decision.Score, signals, decision.CreatedAt); err != nil { return err }
+	}
+	return nil
+}
+
+func (s *PostStore) ListRankingDecisions(ctx context.Context, userID string, limit int) ([]store.RankingDecision, error) {
+	if limit <= 0 || limit > 100 { limit = 50 }
+	rows, err := s.pool.Query(ctx, `SELECT id,user_id,post_id,category,ranking_version,variant,score,signals,created_at FROM feed_ranking_decisions WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, userID, limit); if err != nil { return nil, err }; defer rows.Close()
+	var out []store.RankingDecision
+	for rows.Next() { var d store.RankingDecision; var raw []byte; if err := rows.Scan(&d.ID,&d.UserID,&d.PostID,&d.Category,&d.RankingVersion,&d.Variant,&d.Score,&raw,&d.CreatedAt); err != nil { return nil, err }; if err := json.Unmarshal(raw, &d.Signals); err != nil { d.Signals = nil }; out = append(out, d) }
+	return out, rows.Err()
 }
