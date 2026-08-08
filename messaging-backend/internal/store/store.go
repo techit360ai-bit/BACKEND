@@ -109,6 +109,9 @@ type Post struct {
 	Kind       string
 	Body       string
 	CreatedAt  time.Time
+	RecommendationReason string
+	MatchedSignals []string
+	RankingVersion string
 }
 
 // Comment is a comment on a Post.
@@ -193,7 +196,15 @@ type PostStore interface {
 	AddComment(ctx context.Context, c Comment) error
 	ListComments(ctx context.Context, postID string) ([]Comment, error)
 	PostExists(ctx context.Context, postID string) (bool, error)
+	SavePost(ctx context.Context, postID, userID string, saved bool) error
+	SetPostFeedback(ctx context.Context, postID, userID, feedback string) error
+	FollowUser(ctx context.Context, followerID, followeeID string, following bool) error
+	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
+	RecordFeedEvent(ctx context.Context, event FeedEvent) error
+	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
 }
+
+type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }
 
 // Router delivers a server->client envelope to a user's live connections.
 // Implemented by the hub in Plan 2; the messaging service depends only on this.

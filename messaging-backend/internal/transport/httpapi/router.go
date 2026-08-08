@@ -72,6 +72,12 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/posts", handleCreatePost(d))
 			r.Post("/posts/{id}/like", handleLikePost(d))
 			r.Delete("/posts/{id}/like", handleUnlikePost(d))
+			r.Post("/posts/{id}/save", handleSavePost(d))
+			r.Delete("/posts/{id}/save", handleUnsavePost(d))
+			r.Post("/posts/{id}/feedback", handlePostFeedback(d))
+			r.Post("/feed/events", handleFeedEvent(d))
+			r.Post("/users/{userId}/follow", handleFollowUser(d))
+			r.Delete("/users/{userId}/follow", handleUnfollowUser(d))
 			r.Get("/posts/{id}/comments", handleListComments(d))
 			r.Post("/posts/{id}/comments", handleAddComment(d))
 

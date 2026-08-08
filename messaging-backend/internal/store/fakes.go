@@ -25,7 +25,7 @@ func NewFakeStores() *FakeStores {
 		Conversations: &FakeConversationStore{convos: map[string][2]string{}, cursors: map[string]string{}},
 		Messages:      &FakeMessageStore{byConv: map[string][]Message{}, receipts: map[string]ReceiptState{}, clientIDs: map[string]string{}},
 		Channels:      &FakeChannelStore{members: map[string]map[string]struct{}{}, byChan: map[string][]Message{}, clientIDs: map[string]string{}, cursors: map[string]string{}},
-		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}},
+		Posts:         &FakePostStore{posts: map[string]Post{}, order: nil, likes: map[string]map[string]struct{}{}, comments: map[string][]Comment{}, saves: map[string]map[string]struct{}{}, feedback: map[string]map[string]struct{}{}, follows: map[string]map[string]struct{}{}},
 		Demo:          &FakeDemoStore{events: map[string]DemoEvent{}, roster: map[string][]RosterEntry{}},
 		QA:            &FakeQAStore{questions: map[string]DemoQuestion{}, order: nil, votes: map[string]map[string]struct{}{}},
 	}
@@ -337,7 +337,18 @@ type FakePostStore struct {
 	order    []string // post IDs in creation order
 	likes    map[string]map[string]struct{}
 	comments map[string][]Comment
+	saves map[string]map[string]struct{}
+	feedback map[string]map[string]struct{}
+	follows map[string]map[string]struct{}
+	events []FeedEvent
 }
+
+func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.saves[postID] == nil { s.saves[postID] = map[string]struct{}{} }; if saved { s.saves[postID][userID] = struct{}{} } else { delete(s.saves[postID], userID) }; return nil }
+func (s *FakePostStore) SetPostFeedback(_ context.Context, postID, userID, feedback string) error { s.mu.Lock(); defer s.mu.Unlock(); if s.feedback[postID] == nil { s.feedback[postID] = map[string]struct{}{} }; s.feedback[postID][userID+":"+feedback] = struct{}{}; return nil }
+func (s *FakePostStore) FollowUser(_ context.Context, followerID, followeeID string, following bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.follows[followerID] == nil { s.follows[followerID] = map[string]struct{}{} }; if following { s.follows[followerID][followeeID] = struct{}{} } else { delete(s.follows[followerID], followeeID) }; return nil }
+func (s *FakePostStore) IsFollowing(_ context.Context, followerID, followeeID string) (bool, error) { s.mu.Lock(); defer s.mu.Unlock(); _, ok := s.follows[followerID][followeeID]; return ok, nil }
+func (s *FakePostStore) RecordFeedEvent(_ context.Context, event FeedEvent) error { s.mu.Lock(); defer s.mu.Unlock(); s.events = append(s.events, event); return nil }
+func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for postID, values := range s.feedback { for key := range values { if len(key) > len(userID) && key[:len(userID)] == userID && (key[len(userID):] == ":hide" || key[len(userID):] == ":not_interested" || key[len(userID):] == ":block") { out = append(out, postID); break } } }; return out, nil }
 
 func (s *FakePostStore) CreatePost(_ context.Context, p Post) error {
 	s.mu.Lock()
