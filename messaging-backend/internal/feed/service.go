@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
+	"sort"
 	"time"
 
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
@@ -69,14 +71,45 @@ func (s *Service) ListByZone(ctx context.Context, viewerRole, zone, before strin
 
 // ListByCategory preserves the existing zone store contract while exposing
 // the additive discovery taxonomy to the HTTP API.
-func (s *Service) ListByCategory(ctx context.Context, viewerRole, zone, category, before string, limit int) ([]store.Post, error) {
-	posts, err := s.ListByZone(ctx, viewerRole, zone, before, limit)
+func (s *Service) ListByCategory(ctx context.Context, viewerID, viewerRole, zone, category, before string, limit int) ([]store.Post, error) {
+	if limit <= 0 || limit > 200 { limit = 50 }
+	posts, err := s.ListByZone(ctx, viewerRole, zone, before, limit*4)
 	if err != nil { return nil, err }
+	suppressed, err := s.posts.SuppressedPostIDs(ctx, viewerID)
+	if err != nil { suppressed = nil }
+	blocked := map[string]struct{}{}; for _, id := range suppressed { blocked[id] = struct{}{} }
 	filtered := make([]store.Post, 0, len(posts))
 	for _, post := range posts {
+		if _, hidden := blocked[post.ID]; hidden { continue }
 		if store.MatchesCategory(post.Kind, category) { filtered = append(filtered, post) }
 	}
-	return filtered, nil
+	// Wave 2 ranking: freshness, lightweight engagement, role relevance, and
+	// opportunity value. The store remains the source of truth for all signals.
+	type scored struct { post store.Post; score float64; reason string }
+	scoredPosts := make([]scored, 0, len(filtered))
+	for _, post := range filtered {
+		ageHours := math.Max(0, time.Since(post.CreatedAt).Hours())
+		freshness := math.Exp(-ageHours / 72)
+		likes, _ := s.posts.LikeCount(ctx, post.ID)
+		comments, _ := s.posts.ListComments(ctx, post.ID)
+		engagement := math.Min(1, float64(likes+len(comments))/20)
+		roleMatch := 0.0
+		if post.AuthorRole == store.NormalizeRole(viewerRole) { roleMatch = 1 }
+		opportunity := 0.0
+		if post.Kind == "opportunity-post" || post.Kind == "investment-signal" || post.Kind == "role-available" || post.Kind == "collab-call" { opportunity = 1 }
+		score := freshness*0.35 + engagement*0.25 + roleMatch*0.15 + opportunity*0.15 + 0.10
+		reason := "Fresh activity from the TechIT community"
+		if roleMatch > 0 { reason = "Relevant to your role and community" } else if opportunity > 0 { reason = "Actionable opportunity" }
+		post.RankingVersion = "feed-v2"
+		post.RecommendationReason = reason
+		post.MatchedSignals = []string{store.CategoryForKind(post.Kind)}
+		scoredPosts = append(scoredPosts, scored{post: post, score: score, reason: reason})
+	}
+	sort.SliceStable(scoredPosts, func(i, j int) bool { return scoredPosts[i].score > scoredPosts[j].score })
+	creatorCount := map[string]int{}
+	out := make([]store.Post, 0, limit)
+	for _, item := range scoredPosts { if creatorCount[item.post.AuthorID] >= 2 { continue }; creatorCount[item.post.AuthorID]++; out = append(out, item.post); if len(out) >= limit { break } }
+	return out, nil
 }
 
 // Like records a like (idempotent), returns the new like count, and broadcasts.
@@ -140,6 +173,12 @@ func (s *Service) ListPosts(ctx context.Context, before string, limit int) ([]st
 func (s *Service) ListComments(ctx context.Context, postID string) ([]store.Comment, error) {
 	return s.posts.ListComments(ctx, postID)
 }
+
+func (s *Service) SavePost(ctx context.Context, postID, userID string, saved bool) error { return s.posts.SavePost(ctx, postID, userID, saved) }
+func (s *Service) SetPostFeedback(ctx context.Context, postID, userID, feedback string) error { return s.posts.SetPostFeedback(ctx, postID, userID, feedback) }
+func (s *Service) FollowUser(ctx context.Context, followerID, followeeID string, following bool) error { return s.posts.FollowUser(ctx, followerID, followeeID, following) }
+func (s *Service) RecordEvent(ctx context.Context, event store.FeedEvent) error { return s.posts.RecordFeedEvent(ctx, event) }
+func (s *Service) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) { return s.posts.SuppressedPostIDs(ctx, userID) }
 
 func (s *Service) broadcast(ctx context.Context, actor string, audience []string, typ string, data map[string]any) {
 	raw, _ := json.Marshal(data)

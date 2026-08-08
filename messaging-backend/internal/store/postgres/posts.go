@@ -122,3 +122,27 @@ func (s *PostStore) PostExists(ctx context.Context, postID string) (bool, error)
 	}
 	return err == nil, err
 }
+
+func (s *PostStore) SavePost(ctx context.Context, postID, userID string, saved bool) error {
+	if saved { _, err := s.pool.Exec(ctx, `INSERT INTO feed_post_saves (post_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, postID, userID); return err }
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_post_saves WHERE post_id=$1 AND user_id=$2`, postID, userID); return err
+}
+
+func (s *PostStore) SetPostFeedback(ctx context.Context, postID, userID, feedback string) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_feedback (post_id,user_id,feedback) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, postID, userID, feedback); return err
+}
+
+func (s *PostStore) FollowUser(ctx context.Context, followerID, followeeID string, following bool) error {
+	if following { _, err := s.pool.Exec(ctx, `INSERT INTO feed_follows (follower_id,followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, followerID, followeeID); return err }
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_follows WHERE follower_id=$1 AND followee_id=$2`, followerID, followeeID); return err
+}
+func (s *PostStore) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) { var exists bool; err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feed_follows WHERE follower_id=$1 AND followee_id=$2)`, followerID, followeeID).Scan(&exists); return exists, err }
+
+func (s *PostStore) RecordFeedEvent(ctx context.Context, event store.FeedEvent) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_events (id,user_id,post_id,event_type,metadata,created_at) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6)`, event.ID, event.UserID, event.PostID, event.EventType, event.Metadata, event.CreatedAt); return err
+}
+
+func (s *PostStore) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT post_id FROM feed_post_feedback WHERE user_id=$1 AND feedback IN ('hide','not_interested','block')`, userID); if err != nil { return nil, err }; defer rows.Close()
+	var out []string; for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { return nil, err }; out = append(out, id) }; return out, rows.Err()
+}
