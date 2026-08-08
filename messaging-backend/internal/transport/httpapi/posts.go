@@ -24,6 +24,10 @@ func feedErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if errors.Is(err, feed.ErrDuplicatePost) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
 	writeErr(w, http.StatusInternalServerError, err.Error())
 }
 
@@ -63,7 +67,7 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		for _, p := range posts {
 			out = append(out, map[string]any{
 				"id": p.ID, "authorId": p.AuthorID, "authorRole": p.AuthorRole,
-				"audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "ts": p.CreatedAt,
+				"audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "ts": p.CreatedAt, "expiresAt": p.ExpiresAt,
 				"recommendationReason": p.RecommendationReason, "matchedSignals": p.MatchedSignals, "rankingVersion": p.RankingVersion,
 			})
 		}
@@ -88,7 +92,7 @@ func handleCreatePost(d Deps) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": post.ID, "authorId": post.AuthorID, "authorRole": post.AuthorRole,
-			"audience": post.Audience, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt,
+			"audience": post.Audience, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt, "expiresAt": post.ExpiresAt,
 		})
 	}
 }

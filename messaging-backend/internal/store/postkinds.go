@@ -6,6 +6,7 @@ package store
 var GenericKinds = map[string]bool{
 	"milestone": true, "insight": true, "build-update": true,
 	"collab-call": true, "question": true, "problem": true,
+	"hackathon": true, "hackathon-announcement": true, "hackathon-opportunity": true,
 	"update": true, "build": true, "collab": true,
 }
 
@@ -35,9 +36,10 @@ func AllowedKind(role, kind string) bool {
 // post kinds and older clients.
 func CategoryForKind(kind string) string {
 	switch kind {
+	case "hackathon", "hackathon-announcement", "hackathon-opportunity": return "hackathons"
 	case "milestone", "build-update", "build", "update": return "startups"
 	case "investment-signal", "portfolio-update", "thesis-post": return "funding"
-	case "opportunity-post", "programme-announcement", "community-spotlight": return "organizations"
+	case "opportunity-post", "programme-announcement", "community-spotlight", "opportunity": return "organizations"
 	case "question", "problem", "insight", "skill-showcase": return "learning"
 	case "collab-call", "contribution-update", "role-available": return "startups"
 	default: return "startups"
@@ -46,5 +48,7 @@ func CategoryForKind(kind string) string {
 
 func MatchesCategory(kind, category string) bool {
 	if category == "" || category == "for-you" || category == "following" || category == "ai-recommendations" { return true }
+	// Keep singular legacy URLs compatible with the canonical plural taxonomy.
+	if category == "organization" { category = "organizations" }
 	return CategoryForKind(kind) == category
 }

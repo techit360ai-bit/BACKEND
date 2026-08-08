@@ -22,8 +22,8 @@ func (s *PostStore) CreatePost(ctx context.Context, p store.Post) error {
 	if role == "" {
 		role = "community"
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt)
+	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt, p.ExpiresAt, p.ContentFingerprint)
 	return err
 }
 
@@ -41,8 +41,10 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, author_id, author_role, audience, kind, body, created_at FROM posts`
-	conds := []string{}
+	q := `SELECT id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint FROM posts`
+	// Expired opportunities/posts are never eligible for discovery. Posts with
+	// no expiry remain valid indefinitely.
+	conds := []string{"(expires_at IS NULL OR expires_at > now())"}
 	args := []any{}
 	n := 0
 	if zone == "tribe" {
@@ -67,7 +69,7 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	var out []store.Post
 	for rows.Next() {
 		var p store.Post
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint); err != nil {
 			return nil, err
 		}
 		out = append(out, p)
