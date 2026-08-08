@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
 )
@@ -353,6 +355,13 @@ func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]s
 func (s *FakePostStore) CreatePost(_ context.Context, p Post) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if p.ContentFingerprint != "" {
+		for _, existing := range s.posts {
+			if existing.AuthorID == p.AuthorID && existing.ContentFingerprint == p.ContentFingerprint {
+				return errors.New("uq_posts_content_fingerprint")
+			}
+		}
+	}
 	s.posts[p.ID] = p
 	s.order = append(s.order, p.ID)
 	return nil
@@ -366,7 +375,7 @@ func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) (
 		if before != "" && id >= before {
 			continue
 		}
-		out = append(out, s.posts[id])
+		post := s.posts[id]; if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) { continue }; out = append(out, post)
 		if len(out) >= limit {
 			break
 		}
@@ -396,7 +405,7 @@ func (s *FakePostStore) ListPostsByZone(_ context.Context, viewerRole, zone, bef
 		if before != "" && id >= before {
 			continue
 		}
-		p := s.posts[id]
+		p := s.posts[id]; if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) { continue }
 		if zone == "tribe" && !matchTribe(p) {
 			continue
 		}

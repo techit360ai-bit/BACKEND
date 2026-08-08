@@ -109,6 +109,8 @@ type Post struct {
 	Kind       string
 	Body       string
 	CreatedAt  time.Time
+	ExpiresAt *time.Time
+	ContentFingerprint string
 	RecommendationReason string
 	MatchedSignals []string
 	RankingVersion string

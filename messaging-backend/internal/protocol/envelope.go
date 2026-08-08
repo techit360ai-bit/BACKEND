@@ -63,6 +63,7 @@ type CreatePostPayload struct {
 	Kind     string   `json:"kind"`
 	Body     string   `json:"body"`
 	Audience []string `json:"audience,omitempty"`
+	ExpiresAt string   `json:"expiresAt,omitempty"`
 }
 
 // CommentPayload is the body of an add-comment request (REST).
