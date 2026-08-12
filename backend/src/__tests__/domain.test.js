@@ -771,6 +771,18 @@ describe('domain live-data endpoints', () => {
     expect(summary.body.pendingPayments).toBe(1)
   })
 
+  it('counts a settled usage debit once in the wallet balance', async () => {
+    const db = makeDb({
+      walletAccounts: [{ id: 'wallet_1', userId: 'user-uuid-1', creditBalance: 25 }],
+      creditLedger: [{ id: 'debit_1', userId: 'user-uuid-1', deltaCredits: -5, type: 'usage_settlement' }],
+      usageEvents: [{ id: 'usage_1', userId: 'user-uuid-1', credits: 5, status: 'completed' }],
+    })
+    readDb.mockReturnValue(db)
+    const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
+    expect(summary.body.creditBalance).toBe(20)
+    expect(summary.body.lifetimeCreditsUsed).toBe(5)
+  })
+
   it('persists role-scoped notification preferences without overwriting another role', async () => {
     const db = makeDb()
     readDb.mockReturnValue(db)

@@ -12,6 +12,7 @@ import adminRoutes from './routes/admin.js'
 import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
 import complianceRoutes from './routes/compliance.js'
+import usageSettlementRoutes from './routes/usageSettlement.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
@@ -53,7 +54,13 @@ app.use(cors({
   origin: CORS_ORIGINS,
   credentials: true,
 }))
-app.use(express.json())
+app.use(express.json({
+  verify(req, _res, buffer) {
+    // Service-to-service HMAC verification must cover the exact bytes that
+    // crossed the wire, not a reconstructed object serialization.
+    req.rawBody = buffer.toString('utf8')
+  },
+}))
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)
@@ -66,6 +73,7 @@ app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)
 app.use('/api/video', videoRoutes)
 app.use('/api/context', contextRoutes)
+app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
 // invoke + approve. Mounted under /api/mcp so it never collides with the

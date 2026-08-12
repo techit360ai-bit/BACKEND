@@ -346,3 +346,31 @@ Same as the cross-repo alignment plan — read in order:
 3. `new-frontend/DEPLOYMENT.md` for the four `VITE_*` env vars at build time.
 
 The merged commits referenced by ID throughout (C1–C12, F1–F3, PR #5, #11, #23) are findable via `git log --grep='C2:'` etc.
+# AI usage reservation and settlement
+
+The platform backend is the commercial authority for both capped subscriptions
+and PAYG credits. Before calling the AI Router, issue a reservation-backed grant
+through `POST /internal/usage-settlement/grant`. After execution, the Router
+submits signed facts to `POST /internal/usage-settlement/settle`.
+
+Required environment variables:
+
+- `AI_ROUTER_SETTLEMENT_SECRET` — shared HMAC secret, at least 32 characters.
+- `AI_ROUTER_SERVICE_ID` — defaults to `ai-router`.
+- `AI_ROUTER_SETTLEMENT_MAX_SKEW_SECONDS` — defaults to 300.
+- `AI_USAGE_GRANT_SERVICE_ID` — trusted backend orchestrator identity.
+- `AI_USAGE_GRANT_SERVICE_SECRET` — separate HMAC key for reservation/grant issuance.
+- `AI_EXECUTION_GRANT_SECRET` — signs short-lived Router execution grants.
+- `AI_EXECUTION_GRANT_ISSUER` — defaults to `techit-backend`.
+- `AI_EXECUTION_GRANT_AUDIENCE` — defaults to `techit-ai-router`.
+
+Subscription reservations consume the active subscription allowance only.
+PAYG reservations consume wallet credits only. The caller must explicitly
+authorize PAYG overage; the backend never silently switches funding sources.
+Settlement is idempotent by request ID, releases failed reservations, and
+rejects conflicting replay payloads.
+
+The Router settlement credential can only submit facts and read settlement
+health. It cannot reserve credits or issue execution grants. The trusted
+backend caller that authenticates the user, selects the explicit funding
+source and derives the reserved units must use the separate grant-issuer key.
