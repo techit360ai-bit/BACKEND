@@ -147,8 +147,9 @@ function walletSummaryFor(db, userId) {
   const ledger = collection(db, 'creditLedger').filter(row => row.userId === userId)
   const usage = collection(db, 'usageEvents').filter(row => row.userId === userId)
   const ledgerDelta = ledger.reduce((sum, row) => sum + Number(row.deltaCredits || row.credits || 0), 0)
-  const usageDelta = usage.reduce((sum, row) => sum - Math.abs(Number(row.credits || 0)), 0)
-  const balance = Number(account?.creditBalance ?? account?.balance ?? 0) + ledgerDelta + usageDelta
+  // Settled usage already creates a credit-ledger debit. Including usage
+  // events again would display and enforce a double charge.
+  const balance = Number(account?.creditBalance ?? account?.balance ?? 0) + ledgerDelta
   return {
     account: account || { userId, creditBalance: balance, currency: 'USD' },
     creditBalance: balance,

@@ -100,7 +100,7 @@ describe('database persistence adapter', () => {
 
     closeDbForTests()
     const afterDryRuns = readDb()
-    expect(rolledBack.version).toBe('004_hackathon_invitations')
+    expect(rolledBack.version).toBe('005_usage_settlement')
     expect(afterDryRuns.notifications).toHaveLength(1)
     expect(afterDryRuns.notifications[0].id).toBe('notif-dry-run')
     expect(afterDryRuns.hackathonInvitations).toEqual([])

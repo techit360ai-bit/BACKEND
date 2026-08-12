@@ -68,6 +68,7 @@ const INITIAL = {
   walletAccounts: [],
   creditLedger: [],
   usageEvents: [],
+  usageReservations: [],
   billingPlans: [],
   creditPackages: [],
   paymentIntents: [],
