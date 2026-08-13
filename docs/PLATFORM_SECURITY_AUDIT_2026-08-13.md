@@ -166,4 +166,7 @@ as conflicting replays.
 Dependabot now monitors npm, Go modules, Python dependencies and GitHub Actions
 across the three repositories. Scheduled and pull-request CodeQL workflows were
 added for JavaScript/TypeScript, Go and Python. Registry advisory checks and
-container-image scanning still need network-enabled CI steps.
+container-image scanning still need network-enabled CI steps. CodeQL currently
+runs extraction and queries with SARIF upload disabled because GitHub's private
+repository security-events integration rejected the upload; enable upload after
+repository code-scanning permissions are configured.
