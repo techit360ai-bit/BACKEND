@@ -1,0 +1,290 @@
+{
+  "audit": [
+    {
+      "id": "audit-1786665283655-1",
+      "timestamp": "2026-08-13T23:54:43.655Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "list_repositories",
+      "sourceTool": "github",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283659-2",
+      "timestamp": "2026-08-13T23:54:43.659Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "list_issues",
+      "sourceTool": "github",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283666-3",
+      "timestamp": "2026-08-13T23:54:43.666Z",
+      "actor": "coding-agent",
+      "actorKind": "agent",
+      "action": "create_pull_request",
+      "sourceTool": "github",
+      "result": "pending_approval",
+      "workspaceId": "ws-acme",
+      "detail": {
+        "approvalRequestId": "approval-1786665283666-1"
+      }
+    },
+    {
+      "id": "audit-1786665283667-4",
+      "timestamp": "2026-08-13T23:54:43.667Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "search",
+      "sourceTool": "notion",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283669-5",
+      "timestamp": "2026-08-13T23:54:43.669Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "get_file",
+      "sourceTool": "figma",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283673-6",
+      "timestamp": "2026-08-13T23:54:43.673Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "get_balance",
+      "sourceTool": "web3",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283675-7",
+      "timestamp": "2026-08-13T23:54:43.675Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "review_code",
+      "sourceTool": "ai",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283680-8",
+      "timestamp": "2026-08-13T23:54:43.680Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "list_repositories",
+      "sourceTool": "github",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283688-9",
+      "timestamp": "2026-08-13T23:54:43.688Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "search",
+      "sourceTool": "notion",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283695-10",
+      "timestamp": "2026-08-13T23:54:43.695Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "get_file",
+      "sourceTool": "figma",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283712-11",
+      "timestamp": "2026-08-13T23:54:43.712Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "get_balance",
+      "sourceTool": "web3",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    },
+    {
+      "id": "audit-1786665283715-12",
+      "timestamp": "2026-08-13T23:54:43.715Z",
+      "actor": "founder",
+      "actorKind": "human",
+      "action": "generate_code",
+      "sourceTool": "ai",
+      "result": "success",
+      "workspaceId": "ws-acme"
+    }
+  ],
+  "approvalRequests": [
+    {
+      "workspaceId": "ws-acme",
+      "requestedBy": "coding-agent",
+      "action": "github.create_pull_request",
+      "params": {
+        "repo": "acme/app",
+        "head": "feat/login",
+        "base": "main",
+        "title": "Add login flow"
+      },
+      "reason": "destructive MCP tool github.create_pull_request requires human approval",
+      "id": "approval-1786665283666-1",
+      "status": "pending",
+      "createdAt": "2026-08-13T23:54:43.666Z"
+    }
+  ],
+  "approvalDecisions": {},
+  "contributions": [
+    {
+      "id": "contrib-1786665283658-1",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "github",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "list_repositories"
+      },
+      "timestamp": "2026-08-13T23:54:43.658Z"
+    },
+    {
+      "id": "contrib-1786665283665-2",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "github",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "list_issues"
+      },
+      "timestamp": "2026-08-13T23:54:43.665Z"
+    },
+    {
+      "id": "contrib-1786665283668-3",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "notion",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "search"
+      },
+      "timestamp": "2026-08-13T23:54:43.668Z"
+    },
+    {
+      "id": "contrib-1786665283671-4",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "figma",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "get_file"
+      },
+      "timestamp": "2026-08-13T23:54:43.671Z"
+    },
+    {
+      "id": "contrib-1786665283673-5",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "web3",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "get_balance"
+      },
+      "timestamp": "2026-08-13T23:54:43.673Z"
+    },
+    {
+      "id": "contrib-1786665283676-6",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "ai",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "review_code"
+      },
+      "timestamp": "2026-08-13T23:54:43.676Z"
+    },
+    {
+      "id": "contrib-1786665283684-7",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "github",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "list_repositories"
+      },
+      "timestamp": "2026-08-13T23:54:43.684Z"
+    },
+    {
+      "id": "contrib-1786665283693-8",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "notion",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "search"
+      },
+      "timestamp": "2026-08-13T23:54:43.693Z"
+    },
+    {
+      "id": "contrib-1786665283696-9",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "figma",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "get_file"
+      },
+      "timestamp": "2026-08-13T23:54:43.696Z"
+    },
+    {
+      "id": "contrib-1786665283713-10",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "web3",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "get_balance"
+      },
+      "timestamp": "2026-08-13T23:54:43.713Z"
+    },
+    {
+      "id": "contrib-1786665283716-11",
+      "kind": "ai_action",
+      "actorId": "founder",
+      "actorKind": "human",
+      "sourceTool": "ai",
+      "workspaceId": "ws-acme",
+      "weight": 1,
+      "metadata": {
+        "tool": "generate_code"
+      },
+      "timestamp": "2026-08-13T23:54:43.716Z"
+    }
+  ]
+}

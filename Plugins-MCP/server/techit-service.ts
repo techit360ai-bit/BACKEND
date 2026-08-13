@@ -9,6 +9,10 @@ import type { Actor, AgentDefinition, Role } from '@techit/core';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
+import { registerNotionPlugin } from '@techit/plugin-notion';
+import { registerFigmaPlugin } from '@techit/plugin-figma';
+import { registerWeb3Plugin } from '@techit/plugin-web3';
+import { registerAiPlugin } from '@techit/plugin-ai';
 import {
   FileApprovalStore,
   FileAuditLogger,
@@ -78,6 +82,10 @@ async function build(): Promise<TechitService> {
   const runtime = createRuntime({ audit, approvals, contributions });
   const registry = new MCPRegistry();
   await registerGithubPlugin({ runtime, registry, workspaceId: WS });
+  await registerNotionPlugin({ runtime, registry, workspaceId: WS });
+  await registerFigmaPlugin({ runtime, registry, workspaceId: WS });
+  await registerWeb3Plugin({ runtime, registry, workspaceId: WS });
+  await registerAiPlugin({ runtime, registry, workspaceId: WS });
   const client = new MCPClient(registry);
 
   const service: TechitService = {
@@ -120,6 +128,16 @@ async function build(): Promise<TechitService> {
       'create_pull_request',
       { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
       { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'] },
+    );
+    // One read per new connector so every plugin appears in the demo feeds.
+    await service.invoke('notion', 'search', { query: 'roadmap' });
+    await service.invoke('figma', 'get_file', { file_key: 'demo123' });
+    await service.invoke('web3', 'get_balance', { address: '0x1234567890abcdef1234567890abcdef12345678' });
+    await service.invoke(
+      'ai',
+      'review_code',
+      { code: 'const x: any = 1;', language: 'typescript' },
+      { id: 'founder', kind: 'human', role: 'editor' },
     );
   }
 
