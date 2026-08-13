@@ -15,6 +15,8 @@ if (!JWT_SECRET) {
   )
 }
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
+const JWT_ISSUER = process.env.JWT_ISSUER
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
 const RESET_EXPIRES_MINUTES = parseInt(process.env.PASSWORD_RESET_EXPIRES_MINUTES || '30', 10)
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '')
@@ -36,7 +38,11 @@ function makeToken(userId, profile = null) {
     role: profile?.role || 'founder',
     workspaceId: profile?.workspaceId || `user-${userId}`,
   }
-  return jwt.sign(claims, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+  return jwt.sign(claims, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+    ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
+    ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
+  })
 }
 
 function buildProfile(data, now) {
@@ -169,6 +175,9 @@ export async function signup(req, res) {
 
   if (!email || !password || !firstName || !lastName) {
     return res.status(400).json({ error: 'Email, password, first name, and last name are required' })
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
   if (!isAllowedRole(role)) {
@@ -331,6 +340,9 @@ export async function resetPassword(req, res) {
   const email = normalizeEmail(rawEmail)
   if (!email || !token || !password) {
     return res.status(400).json({ error: 'Email, token, and password are required' })
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
   const now = new Date().toISOString()

@@ -3,7 +3,39 @@ import { validateDatabaseConfig } from './config/database.js'
 
 const PORT = process.env.PORT || 3000
 
+function validateSecurityConfig() {
+  if (process.env.NODE_ENV !== 'production') return
+  for (const name of [
+    'JWT_ISSUER',
+    'JWT_AUDIENCE',
+    'GITHUB_TOKEN_ENCRYPTION_KEY',
+    'OTP_HASH_SECRET',
+    'AI_ROUTER_SETTLEMENT_SECRET',
+    'AI_USAGE_GRANT_SERVICE_SECRET',
+    'AI_EXECUTION_GRANT_SECRET',
+  ]) {
+    if (!process.env[name]) throw new Error(`${name} is required in production`)
+  }
+  for (const name of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'GITHUB_REDIRECT_URI']) {
+    const value = process.env[name] || ''
+    if (!value || /test-github|localhost|replace/i.test(value)) {
+      throw new Error(`${name} must be configured for production`)
+    }
+  }
+  if ((process.env.JWT_SECRET || '').length < 32) throw new Error('JWT_SECRET must be at least 32 characters')
+  for (const name of [
+    'GITHUB_TOKEN_ENCRYPTION_KEY',
+    'OTP_HASH_SECRET',
+    'AI_ROUTER_SETTLEMENT_SECRET',
+    'AI_USAGE_GRANT_SERVICE_SECRET',
+    'AI_EXECUTION_GRANT_SECRET',
+  ]) {
+    if ((process.env[name] || '').length < 32) throw new Error(`${name} must be at least 32 characters`)
+  }
+}
+
 validateDatabaseConfig()
+validateSecurityConfig()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

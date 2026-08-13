@@ -1,5 +1,5 @@
 import { Resend } from 'resend'
-import { createHash, randomBytes, randomInt, randomUUID } from 'crypto'
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
 import { normalizeEmail } from '../utils/authInputs.js'
 import {
@@ -42,6 +42,22 @@ function cleanExpired(otps = []) {
 
 function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex')
+}
+
+function codeHash(code) {
+  return tokenHash(String(code).trim())
+}
+
+function codeHmac(code) {
+  const secret = process.env.OTP_HASH_SECRET || process.env.JWT_SECRET || ''
+  if (!secret) throw new Error('OTP_HASH_SECRET is required to protect OTP records')
+  return createHmac('sha256', secret).update(String(code).trim()).digest('hex')
+}
+
+function constantTimeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left))
+  const rightBuffer = Buffer.from(String(right))
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
 }
 
 function cleanExpiredVerifications(records) {
@@ -138,7 +154,9 @@ export async function sendOtp(req, res) {
     return res.status(502).json({ error: 'Failed to send email. Please try again.' })
   }
 
-  db.otps.push({ email, code, expiresAt, sentAt, attempts: 0 })
+  // Never persist the six-digit OTP itself. A database read must not be
+  // sufficient to complete email verification.
+  db.otps.push({ email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
   writeDb(db)
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })
@@ -168,7 +186,16 @@ export function verifyOtp(req, res) {
     return res.status(400).json({ error: 'Too many attempts. Please request a new code.' })
   }
 
-  if (record.code !== String(code).trim()) {
+  // Legacy plaintext records are accepted during the rolling deployment and
+  // are removed immediately after success/expiry. New writes are hash-only.
+  const submittedCode = String(code).trim()
+  const keyedHashMatches = typeof record.codeHmac === 'string'
+    && constantTimeEqual(record.codeHmac, codeHmac(submittedCode))
+  const legacyHashMatches = typeof record.codeHash === 'string'
+    && constantTimeEqual(record.codeHash, codeHash(submittedCode))
+  const legacyMatches = typeof record.code === 'string'
+    && constantTimeEqual(record.code, submittedCode)
+  if (!keyedHashMatches && !legacyHashMatches && !legacyMatches) {
     writeDb(db)
     const left = MAX_ATTEMPTS - record.attempts
     return res.status(400).json({

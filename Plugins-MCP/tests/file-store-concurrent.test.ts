@@ -81,28 +81,28 @@ test('interleaved writes from two FileAuditLogger instances share the file', asy
   expect(onDisk.audit.length).toBe(4);
 });
 
-test('production requires explicit persistent MCP file-store opt-in', async () => {
+test('production forbids the single-process MCP file store', async () => {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   process.env.MCP_DATA_FILE = dataFile;
   delete process.env.MCP_ALLOW_FILE_STORE;
   try {
     const mod = await import('../server/file-store.js?prod=' + Date.now());
-    expect(() => mod.validateMcpStoreConfig()).toThrow(/MCP_ALLOW_FILE_STORE/);
+    expect(() => mod.validateMcpStoreConfig()).toThrow(/forbidden/i);
   } finally {
     process.env.NODE_ENV = previousNodeEnv;
     process.env.MCP_DATA_FILE = dataFile;
   }
 });
 
-test('production accepts file-store only with explicit path and opt-in', async () => {
+test('production still rejects file-store when the legacy opt-in is set', async () => {
   const previousNodeEnv = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   process.env.MCP_DATA_FILE = dataFile;
   process.env.MCP_ALLOW_FILE_STORE = 'true';
   try {
     const mod = await import('../server/file-store.js?prodok=' + Date.now());
-    expect(() => mod.validateMcpStoreConfig()).not.toThrow();
+    expect(() => mod.validateMcpStoreConfig()).toThrow(/forbidden/i);
   } finally {
     process.env.NODE_ENV = previousNodeEnv;
     delete process.env.MCP_ALLOW_FILE_STORE;

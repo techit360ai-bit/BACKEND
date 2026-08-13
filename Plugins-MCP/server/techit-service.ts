@@ -109,10 +109,10 @@ async function build(): Promise<TechitService> {
     },
   };
 
-  // Seed a little activity so the dashboards aren't empty on first load.
-  // Only run when the audit log is empty (fresh database) — without this guard
-  // every restart would append three more rows, polluting the persistent log.
-  if (audit.entries().length === 0) {
+  // Demo seed activity is opt-in and forbidden in production/staging. An audit
+  // log must contain only real actions unless an operator explicitly launches
+  // a local demo.
+  if (process.env.MCP_SEED_DEMO_ACTIVITY === 'true' && audit.entries().length === 0) {
     await service.invoke('github', 'list_repositories', {});
     await service.invoke('github', 'list_issues', { repo: 'acme/app' });
     await service.invoke(
@@ -136,8 +136,10 @@ export function getTechitService(): Promise<TechitService> {
 function validateProductionConfig(): void {
   const env = (process.env.NODE_ENV || 'development').toLowerCase();
   if (!['production', 'staging'].includes(env)) return;
-  if (process.env.MCP_ALLOW_STUB_CONNECTORS === 'true') return;
-  throw new Error(
-    'MCP production/staging requires real connector wiring; set MCP_ALLOW_STUB_CONNECTORS=true only for an explicit demo deployment.',
-  );
+  if (process.env.MCP_ALLOW_STUB_CONNECTORS === 'true') {
+    throw new Error('MCP_ALLOW_STUB_CONNECTORS=true is forbidden in production/staging.');
+  }
+  if (process.env.MCP_SEED_DEMO_ACTIVITY === 'true') {
+    throw new Error('MCP_SEED_DEMO_ACTIVITY=true is forbidden in production/staging.');
+  }
 }

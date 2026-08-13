@@ -12,7 +12,15 @@ function text(value, fallback = '') {
 }
 
 function hashPayload(payload) {
-  return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+  return createHash('sha256').update(stableJson(payload)).digest('hex')
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
 }
 
 function reservationFor(db, reservationId) {

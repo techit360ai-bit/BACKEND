@@ -48,16 +48,27 @@ jobs:
           ENVIRONMENT: production
           PORT: "3000"
           JWT_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          JWT_ISSUER: techit-backend
+          JWT_AUDIENCE: techit-platform
+          OTP_HASH_SECRET: 89abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567
           CORS_ORIGINS: https://app.techit.example
           FRONTEND_URL: https://app.techit.example
           DB_DRIVER: sqlite
           SQLITE_DB_PATH: /tmp/techit/backend/techit.sqlite
           RESEND_API_KEY: re_ci_contract_value
           FROM_EMAIL: TechIT <noreply@techit.example>
-          MCP_DATA_FILE: /tmp/techit/plugins-mcp.json
-          MCP_ALLOW_FILE_STORE: "true"
-          MCP_ALLOW_STUB_CONNECTORS: "true"
+          MCP_ENABLED: "false"
+          MCP_ALLOW_FILE_STORE: "false"
+          MCP_ALLOW_STUB_CONNECTORS: "false"
+          MCP_SEED_DEMO_ACTIVITY: "false"
           MCP_APPROVAL_TTL_MS: "900000"
+          GITHUB_CLIENT_ID: github-ci-client
+          GITHUB_CLIENT_SECRET: github-ci-secret-value
+          GITHUB_REDIRECT_URI: https://api.techit.example/api/github/callback
+          GITHUB_TOKEN_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          AI_ROUTER_SETTLEMENT_SECRET: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+          AI_USAGE_GRANT_SERVICE_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          AI_EXECUTION_GRANT_SECRET: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
           DATABASE_URL: postgres://techit:secret@postgres.example:5432/techit_msg?sslmode=require
           REDIS_URL: rediss://redis.example:6379
           ENABLE_DEV_TOKEN: "0"

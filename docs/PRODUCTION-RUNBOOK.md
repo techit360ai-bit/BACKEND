@@ -42,6 +42,9 @@ cd backend && npm run start              # node --import tsx src/index.js
 Env vars:
 ```
 JWT_SECRET=<32-byte hex>                 # required, no fallback
+JWT_ISSUER=techit-backend
+JWT_AUDIENCE=techit-platform
+OTP_HASH_SECRET=<different 32+ random bytes>
 NODE_ENV=production
 PORT=3000
 CORS_ORIGINS=https://app.<domain>        # comma-separated browser origins
@@ -50,10 +53,18 @@ SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
 FRONTEND_URL=https://app.<domain>        # used in password reset links
-MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json   # persistent volume; survives restarts
-MCP_ALLOW_FILE_STORE=true                # explicit single-replica file-store acknowledgement
-MCP_ALLOW_STUB_CONNECTORS=true           # demo connector bridge until real provider wiring lands
+MCP_ENABLED=false                        # keep disabled until shared transactional persistence lands
+MCP_ALLOW_FILE_STORE=false               # forbidden in production/staging
+MCP_ALLOW_STUB_CONNECTORS=false          # forbidden in production/staging
+MCP_SEED_DEMO_ACTIVITY=false
 MCP_APPROVAL_TTL_MS=900000
+GITHUB_CLIENT_ID=<production GitHub OAuth app client ID>
+GITHUB_CLIENT_SECRET=<production GitHub OAuth app secret>
+GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback
+GITHUB_TOKEN_ENCRYPTION_KEY=<32+ random bytes>
+AI_ROUTER_SETTLEMENT_SECRET=<32+ random bytes>
+AI_USAGE_GRANT_SERVICE_SECRET=<different 32+ random bytes>
+AI_EXECUTION_GRANT_SECRET=<different 32+ random bytes>
 ```
 
 Health check: `GET /` → `{"status":"TechIT API running"}` (200).
@@ -66,16 +77,27 @@ NODE_ENV=production \
 ENVIRONMENT=production \
 PORT=3000 \
 JWT_SECRET=<32-byte-hex-or-longer-shared-secret> \
+JWT_ISSUER=techit-backend \
+JWT_AUDIENCE=techit-platform \
+OTP_HASH_SECRET=<different-32+-character-secret> \
 CORS_ORIGINS=https://app.<domain> \
 FRONTEND_URL=https://app.<domain> \
 DB_DRIVER=sqlite \
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite \
 RESEND_API_KEY=<resend key> \
 FROM_EMAIL="TechIT <noreply@yourdomain.com>" \
-MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json \
-MCP_ALLOW_FILE_STORE=true \
-MCP_ALLOW_STUB_CONNECTORS=true \
+MCP_ENABLED=false \
+MCP_ALLOW_FILE_STORE=false \
+MCP_ALLOW_STUB_CONNECTORS=false \
+MCP_SEED_DEMO_ACTIVITY=false \
 MCP_APPROVAL_TTL_MS=900000 \
+GITHUB_CLIENT_ID=<production-client-id> \
+GITHUB_CLIENT_SECRET=<production-client-secret> \
+GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback \
+GITHUB_TOKEN_ENCRYPTION_KEY=<32+-character-secret> \
+AI_ROUTER_SETTLEMENT_SECRET=<different-32+-character-secret> \
+AI_USAGE_GRANT_SERVICE_SECRET=<different-32+-character-secret> \
+AI_EXECUTION_GRANT_SECRET=<different-32+-character-secret> \
 DATABASE_URL=postgres://...:5432/techit_msg \
 REDIS_URL=redis://...:6379 \
 ENABLE_DEV_TOKEN=0 \
@@ -125,16 +147,12 @@ export TOKEN=...
 curl https://api.<domain>/api/auth/session -H "Authorization: Bearer $TOKEN"
 # returns { user: { id, email, user_metadata } }
 
-# verify the MCP gate also accepts the same token
-curl https://api.<domain>/api/mcp/health -H "Authorization: Bearer $TOKEN"
-# returns { ok: true, workspaceId: "ws-acme" }
-
-# verify unauthenticated MCP is rejected
+# verify the MCP surface remains unavailable until its production datastore is ready
 curl -o /dev/null -w '%{http_code}\n' https://api.<domain>/api/mcp/health
-# 401
+# 404
 ```
 
-If `/api/mcp/health` returns 200 without a token, **stop and fix `resolveActor` wiring** before proceeding — that's a silent auth bypass on the plugin surface.
+If `/api/mcp/health` is exposed before the production datastore is ready, stop the deployment and restore `MCP_ENABLED=false`.
 
 ### 1.2 ai-router (Python FastAPI)
 
@@ -277,8 +295,7 @@ Before promoting a release, make one authenticated request with a known `X-Reque
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
 | BACKEND/messaging-backend exits with `ENABLE_DEV_TOKEN=1 is forbidden in production` | local smoke-test token endpoint enabled in prod | Set `ENABLE_DEV_TOKEN=0` or unset it. |
 | Frontend logs `401` on every call after a deploy | mismatched `JWT_SECRET` between BACKEND and ai-router/messaging | Compare secret values across services; **same string everywhere**. |
-| `/api/mcp/tools` returns 401 | client not forwarding Bearer, or JWT didn't include the verified actor shape | Inspect `Authorization` header; verify `resolveActor` in `backend/src/app.js` returns non-null for valid tokens. |
-| Audit log empty after restart | `MCP_DATA_FILE` not on a persistent volume | Point it at a real mount (e.g. `/var/lib/techit/plugins-mcp.json`); F3 file-store reads on boot. |
+| `/api/mcp/tools` returns 404 | expected while `MCP_ENABLED=false` | Keep disabled until transactional shared persistence and real connectors are deployed. |
 | Frontend shows React error on `/plugins` | `VITE_TECHIT_API` not set at build time | Rebuild with the env var; Vite inlines it at build, not runtime. |
 
 ---
@@ -289,18 +306,25 @@ Before promoting a release, make one authenticated request with a known `X-Reque
 DOMAIN=yourdomain.com
 EMAIL=smoke-$(date +%s)@x.test
 
-# 1. signup → token
+# 1. verify email, then signup → token
+curl -sS -X POST https://api.$DOMAIN/api/auth/send-otp \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\"}"
+read -r -p "OTP delivered to $EMAIL: " OTP_CODE
+EMAIL_VERIFICATION_TOKEN=$(curl -sS -X POST https://api.$DOMAIN/api/auth/verify-otp \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"code\":\"$OTP_CODE\"}" | jq -r .verificationToken)
+
 TOKEN=$(curl -sS -X POST https://api.$DOMAIN/api/auth/signup \
   -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"hunter2!hunter2!\",\"firstName\":\"S\",\"lastName\":\"T\",\"otpVerified\":true}" \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"hunter2!hunter2!\",\"firstName\":\"S\",\"lastName\":\"T\",\"emailVerificationToken\":\"$EMAIL_VERIFICATION_TOKEN\"}" \
   | jq -r .token)
 [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo FAIL signup; exit 1; }
 
-# 2. four services accept the same token
+# 2. authenticated production services accept the same token
 for url in \
   "https://api.$DOMAIN/api/auth/session" \
   "https://api.$DOMAIN/api/users/me" \
-  "https://api.$DOMAIN/api/mcp/health" \
   "https://ai.$DOMAIN/api/v1/dashboard/intelligence" \
   "https://messaging.$DOMAIN/api/v1/conversations"
 do
@@ -312,13 +336,16 @@ done
 # 3. unauthenticated requests are rejected
 for url in \
   "https://api.$DOMAIN/api/auth/session" \
-  "https://api.$DOMAIN/api/mcp/health" \
   "https://ai.$DOMAIN/api/v1/dashboard/intelligence"
 do
   code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
   echo "$code  $url (no token)"
   [ "$code" = "401" ] || { echo FAIL "expected 401 from $url"; exit 1; }
 done
+
+# 4. MCP remains disabled until its production datastore is complete
+[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health)" = "404" ] \
+  || { echo FAIL "MCP must remain disabled"; exit 1; }
 
 echo "ALL GREEN"
 ```
@@ -329,12 +356,14 @@ If this cheat sheet exits non-zero, **do not flip DNS to the new deploy.** Roll 
 
 ## 5. Known soft spots (worth tightening before scale)
 
-These are open hardening items as of 2026-06-21 — not deploy blockers, but log them in your tracker:
+These are open hardening items as of 2026-08-13. Treat the first four as
+deployment blockers for the affected surface:
 
-- **No rate limit on `/api/auth/signin` or `/api/auth/send-otp`** (security sweep A1, finding #3) — facilitates brute force / OTP enumeration. Add `express-rate-limit` (5/min for signin, 3/10min for send-otp per IP).
-- **ai-router reads `credits_remaining` + `team_size` from JWT claims** (sweep A1, #1, HIGH) — if the issuer is ever compromised, attacker can fabricate paywall bypass. Hydrate from `users` table keyed by `sub` instead.
-- **Plugins-MCP file-store has a ~1–5ms write race** (sweep A1, #2) — concurrent `/api/mcp/invoke` calls can lose audit rows. Migrate to SQLite or add a write lock before scaling horizontally.
-- **Plugins-MCP hardcodes `WS = 'ws-acme'`** as the workspaceId (sweep A1, #10) — fine while single-tenant; lift to env var or per-user claim when multi-tenant lands.
+- **Browser JWTs remain in `localStorage`** — migrate to short-lived access tokens in Secure, HttpOnly, SameSite cookies with CSRF protection.
+- **Shared HS256 signing** — replace with EdDSA or RS256, key IDs, rotation and JWKS verification.
+- **Plugins-MCP production persistence is not implemented** — keep `MCP_ENABLED=false` until a shared transactional store and real connectors land.
+- **WebSocket query-string tokens remain supported for legacy clients** — migrate clients to secure cookies or ephemeral single-use socket tickets, then remove the query fallback.
+- **Existing plaintext GitHub OAuth tokens** — reconnect accounts or run a controlled encryption migration before enabling GitHub features.
 
 ---
 

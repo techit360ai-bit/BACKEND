@@ -9,6 +9,7 @@ func clearConfigEnv(t *testing.T) {
 	for _, key := range []string{
 		"PORT", "DATABASE_URL", "REDIS_URL", "JWT_SECRET", "CORS_ORIGINS",
 		"ENVIRONMENT", "APP_ENV", "NODE_ENV", "ENABLE_DEV_TOKEN",
+		"JWT_ISSUER", "JWT_AUDIENCE",
 	} {
 		t.Setenv(key, "")
 	}
@@ -33,6 +34,9 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.EnableDevToken {
 		t.Error("EnableDevToken = true, want false")
 	}
+	if cfg.CORSOrigins != "" {
+		t.Errorf("CORSOrigins = %q, want empty development default", cfg.CORSOrigins)
+	}
 }
 
 func TestLoadRequiresJWTSecret(t *testing.T) {
@@ -45,12 +49,15 @@ func TestLoadRequiresJWTSecret(t *testing.T) {
 
 func TestLoadOverrides(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("JWT_SECRET", "x")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("PORT", "9999")
 	t.Setenv("DATABASE_URL", "postgres://u@h/db")
 	t.Setenv("REDIS_URL", "redis://localhost:6379")
 	t.Setenv("ENVIRONMENT", "staging")
 	t.Setenv("ENABLE_DEV_TOKEN", "1")
+	t.Setenv("CORS_ORIGINS", "https://app.example.com")
+	t.Setenv("JWT_ISSUER", "techit-backend")
+	t.Setenv("JWT_AUDIENCE", "techit-platform")
 	cfg, _ := Load()
 	if cfg.Port != "9999" || cfg.DatabaseURL != "postgres://u@h/db" || cfg.RedisURL != "redis://localhost:6379" {
 		t.Errorf("overrides not applied: %+v", cfg)
@@ -62,11 +69,14 @@ func TestLoadOverrides(t *testing.T) {
 
 func TestLoadRejectsDevTokenInProduction(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("JWT_SECRET", "x")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("ENVIRONMENT", "production")
 	t.Setenv("DATABASE_URL", "postgres://u@h/db")
 	t.Setenv("REDIS_URL", "redis://h:6379")
 	t.Setenv("ENABLE_DEV_TOKEN", "1")
+	t.Setenv("CORS_ORIGINS", "https://app.example.com")
+	t.Setenv("JWT_ISSUER", "techit-backend")
+	t.Setenv("JWT_AUDIENCE", "techit-platform")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error when ENABLE_DEV_TOKEN is on in production")
 	}
@@ -76,9 +86,12 @@ func TestLoadRequiresDurableStoresOutsideDevelopment(t *testing.T) {
 	for _, environment := range []string{"staging", "production"} {
 		t.Run(environment+" database", func(t *testing.T) {
 			clearConfigEnv(t)
-			t.Setenv("JWT_SECRET", "x")
+			t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 			t.Setenv("ENVIRONMENT", environment)
 			t.Setenv("REDIS_URL", "redis://h:6379")
+			t.Setenv("CORS_ORIGINS", "https://app.example.com")
+			t.Setenv("JWT_ISSUER", "techit-backend")
+			t.Setenv("JWT_AUDIENCE", "techit-platform")
 			if _, err := Load(); err == nil || err.Error() != "DATABASE_URL is required outside development and test" {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -86,12 +99,41 @@ func TestLoadRequiresDurableStoresOutsideDevelopment(t *testing.T) {
 
 		t.Run(environment+" redis", func(t *testing.T) {
 			clearConfigEnv(t)
-			t.Setenv("JWT_SECRET", "x")
+			t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 			t.Setenv("ENVIRONMENT", environment)
 			t.Setenv("DATABASE_URL", "postgres://u@h/db")
+			t.Setenv("CORS_ORIGINS", "https://app.example.com")
+			t.Setenv("JWT_ISSUER", "techit-backend")
+			t.Setenv("JWT_AUDIENCE", "techit-platform")
 			if _, err := Load(); err == nil || err.Error() != "REDIS_URL is required outside development and test" {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestLoadRejectsWildcardCORSOutsideDevelopment(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("DATABASE_URL", "postgres://u@h/db")
+	t.Setenv("REDIS_URL", "redis://h:6379")
+	t.Setenv("CORS_ORIGINS", "*")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected wildcard CORS to be rejected")
+	}
+}
+
+func TestLoadRejectsInsecureCORSOutsideDevelopment(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("DATABASE_URL", "postgres://u@h/db")
+	t.Setenv("REDIS_URL", "redis://h:6379")
+	t.Setenv("JWT_ISSUER", "techit-backend")
+	t.Setenv("JWT_AUDIENCE", "techit-platform")
+	t.Setenv("CORS_ORIGINS", "http://app.example.com")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected insecure CORS origin to be rejected")
 	}
 }

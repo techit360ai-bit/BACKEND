@@ -1,15 +1,27 @@
 import { Router } from 'express'
 import { adminLogin, adminMe, adminList, adminCreate, adminUpdate, adminDelete } from '../controllers/adminAuthController.js'
-import { requireAuth } from '../middlewares/auth.js'
+import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 
 const router = Router()
 
-router.post('/login', adminLogin)
-router.get('/me', requireAuth, requireAdmin, adminMe)
-router.get('/users', requireAuth, requireSuperAdmin, adminList)
-router.post('/users', requireAuth, requireSuperAdmin, adminCreate)
-router.patch('/users/:id', requireAuth, requireSuperAdmin, adminUpdate)
-router.delete('/users/:id', requireAuth, requireSuperAdmin, adminDelete)
+const adminLoginLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: req => ipKeyGenerator(req.ip),
+  validate: { trustProxy: true, xForwardedForHeader: true },
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Too many admin sign-in attempts. Please try again later.' },
+})
+
+router.post('/login', adminLoginLimit, adminLogin)
+router.get('/me', requireAdminAuth, requireAdmin, adminMe)
+router.get('/users', requireAdminAuth, requireSuperAdmin, adminList)
+router.post('/users', requireAdminAuth, requireSuperAdmin, adminCreate)
+router.patch('/users/:id', requireAdminAuth, requireSuperAdmin, adminUpdate)
+router.delete('/users/:id', requireAdminAuth, requireSuperAdmin, adminDelete)
 
 export default router

@@ -12,6 +12,8 @@ type Config struct {
 	DatabaseURL    string
 	RedisURL       string
 	JWTSecret      string
+	JWTIssuer      string
+	JWTAudience    string
 	CORSOrigins    string
 	Environment    string
 	EnableDevToken bool
@@ -50,7 +52,9 @@ func Load() (Config, error) {
 		DatabaseURL:    databaseURL,
 		RedisURL:       redisURL,
 		JWTSecret:      os.Getenv("JWT_SECRET"),
-		CORSOrigins:    envOr("CORS_ORIGINS", "*"),
+		JWTIssuer:      os.Getenv("JWT_ISSUER"),
+		JWTAudience:    os.Getenv("JWT_AUDIENCE"),
+		CORSOrigins:    envOr("CORS_ORIGINS", ""),
 		Environment:    environment,
 		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1",
 
@@ -60,6 +64,26 @@ func Load() (Config, error) {
 	}
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")
+	}
+	if requiresDurableStores(environment) && len(cfg.JWTSecret) < 32 {
+		return Config{}, errors.New("JWT_SECRET must be at least 32 characters outside development and test")
+	}
+	if requiresDurableStores(environment) && (cfg.JWTIssuer == "" || cfg.JWTAudience == "") {
+		return Config{}, errors.New("JWT_ISSUER and JWT_AUDIENCE are required outside development and test")
+	}
+	if requiresDurableStores(environment) && strings.TrimSpace(cfg.CORSOrigins) == "" {
+		return Config{}, errors.New("CORS_ORIGINS is required outside development and test")
+	}
+	if requiresDurableStores(environment) {
+		for _, origin := range strings.Split(cfg.CORSOrigins, ",") {
+			origin = strings.TrimSpace(origin)
+			if origin == "*" {
+				return Config{}, errors.New("CORS_ORIGINS cannot be wildcard outside development and test")
+			}
+			if !strings.HasPrefix(origin, "https://") {
+				return Config{}, errors.New("CORS_ORIGINS must use https outside development and test")
+			}
+		}
 	}
 	if cfg.EnableDevToken && strings.EqualFold(cfg.Environment, "production") {
 		return Config{}, errors.New("ENABLE_DEV_TOKEN=1 is forbidden in production")

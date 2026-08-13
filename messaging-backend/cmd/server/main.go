@@ -64,7 +64,7 @@ func main() {
 	demoSvc := demo.New(pg.Demo)
 	qaSvc := qa.New(pg.QA, demoSvc, h)
 	lkSvc := livekit.New(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitURL)
-	ver := auth.NewVerifier(cfg.JWTSecret)
+	ver := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
 
 	gw := ws.New(ws.Deps{
 		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Channels: chSvc, Presence: presSvc,
