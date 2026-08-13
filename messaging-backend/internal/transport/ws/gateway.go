@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -44,7 +45,14 @@ const (
 
 // Handle is the http.HandlerFunc for the WS endpoint.
 func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
+	// Query-string tokens are routinely logged by proxies and browser history.
+	// Prefer the Authorization header; retain the query form only for legacy
+	// clients until the coordinated frontend migration is complete.
+	token := r.Header.Get("Authorization")
+	token = strings.TrimPrefix(token, "Bearer ")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
 	claims, err := g.d.Verifier.Verify(token)
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)

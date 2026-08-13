@@ -345,7 +345,9 @@ describe('POST /api/auth/send-otp', () => {
     const written = writeDb.mock.calls[0][0]
     expect(written.otps).toHaveLength(1)
     expect(written.otps[0].email).toBe('otp@example.com')
-    expect(written.otps[0].code).toMatch(/^\d{6}$/)
+    expect(written.otps[0].code).toBeUndefined()
+    expect(written.otps[0].codeHmac).toMatch(/^[a-f0-9]{64}$/)
+    expect(written.otps[0].codeHash).toBeUndefined()
   })
 
   it('does not persist an OTP when email delivery fails', async () => {
@@ -814,5 +816,19 @@ describe('Password recovery', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/invalid or expired/i)
+  })
+
+  it('rejects a weak replacement password before consuming the token', async () => {
+    readDb.mockReturnValue(makeDb({ users: [makeUser()], passwordResets: [] }))
+
+    const res = await request(app).post('/api/auth/reset-password').send({
+      email: 'alice@example.com',
+      token: 'reset-token',
+      password: 'short',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/at least 8 characters/i)
+    expect(updateDb).not.toHaveBeenCalled()
   })
 })

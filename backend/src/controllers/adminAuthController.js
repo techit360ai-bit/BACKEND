@@ -6,21 +6,32 @@ import { createId, nowIso } from '../utils/api.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
+const JWT_ISSUER = process.env.JWT_ISSUER
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
 
-const INITIAL_SUPER_ADMIN_EMAIL = process.env.ADMIN_SUPER_EMAIL || 'superadmin@techit.dev'
-const INITIAL_SUPER_ADMIN_PASSWORD = process.env.ADMIN_SUPER_PASSWORD || 'TechIT-Super-2026!'
+const INITIAL_SUPER_ADMIN_EMAIL = process.env.ADMIN_SUPER_EMAIL
+const INITIAL_SUPER_ADMIN_PASSWORD = process.env.ADMIN_SUPER_PASSWORD
+const ADMIN_PASSWORD_MIN_LENGTH = 14
 
 function makeAdminToken(userId, role) {
   return jwt.sign(
     { sub: userId, role, workspaceId: `admin-${userId}` },
     JWT_SECRET,
-    { expiresIn: JWT_EXPIRES_IN },
+    {
+      expiresIn: JWT_EXPIRES_IN,
+      ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
+      ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
+    },
   )
 }
 
 function ensureSuperAdmin(db) {
   if (!db.adminUsers) db.adminUsers = []
+  if (!INITIAL_SUPER_ADMIN_EMAIL || !INITIAL_SUPER_ADMIN_PASSWORD) return
+  if (INITIAL_SUPER_ADMIN_PASSWORD.length < ADMIN_PASSWORD_MIN_LENGTH) {
+    throw new Error(`ADMIN_SUPER_PASSWORD must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters`)
+  }
   const existing = db.adminUsers.find(u => u.email === INITIAL_SUPER_ADMIN_EMAIL)
   if (!existing) {
     const hash = bcrypt.hashSync(INITIAL_SUPER_ADMIN_PASSWORD, SALT_ROUNDS)
@@ -47,7 +58,11 @@ export function adminLogin(req, res) {
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
   const db = readDb()
-  ensureSuperAdmin(db)
+  try {
+    ensureSuperAdmin(db)
+  } catch {
+    return res.status(503).json({ error: 'Admin bootstrap configuration is invalid' })
+  }
 
   const admin = (db.adminUsers || []).find(u => u.email === email && u.active !== false)
   if (!admin) return res.status(401).json({ error: 'Invalid credentials' })
@@ -113,7 +128,9 @@ export function adminCreate(req, res) {
 
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' })
   if (!isAdminRole(role)) return res.status(400).json({ error: 'Invalid admin role' })
-  if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  if (password.length < ADMIN_PASSWORD_MIN_LENGTH) {
+    return res.status(400).json({ error: `Password must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters` })
+  }
 
   const db = readDb()
   if (!db.adminUsers) db.adminUsers = []
@@ -163,8 +180,12 @@ export function adminUpdate(req, res) {
   if (req.body.lastName) admin.lastName = String(req.body.lastName).trim()
   if (Array.isArray(req.body.permissions)) admin.permissions = req.body.permissions
   if (typeof req.body.active === 'boolean') admin.active = req.body.active
-  if (req.body.password && req.body.password.length >= 8) {
-    admin.passwordHash = bcrypt.hashSync(req.body.password, SALT_ROUNDS)
+  if (req.body.password !== undefined) {
+    const password = String(req.body.password)
+    if (password.length < ADMIN_PASSWORD_MIN_LENGTH) {
+      return res.status(400).json({ error: `Password must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters` })
+    }
+    admin.passwordHash = bcrypt.hashSync(password, SALT_ROUNDS)
   }
   admin.updatedAt = nowIso()
   writeDb(db)

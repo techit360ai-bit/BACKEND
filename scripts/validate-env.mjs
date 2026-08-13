@@ -123,17 +123,42 @@ function validateNodeBackend(env) {
   requireAbsolutePath(env, "SQLITE_DB_PATH");
   requireValue(env, "RESEND_API_KEY");
   requireProductionEmailSender(env, "FROM_EMAIL");
-  requireAbsolutePath(env, "MCP_DATA_FILE");
+  for (const name of ["JWT_ISSUER", "JWT_AUDIENCE"]) requireValue(env, name);
+  for (const name of ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"]) {
+    const value = requireValue(env, name);
+    if (/test-github|replace/i.test(value)) fail(`${name} must be configured for production`);
+  }
+  requireUrl(env, "GITHUB_REDIRECT_URI");
+  for (const name of [
+    "GITHUB_TOKEN_ENCRYPTION_KEY",
+    "OTP_HASH_SECRET",
+    "AI_ROUTER_SETTLEMENT_SECRET",
+    "AI_USAGE_GRANT_SERVICE_SECRET",
+    "AI_EXECUTION_GRANT_SECRET",
+  ]) {
+    const value = requireValue(env, name);
+    if (value.length < 32 || /change|replace|test-secret/i.test(value)) {
+      fail(`${name} must be at least 32 characters and non-placeholder`);
+    }
+  }
+  if (requireValue(env, "MCP_ENABLED") !== "false") {
+    fail("MCP_ENABLED must remain false until transactional shared persistence is implemented");
+  }
 }
 
 function validatePluginsMcp(env) {
   assertStrongSharedSecret(env);
-  requireAbsolutePath(env, "MCP_DATA_FILE");
-  if (requireValue(env, "MCP_ALLOW_FILE_STORE") !== "true") {
-    fail("MCP_ALLOW_FILE_STORE=true must be explicit for the current single-replica file store");
+  if (requireValue(env, "MCP_ENABLED") !== "false") {
+    fail("MCP_ENABLED must remain false in production/staging");
   }
-  if (requireValue(env, "MCP_ALLOW_STUB_CONNECTORS") !== "true") {
-    fail("MCP_ALLOW_STUB_CONNECTORS=true must be explicit until real connector wiring is deployed");
+  if (requireValue(env, "MCP_ALLOW_FILE_STORE") !== "false") {
+    fail("MCP_ALLOW_FILE_STORE must be false in production/staging");
+  }
+  if (requireValue(env, "MCP_ALLOW_STUB_CONNECTORS") !== "false") {
+    fail("MCP_ALLOW_STUB_CONNECTORS must be false in production/staging");
+  }
+  if (requireValue(env, "MCP_SEED_DEMO_ACTIVITY") !== "false") {
+    fail("MCP_SEED_DEMO_ACTIVITY must be false in production/staging");
   }
   const ttl = Number(requireValue(env, "MCP_APPROVAL_TTL_MS"));
   if (!Number.isInteger(ttl) || ttl < 60_000) {
@@ -146,6 +171,8 @@ function validateMessagingBackend(env) {
     fail("ENVIRONMENT must be production for messaging-backend");
   }
   assertStrongSharedSecret(env);
+  requireValue(env, "JWT_ISSUER");
+  requireValue(env, "JWT_AUDIENCE");
   requireValue(env, "PORT");
   requireUrl(env, "DATABASE_URL", ["postgres:", "postgresql:"]);
   requireUrl(env, "REDIS_URL", ["redis:", "rediss:"]);

@@ -12,13 +12,23 @@
         "NODE_ENV",
         "PORT",
         "JWT_SECRET",
+        "JWT_ISSUER",
+        "JWT_AUDIENCE",
+        "OTP_HASH_SECRET",
         "CORS_ORIGINS",
         "FRONTEND_URL",
         "DB_DRIVER",
         "SQLITE_DB_PATH",
         "RESEND_API_KEY",
         "FROM_EMAIL",
-        "MCP_DATA_FILE"
+        "MCP_ENABLED",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GITHUB_REDIRECT_URI",
+        "GITHUB_TOKEN_ENCRYPTION_KEY",
+        "AI_ROUTER_SETTLEMENT_SECRET",
+        "AI_USAGE_GRANT_SERVICE_SECRET",
+        "AI_EXECUTION_GRANT_SECRET"
       ],
       "healthCheck": {
         "method": "GET",
@@ -39,20 +49,20 @@
       "requiredEnv": [
         "NODE_ENV",
         "JWT_SECRET",
-        "MCP_DATA_FILE",
+        "MCP_ENABLED",
         "MCP_ALLOW_FILE_STORE",
         "MCP_ALLOW_STUB_CONNECTORS",
+        "MCP_SEED_DEMO_ACTIVITY",
         "MCP_APPROVAL_TTL_MS"
       ],
       "healthCheck": {
         "method": "GET",
         "path": "/api/mcp/health",
-        "authenticatedExpectedStatus": 200,
-        "unauthenticatedExpectedStatus": 401
+        "expectedStatus": 404,
+        "note": "Production-disabled until shared transactional persistence is implemented"
       },
       "dependencies": [
-        "node-backend",
-        "persistent-volume"
+        "node-backend"
       ]
     },
     {
@@ -65,6 +75,8 @@
         "ENVIRONMENT",
         "PORT",
         "JWT_SECRET",
+        "JWT_ISSUER",
+        "JWT_AUDIENCE",
         "DATABASE_URL",
         "REDIS_URL",
         "CORS_ORIGINS",

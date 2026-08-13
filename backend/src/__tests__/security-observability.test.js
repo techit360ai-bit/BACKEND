@@ -101,6 +101,29 @@ describe('security and observability gates', () => {
     expect(res.body.error).toMatch(/invalid or expired/i)
   })
 
+  it('sets baseline browser security headers', async () => {
+    const res = await request(app).get('/')
+    expect(res.headers['x-content-type-options']).toBe('nosniff')
+    expect(res.headers['x-frame-options']).toBe('DENY')
+    expect(res.headers['referrer-policy']).toBe('strict-origin-when-cross-origin')
+  })
+
+  it('rejects a normal user token carrying forged admin claims on admin routes', async () => {
+    readDb.mockReturnValue({
+      users: [{ id: 'user-1', email: 'alice@example.com' }],
+      profiles: [{ id: 'user-1', role: 'founder' }],
+      adminUsers: [],
+    })
+    const forgedAdminClaim = token({ role: 'super_admin' })
+
+    const res = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${forgedAdminClaim}`)
+
+    expect(res.status).toBe(401)
+    expect(res.body.error).toMatch(/admin not found or inactive/i)
+  })
+
   it('returns and logs the same request id for unhandled errors', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     readDb.mockImplementation(() => {

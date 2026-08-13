@@ -35,7 +35,7 @@ try {
     "X-Request-Id",
     "http_request",
     "http_error",
-    "MCP_DATA_FILE",
+    "MCP_ENABLED=false",
     "db:rollback:dry-run",
     "do not flip DNS",
   ]) {
