@@ -1,0 +1,66 @@
+name: ai
+version: 0.1.0
+displayName: AI Harness
+
+auth:
+  kind: api_key
+  scopes:
+    - ai:invoke
+
+capabilities:
+  read: true
+  write: false
+  execute: true
+
+resources:
+  - type: generation
+    artifactType: code
+
+mcp:
+  enabled: true
+  tools:
+    - name: generate_code
+      description: Generate code from a natural-language prompt via the AI harness.
+      requiredRole: editor
+      input_schema:
+        type: object
+        properties:
+          prompt: { type: string }
+          language: { type: string }
+        required: [prompt]
+
+    - name: review_code
+      description: Review a code snippet and return issues, a summary, and a score.
+      requiredRole: editor
+      input_schema:
+        type: object
+        properties:
+          code: { type: string }
+          language: { type: string }
+          context: { type: string }
+        required: [code]
+
+    - name: deep_research
+      description: Run a multi-source research pass and return a synthesized summary.
+      requiredRole: editor
+      input_schema:
+        type: object
+        properties:
+          query: { type: string }
+          depth: { type: string }
+        required: [query]
+
+    - name: run_sandbox
+      description: >-
+        Execute a code snippet in an isolated sandbox. Destructive — routed
+        through the approval gate. Always simulated in this MVP (no real
+        execution).
+      requiredRole: admin
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          language: { type: string }
+          code: { type: string }
+          approvalRequestId: { type: string }
+        required: [language, code]

@@ -1,0 +1,75 @@
+name: notion
+version: 0.1.0
+displayName: Notion
+
+auth:
+  kind: api_key
+  scopes: []
+
+capabilities:
+  read: true
+  write: true
+  execute: true
+
+resources:
+  - type: page
+    artifactType: document
+  - type: database
+    artifactType: dataset
+
+events:
+  transport: poller
+  pollIntervalSeconds: 300
+  types: []
+
+mcp:
+  enabled: true
+  tools:
+    - name: search
+      description: Search pages and databases the connected integration can access.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          query: { type: string }
+        required: []
+
+    - name: get_page
+      description: Fetch a page's title, properties, and first blocks of content.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          page_id: { type: string }
+        required: [page_id]
+
+    - name: create_page
+      description: Create a new page under a parent page or database. Destructive — routed through the approval gate.
+      requiredRole: editor
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          parent_id: { type: string }
+          title: { type: string }
+          content: { type: string }
+          approvalRequestId: { type: string }
+        required: [parent_id, title]
+
+    - name: append_blocks
+      description: Append content blocks to an existing page. Destructive — routed through the approval gate.
+      requiredRole: editor
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          page_id: { type: string }
+          blocks:
+            type: array
+            items:
+              type: object
+              properties:
+                type: { type: string }
+                text: { type: string }
+          approvalRequestId: { type: string }
+        required: [page_id, blocks]
