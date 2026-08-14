@@ -1,4 +1,4 @@
-import { createId, nowIso } from '../utils/api.js'
+import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 
@@ -1425,6 +1425,94 @@ export function genericList(userId, name) {
   return collection(db, name).filter(row => isRecordVisible(row, userId)).sort(byNewest)
 }
 
+function collaborationText(value, maxLength) {
+  if (typeof value !== 'string') return ''
+  return value.replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function collaborationNumber(value, min, max) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : min
+}
+
+function collaborationList(value, maxItems = 12, maxLength = 60) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(item => collaborationText(item, maxLength)).filter(Boolean))].slice(0, maxItems)
+}
+
+export function createCollaborationCall(userId, body) {
+  return updateDb(db => {
+    const projectId = collaborationText(body.projectId, 100)
+    const company = collaborationText(body.company || body.projectName, 120)
+    const summary = collaborationText(body.summary, 500)
+    const scope = collaborationText(body.scope, 1000)
+    const role = collaborationText(body.role || body.requestedRole, 80)
+    const skills = collaborationList(body.skills || body.requiredSkills)
+    const audienceRoles = collaborationList(body.audienceRoles, 3, 24)
+      .filter(audience => ['collaborator', 'founder', 'explorer'].includes(audience))
+    const compensationMode = ['equity-heavy', 'equity-cash', 'cash-only'].includes(body.compensationMode)
+      ? body.compensationMode
+      : 'equity-heavy'
+    const equityPercent = compensationMode === 'cash-only'
+      ? 0
+      : collaborationNumber(body.equityPercent, 0, 30)
+    const cashCompMonthly = compensationMode === 'equity-heavy'
+      ? 0
+      : collaborationNumber(body.cashCompMonthly, 0, 1_000_000)
+    const requestedDeadline = new Date(collaborationText(body.applyDeadline, 40))
+    const applyDeadline = Number.isFinite(requestedDeadline.getTime()) && requestedDeadline.getTime() > Date.now()
+      ? requestedDeadline.toISOString()
+      : new Date(Date.now() + 30 * DAY_MS).toISOString()
+
+    if (!projectId || !company || !summary || !scope || !role) return { ok: false, error: 'collaboration_call_fields_required' }
+    if (audienceRoles.length === 0) return { ok: false, error: 'audience_required' }
+    if (compensationMode !== 'cash-only' && equityPercent <= 0) return { ok: false, error: 'ownership_proposal_required' }
+    if ((compensationMode === 'equity-cash' || compensationMode === 'cash-only') && cashCompMonthly <= 0) {
+      return { ok: false, error: 'cash_support_required' }
+    }
+
+    const existing = collection(db, 'opportunities').find(row =>
+      row.ownerId === userId &&
+      row.type === 'collaboration' &&
+      row.projectId === projectId &&
+      row.role === role &&
+      row.status === 'open'
+    )
+    if (existing) return { ok: true, opportunity: existing, created: false }
+
+    const founder = collection(db, 'profiles').find(profile => profile.id === userId)
+    const opportunity = insertOwned(db, 'opportunities', userId, {
+      type: 'collaboration',
+      visibility: 'public',
+      status: 'open',
+      source: 'incubation_validation',
+      projectId,
+      title: `${role} for ${company}`.slice(0, 160),
+      company,
+      organizerName: userName(founder, company),
+      summary,
+      description: summary,
+      scope,
+      role,
+      skills,
+      compensationMode,
+      equityPercent,
+      cashCompMonthly,
+      timeCommitment: collaborationText(body.timeCommitment, 80),
+      timeline: collaborationText(body.timeline, 40),
+      commitmentStyle: collaborationText(body.commitmentStyle, 24),
+      industry: collaborationText(body.industry, 80),
+      stage: collaborationText(body.stage, 40),
+      tags: collaborationList(body.tags),
+      audienceRoles,
+      applyDeadline,
+      publishedAt: nowIso(),
+      poster: '',
+    }, 'opp')
+    return { ok: true, opportunity, created: true }
+  })
+}
+
 export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
   return updateDb(db => insertOwned(db, name, userId, body, prefix, field))
 }
@@ -1592,6 +1680,7 @@ export function applyToOpportunity(userId, opportunityId, body) {
   return updateDb(db => {
     const opportunity = collection(db, 'opportunities').find(row => row.id === opportunityId)
     if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
+    if (opportunity.ownerId === userId) return { ok: false, error: 'self_application_not_allowed' }
 
     const existing = collection(db, 'opportunityApplications').find(row =>
       row.applicantId === userId && row.opportunityId === opportunityId

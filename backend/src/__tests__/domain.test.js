@@ -477,6 +477,78 @@ describe('domain live-data endpoints', () => {
     expect(db.opportunities[0].ownerId).toBe('user-uuid-1')
   })
 
+  it('publishes an ownership-first collaboration call to selected role hubs', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        skills: ['Node.js', 'Postgres'],
+        compensationMode: 'equity-heavy',
+        equityPercent: 4,
+        cashCompMonthly: 5000,
+        audienceRoles: ['collaborator', 'founder', 'explorer', 'admin'],
+        timeCommitment: '20 hrs/week',
+      })
+
+    expect(res.status).toBe(201)
+    expect(res.body.opportunity).toMatchObject({
+      type: 'collaboration',
+      visibility: 'public',
+      ownerId: 'user-uuid-1',
+      compensationMode: 'equity-heavy',
+      equityPercent: 4,
+      cashCompMonthly: 0,
+      audienceRoles: ['collaborator', 'founder', 'explorer'],
+    })
+
+    const duplicate = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        compensationMode: 'equity-heavy',
+        equityPercent: 4,
+        audienceRoles: ['collaborator'],
+      })
+    expect(duplicate.status).toBe(200)
+    expect(db.opportunities).toHaveLength(1)
+  })
+
+  it('rejects an ownership-first call with no ownership proposal', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        compensationMode: 'equity-heavy',
+        equityPercent: 0,
+        audienceRoles: ['collaborator'],
+      })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('ownership_proposal_required')
+    expect(db.opportunities).toHaveLength(0)
+  })
+
   it('aggregates hackathon command-center metrics from persisted team activity', async () => {
     const db = makeDb()
     readDb.mockReturnValue(db)

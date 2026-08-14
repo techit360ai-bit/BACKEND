@@ -3,6 +3,7 @@ import {
   collaboratorEarnings,
   collaboratorEquity,
   countersignContract,
+  createCollaborationCall,
   createAnalysis,
   createContract,
   createHackathon,
@@ -465,6 +466,12 @@ export function walletPaymentIntent(req, res) {
 
 export function genericListGet(req, res) {
   return res.json({ [req.responseKey]: genericList(req.user.id, req.collectionName) })
+}
+
+export function collaborationCallCreate(req, res) {
+  const result = createCollaborationCall(req.user.id, req.body)
+  if (!result.ok) return res.status(400).json({ error: result.error })
+  return res.status(result.created === false ? 200 : 201).json({ opportunity: result.opportunity })
 }
 
 export function genericCreatePost(req, res) {

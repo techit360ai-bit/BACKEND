@@ -3,6 +3,7 @@ import {
   analyses,
   analysisCreate,
   analysisGet,
+  collaborationCallCreate,
   collaboratorScores,
   contractCountersign,
   contractCreate,
@@ -222,6 +223,7 @@ router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice',
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
+router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
 router.post('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericCreatePost)
 router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericPatchItem)
 router.post('/opportunities/:id/apply', opportunityApply)

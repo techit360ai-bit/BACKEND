@@ -14,6 +14,7 @@ function toNotification(n, db) {
     avatar: n.avatar || avatarGradient(n.actorId || n.author || n.id),
     timeAgo: timeAgo(n.createdAt),
     linkTo: n.linkTo || '/feed',
+    metadata: n.metadata && typeof n.metadata === 'object' ? n.metadata : undefined,
     createdAt: n.createdAt,
   }
 }
