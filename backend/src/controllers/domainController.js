@@ -15,6 +15,7 @@ import {
   createPaymentIntent,
   createProject,
   createWorkspaceCollectionItem,
+  createWorkspaceInvitation,
   genericCreate,
   genericList,
   genericPatch,
@@ -51,7 +52,12 @@ import {
   listProjects,
   listWatchlist,
   listWorkspaceCollection,
+  listWorkspaceMembers,
   patchWorkspaceCollectionItem,
+  acceptWorkspaceInvitation,
+  declineWorkspaceInvitation,
+  getWorkspaceInvitation,
+  removeWorkspaceMember,
   listWorkspaces,
   logHackathonCheckIn,
   organizationDashboard,
@@ -139,6 +145,48 @@ export function workspaceProvision(req, res) {
 export function workspaceContextGet(req, res) {
   const result = workspaceContext(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
+  return res.json(result)
+}
+
+export function workspaceInvitationCreate(req, res) {
+  const result = createWorkspaceInvitation(req.user.id, req.params.workspaceId, req.body)
+  if (!result.ok) {
+    const status = ['workspace_not_found', 'collaborator_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json({ error: result.error })
+  }
+  return created(res, result)
+}
+
+export function workspaceInvitationGet(req, res) {
+  const invitation = getWorkspaceInvitation(req.user.id, req.params.invitationId)
+  if (!invitation) return notFound(res, 'Invitation not found')
+  return res.json({ invitation })
+}
+
+export function workspaceInvitationAccept(req, res) {
+  const result = acceptWorkspaceInvitation(req.user.id, req.params.invitationId)
+  if (!result.ok) {
+    const status = ['invitation_not_found', 'workspace_not_found'].includes(result.error) ? 404 : 400
+    return res.status(status).json({ error: result.error })
+  }
+  return res.json(result)
+}
+
+export function workspaceInvitationDecline(req, res) {
+  const result = declineWorkspaceInvitation(req.user.id, req.params.invitationId)
+  if (!result.ok) return res.status(404).json({ error: result.error })
+  return res.json(result)
+}
+
+export function workspaceMembersGet(req, res) {
+  const result = listWorkspaceMembers(req.user.id, req.params.workspaceId)
+  if (!result) return notFound(res, 'Workspace not found')
+  return res.json(result)
+}
+
+export function workspaceMemberDelete(req, res) {
+  const result = removeWorkspaceMember(req.user.id, req.params.workspaceId, req.params.memberId)
+  if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
 }
 

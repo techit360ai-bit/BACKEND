@@ -30,6 +30,8 @@ const INITIAL = {
   haviThreads: [],
   projects: [],
   workspaces: [],
+  workspaceInvitations: [],
+  workspaceMembers: [],
   projectAnalyses: [],
   equityGrants: [],
   dilutionEvents: [],
