@@ -1,0 +1,67 @@
+name: figma
+version: 0.1.0
+displayName: Figma
+
+auth:
+  kind: api_key
+  scopes: []
+
+capabilities:
+  read: true
+  write: true
+  execute: true
+
+resources:
+  - type: file
+    artifactType: design
+  - type: comment
+    artifactType: design
+
+events:
+  transport: poller
+  pollIntervalSeconds: 300
+  types: []
+
+mcp:
+  enabled: true
+  tools:
+    - name: get_file
+      description: Get a Figma file's name, last-modified time, and top-level pages/frames.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          file_key: { type: string }
+        required: [file_key]
+
+    - name: export_frame
+      description: Render a frame/node to an image URL.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          file_key: { type: string }
+          node_id: { type: string }
+        required: [file_key, node_id]
+
+    - name: list_comments
+      description: List comments on a Figma file.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          file_key: { type: string }
+        required: [file_key]
+
+    - name: post_comment
+      description: Post a comment on a Figma file. Destructive — routed through the approval gate.
+      requiredRole: editor
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          file_key: { type: string }
+          message: { type: string }
+          node_id: { type: string }
+          approvalRequestId: { type: string }
+        required: [file_key, message]
