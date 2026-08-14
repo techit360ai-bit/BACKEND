@@ -14,15 +14,19 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "mcp:inspect": "tsx packages/mcp-client/src/inspector.ts",
+    "mcp:migrate": "tsx scripts/migrate-postgres.mts",
     "demo": "tsx scripts/demo.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/pg": "^8.21.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.9"
   },
   "dependencies": {
+    "pg": "^8.23.0",
+    "viem": "^2.55.15",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"
   }

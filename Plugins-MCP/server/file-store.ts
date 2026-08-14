@@ -183,6 +183,10 @@ export class FileApprovalStore implements ApprovalStore {
   listForWorkspace(workspaceId: string): ApprovalRequest[] {
     return [...this.requests.values()].filter((req) => req.workspaceId === workspaceId);
   }
+
+  allApprovals(): ApprovalRequest[] {
+    return [...this.requests.values()];
+  }
 }
 
 export class FileContributionSink implements ContributionSink {
@@ -201,5 +205,9 @@ export class FileContributionSink implements ContributionSink {
 
   eventsForWorkspace(workspaceId: string): ContributionEvent[] {
     return this.events.filter((event) => event.workspaceId === workspaceId);
+  }
+
+  allEvents(): ContributionEvent[] {
+    return this.events.slice();
   }
 }

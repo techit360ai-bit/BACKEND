@@ -109,7 +109,9 @@ export function mcpRoleFromClaim(role) {
   if (role === 'collaborator') return 'editor'
   return 'viewer'
 }
-const MCP_ENABLED = process.env.MCP_ENABLED !== 'false'
+// Fail closed: MCP is exposed only by an explicit opt-in. Production contract
+// validation requires all datastore, encryption, and real-connector settings.
+const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
 if (MCP_ENABLED) {
   await mountTechitApi(app, '/api/mcp', {
     resolveActor(req) {

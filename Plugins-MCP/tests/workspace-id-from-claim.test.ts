@@ -38,7 +38,7 @@ test('explicit workspaceId from the actor reaches audit + on-disk store', async 
   });
 
   // The most recent audit entry (after the build-time seed) carries our workspace.
-  const entries = svc.audit() as Array<{ workspaceId: string; actor: string }>;
+  const entries = await svc.audit() as Array<{ workspaceId: string; actor: string }>;
   const last = entries[entries.length - 1];
   expect(last.workspaceId).toBe('ws-customer-42');
   expect(last.actor).toBe('user-42');
@@ -66,7 +66,7 @@ test('two callers with different workspaceIds produce two distinct audit rows', 
     workspaceId: 'ws-tenant-b',
   });
 
-  const entries = svc.audit() as Array<{ workspaceId: string }>;
+  const entries = await svc.audit() as Array<{ workspaceId: string }>;
   const tail = entries.slice(-2);
   expect(tail.map(e => e.workspaceId).sort()).toEqual(['ws-tenant-a', 'ws-tenant-b'].sort());
 });
@@ -77,7 +77,7 @@ test('omitted workspaceId falls back to the seed default (no behavior break)', a
 
   await svc.invoke('github', 'list_repositories', {});
 
-  const entries = svc.audit() as Array<{ workspaceId: string }>;
+  const entries = await svc.audit() as Array<{ workspaceId: string }>;
   const last = entries[entries.length - 1];
   expect(last.workspaceId).toBe('ws-acme');
 });

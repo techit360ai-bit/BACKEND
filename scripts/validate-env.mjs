@@ -83,6 +83,40 @@ function requireProductionEmailSender(env, name) {
   }
 }
 
+function requireMcpEncryptionKey(env) {
+  const raw = requireValue(env, "MCP_SECRET_KEY");
+  const value = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
+  if (value.length !== 32) fail("MCP_SECRET_KEY must encode exactly 32 bytes");
+  if (new Set(value).size < 8) fail("MCP_SECRET_KEY does not have sufficient diversity");
+}
+
+function validateProductionMcp(env) {
+  if (requireValue(env, "MCP_ENABLED") !== "true") fail("MCP_ENABLED must be true for the production-ready MCP contract");
+  if (requireValue(env, "MCP_STORE") !== "postgres") fail("MCP_STORE must be postgres in production/staging");
+  requireUrl(env, "MCP_DATABASE_URL", ["postgres:", "postgresql:"]);
+  requireMcpEncryptionKey(env);
+  const connectors = requireValue(env, "MCP_ENABLED_CONNECTORS").split(",").map((x) => x.trim()).filter(Boolean);
+  if (connectors.length === 0) fail("MCP_ENABLED_CONNECTORS must not be empty");
+  const requirements = {
+    github: ["GITHUB_CONNECTOR_MODE", "MCP_GITHUB_TOKEN"],
+    notion: ["NOTION_CONNECTOR_MODE", "NOTION_TOKEN"],
+    figma: ["FIGMA_CONNECTOR_MODE", "FIGMA_TOKEN"],
+    web3: ["WEB3_CONNECTOR_MODE", "SIWE_EXPECTED_DOMAIN", "SIWE_EXPECTED_URI", "SIWE_EXPECTED_CHAIN_ID"],
+    ai: ["AI_HARNESS_CONNECTOR_MODE", "AI_ROUTER_URL", "AI_ROUTER_TOKEN"],
+  };
+  for (const connector of connectors) {
+    const names = requirements[connector];
+    if (!names) fail(`unsupported MCP connector ${connector}`);
+    if (requireValue(env, names[0]) !== "real") fail(`${names[0]} must be real`);
+    for (const name of names.slice(1)) requireValue(env, name);
+  }
+  if (connectors.includes("web3")) {
+    if (!env.WEB3_RPC_URL && !env.ALCHEMY_API_KEY) fail("WEB3_RPC_URL or ALCHEMY_API_KEY is required");
+    if (env.WEB3_RPC_URL) requireUrl(env, "WEB3_RPC_URL");
+  }
+  if (connectors.includes("ai")) requireUrl(env, "AI_ROUTER_URL");
+}
+
 function validateManifest() {
   const manifest = readJson(MANIFEST_PATH);
   if (manifest.version !== 1) fail("deployment manifest version must be 1");
@@ -141,16 +175,12 @@ function validateNodeBackend(env) {
       fail(`${name} must be at least 32 characters and non-placeholder`);
     }
   }
-  if (requireValue(env, "MCP_ENABLED") !== "false") {
-    fail("MCP_ENABLED must remain false until transactional shared persistence is implemented");
-  }
+  validateProductionMcp(env);
 }
 
 function validatePluginsMcp(env) {
   assertStrongSharedSecret(env);
-  if (requireValue(env, "MCP_ENABLED") !== "false") {
-    fail("MCP_ENABLED must remain false in production/staging");
-  }
+  validateProductionMcp(env);
   if (requireValue(env, "MCP_ALLOW_FILE_STORE") !== "false") {
     fail("MCP_ALLOW_FILE_STORE must be false in production/staging");
   }

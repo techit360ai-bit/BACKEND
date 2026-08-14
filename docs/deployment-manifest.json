@@ -22,6 +22,21 @@
         "RESEND_API_KEY",
         "FROM_EMAIL",
         "MCP_ENABLED",
+        "MCP_STORE",
+        "MCP_DATABASE_URL",
+        "MCP_SECRET_KEY",
+        "MCP_ENABLED_CONNECTORS",
+        "GITHUB_CONNECTOR_MODE",
+        "MCP_GITHUB_TOKEN",
+        "NOTION_CONNECTOR_MODE",
+        "NOTION_TOKEN",
+        "FIGMA_CONNECTOR_MODE",
+        "FIGMA_TOKEN",
+        "WEB3_CONNECTOR_MODE",
+        "WEB3_RPC_URL",
+        "SIWE_EXPECTED_DOMAIN",
+        "SIWE_EXPECTED_URI",
+        "SIWE_EXPECTED_CHAIN_ID",
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
         "GITHUB_REDIRECT_URI",
@@ -37,7 +52,8 @@
       },
       "dependencies": [
         "sqlite-persistent-volume",
-        "plugins-mcp"
+        "plugins-mcp",
+        "postgres-mcp"
       ]
     },
     {
@@ -50,6 +66,21 @@
         "NODE_ENV",
         "JWT_SECRET",
         "MCP_ENABLED",
+        "MCP_STORE",
+        "MCP_DATABASE_URL",
+        "MCP_SECRET_KEY",
+        "MCP_ENABLED_CONNECTORS",
+        "GITHUB_CONNECTOR_MODE",
+        "MCP_GITHUB_TOKEN",
+        "NOTION_CONNECTOR_MODE",
+        "NOTION_TOKEN",
+        "FIGMA_CONNECTOR_MODE",
+        "FIGMA_TOKEN",
+        "WEB3_CONNECTOR_MODE",
+        "WEB3_RPC_URL",
+        "SIWE_EXPECTED_DOMAIN",
+        "SIWE_EXPECTED_URI",
+        "SIWE_EXPECTED_CHAIN_ID",
         "MCP_ALLOW_FILE_STORE",
         "MCP_ALLOW_STUB_CONNECTORS",
         "MCP_SEED_DEMO_ACTIVITY",
@@ -58,12 +89,25 @@
       "healthCheck": {
         "method": "GET",
         "path": "/api/mcp/health",
-        "expectedStatus": 404,
-        "note": "Production-disabled until shared transactional persistence is implemented"
+        "expectedStatus": 401,
+        "note": "Production MCP is enabled but health remains authenticated"
       },
       "dependencies": [
-        "node-backend"
+        "node-backend",
+        "postgres-mcp"
       ]
+    },
+    {
+      "name": "postgres-mcp",
+      "image": "postgres:16",
+      "provides": [
+        "MCP_DATABASE_URL"
+      ],
+      "network": "private-only",
+      "backups": "encrypted-pitr",
+      "healthCheck": {
+        "command": "pg_isready"
+      }
     },
     {
       "name": "messaging-backend",

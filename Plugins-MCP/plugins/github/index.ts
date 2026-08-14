@@ -20,7 +20,7 @@ import {
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { GitHubConnector } from './connector.js';
 import { GitHubMCPServer } from './mcp.js';
-import { FakeGitHubApi, type GitHubApi } from './github-api.js';
+import { FakeGitHubApi, RealGitHubApi, type GitHubApi } from './github-api.js';
 import { StubOAuthExchange, resolveToken, storeToken, type OAuthExchange } from './auth.js';
 
 const MANIFEST_PATH = fileURLToPath(new URL('./techit.plugin.yaml', import.meta.url));
@@ -55,7 +55,13 @@ export class GitHubPlugin extends BasePlugin {
     // exchange and an explicit connect step.
     const existing = await secrets.get('oauth_access_token');
     if (!existing) {
-      await storeToken(secrets, this.oauth, 'devcode');
+      if (process.env.MCP_GITHUB_TOKEN) {
+        await secrets.set('oauth_access_token', process.env.MCP_GITHUB_TOKEN);
+      } else if (['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase())) {
+        throw new Error('MCP_GITHUB_TOKEN is required for the production GitHub connector.');
+      } else {
+        await storeToken(secrets, this.oauth, 'devcode');
+      }
     }
     return resolveToken(secrets);
   }
@@ -70,7 +76,9 @@ export class GitHubPlugin extends BasePlugin {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
     const plugin = new GitHubPlugin(
       manifest,
-      opts.api ?? new FakeGitHubApi(),
+      opts.api ?? (process.env.GITHUB_CONNECTOR_MODE === 'real'
+        ? new RealGitHubApi(async () => (await pluginTokenFromRuntime(opts.runtime)) ?? '')
+        : new FakeGitHubApi()),
       opts.oauth ?? new StubOAuthExchange(),
       opts.workspaceId,
     );
@@ -81,6 +89,10 @@ export class GitHubPlugin extends BasePlugin {
   }
 }
 
+async function pluginTokenFromRuntime(runtime: SdkRuntime): Promise<string | undefined> {
+  return (await runtime.vault.scopeTo('github').get('oauth_access_token'))?.value;
+}
+
 export async function registerGithubPlugin(opts: GithubPluginOptions): Promise<GitHubPlugin> {
   return GitHubPlugin.install(opts);
 }
@@ -88,4 +100,4 @@ export async function registerGithubPlugin(opts: GithubPluginOptions): Promise<G
 export { GitHubConnector } from './connector.js';
 export { GitHubMCPServer } from './mcp.js';
 export { parseWebhook, type TechitEvent } from './webhook.js';
-export { FakeGitHubApi, type GitHubApi } from './github-api.js';
+export { FakeGitHubApi, RealGitHubApi, type GitHubApi } from './github-api.js';

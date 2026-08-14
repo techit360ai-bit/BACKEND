@@ -53,11 +53,29 @@ SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
 FRONTEND_URL=https://app.<domain>        # used in password reset links
-MCP_ENABLED=false                        # keep disabled until shared transactional persistence lands
+MCP_ENABLED=true                         # explicit opt-in; defaults to disabled
+MCP_STORE=postgres
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require
+MCP_DATABASE_SSL=true
+MCP_DATABASE_SSL_REJECT_UNAUTHORIZED=true
+MCP_SECRET_KEY=<base64-encoded 32 random bytes>
+MCP_SECRET_KEY_PREVIOUS=                 # comma-separated previous keys during rotation
+MCP_ENABLED_CONNECTORS=github,notion,figma,web3
 MCP_ALLOW_FILE_STORE=false               # forbidden in production/staging
 MCP_ALLOW_STUB_CONNECTORS=false          # forbidden in production/staging
 MCP_SEED_DEMO_ACTIVITY=false
 MCP_APPROVAL_TTL_MS=900000
+GITHUB_CONNECTOR_MODE=real
+MCP_GITHUB_TOKEN=<least-privilege GitHub App installation token>
+NOTION_CONNECTOR_MODE=real
+NOTION_TOKEN=<integration token>
+FIGMA_CONNECTOR_MODE=real
+FIGMA_TOKEN=<personal access token>
+WEB3_CONNECTOR_MODE=real
+WEB3_RPC_URL=https://<sepolia-provider>
+SIWE_EXPECTED_DOMAIN=app.<domain>
+SIWE_EXPECTED_URI=https://app.<domain>
+SIWE_EXPECTED_CHAIN_ID=11155111
 GITHUB_CLIENT_ID=<production GitHub OAuth app client ID>
 GITHUB_CLIENT_SECRET=<production GitHub OAuth app secret>
 GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback
@@ -86,11 +104,21 @@ DB_DRIVER=sqlite \
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite \
 RESEND_API_KEY=<resend key> \
 FROM_EMAIL="TechIT <noreply@yourdomain.com>" \
-MCP_ENABLED=false \
+MCP_ENABLED=true \
+MCP_STORE=postgres \
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require \
+MCP_DATABASE_SSL=true \
+MCP_SECRET_KEY=<base64-32-byte-key> \
+MCP_ENABLED_CONNECTORS=github,notion,figma,web3 \
 MCP_ALLOW_FILE_STORE=false \
 MCP_ALLOW_STUB_CONNECTORS=false \
 MCP_SEED_DEMO_ACTIVITY=false \
 MCP_APPROVAL_TTL_MS=900000 \
+GITHUB_CONNECTOR_MODE=real MCP_GITHUB_TOKEN=<token> \
+NOTION_CONNECTOR_MODE=real NOTION_TOKEN=<token> \
+FIGMA_CONNECTOR_MODE=real FIGMA_TOKEN=<token> \
+WEB3_CONNECTOR_MODE=real WEB3_RPC_URL=https://<sepolia-provider> \
+SIWE_EXPECTED_DOMAIN=app.<domain> SIWE_EXPECTED_URI=https://app.<domain> SIWE_EXPECTED_CHAIN_ID=11155111 \
 GITHUB_CLIENT_ID=<production-client-id> \
 GITHUB_CLIENT_SECRET=<production-client-secret> \
 GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback \
@@ -111,6 +139,10 @@ cd BACKEND/backend
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate:dry-run
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:rollback:dry-run
+
+# Applies the idempotent MCP PostgreSQL schema under an advisory transaction lock.
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require \
+MCP_SECRET_KEY=<base64-32-byte-key> npm run mcp:migrate --prefix Plugins-MCP
 ```
 
 Backup and restore:
@@ -147,12 +179,12 @@ export TOKEN=...
 curl https://api.<domain>/api/auth/session -H "Authorization: Bearer $TOKEN"
 # returns { user: { id, email, user_metadata } }
 
-# verify the MCP surface remains unavailable until its production datastore is ready
+# MCP health is authenticated and verifies the PostgreSQL connection.
 curl -o /dev/null -w '%{http_code}\n' https://api.<domain>/api/mcp/health
-# 404
+# 401 without a token
+curl https://api.<domain>/api/mcp/health -H "Authorization: Bearer $TOKEN"
+# 200 {"ok":true,...}
 ```
-
-If `/api/mcp/health` is exposed before the production datastore is ready, stop the deployment and restore `MCP_ENABLED=false`.
 
 ### 1.2 ai-router (Python FastAPI)
 
@@ -295,7 +327,9 @@ Before promoting a release, make one authenticated request with a known `X-Reque
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
 | BACKEND/messaging-backend exits with `ENABLE_DEV_TOKEN=1 is forbidden in production` | local smoke-test token endpoint enabled in prod | Set `ENABLE_DEV_TOKEN=0` or unset it. |
 | Frontend logs `401` on every call after a deploy | mismatched `JWT_SECRET` between BACKEND and ai-router/messaging | Compare secret values across services; **same string everywhere**. |
-| `/api/mcp/tools` returns 404 | expected while `MCP_ENABLED=false` | Keep disabled until transactional shared persistence and real connectors are deployed. |
+| `/api/mcp/tools` returns 404 | `MCP_ENABLED` is absent or not exactly `true` | Validate the PostgreSQL/encryption/connector contract, then explicitly set `MCP_ENABLED=true`. |
+| BACKEND exits with `MCP_STORE=postgres is required` | production MCP was configured with a local/file adapter | Set `MCP_STORE=postgres` and `MCP_DATABASE_URL`; file persistence is never allowed in production. |
+| MCP connector boot fails with `=real is required` | an enabled connector would otherwise use its fake adapter | Configure the real mode and credential or remove that connector from `MCP_ENABLED_CONNECTORS`. |
 | Frontend shows React error on `/plugins` | `VITE_TECHIT_API` not set at build time | Rebuild with the env var; Vite inlines it at build, not runtime. |
 
 ---
@@ -343,9 +377,11 @@ do
   [ "$code" = "401" ] || { echo FAIL "expected 401 from $url"; exit 1; }
 done
 
-# 4. MCP remains disabled until its production datastore is complete
-[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health)" = "404" ] \
-  || { echo FAIL "MCP must remain disabled"; exit 1; }
+# 4. MCP is authenticated and its health check includes PostgreSQL connectivity
+[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health)" = "401" ] \
+  || { echo FAIL "MCP health must reject anonymous access"; exit 1; }
+[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health -H "Authorization: Bearer $TOKEN")" = "200" ] \
+  || { echo FAIL "MCP health or PostgreSQL unavailable"; exit 1; }
 
 echo "ALL GREEN"
 ```
@@ -361,7 +397,7 @@ deployment blockers for the affected surface:
 
 - **Browser JWTs remain in `localStorage`** — migrate to short-lived access tokens in Secure, HttpOnly, SameSite cookies with CSRF protection.
 - **Shared HS256 signing** — replace with EdDSA or RS256, key IDs, rotation and JWKS verification.
-- **Plugins-MCP production persistence is not implemented** — keep `MCP_ENABLED=false` until a shared transactional store and real connectors land.
+- **MCP connector credentials are currently service-managed** — use least-privilege provider identities and separate credentials per environment; add per-workspace OAuth provisioning before offering user-owned integrations.
 - **WebSocket query-string tokens remain supported for legacy clients** — migrate clients to secure cookies or ephemeral single-use socket tickets, then remove the query fallback.
 - **Existing plaintext GitHub OAuth tokens** — reconnect accounts or run a controlled encryption migration before enabling GitHub features.
 

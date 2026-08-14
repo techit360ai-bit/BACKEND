@@ -35,7 +35,9 @@ try {
     "X-Request-Id",
     "http_request",
     "http_error",
-    "MCP_ENABLED=false",
+    "MCP_ENABLED=true",
+    "MCP_STORE=postgres",
+    "mcp:migrate",
     "db:rollback:dry-run",
     "do not flip DNS",
   ]) {

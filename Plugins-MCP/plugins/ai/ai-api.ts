@@ -122,8 +122,6 @@ export class FakeAiHarnessApi implements AiHarnessApi {
  * network — sandbox execution is simulated for demo safety regardless of mode.
  */
 export class RealAiHarnessApi implements AiHarnessApi {
-  private readonly fallback = new FakeAiHarnessApi();
-
   constructor(
     private readonly baseUrl: string | (() => Promise<string>),
     private readonly token: string | (() => Promise<string>),
@@ -135,8 +133,8 @@ export class RealAiHarnessApi implements AiHarnessApi {
   }
 
   async generateCode(prompt: string, language?: string): Promise<GenerateResult> {
-    // No dedicated ai-router route yet — deterministic fallback.
-    return this.fallback.generateCode(prompt, language);
+    void prompt; void language;
+    throw new Error('generate_code is unavailable in real mode until a dedicated ai-router contract is deployed');
   }
 
   async reviewCode(code: string, language = 'typescript', context?: string): Promise<ReviewResult> {
@@ -163,12 +161,12 @@ export class RealAiHarnessApi implements AiHarnessApi {
   }
 
   async deepResearch(query: string, depth?: string): Promise<ResearchResult> {
-    // No dedicated ai-router route yet — deterministic fallback.
-    return this.fallback.deepResearch(query, depth);
+    void query; void depth;
+    throw new Error('deep_research is unavailable in real mode until a dedicated ai-router contract is deployed');
   }
 
   async runSandbox(language: string, code: string): Promise<SandboxResult> {
-    // Always simulated — real code execution is intentionally not wired.
-    return this.fallback.runSandbox(language, code);
+    void language; void code;
+    throw new Error('run_sandbox is unavailable in real mode; simulated execution is forbidden in production');
   }
 }

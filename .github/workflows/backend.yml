@@ -57,11 +57,27 @@ jobs:
           SQLITE_DB_PATH: /tmp/techit/backend/techit.sqlite
           RESEND_API_KEY: re_ci_contract_value
           FROM_EMAIL: TechIT <noreply@techit.example>
-          MCP_ENABLED: "false"
+          MCP_ENABLED: "true"
+          MCP_STORE: postgres
+          MCP_DATABASE_URL: postgres://mcp_app:mcp_password@postgres.example:5432/techit_mcp?sslmode=require
+          MCP_DATABASE_SSL: "true"
+          MCP_SECRET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          MCP_ENABLED_CONNECTORS: github,notion,figma,web3
           MCP_ALLOW_FILE_STORE: "false"
           MCP_ALLOW_STUB_CONNECTORS: "false"
           MCP_SEED_DEMO_ACTIVITY: "false"
           MCP_APPROVAL_TTL_MS: "900000"
+          GITHUB_CONNECTOR_MODE: real
+          MCP_GITHUB_TOKEN: github_pat_ci_contract_value
+          NOTION_CONNECTOR_MODE: real
+          NOTION_TOKEN: secret_notion_ci_contract_value
+          FIGMA_CONNECTOR_MODE: real
+          FIGMA_TOKEN: figd_ci_contract_value
+          WEB3_CONNECTOR_MODE: real
+          WEB3_RPC_URL: https://ethereum-sepolia-rpc.publicnode.com
+          SIWE_EXPECTED_DOMAIN: app.techit.example
+          SIWE_EXPECTED_URI: https://app.techit.example
+          SIWE_EXPECTED_CHAIN_ID: "11155111"
           GITHUB_CLIENT_ID: github-ci-client
           GITHUB_CLIENT_SECRET: github-ci-secret-value
           GITHUB_REDIRECT_URI: https://api.techit.example/api/github/callback
@@ -150,6 +166,20 @@ jobs:
   plugins-mcp:
     name: Plugins MCP Security Gates
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: techit_mcp
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d techit_mcp"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -165,6 +195,9 @@ jobs:
 
       - name: Run MCP tests and typecheck
         run: npm test --prefix Plugins-MCP && npm run typecheck --prefix Plugins-MCP
+        env:
+          MCP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/techit_mcp
+          MCP_SECRET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
   deploy:
     name: Deploy Messaging to Render
