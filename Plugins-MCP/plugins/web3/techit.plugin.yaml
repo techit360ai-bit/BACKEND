@@ -61,4 +61,5 @@ mcp:
         properties:
           message: { type: string }
           signature: { type: string }
-        required: [message, signature]
+          expected_nonce: { type: string }
+        required: [message, signature, expected_nonce]

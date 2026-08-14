@@ -7,6 +7,7 @@ import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerWeb3Plugin } from './index.js';
 import { verifySiwe } from './siwe.js';
 import { SEPOLIA_CHAIN_ID } from './web3-api.js';
+import { privateKeyToAccount } from 'viem/accounts';
 
 const WS = 'ws-1';
 
@@ -30,10 +31,10 @@ function codingAgent(toolsAllowed: string[], workspaceId = WS): { actor: Actor; 
   return { actor, agent };
 }
 
-// A well-formed EIP-4361 message + a syntactically valid 65-byte signature.
-const ADDRESS = '0x1234567890abcdef1234567890abcdef12345678';
-const SIGNATURE = '0x' + 'ab'.repeat(65);
-function siweMessage(expirationTime?: string): string {
+const account = privateKeyToAccount('0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+const ADDRESS = account.address;
+const NONCE = 'abcdef123456';
+function siweMessage(expirationTime?: string, issuedAt = new Date().toISOString()): string {
   return [
     'app.techit.network wants you to sign in with your Ethereum account:',
     ADDRESS,
@@ -43,8 +44,8 @@ function siweMessage(expirationTime?: string): string {
     'URI: https://app.techit.network',
     'Version: 1',
     `Chain ID: ${SEPOLIA_CHAIN_ID}`,
-    'Nonce: abcdef123456',
-    'Issued At: 2026-01-01T00:00:00.000Z',
+    `Nonce: ${NONCE}`,
+    `Issued At: ${issuedAt}`,
     ...(expirationTime ? [`Expiration Time: ${expirationTime}`] : []),
   ].join('\n');
 }
@@ -83,10 +84,12 @@ describe('Web3 connector', () => {
 
   it('siwe_verify accepts a well-formed message via the MCP tool', async () => {
     const { client } = await makeHarness();
+    const message = siweMessage();
+    const signature = await account.signMessage({ message });
     const res = await client.invoke(
       'web3',
       'siwe_verify',
-      { message: siweMessage(), signature: SIGNATURE },
+      { message, signature, expected_nonce: NONCE },
       { actor: viewerActor(), resourceWorkspaceId: WS },
     );
     expect(res.ok).toBe(true);
@@ -94,21 +97,23 @@ describe('Web3 connector', () => {
       const data = res.data as { valid: boolean; address: string; cryptographicallyVerified: boolean };
       expect(data.valid).toBe(true);
       expect(data.address).toBe(ADDRESS);
-      // Honest about not doing ECDSA recovery yet.
-      expect(data.cryptographicallyVerified).toBe(false);
+      expect(data.cryptographicallyVerified).toBe(true);
     }
   });
 
-  it('verifySiwe rejects a malformed signature and an expired message', () => {
+  it('verifySiwe rejects a malformed signature and an expired message', async () => {
     const goodMsg = siweMessage();
-    expect(verifySiwe(goodMsg, '0xnothex').valid).toBe(false);
-    expect(verifySiwe(goodMsg, '0xnothex').checks.signatureFormat).toBe(false);
+    expect((await verifySiwe(goodMsg, '0xnothex', { expectedNonce: NONCE })).valid).toBe(false);
+    expect((await verifySiwe(goodMsg, '0xnothex', { expectedNonce: NONCE })).checks.signatureFormat).toBe(false);
 
-    const expired = siweMessage('2020-01-01T00:00:00.000Z');
-    const r = verifySiwe(expired, SIGNATURE, new Date('2026-08-09T00:00:00.000Z'));
+    const expired = siweMessage('2020-01-01T00:00:00.000Z', '2019-01-01T00:00:00.000Z');
+    const signature = await account.signMessage({ message: expired });
+    const r = await verifySiwe(expired, signature, {
+      now: new Date('2026-08-09T00:00:00.000Z'), expectedNonce: NONCE,
+    });
     expect(r.valid).toBe(false);
-    expect(r.checks.notExpired).toBe(false);
-    expect(r.reason).toBe('message expired');
+    expect(r.checks.timeValid).toBe(false);
+    expect(r.reason).toBe('message time window is invalid');
   });
 
   it('allows an agent to read within its allow-list', async () => {

@@ -79,7 +79,7 @@ export abstract class BaseMCPServer implements MCPAdapter {
 
     const validation = validateInput(entry.spec.input_schema, params);
     if (!validation.ok) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
         reason: 'invalid_input',
       });
       return err('invalid_input', 'params do not satisfy input_schema', validation.detail);
@@ -89,7 +89,7 @@ export abstract class BaseMCPServer implements MCPAdapter {
     const qualified = `${this.sourceTool}.${tool}`;
     const decision = checkPermission(this.runtime, this.ctx, qualified, entry.spec.requiredRole);
     if (!decision.allowed) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
         reason: decision.reason,
       });
       return err('permission_denied', 'tool not permitted', decision.detail ?? decision.reason);
@@ -101,7 +101,7 @@ export abstract class BaseMCPServer implements MCPAdapter {
       if (approvalId) {
         const approval = await validateApproval(this.runtime, this.ctx, approvalId, qualified);
         if (!approval.ok) {
-          recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+          await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
             reason: `approval_${approval.reason}`,
             approvalRequestId: approvalId,
           });
@@ -116,7 +116,7 @@ export abstract class BaseMCPServer implements MCPAdapter {
           p,
           `destructive MCP tool ${qualified} requires human approval`,
         );
-        recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'pending_approval', undefined, {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'pending_approval', undefined, {
           approvalRequestId: request.id,
         });
         return err('pending_approval', 'awaiting human approval', request.id, request.id);
@@ -128,14 +128,14 @@ export abstract class BaseMCPServer implements MCPAdapter {
         await consumeApproval(this.runtime, approvedRequest, this.ctx.actor.id);
       }
       const data = await entry.handler(p);
-      recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'success');
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'success');
       const kind = entry.contribution ?? 'ai_action';
       await emitContribution(this.runtime, this.ctx, this.sourceTool, kind, {
         metadata: { tool },
       });
       return ok(data);
     } catch (e) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
         message: (e as Error).message,
       });
       return err('upstream_error', `tool ${tool} failed`, (e as Error).message);

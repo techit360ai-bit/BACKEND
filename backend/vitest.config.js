@@ -10,6 +10,10 @@ export default defineConfig({
       // Isolate the Plugins-MCP file-store away from backend/data/plugins-mcp.json
       // so the suite never reads or writes the production-like fixture.
       MCP_DATA_FILE: '/tmp/vitest-mcp-store.json',
+      // Production MCP is explicit opt-in. Unit tests exercise the development
+      // file adapter unless a focused PostgreSQL integration suite is running.
+      MCP_ENABLED: 'true',
+      MCP_STORE: 'file',
     },
     coverage: {
       reporter: ['text', 'lcov'],

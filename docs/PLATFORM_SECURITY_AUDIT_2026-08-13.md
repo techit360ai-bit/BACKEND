@@ -170,3 +170,22 @@ container-image scanning still need network-enabled CI steps. CodeQL currently
 runs extraction and queries with SARIF upload disabled because GitHub's private
 repository security-events integration rejected the upload; enable upload after
 repository code-scanning permissions are configured.
+
+## 2026-08-14 MCP production-readiness addendum
+
+The MCP execution layer now has a production PostgreSQL implementation for
+audit records, approvals, contribution events and encrypted connector secrets.
+Audit rows are protected by a database trigger against update/delete, approval
+state transitions are serialized with row locks, and secrets use AES-256-GCM
+with authenticated namespace/key binding and rotation through previous keys.
+
+Production MCP startup now fails closed unless `MCP_STORE=postgres`, a strong
+32-byte `MCP_SECRET_KEY` is configured, at least one connector is explicitly
+enabled, and every enabled connector is set to `real` with its required
+credentials. The mounted surface is explicit opt-in with `MCP_ENABLED=true`.
+SIWE verification now performs Ethereum message-signature recovery and can
+enforce the expected domain, URI, chain, nonce and time window.
+
+Provider identities must still be least privilege and environment-specific.
+The current service-managed connector credentials are suitable for controlled
+platform integrations; user-owned connector OAuth remains separate future work.

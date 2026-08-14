@@ -21,6 +21,12 @@ export class Web3MCPServer extends BaseMCPServer {
 
     this.handle('read_contract', async (p) => this.api.readContract(String(p.to), String(p.data)));
 
-    this.handle('siwe_verify', async (p) => verifySiwe(String(p.message), String(p.signature)), 'ai_action');
+    this.handle('siwe_verify', async (p) => verifySiwe(String(p.message), String(p.signature), {
+      expectedDomain: process.env.SIWE_EXPECTED_DOMAIN,
+      expectedUri: process.env.SIWE_EXPECTED_URI,
+      expectedChainId: process.env.SIWE_EXPECTED_CHAIN_ID ? Number(process.env.SIWE_EXPECTED_CHAIN_ID) : undefined,
+      expectedNonce: p.expected_nonce ? String(p.expected_nonce) : undefined,
+      maxAgeMs: Number(process.env.SIWE_MAX_AGE_MS || 10 * 60 * 1000),
+    }), 'ai_action');
   }
 }
