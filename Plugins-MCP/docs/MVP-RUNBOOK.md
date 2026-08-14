@@ -92,6 +92,46 @@ curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
 Roles map from the JWT `role` claim: `founder|organisation` → owner, `admin` →
 admin, `collaborator` → editor, everything else → viewer.
 
+### (d) Try one safe tool from every client
+
+Run these in the second terminal after creating `TOKEN` above. They use the
+deterministic fake clients, so they need no GitHub, Notion, Figma, RPC, or AI
+credentials and do not change external systems.
+
+```bash
+# GitHub
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"plugin":"github","tool":"list_repositories","params":{}}' | jq
+
+# Notion
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"plugin":"notion","tool":"search","params":{"query":"roadmap"}}' | jq
+
+# Figma
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"plugin":"figma","tool":"get_file","params":{"file_key":"demo123"}}' | jq
+
+# Web3
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"plugin":"web3","tool":"get_balance","params":{"address":"0x1234567890abcdef1234567890abcdef12345678"}}' | jq
+
+# AI harness
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"plugin":"ai","tool":"generate_code","params":{"prompt":"Write a TypeScript hello-world function","language":"typescript"}}' | jq
+```
+
+Each response should contain `"ok": true`. Then verify the execution records:
+
+```bash
+curl -s localhost:3000/api/mcp/audit -H "Authorization: Bearer $TOKEN" | jq
+curl -s localhost:3000/api/mcp/contributions -H "Authorization: Bearer $TOKEN" | jq
+```
+
 ---
 
 ## 4. The approval gate (destructive tools)
@@ -100,15 +140,23 @@ Destructive tools return `pending_approval` on first call, then execute once app
 
 ```bash
 # First call → { ok:false, error.code:"pending_approval", approvalRequestId:"..." }
-curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"plugin":"ai","tool":"run_sandbox","params":{"language":"python","code":"print(1)"}}'
+PENDING=$(curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"plugin":"ai","tool":"run_sandbox","params":{"language":"python","code":"print(1)"}}')
+echo "$PENDING" | jq
+APPROVAL_ID=$(echo "$PENDING" | jq -r '.approvalRequestId')
 
 # Approve (admin/owner only)
-curl -s localhost:3000/api/mcp/approvals/<id>/approve -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d '{"decidedBy":"founder"}'
+curl -s "localhost:3000/api/mcp/approvals/$APPROVAL_ID/approve" \
+  -H "Authorization: Bearer $TOKEN" | jq
 
-# Re-invoke with the approvalRequestId in params → executes, approval marked "used"
+# Re-invoke with the SAME original params plus approvalRequestId.
+curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"plugin\":\"ai\",\"tool\":\"run_sandbox\",\"params\":{\"language\":\"python\",\"code\":\"print(1)\",\"approvalRequestId\":\"$APPROVAL_ID\"}}" | jq
 ```
+
+Expected sequence: `pending_approval` → `{ "approved": true }` → `"ok": true`.
+The approval is single-use; replaying the final request should be denied.
 
 ---
 
@@ -125,7 +173,35 @@ curl -s localhost:3000/api/mcp/approvals/<id>/approve -H "Authorization: Bearer 
 
 ---
 
-## 6. Known-good state (2026-08-11)
+## 6. Optional: test real external services
+
+Fake mode proves the MCP execution, permissions, approval, audit, and
+contribution layers. Real mode additionally calls the external provider.
+
+Start the backend with the relevant variables:
+
+```bash
+# Notion
+NOTION_CONNECTOR_MODE=real NOTION_TOKEN=secret_... \
+  JWT_SECRET=testsecret MCP_DATA_FILE=/tmp/mcp-real.json npm start
+
+# Figma
+FIGMA_CONNECTOR_MODE=real FIGMA_TOKEN=figd_... \
+  JWT_SECRET=testsecret MCP_DATA_FILE=/tmp/mcp-real.json npm start
+
+# Sepolia Web3 (use either WEB3_RPC_URL or ALCHEMY_API_KEY)
+WEB3_CONNECTOR_MODE=real WEB3_RPC_URL=https://... \
+  JWT_SECRET=testsecret MCP_DATA_FILE=/tmp/mcp-real.json npm start
+
+# AI router; only review_code currently has a live route. run_sandbox remains simulated.
+AI_HARNESS_CONNECTOR_MODE=real AI_ROUTER_URL=http://localhost:8000 AI_ROUTER_TOKEN=... \
+  JWT_SECRET=testsecret MCP_DATA_FILE=/tmp/mcp-real.json npm start
+```
+
+Run one connector in real mode at a time first. Do not commit tokens or paste
+them into the repository. GitHub currently remains fake-only in this MVP.
+
+## 7. Known-good state (2026-08-14)
 
 - `npx vitest run` → 12 files / 57 tests passing.
 - `npm run typecheck` → clean.
@@ -134,10 +210,10 @@ curl -s localhost:3000/api/mcp/approvals/<id>/approve -H "Authorization: Bearer 
   returns 22, a read invoke returns live data, and the destructive-tool approval
   loop works end-to-end (`pending_approval` → approve → re-invoke → `success`,
   visible in `/api/mcp/audit`).
-- One flaky full-suite run was observed once (file-store contention under
-  parallelism); reran clean. If it recurs, run connector suites in isolation.
+- The suite uses a 15-second timeout because cold registration of all five
+  connectors can exceed Vitest's default 5-second timeout on slower machines.
 
-## 7. Backlog (not yet built)
+## 8. Backlog (not yet built)
 
 1. Postgres-backed stores + AES-256-GCM secret vault + webhook receiver (task #1).
 2. Real GitHub API + OAuth (task #2).
