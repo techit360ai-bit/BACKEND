@@ -76,6 +76,7 @@ import {
   walletSummary,
   workspaceContext,
 } from '../services/domainService.js'
+import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
 
 function created(res, body) {
   return res.status(201).json(body)
@@ -159,7 +160,7 @@ export function workspaceItemCreate(req, res) {
   return created(res, { [req.itemKey]: row })
 }
 
-export function workspaceItemPatch(req, res) {
+export async function workspaceItemPatch(req, res) {
   const row = patchWorkspaceCollectionItem(
     req.user.id,
     req.params.workspaceId,
@@ -168,6 +169,22 @@ export function workspaceItemPatch(req, res) {
     req.body,
   )
   if (!row) return notFound(res, 'Workspace item not found')
+  if (
+    req.collectionName === 'workspaceTasks' &&
+    row.status === 'completed' &&
+    row.gsisRecommendationId
+  ) {
+    await recordGsisRecommendationOutcome(req.user.token, row.gsisRecommendationId, {
+      metric: row.successMetric || row.title || 'task_completion',
+      baseline_value: row.baselineValue,
+      observed_value: row.observedValue,
+      expected_value: row.expectedValue,
+      observed_positive: true,
+      outcome: 'task_completed',
+      source: 'verified_platform_event',
+      evidence: { task_id: row.id, workspace_id: req.params.workspaceId },
+    })
+  }
   return res.json({ [req.itemKey]: row })
 }
 
