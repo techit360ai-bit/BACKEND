@@ -1,5 +1,6 @@
 import { readDb, writeDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
+import { recordActivityInDb } from '../services/discoveryService.js'
 
 const TYPES = new Set(['fire', 'comment', 'collab', 'gsis', 'milestone', 'mention', 'answer'])
 
@@ -55,6 +56,7 @@ export function markNotificationRead(req, res) {
   const idx = db.notifications.findIndex(n => n.id === req.params.id && n.userId === req.user.id)
   if (idx === -1) return res.status(404).json({ error: 'Notification not found' })
   db.notifications[idx] = { ...db.notifications[idx], read: true }
+  recordActivityInDb(db, req.user.id, 'notification_read', 'notifications')
   writeDb(db)
   return res.json(toNotification(db.notifications[idx], db))
 }
@@ -64,6 +66,7 @@ export function markAllNotificationsRead(req, res) {
   db.notifications = db.notifications.map(n => (
     n.userId === req.user.id ? { ...n, read: true } : n
   ))
+  recordActivityInDb(db, req.user.id, 'notification_read', 'notifications')
   writeDb(db)
   return res.json({ ok: true })
 }

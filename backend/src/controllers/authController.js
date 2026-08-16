@@ -2,9 +2,10 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb, updateDb, writeDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
+import { recordActivityInDb } from '../services/discoveryService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -237,6 +238,8 @@ export async function signin(req, res) {
   }
 
   const profile = db.profiles.find(p => p.id === user.id) || null
+  recordActivityInDb(db, user.id, 'login', 'auth')
+  writeDb(db)
 
   return res.json({
     token: makeToken(user.id, profile),
@@ -248,6 +251,8 @@ export async function signin(req, res) {
 export function session(req, res) {
   const db = readDb()
   const profile = db.profiles.find(p => p.id === req.user.id) || null
+  recordActivityInDb(db, req.user.id, 'session', 'auth')
+  writeDb(db)
   return res.json({ user: req.user, profile })
 }
 

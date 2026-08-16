@@ -13,6 +13,7 @@ import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
 import complianceRoutes from './routes/compliance.js'
 import usageSettlementRoutes from './routes/usageSettlement.js'
+import discoveryRoutes from './routes/discovery.js'
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -92,6 +93,7 @@ app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)
 app.use('/api/video', videoRoutes)
 app.use('/api/context', contextRoutes)
+app.use('/api/discovery', discoveryRoutes)
 app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,

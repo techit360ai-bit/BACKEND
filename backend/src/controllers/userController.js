@@ -1,5 +1,6 @@
 import { readDb, updateDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
+import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -32,6 +33,7 @@ export function updateMe(req, res) {
     const idx = db.profiles.findIndex(p => p.id === req.user.id)
     if (idx === -1) return null
     db.profiles[idx] = { ...db.profiles[idx], ...updates, updatedAt: new Date().toISOString() }
+    syncRecommendationProfileInDb(db, req.user.id)
     return db.profiles[idx]
   })
   if (!result) return res.status(404).json({ error: 'Profile not found' })
@@ -156,6 +158,16 @@ export function connectUser(req, res) {
         createdAt: nowIso(),
       })
     }
+    const event = appendPlatformEventInDb(db, {
+      userId: req.user.id,
+      actorId: req.user.id,
+      eventType: 'connect',
+      entityType: 'person',
+      entityId: target.id,
+      importance: 'HIGH',
+      metadata: { targetName: userName(target) },
+    })
+    appendRelationshipInDb(db, req.user.id, event)
     return { status: 200 }
   })
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
