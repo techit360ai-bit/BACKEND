@@ -60,3 +60,19 @@ export function extractRecommendation(payload) {
   }
   return null
 }
+
+export async function recordGsisRecommendationOutcome(token, recommendationId, outcome) {
+  if (!token || !recommendationId) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v2/gsis/recommendations/${encodeURIComponent(recommendationId)}/outcome`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(outcome),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
