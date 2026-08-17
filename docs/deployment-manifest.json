@@ -65,6 +65,7 @@
       "path": "backend",
       "runtime": "nodejs-22",
       "startCommand": "npm run discovery:worker --prefix backend",
+      "envFile": "backend/.env.example",
       "requiredEnv": ["DISCOVERY_DATABASE_URL", "DISCOVERY_REDIS_URL", "JWT_SECRET"],
       "dependencies": ["postgres-discovery", "redis-discovery", "node-backend"]
     },
