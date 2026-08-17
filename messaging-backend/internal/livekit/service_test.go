@@ -64,7 +64,7 @@ func verify(t *testing.T, token string) *auth.ClaimGrants {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	claims, err := v.Verify(testSecret)
+	_, claims, err := v.Verify(testSecret)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}

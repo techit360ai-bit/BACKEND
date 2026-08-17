@@ -20,5 +20,5 @@ curl -sf http://localhost:8080/health >/dev/null || { echo "server never became 
 echo "==> running smoke client"
 docker run --rm --network host -e GOFLAGS=-mod=mod -e GOSUMDB=off \
   -e SMOKE_BASE="http://localhost:8080" \
-  -v "$PWD":/app -w /app golang:1.23-alpine go run ./cmd/smoke
+  -v "$PWD":/app -w /app golang:1.26-alpine go run ./cmd/smoke
 echo "==> smoke passed"
