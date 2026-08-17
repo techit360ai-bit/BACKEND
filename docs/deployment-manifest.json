@@ -67,6 +67,7 @@
       "startCommand": "npm run discovery:worker --prefix backend",
       "envFile": "backend/.env.example",
       "requiredEnv": ["DISCOVERY_DATABASE_URL", "DISCOVERY_REDIS_URL", "JWT_SECRET"],
+      "healthCheck": { "command": "node --check scripts/discovery-worker.js" },
       "dependencies": ["postgres-discovery", "redis-discovery", "node-backend"]
     },
     {
