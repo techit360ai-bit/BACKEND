@@ -54,26 +54,26 @@ export abstract class BaseConnector implements Connector {
   async listResources(): Promise<Resource[]> {
     const decision = checkPermission(this.runtime, this.ctx, `${this.sourceTool}.listResources`, 'viewer');
     if (!decision.allowed) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, 'listResources', 'denied', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, 'listResources', 'denied', undefined, {
         reason: decision.reason,
       });
       throw new Error(`permission_denied: ${decision.detail ?? decision.reason}`);
     }
     const out = await this.listResourcesImpl();
-    recordAudit(this.runtime, this.ctx, this.sourceTool, 'listResources', 'success');
+    await recordAudit(this.runtime, this.ctx, this.sourceTool, 'listResources', 'success');
     return out;
   }
 
   async readResource(id: string): Promise<Resource> {
     const decision = checkPermission(this.runtime, this.ctx, `${this.sourceTool}.readResource`, 'viewer');
     if (!decision.allowed) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, 'readResource', 'denied', id, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, 'readResource', 'denied', id, {
         reason: decision.reason,
       });
       throw new Error(`permission_denied: ${decision.detail ?? decision.reason}`);
     }
     const out = await this.readResourceImpl(id);
-    recordAudit(this.runtime, this.ctx, this.sourceTool, 'readResource', 'success', id);
+    await recordAudit(this.runtime, this.ctx, this.sourceTool, 'readResource', 'success', id);
     return out;
   }
 
@@ -118,7 +118,7 @@ export abstract class BaseConnector implements Connector {
   ): Promise<Result<T>> {
     const decision = checkPermission(this.runtime, this.ctx, qualifiedAction, policy.requiredRole);
     if (!decision.allowed) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'denied', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'denied', undefined, {
         reason: decision.reason,
       });
       return err('permission_denied', 'action not permitted', decision.detail ?? decision.reason);
@@ -130,7 +130,7 @@ export abstract class BaseConnector implements Connector {
       if (approvalId) {
         const approval = await validateApproval(this.runtime, this.ctx, approvalId, qualifiedAction);
         if (!approval.ok) {
-          recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'denied', undefined, {
+          await recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'denied', undefined, {
             reason: `approval_${approval.reason}`,
             approvalRequestId: approvalId,
           });
@@ -145,7 +145,7 @@ export abstract class BaseConnector implements Connector {
           params,
           `destructive action ${qualifiedAction} requires human approval`,
         );
-        recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'pending_approval', undefined, {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'pending_approval', undefined, {
           approvalRequestId: request.id,
         });
         return err('pending_approval', 'awaiting human approval', request.id, request.id);
@@ -157,13 +157,13 @@ export abstract class BaseConnector implements Connector {
         await consumeApproval(this.runtime, approvedRequest, this.ctx.actor.id);
       }
       const data = await run();
-      recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'success');
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'success');
       if (policy.contribution) {
         await emitContribution(this.runtime, this.ctx, this.sourceTool, policy.contribution);
       }
       return ok(data);
     } catch (e) {
-      recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'failure', undefined, {
+      await recordAudit(this.runtime, this.ctx, this.sourceTool, auditAction, 'failure', undefined, {
         message: (e as Error).message,
       });
       return err('upstream_error', 'action failed', (e as Error).message);

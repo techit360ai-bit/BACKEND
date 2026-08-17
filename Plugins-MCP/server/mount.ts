@@ -85,6 +85,7 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
   app.get(`${base}/health`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
+    await svc.healthCheck();
     res.json({ ok: true, workspaceId: resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId });
   });
   app.get(`${base}/tools`, async (req, res) => {
@@ -94,17 +95,17 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
   app.get(`${base}/audit`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
-    res.json(svc.audit(resolved.workspaceId ?? resolved.actor.workspaceId));
+    res.json(await svc.audit(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
   app.get(`${base}/contributions`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
-    res.json(svc.contributions(resolved.workspaceId ?? resolved.actor.workspaceId));
+    res.json(await svc.contributions(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
   app.get(`${base}/approvals`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
-    res.json(svc.approvals(resolved.workspaceId ?? resolved.actor.workspaceId));
+    res.json(await svc.approvals(resolved.workspaceId ?? resolved.actor.workspaceId));
   });
 
   app.post(`${base}/invoke`, async (req, res) => {

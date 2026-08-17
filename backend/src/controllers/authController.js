@@ -2,8 +2,10 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb, updateDb, writeDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
+import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
+import { recordActivityInDb } from '../services/discoveryService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -14,9 +16,10 @@ if (!JWT_SECRET) {
   )
 }
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
+const JWT_ISSUER = process.env.JWT_ISSUER
+const JWT_AUDIENCE = process.env.JWT_AUDIENCE
 const SALT_ROUNDS = parseInt(process.env.BCRYPT_ROUNDS || '12', 10)
 const RESET_EXPIRES_MINUTES = parseInt(process.env.PASSWORD_RESET_EXPIRES_MINUTES || '30', 10)
-const FROM = process.env.FROM_EMAIL || 'TechIT <onboarding@resend.dev>'
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '')
 
 let _resend
@@ -36,7 +39,11 @@ function makeToken(userId, profile = null) {
     role: profile?.role || 'founder',
     workspaceId: profile?.workspaceId || `user-${userId}`,
   }
-  return jwt.sign(claims, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+  return jwt.sign(claims, JWT_SECRET, {
+    expiresIn: JWT_EXPIRES_IN,
+    ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
+    ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
+  })
 }
 
 function buildProfile(data, now) {
@@ -124,8 +131,8 @@ function makePasswordResetRecord(user) {
 }
 
 async function sendPasswordResetEmail(email, resetUrl) {
-  await getResend().emails.send({
-    from: FROM,
+  const delivery = await getResend().emails.send({
+    from: configuredFromEmail('password reset emails'),
     to: [email],
     subject: 'Reset your TechIT password',
     html: `
@@ -156,6 +163,7 @@ async function sendPasswordResetEmail(email, resetUrl) {
       </html>
     `,
   })
+  assertEmailAccepted(delivery, 'password reset email')
 }
 
 export async function signup(req, res) {
@@ -168,6 +176,9 @@ export async function signup(req, res) {
 
   if (!email || !password || !firstName || !lastName) {
     return res.status(400).json({ error: 'Email, password, first name, and last name are required' })
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
   if (!isAllowedRole(role)) {
@@ -227,6 +238,8 @@ export async function signin(req, res) {
   }
 
   const profile = db.profiles.find(p => p.id === user.id) || null
+  recordActivityInDb(db, user.id, 'login', 'auth')
+  writeDb(db)
 
   return res.json({
     token: makeToken(user.id, profile),
@@ -238,11 +251,41 @@ export async function signin(req, res) {
 export function session(req, res) {
   const db = readDb()
   const profile = db.profiles.find(p => p.id === req.user.id) || null
+  recordActivityInDb(db, req.user.id, 'session', 'auth')
+  writeDb(db)
   return res.json({ user: req.user, profile })
 }
 
 export function signout(_req, res) {
   return res.json({ message: 'Signed out' })
+}
+
+export async function changePassword(req, res) {
+  const currentPassword = String(req.body.currentPassword || '')
+  const newPassword = String(req.body.newPassword || '')
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ error: 'Current password and new password are required' })
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters' })
+  }
+
+  const db = readDb()
+  const user = db.users.find(row => row.id === req.user.id)
+  if (!user || !await bcrypt.compare(currentPassword, user.passwordHash)) {
+    return res.status(401).json({ error: 'Current password is incorrect' })
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS)
+  const updated = updateDb(current => {
+    const target = current.users.find(row => row.id === req.user.id)
+    if (!target) return false
+    target.passwordHash = passwordHash
+    target.updatedAt = new Date().toISOString()
+    return true
+  })
+  if (!updated) return res.status(404).json({ error: 'User not found' })
+  return res.json({ message: 'Password updated successfully' })
 }
 
 export async function forgotPassword(req, res) {
@@ -302,6 +345,9 @@ export async function resetPassword(req, res) {
   const email = normalizeEmail(rawEmail)
   if (!email || !token || !password) {
     return res.status(400).json({ error: 'Email, token, and password are required' })
+  }
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
   }
 
   const now = new Date().toISOString()

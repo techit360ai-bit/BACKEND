@@ -1,8 +1,9 @@
 const timeoutMs = Number(process.env.SMOKE_TIMEOUT_MS || 10_000);
 
+const mcpEnabled = process.env.MCP_ENABLED === "true";
 const checks = [
   { name: "node-backend", base: "BACKEND_BASE_URL", path: "/", statuses: [200] },
-  { name: "mcp-auth-boundary", base: "BACKEND_BASE_URL", path: "/api/mcp/health", statuses: [401] },
+  { name: "mcp-disabled-boundary", base: "BACKEND_BASE_URL", path: "/api/mcp/health", statuses: mcpEnabled ? [401] : [404] },
   { name: "messaging-health", base: "MESSAGING_BASE_URL", path: "/health", statuses: [200] },
 ];
 
@@ -15,13 +16,13 @@ if (process.env.SMOKE_BEARER_TOKEN) {
       statuses: [200],
       token: process.env.SMOKE_BEARER_TOKEN,
     },
-    {
+    ...(mcpEnabled ? [{
       name: "mcp-authenticated",
       base: "BACKEND_BASE_URL",
       path: "/api/mcp/health",
       statuses: [200],
       token: process.env.SMOKE_BEARER_TOKEN,
-    },
+    }] : []),
     {
       name: "messaging-conversations",
       base: "MESSAGING_BASE_URL",

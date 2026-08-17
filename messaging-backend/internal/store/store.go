@@ -109,6 +109,13 @@ type Post struct {
 	Kind       string
 	Body       string
 	CreatedAt  time.Time
+	ExpiresAt *time.Time
+	ContentFingerprint string
+	ModerationStatus string
+	AbuseScore int
+	RecommendationReason string
+	MatchedSignals []string
+	RankingVersion string
 }
 
 // Comment is a comment on a Post.
@@ -193,7 +200,33 @@ type PostStore interface {
 	AddComment(ctx context.Context, c Comment) error
 	ListComments(ctx context.Context, postID string) ([]Comment, error)
 	PostExists(ctx context.Context, postID string) (bool, error)
+	SavePost(ctx context.Context, postID, userID string, saved bool) error
+	SetPostFeedback(ctx context.Context, postID, userID, feedback string) error
+	FollowUser(ctx context.Context, followerID, followeeID string, following bool) error
+	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
+	RecordFeedEvent(ctx context.Context, event FeedEvent) error
+	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
+	FollowedUserIDs(ctx context.Context, userID string) ([]string, error)
+	SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error
+	FeedEventCount(ctx context.Context, userID string) (int, error)
+	CreatorPostCount(ctx context.Context, creatorID string) (int, error)
+	RecordRankingDecisions(ctx context.Context, decisions []RankingDecision) error
+	ListRankingDecisions(ctx context.Context, userID string, limit int) ([]RankingDecision, error)
+	ListModerationQueue(ctx context.Context, limit int) ([]Post, error)
+	ReviewPost(ctx context.Context, postID, reviewerID, status, reason string) error
+	SaveCount(ctx context.Context, postID string) (int, error)
+	ShareCount(ctx context.Context, postID string) (int, error)
+	GetDiscoveryProfile(ctx context.Context, userID string) (DiscoveryProfile, error)
+	UpsertDiscoveryProfile(ctx context.Context, profile DiscoveryProfile) error
+	RankingMetrics(ctx context.Context) ([]RankingMetrics, error)
+	PostInteractionCount(ctx context.Context, userID, postID string) (int, error)
 }
+
+type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }
+type RankingDecision struct { ID, UserID, PostID, Category, RankingVersion, Variant string; Score float64; Signals []string; CreatedAt time.Time }
+type ModerationReview struct { PostID, Status, Reason, ReviewerID string; AbuseScore int; CreatedAt, ReviewedAt time.Time }
+type DiscoveryProfile struct { UserID, Location string; Skills, Industries, Interests []string; Credibility, StartupQuality, ContributionScore float64 }
+type RankingMetrics struct { Variant string; Decisions, Impressions, Opens, Saves, Shares int; AverageScore float64 }
 
 // Router delivers a server->client envelope to a user's live connections.
 // Implemented by the hub in Plan 2; the messaging service depends only on this.

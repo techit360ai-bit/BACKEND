@@ -76,6 +76,47 @@ function requireAbsolutePath(env, name) {
   if (!path.isAbsolute(value)) fail(`${name} must be an absolute path to persistent storage`);
 }
 
+function requireProductionEmailSender(env, name) {
+  const value = requireValue(env, name);
+  if (/@resend\.dev\b/i.test(value)) {
+    fail(`${name} must use a verified sender domain, not resend.dev, in production/staging`);
+  }
+}
+
+function requireMcpEncryptionKey(env) {
+  const raw = requireValue(env, "MCP_SECRET_KEY");
+  const value = /^[0-9a-fA-F]{64}$/.test(raw) ? Buffer.from(raw, "hex") : Buffer.from(raw, "base64");
+  if (value.length !== 32) fail("MCP_SECRET_KEY must encode exactly 32 bytes");
+  if (new Set(value).size < 8) fail("MCP_SECRET_KEY does not have sufficient diversity");
+}
+
+function validateProductionMcp(env) {
+  if (requireValue(env, "MCP_ENABLED") !== "true") fail("MCP_ENABLED must be true for the production-ready MCP contract");
+  if (requireValue(env, "MCP_STORE") !== "postgres") fail("MCP_STORE must be postgres in production/staging");
+  requireUrl(env, "MCP_DATABASE_URL", ["postgres:", "postgresql:"]);
+  requireMcpEncryptionKey(env);
+  const connectors = requireValue(env, "MCP_ENABLED_CONNECTORS").split(",").map((x) => x.trim()).filter(Boolean);
+  if (connectors.length === 0) fail("MCP_ENABLED_CONNECTORS must not be empty");
+  const requirements = {
+    github: ["GITHUB_CONNECTOR_MODE", "MCP_GITHUB_TOKEN"],
+    notion: ["NOTION_CONNECTOR_MODE", "NOTION_TOKEN"],
+    figma: ["FIGMA_CONNECTOR_MODE", "FIGMA_TOKEN"],
+    web3: ["WEB3_CONNECTOR_MODE", "SIWE_EXPECTED_DOMAIN", "SIWE_EXPECTED_URI", "SIWE_EXPECTED_CHAIN_ID"],
+    ai: ["AI_HARNESS_CONNECTOR_MODE", "AI_ROUTER_URL", "AI_ROUTER_TOKEN"],
+  };
+  for (const connector of connectors) {
+    const names = requirements[connector];
+    if (!names) fail(`unsupported MCP connector ${connector}`);
+    if (requireValue(env, names[0]) !== "real") fail(`${names[0]} must be real`);
+    for (const name of names.slice(1)) requireValue(env, name);
+  }
+  if (connectors.includes("web3")) {
+    if (!env.WEB3_RPC_URL && !env.ALCHEMY_API_KEY) fail("WEB3_RPC_URL or ALCHEMY_API_KEY is required");
+    if (env.WEB3_RPC_URL) requireUrl(env, "WEB3_RPC_URL");
+  }
+  if (connectors.includes("ai")) requireUrl(env, "AI_ROUTER_URL");
+}
+
 function validateManifest() {
   const manifest = readJson(MANIFEST_PATH);
   if (manifest.version !== 1) fail("deployment manifest version must be 1");
@@ -115,18 +156,39 @@ function validateNodeBackend(env) {
   }
   requireAbsolutePath(env, "SQLITE_DB_PATH");
   requireValue(env, "RESEND_API_KEY");
-  requireValue(env, "FROM_EMAIL");
-  requireAbsolutePath(env, "MCP_DATA_FILE");
+  requireProductionEmailSender(env, "FROM_EMAIL");
+  for (const name of ["JWT_ISSUER", "JWT_AUDIENCE"]) requireValue(env, name);
+  for (const name of ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"]) {
+    const value = requireValue(env, name);
+    if (/test-github|replace/i.test(value)) fail(`${name} must be configured for production`);
+  }
+  requireUrl(env, "GITHUB_REDIRECT_URI");
+  for (const name of [
+    "GITHUB_TOKEN_ENCRYPTION_KEY",
+    "OTP_HASH_SECRET",
+    "AI_ROUTER_SETTLEMENT_SECRET",
+    "AI_USAGE_GRANT_SERVICE_SECRET",
+    "AI_EXECUTION_GRANT_SECRET",
+  ]) {
+    const value = requireValue(env, name);
+    if (value.length < 32 || /change|replace|test-secret/i.test(value)) {
+      fail(`${name} must be at least 32 characters and non-placeholder`);
+    }
+  }
+  validateProductionMcp(env);
 }
 
 function validatePluginsMcp(env) {
   assertStrongSharedSecret(env);
-  requireAbsolutePath(env, "MCP_DATA_FILE");
-  if (requireValue(env, "MCP_ALLOW_FILE_STORE") !== "true") {
-    fail("MCP_ALLOW_FILE_STORE=true must be explicit for the current single-replica file store");
+  validateProductionMcp(env);
+  if (requireValue(env, "MCP_ALLOW_FILE_STORE") !== "false") {
+    fail("MCP_ALLOW_FILE_STORE must be false in production/staging");
   }
-  if (requireValue(env, "MCP_ALLOW_STUB_CONNECTORS") !== "true") {
-    fail("MCP_ALLOW_STUB_CONNECTORS=true must be explicit until real connector wiring is deployed");
+  if (requireValue(env, "MCP_ALLOW_STUB_CONNECTORS") !== "false") {
+    fail("MCP_ALLOW_STUB_CONNECTORS must be false in production/staging");
+  }
+  if (requireValue(env, "MCP_SEED_DEMO_ACTIVITY") !== "false") {
+    fail("MCP_SEED_DEMO_ACTIVITY must be false in production/staging");
   }
   const ttl = Number(requireValue(env, "MCP_APPROVAL_TTL_MS"));
   if (!Number.isInteger(ttl) || ttl < 60_000) {
@@ -139,6 +201,8 @@ function validateMessagingBackend(env) {
     fail("ENVIRONMENT must be production for messaging-backend");
   }
   assertStrongSharedSecret(env);
+  requireValue(env, "JWT_ISSUER");
+  requireValue(env, "JWT_AUDIENCE");
   requireValue(env, "PORT");
   requireUrl(env, "DATABASE_URL", ["postgres:", "postgresql:"]);
   requireUrl(env, "REDIS_URL", ["redis:", "rediss:"]);

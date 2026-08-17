@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
-import { forgotPassword, resetPassword, signup, signin, session, signout } from '../controllers/authController.js'
+import { changePassword, forgotPassword, resetPassword, signup, signin, session, signout } from '../controllers/authController.js'
 import { sendOtp, verifyOtp } from '../controllers/otpController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
@@ -24,7 +24,7 @@ const baseLimit = (opts) => rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   keyGenerator: (req) => ipKeyGenerator(req.ip),
-  validate: { trustProxy: false, xForwardedForHeader: false },
+  validate: { trustProxy: true, xForwardedForHeader: true },
   skip: () => IS_TEST,
 })
 
@@ -46,15 +46,22 @@ const signupLimit = baseLimit({
   message: { error: 'Too many sign-up attempts from this IP. Please try again later.' },
 })
 
+const verifyLimit = baseLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many verification attempts. Please wait before trying again.' },
+})
+
 router.post('/signup',      signupLimit, signup)
 router.post('/signin',      signinLimit, signin)
 router.get('/session',      requireAuth, session)
 router.post('/signout',     requireAuth, signout)
+router.post('/change-password', requireAuth, changePassword)
 router.post('/forgot-password', signinLimit, forgotPassword)
 router.post('/reset-password',  signinLimit, resetPassword)
 
 // OTP email verification
 router.post('/send-otp',    otpLimit, sendOtp)
-router.post('/verify-otp',  verifyOtp)
+router.post('/verify-otp',  verifyLimit, verifyOtp)
 
 export default router

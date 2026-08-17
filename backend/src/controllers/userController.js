@@ -1,12 +1,19 @@
 import { readDb, updateDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
+import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
   'avatarUrl', 'bio', 'secondaryRoles', 'isOnboarded', 'startupStage', 'industries', 'experience',
   'skills', 'weeklyHours', 'riskTolerance', 'investmentFocus', 'ticketSize',
   'orgName', 'orgType', 'website', 'linkedinUrl', 'githubUrl', 'portfolioUrl',
-  'timezone', 'certifications',
+  'timezone', 'certifications', 'title', 'twitterUrl',
+  'yearsBuilding', 'founderType', 'oneLiner', 'foundingYear', 'logoEmoji',
+  'currentTeamSize', 'openRoles', 'compensationOffered', 'equityRangeMin', 'equityRangeMax',
+  'launchStatus', 'users', 'revenueMonthly', 'fundingRaised', 'leadInvestor',
+  'nextMilestone', 'whyBuilding', 'winningIn3Years', 'unfairAdvantage', 'ownershipPhilosophy',
+  'yearsExperience', 'discipline', 'subSkills', 'techStack', 'earliestStart',
+  'commitmentStyle', 'equityPreference', 'minCashFloor', 'vestingComfort',
 ])
 
 export function getMe(req, res) {
@@ -26,6 +33,7 @@ export function updateMe(req, res) {
     const idx = db.profiles.findIndex(p => p.id === req.user.id)
     if (idx === -1) return null
     db.profiles[idx] = { ...db.profiles[idx], ...updates, updatedAt: new Date().toISOString() }
+    syncRecommendationProfileInDb(db, req.user.id)
     return db.profiles[idx]
   })
   if (!result) return res.status(404).json({ error: 'Profile not found' })
@@ -79,6 +87,70 @@ function publicProfile(profile, db, viewerId) {
   }
 }
 
+function hasDirectoryRole(profile, role) {
+  if (!role) return true
+  const roles = [
+    profile.role,
+    ...(Array.isArray(profile.secondaryRoles) ? profile.secondaryRoles : []),
+    ...(Array.isArray(profile.roles) ? profile.roles : []),
+  ].map(value => String(value || '').toLowerCase())
+  return roles.includes(role)
+}
+
+function boundedNumber(value, min, max) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : min
+}
+
+function plainText(value, maxLength) {
+  if (typeof value !== 'string') return ''
+  return value
+    .replace(/[<>\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength)
+}
+
+function safeStringArray(value, maxItems = 24, maxLength = 80) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(item => plainText(item, maxLength)).filter(Boolean))].slice(0, maxItems)
+}
+
+function directoryProfile(profile) {
+  return {
+    id: profile.id,
+    name: userName(profile),
+    role: profile.role || 'collaborator',
+    title: profile.title || profile.discipline || '',
+    headline: profile.bio || '',
+    skills: safeStringArray(profile.skills),
+    discipline: plainText(profile.discipline, 80),
+    subSkills: safeStringArray(profile.subSkills),
+    techStack: safeStringArray(profile.techStack),
+    weeklyHours: boundedNumber(profile.weeklyHours, 0, 168),
+    timezone: profile.timezone || '',
+    location: profile.country || '',
+    earliestStart: plainText(profile.earliestStart, 24),
+    commitmentStyle: plainText(profile.commitmentStyle, 24),
+    equityPreference: boundedNumber(profile.equityPreference, 0, 100),
+    minCashFloor: boundedNumber(profile.minCashFloor, 0, 1_000_000),
+    industries: safeStringArray(profile.industries, 12),
+    avatarUrl: profile.avatarUrl || '',
+    credibilityScore: boundedNumber(profile.credibilityScore, 0, 100),
+    isVerified: Boolean(profile.isVerified),
+  }
+}
+
+export function listUsers(req, res) {
+  const requestedRole = String(req.query.role || '').trim().toLowerCase()
+  const db = readDb()
+  const users = db.profiles
+    .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
+    .map(directoryProfile)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return res.json({ users })
+}
+
 export function getUserProfile(req, res) {
   const db = readDb()
   const id = req.params.id === 'me' ? req.user.id : req.params.id
@@ -87,7 +159,52 @@ export function getUserProfile(req, res) {
   return res.json(publicProfile(profile, db, req.user.id))
 }
 
+function normalizeInvitation(value) {
+  if (value === undefined || value === null) return { invitation: null }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { error: 'Invalid collaboration invitation' }
+  const invitation = {
+    projectId: plainText(value.projectId, 100),
+    projectName: plainText(value.projectName, 120),
+    summary: plainText(value.summary, 500),
+    scope: plainText(value.scope, 1000),
+    requestedRole: plainText(value.requestedRole, 80),
+    requiredSkills: safeStringArray(value.requiredSkills, 12, 50),
+    compensationMode: ['equity-heavy', 'equity-cash', 'cash-only'].includes(value.compensationMode)
+      ? value.compensationMode
+      : 'equity-heavy',
+    equityProposal: boundedNumber(value.equityProposal, 0, 30),
+    cashReward: boundedNumber(value.cashReward, 0, 1_000_000),
+  }
+  if (invitation.compensationMode === 'cash-only') invitation.equityProposal = 0
+  if (invitation.compensationMode === 'equity-heavy') invitation.cashReward = 0
+  if (!invitation.projectId || !invitation.projectName || !invitation.summary || !invitation.scope || !invitation.requestedRole) {
+    return { error: 'Project, summary, scope and requested role are required' }
+  }
+  if (invitation.compensationMode !== 'cash-only' && invitation.equityProposal <= 0) {
+    return { error: 'An ownership proposal is required' }
+  }
+  if (invitation.compensationMode !== 'equity-heavy' && invitation.cashReward <= 0) {
+    return { error: 'Cash support is required for this offer type' }
+  }
+  return { invitation }
+}
+
+function invitationContent(invitation) {
+  const ownership = invitation.equityProposal > 0 ? `${invitation.equityProposal}% proposed ownership` : ''
+  const cashSupport = invitation.cashReward > 0 ? `$${invitation.cashReward.toLocaleString('en-US')}/month optional cash support` : ''
+  const compensation = [ownership, cashSupport].filter(Boolean).join(' + ')
+  return [
+    `invites you as ${invitation.requestedRole} for ${invitation.projectName}.`,
+    invitation.summary,
+    `Scope: ${invitation.scope}`,
+    compensation ? `Non-binding ownership proposal: ${compensation}.` : 'Ownership terms are open for discussion.',
+  ].join(' ')
+}
+
 export function connectUser(req, res) {
+  const normalized = normalizeInvitation(req.body?.invitation)
+  if (normalized.error) return res.status(400).json({ error: normalized.error })
+  const invitation = normalized.invitation
   const result = updateDb(db => {
     const target = db.profiles.find(p => p.id === req.params.id || p.username === req.params.id)
     const actor = db.profiles.find(p => p.id === req.user.id)
@@ -97,7 +214,10 @@ export function connectUser(req, res) {
       n.userId === target.id &&
       n.actorId === req.user.id &&
       n.type === 'collab' &&
-      n.linkTo === `/feed/profile/${req.user.id}`
+      n.linkTo === `/feed/profile/${req.user.id}` &&
+      (invitation
+        ? n.metadata?.invitation?.projectId === invitation.projectId
+        : !n.metadata?.invitation)
     )
     if (!exists) {
       db.notifications.push({
@@ -106,13 +226,24 @@ export function connectUser(req, res) {
         actorId: req.user.id,
         type: 'collab',
         read: false,
-        content: 'wants to connect with you',
+        content: invitation ? invitationContent(invitation) : 'wants to connect with you',
         author: userName(actor),
         avatar: avatarGradient(req.user.id),
         linkTo: `/feed/profile/${req.user.id}`,
+        metadata: invitation ? { invitation } : undefined,
         createdAt: nowIso(),
       })
     }
+    const event = appendPlatformEventInDb(db, {
+      userId: req.user.id,
+      actorId: req.user.id,
+      eventType: 'connect',
+      entityType: 'person',
+      entityId: target.id,
+      importance: 'HIGH',
+      metadata: { targetName: userName(target) },
+    })
+    appendRelationshipInDb(db, req.user.id, event)
     return { status: 200 }
   })
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })

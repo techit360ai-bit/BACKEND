@@ -9,18 +9,31 @@ import type { Actor, AgentDefinition, Role } from '@techit/core';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
+import { registerNotionPlugin } from '@techit/plugin-notion';
+import { registerFigmaPlugin } from '@techit/plugin-figma';
+import { registerWeb3Plugin } from '@techit/plugin-web3';
+import { registerAiPlugin } from '@techit/plugin-ai';
 import {
   FileApprovalStore,
   FileAuditLogger,
   FileContributionSink,
   validateMcpStoreConfig,
 } from './file-store.js';
+import {
+  createMcpPool,
+  EncryptedPgSecretVault,
+  migrateMcpDatabase,
+  PgMcpStore,
+  validatePostgresMcpConfig,
+} from './postgres-store.js';
 
 // Default workspaceId used for the demo-seed activity in build() and as a
 // fallback when a caller doesn't supply one. Production traffic should
 // always come through mount.ts with a verified JWT claim — see
 // resolveActor in app.js, which sets ActorInput.workspaceId from the token.
 const WS = 'ws-acme';
+const CONNECTOR_NAMES = ['github', 'notion', 'figma', 'web3', 'ai'] as const;
+type ConnectorName = typeof CONNECTOR_NAMES[number];
 
 export interface ActorInput {
   id?: string;
@@ -36,9 +49,10 @@ export interface ActorInput {
 export interface TechitService {
   workspaceId: string;
   listTools(): { plugin: string; tool: unknown }[];
-  audit(workspaceId?: string): unknown[];
-  contributions(workspaceId?: string): unknown[];
-  approvals(workspaceId?: string): unknown[];
+  audit(workspaceId?: string): Promise<unknown[]>;
+  contributions(workspaceId?: string): Promise<unknown[]>;
+  approvals(workspaceId?: string): Promise<unknown[]>;
+  healthCheck(): Promise<void>;
   invoke(plugin: string, tool: string, params: unknown, actor?: ActorInput): Promise<Result>;
   approve(
     requestId: string,
@@ -67,29 +81,55 @@ function toContext(input: ActorInput | undefined): CallContext {
 
 async function build(): Promise<TechitService> {
   validateProductionConfig();
-  validateMcpStoreConfig();
-
-  // Persistent stores backed by backend/data/plugins-mcp.json (override path
-  // with MCP_DATA_FILE env). Audit log + approval queue + contribution feed
-  // all survive restarts; the previous In-Memory stores reset on every boot.
-  const audit = new FileAuditLogger();
-  const approvals = new FileApprovalStore();
-  const contributions = new FileContributionSink();
-  const runtime = createRuntime({ audit, approvals, contributions });
+  const storeMode = (process.env.MCP_STORE || (isProductionLike() ? 'postgres' : 'file')).toLowerCase();
+  let audit: FileAuditLogger | PgMcpStore;
+  let approvals: FileApprovalStore | PgMcpStore;
+  let contributions: FileContributionSink | PgMcpStore;
+  let healthCheck: () => Promise<void>;
+  let vault;
+  if (storeMode === 'postgres') {
+    validatePostgresMcpConfig();
+    const pool = createMcpPool();
+    await migrateMcpDatabase(pool);
+    const store = new PgMcpStore(pool);
+    await store.healthCheck();
+    audit = store;
+    approvals = store;
+    contributions = store;
+    vault = new EncryptedPgSecretVault(pool);
+    healthCheck = () => store.healthCheck();
+  } else if (storeMode === 'file') {
+    validateMcpStoreConfig();
+    audit = new FileAuditLogger();
+    approvals = new FileApprovalStore();
+    contributions = new FileContributionSink();
+    healthCheck = async () => undefined;
+  } else {
+    throw new Error(`Unsupported MCP_STORE=${storeMode}; expected postgres or file.`);
+  }
+  const runtime = createRuntime({ audit, approvals, contributions, ...(vault ? { vault } : {}) });
   const registry = new MCPRegistry();
-  await registerGithubPlugin({ runtime, registry, workspaceId: WS });
+  const connectors = enabledConnectors();
+  if (connectors.has('github')) await registerGithubPlugin({ runtime, registry, workspaceId: WS });
+  if (connectors.has('notion')) await registerNotionPlugin({ runtime, registry, workspaceId: WS });
+  if (connectors.has('figma')) await registerFigmaPlugin({ runtime, registry, workspaceId: WS });
+  if (connectors.has('web3')) await registerWeb3Plugin({ runtime, registry, workspaceId: WS });
+  if (connectors.has('ai')) await registerAiPlugin({ runtime, registry, workspaceId: WS });
   const client = new MCPClient(registry);
 
   const service: TechitService = {
     workspaceId: WS,
     listTools: () => client.listTools(),
-    audit: (workspaceId) => workspaceId ? [...audit.entriesForWorkspace(workspaceId)] : [...audit.entries()],
-    contributions: (workspaceId) => workspaceId
-      ? [...contributions.eventsForWorkspace(workspaceId)]
-      : [...contributions.events],
-    approvals: (workspaceId) => workspaceId
-      ? approvals.listForWorkspace(workspaceId)
-      : [...approvals.requests.values()],
+    audit: async (workspaceId) => workspaceId
+      ? [...await audit.entriesForWorkspace(workspaceId)]
+      : [...await audit.entries()],
+    contributions: async (workspaceId) => workspaceId
+      ? [...await contributions.eventsForWorkspace(workspaceId)]
+      : [...await contributions.allEvents()],
+    approvals: async (workspaceId) => workspaceId
+      ? await approvals.listForWorkspace(workspaceId)
+      : await approvals.allApprovals(),
+    healthCheck,
     invoke: (plugin, tool, params, actor) => client.invoke(plugin, tool, params, toContext(actor)),
     approve: async (requestId, actor = { id: 'founder', role: 'owner', kind: 'human', workspaceId: WS }) => {
       const req = await approvals.get(requestId);
@@ -99,20 +139,25 @@ async function build(): Promise<TechitService> {
       if (!['admin', 'owner'].includes(ctx.actor.role)) return { approved: false, reason: 'insufficient_role' };
       if (req.workspaceId !== ctx.actor.workspaceId) return { approved: false, reason: 'workspace_mismatch' };
       if (req.status !== 'pending') return { approved: false, reason: `already_${req.status}` };
-      await approvals.decide({
-        requestId,
-        decidedBy: ctx.actor.id,
-        status: 'approved',
-        decidedAt: new Date().toISOString(),
-      });
+      try {
+        await approvals.decide({
+          requestId,
+          decidedBy: ctx.actor.id,
+          status: 'approved',
+          decidedAt: new Date().toISOString(),
+        });
+      } catch {
+        const current = await approvals.get(requestId);
+        return { approved: false, reason: `already_${current?.status ?? 'changed'}` };
+      }
       return { approved: true };
     },
   };
 
-  // Seed a little activity so the dashboards aren't empty on first load.
-  // Only run when the audit log is empty (fresh database) — without this guard
-  // every restart would append three more rows, polluting the persistent log.
-  if (audit.entries().length === 0) {
+  // Demo seed activity is opt-in and forbidden in production/staging. An audit
+  // log must contain only real actions unless an operator explicitly launches
+  // a local demo.
+  if (process.env.MCP_SEED_DEMO_ACTIVITY === 'true' && (await audit.entries()).length === 0) {
     await service.invoke('github', 'list_repositories', {});
     await service.invoke('github', 'list_issues', { repo: 'acme/app' });
     await service.invoke(
@@ -120,6 +165,16 @@ async function build(): Promise<TechitService> {
       'create_pull_request',
       { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
       { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'] },
+    );
+    // One read per new connector so every plugin appears in the demo feeds.
+    await service.invoke('notion', 'search', { query: 'roadmap' });
+    await service.invoke('figma', 'get_file', { file_key: 'demo123' });
+    await service.invoke('web3', 'get_balance', { address: '0x1234567890abcdef1234567890abcdef12345678' });
+    await service.invoke(
+      'ai',
+      'review_code',
+      { code: 'const x: any = 1;', language: 'typescript' },
+      { id: 'founder', kind: 'human', role: 'editor' },
     );
   }
 
@@ -134,10 +189,53 @@ export function getTechitService(): Promise<TechitService> {
 }
 
 function validateProductionConfig(): void {
-  const env = (process.env.NODE_ENV || 'development').toLowerCase();
-  if (!['production', 'staging'].includes(env)) return;
-  if (process.env.MCP_ALLOW_STUB_CONNECTORS === 'true') return;
-  throw new Error(
-    'MCP production/staging requires real connector wiring; set MCP_ALLOW_STUB_CONNECTORS=true only for an explicit demo deployment.',
-  );
+  if (!isProductionLike()) return;
+  if (process.env.MCP_STORE !== 'postgres') {
+    throw new Error('MCP_STORE=postgres is required in production/staging.');
+  }
+  if (process.env.MCP_ALLOW_STUB_CONNECTORS === 'true') {
+    throw new Error('MCP_ALLOW_STUB_CONNECTORS=true is forbidden in production/staging.');
+  }
+  if (process.env.MCP_SEED_DEMO_ACTIVITY === 'true') {
+    throw new Error('MCP_SEED_DEMO_ACTIVITY=true is forbidden in production/staging.');
+  }
+  const connectors = enabledConnectors();
+  if (connectors.size === 0) throw new Error('MCP_ENABLED_CONNECTORS must enable at least one production connector.');
+  const requirements: Record<ConnectorName, { mode: string; vars: string[] }> = {
+    github: { mode: 'GITHUB_CONNECTOR_MODE', vars: ['MCP_GITHUB_TOKEN'] },
+    notion: { mode: 'NOTION_CONNECTOR_MODE', vars: ['NOTION_TOKEN'] },
+    figma: { mode: 'FIGMA_CONNECTOR_MODE', vars: ['FIGMA_TOKEN'] },
+    web3: { mode: 'WEB3_CONNECTOR_MODE', vars: ['SIWE_EXPECTED_DOMAIN', 'SIWE_EXPECTED_URI', 'SIWE_EXPECTED_CHAIN_ID'] },
+    ai: { mode: 'AI_HARNESS_CONNECTOR_MODE', vars: ['AI_ROUTER_URL', 'AI_ROUTER_TOKEN'] },
+  };
+  for (const connector of connectors) {
+    const requirement = requirements[connector];
+    if (process.env[requirement.mode] !== 'real') {
+      throw new Error(`${requirement.mode}=real is required for enabled production connector ${connector}.`);
+    }
+    for (const name of requirement.vars) {
+      if (!process.env[name]) throw new Error(`${name} is required for enabled production connector ${connector}.`);
+    }
+  }
+  if (connectors.has('web3') && !process.env.WEB3_RPC_URL && !process.env.ALCHEMY_API_KEY) {
+    throw new Error('WEB3_RPC_URL or ALCHEMY_API_KEY is required for the production web3 connector.');
+  }
+  for (const name of ['AI_ROUTER_URL', 'WEB3_RPC_URL']) {
+    const value = process.env[name];
+    if (value && new URL(value).protocol !== 'https:') throw new Error(`${name} must use https in production/staging.`);
+  }
+}
+
+function isProductionLike(): boolean {
+  return ['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase());
+}
+
+function enabledConnectors(): Set<ConnectorName> {
+  const raw = process.env.MCP_ENABLED_CONNECTORS;
+  if (!raw && !isProductionLike()) return new Set(CONNECTOR_NAMES);
+  if (!raw) throw new Error('MCP_ENABLED_CONNECTORS is required in production/staging.');
+  const values = raw.split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  const invalid = values.filter((value) => !CONNECTOR_NAMES.includes(value as ConnectorName));
+  if (invalid.length) throw new Error(`Unknown MCP connector(s): ${invalid.join(', ')}`);
+  return new Set(values as ConnectorName[]);
 }

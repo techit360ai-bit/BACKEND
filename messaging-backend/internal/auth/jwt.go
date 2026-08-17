@@ -19,15 +19,26 @@ type Claims struct {
 
 // Verifier verifies and mints HS256 tokens with a shared secret.
 type Verifier struct {
-	secret []byte
+	secret   []byte
+	issuer   string
+	audience string
 }
 
-func NewVerifier(secret string) *Verifier { return &Verifier{secret: []byte(secret)} }
+func NewVerifier(secret string, values ...string) *Verifier {
+	v := &Verifier{secret: []byte(secret)}
+	if len(values) > 0 {
+		v.issuer = values[0]
+	}
+	if len(values) > 1 {
+		v.audience = values[1]
+	}
+	return v
+}
 
 // Verify parses and validates an HS256 token, returning its identity claims.
 func (v *Verifier) Verify(token string) (Claims, error) {
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS256 {
 			return nil, errors.New("unexpected signing method")
 		}
 		return v.secret, nil
@@ -38,6 +49,28 @@ func (v *Verifier) Verify(token string) (Claims, error) {
 	mc, ok := parsed.Claims.(jwt.MapClaims)
 	if !ok || !parsed.Valid {
 		return Claims{}, errors.New("invalid token")
+	}
+	if v.issuer != "" {
+		if value, _ := mc["iss"].(string); value != v.issuer {
+			return Claims{}, errors.New("invalid issuer")
+		}
+	}
+	if v.audience != "" {
+		validAudience := false
+		switch value := mc["aud"].(type) {
+		case string:
+			validAudience = value == v.audience
+		case []any:
+			for _, item := range value {
+				if item == v.audience {
+					validAudience = true
+					break
+				}
+			}
+		}
+		if !validAudience {
+			return Claims{}, errors.New("invalid audience")
+		}
 	}
 	sub, _ := mc["sub"].(string)
 	if sub == "" {

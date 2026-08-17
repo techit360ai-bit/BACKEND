@@ -1,0 +1,65 @@
+name: web3
+version: 0.1.0
+displayName: Web3 (EVM / Sepolia)
+
+auth:
+  kind: api_key
+  scopes: []
+
+capabilities:
+  read: true
+  write: false
+  execute: true
+
+resources:
+  - type: address
+    artifactType: dataset
+  - type: transaction
+    artifactType: dataset
+
+events:
+  transport: poller
+  pollIntervalSeconds: 60
+  types: []
+
+mcp:
+  enabled: true
+  tools:
+    - name: get_balance
+      description: Get the native (ETH) balance of an address on Sepolia testnet.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          address: { type: string }
+        required: [address]
+
+    - name: get_transaction
+      description: Look up a transaction by hash on Sepolia testnet.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          hash: { type: string }
+        required: [hash]
+
+    - name: read_contract
+      description: Perform a read-only eth_call against a contract (hex calldata). No state change, no gas.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          to: { type: string }
+          data: { type: string }
+        required: [to, data]
+
+    - name: siwe_verify
+      description: Verify a Sign-In-With-Ethereum (EIP-4361) message + signature. Returns the claimed address and validity.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          message: { type: string }
+          signature: { type: string }
+          expected_nonce: { type: string }
+        required: [message, signature, expected_nonce]

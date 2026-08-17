@@ -1,7 +1,12 @@
 import { Resend } from 'resend'
-import { createHash, randomBytes, randomInt, randomUUID } from 'crypto'
+import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto'
 import { readDb, writeDb } from '../config/database.js'
 import { normalizeEmail } from '../utils/authInputs.js'
+import {
+  assertEmailAccepted,
+  configuredFromEmail,
+  describeEmailProviderError,
+} from '../utils/emailDelivery.js'
 
 // Lazy-initialize the Resend client so module load stays side-effect free.
 // The Resend constructor throws when no API key is set; eager construction here
@@ -18,7 +23,6 @@ function getResend() {
   return _resend
 }
 
-const FROM      = process.env.FROM_EMAIL         || 'TechIT <onboarding@resend.dev>'
 const EXPIRES   = parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10)
 const RESEND_COOLDOWN_SECONDS = 60   // minimum gap between sends per email
 const MAX_ATTEMPTS = 5               // wrong guesses before OTP is invalidated
@@ -38,6 +42,22 @@ function cleanExpired(otps = []) {
 
 function tokenHash(token) {
   return createHash('sha256').update(token).digest('hex')
+}
+
+function codeHash(code) {
+  return tokenHash(String(code).trim())
+}
+
+function codeHmac(code) {
+  const secret = process.env.OTP_HASH_SECRET || process.env.JWT_SECRET || ''
+  if (!secret) throw new Error('OTP_HASH_SECRET is required to protect OTP records')
+  return createHmac('sha256', secret).update(String(code).trim()).digest('hex')
+}
+
+function constantTimeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left))
+  const rightBuffer = Buffer.from(String(right))
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
 }
 
 function cleanExpiredVerifications(records) {
@@ -80,8 +100,8 @@ export async function sendOtp(req, res) {
 
   // ── Send email via Resend ─────────────────────────────────────────────────
   try {
-    await getResend().emails.send({
-      from:    FROM,
+    const delivery = await getResend().emails.send({
+      from:    configuredFromEmail('OTP emails'),
       to:      [email],
       subject: 'Your TechIT verification code',
       html: `
@@ -124,12 +144,19 @@ export async function sendOtp(req, res) {
         </html>
       `,
     })
+    assertEmailAccepted(delivery, 'OTP email')
   } catch (err) {
-    console.error('[OTP] Resend error:', err.message)
+    console.error(JSON.stringify({
+      event: 'otp_email_send_failed',
+      requestId: req.id,
+      error: describeEmailProviderError(err),
+    }))
     return res.status(502).json({ error: 'Failed to send email. Please try again.' })
   }
 
-  db.otps.push({ email, code, expiresAt, sentAt, attempts: 0 })
+  // Never persist the six-digit OTP itself. A database read must not be
+  // sufficient to complete email verification.
+  db.otps.push({ email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
   writeDb(db)
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })
@@ -159,7 +186,16 @@ export function verifyOtp(req, res) {
     return res.status(400).json({ error: 'Too many attempts. Please request a new code.' })
   }
 
-  if (record.code !== String(code).trim()) {
+  // Legacy plaintext records are accepted during the rolling deployment and
+  // are removed immediately after success/expiry. New writes are hash-only.
+  const submittedCode = String(code).trim()
+  const keyedHashMatches = typeof record.codeHmac === 'string'
+    && constantTimeEqual(record.codeHmac, codeHmac(submittedCode))
+  const legacyHashMatches = typeof record.codeHash === 'string'
+    && constantTimeEqual(record.codeHash, codeHash(submittedCode))
+  const legacyMatches = typeof record.code === 'string'
+    && constantTimeEqual(record.code, submittedCode)
+  if (!keyedHashMatches && !legacyHashMatches && !legacyMatches) {
     writeDb(db)
     const left = MAX_ATTEMPTS - record.attempts
     return res.status(400).json({

@@ -42,6 +42,9 @@ cd backend && npm run start              # node --import tsx src/index.js
 Env vars:
 ```
 JWT_SECRET=<32-byte hex>                 # required, no fallback
+JWT_ISSUER=techit-backend
+JWT_AUDIENCE=techit-platform
+OTP_HASH_SECRET=<different 32+ random bytes>
 NODE_ENV=production
 PORT=3000
 CORS_ORIGINS=https://app.<domain>        # comma-separated browser origins
@@ -50,10 +53,36 @@ SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
 FRONTEND_URL=https://app.<domain>        # used in password reset links
-MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json   # persistent volume; survives restarts
-MCP_ALLOW_FILE_STORE=true                # explicit single-replica file-store acknowledgement
-MCP_ALLOW_STUB_CONNECTORS=true           # demo connector bridge until real provider wiring lands
+MCP_ENABLED=true                         # explicit opt-in; defaults to disabled
+MCP_STORE=postgres
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require
+MCP_DATABASE_SSL=true
+MCP_DATABASE_SSL_REJECT_UNAUTHORIZED=true
+MCP_SECRET_KEY=<base64-encoded 32 random bytes>
+MCP_SECRET_KEY_PREVIOUS=                 # comma-separated previous keys during rotation
+MCP_ENABLED_CONNECTORS=github,notion,figma,web3
+MCP_ALLOW_FILE_STORE=false               # forbidden in production/staging
+MCP_ALLOW_STUB_CONNECTORS=false          # forbidden in production/staging
+MCP_SEED_DEMO_ACTIVITY=false
 MCP_APPROVAL_TTL_MS=900000
+GITHUB_CONNECTOR_MODE=real
+MCP_GITHUB_TOKEN=<least-privilege GitHub App installation token>
+NOTION_CONNECTOR_MODE=real
+NOTION_TOKEN=<integration token>
+FIGMA_CONNECTOR_MODE=real
+FIGMA_TOKEN=<personal access token>
+WEB3_CONNECTOR_MODE=real
+WEB3_RPC_URL=https://<sepolia-provider>
+SIWE_EXPECTED_DOMAIN=app.<domain>
+SIWE_EXPECTED_URI=https://app.<domain>
+SIWE_EXPECTED_CHAIN_ID=11155111
+GITHUB_CLIENT_ID=<production GitHub OAuth app client ID>
+GITHUB_CLIENT_SECRET=<production GitHub OAuth app secret>
+GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback
+GITHUB_TOKEN_ENCRYPTION_KEY=<32+ random bytes>
+AI_ROUTER_SETTLEMENT_SECRET=<32+ random bytes>
+AI_USAGE_GRANT_SERVICE_SECRET=<different 32+ random bytes>
+AI_EXECUTION_GRANT_SECRET=<different 32+ random bytes>
 ```
 
 Health check: `GET /` → `{"status":"TechIT API running"}` (200).
@@ -66,16 +95,37 @@ NODE_ENV=production \
 ENVIRONMENT=production \
 PORT=3000 \
 JWT_SECRET=<32-byte-hex-or-longer-shared-secret> \
+JWT_ISSUER=techit-backend \
+JWT_AUDIENCE=techit-platform \
+OTP_HASH_SECRET=<different-32+-character-secret> \
 CORS_ORIGINS=https://app.<domain> \
 FRONTEND_URL=https://app.<domain> \
 DB_DRIVER=sqlite \
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite \
 RESEND_API_KEY=<resend key> \
 FROM_EMAIL="TechIT <noreply@yourdomain.com>" \
-MCP_DATA_FILE=/var/lib/techit/plugins-mcp.json \
-MCP_ALLOW_FILE_STORE=true \
-MCP_ALLOW_STUB_CONNECTORS=true \
+MCP_ENABLED=true \
+MCP_STORE=postgres \
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require \
+MCP_DATABASE_SSL=true \
+MCP_SECRET_KEY=<base64-32-byte-key> \
+MCP_ENABLED_CONNECTORS=github,notion,figma,web3 \
+MCP_ALLOW_FILE_STORE=false \
+MCP_ALLOW_STUB_CONNECTORS=false \
+MCP_SEED_DEMO_ACTIVITY=false \
 MCP_APPROVAL_TTL_MS=900000 \
+GITHUB_CONNECTOR_MODE=real MCP_GITHUB_TOKEN=<token> \
+NOTION_CONNECTOR_MODE=real NOTION_TOKEN=<token> \
+FIGMA_CONNECTOR_MODE=real FIGMA_TOKEN=<token> \
+WEB3_CONNECTOR_MODE=real WEB3_RPC_URL=https://<sepolia-provider> \
+SIWE_EXPECTED_DOMAIN=app.<domain> SIWE_EXPECTED_URI=https://app.<domain> SIWE_EXPECTED_CHAIN_ID=11155111 \
+GITHUB_CLIENT_ID=<production-client-id> \
+GITHUB_CLIENT_SECRET=<production-client-secret> \
+GITHUB_REDIRECT_URI=https://api.<domain>/api/github/callback \
+GITHUB_TOKEN_ENCRYPTION_KEY=<32+-character-secret> \
+AI_ROUTER_SETTLEMENT_SECRET=<different-32+-character-secret> \
+AI_USAGE_GRANT_SERVICE_SECRET=<different-32+-character-secret> \
+AI_EXECUTION_GRANT_SECRET=<different-32+-character-secret> \
 DATABASE_URL=postgres://...:5432/techit_msg \
 REDIS_URL=redis://...:6379 \
 ENABLE_DEV_TOKEN=0 \
@@ -89,6 +139,10 @@ cd BACKEND/backend
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate:dry-run
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:migrate
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite npm run db:rollback:dry-run
+
+# Applies the idempotent MCP PostgreSQL schema under an advisory transaction lock.
+MCP_DATABASE_URL=postgresql://mcp_app:<pw>@<host>:5432/techit_mcp?sslmode=require \
+MCP_SECRET_KEY=<base64-32-byte-key> npm run mcp:migrate --prefix Plugins-MCP
 ```
 
 Backup and restore:
@@ -125,16 +179,12 @@ export TOKEN=...
 curl https://api.<domain>/api/auth/session -H "Authorization: Bearer $TOKEN"
 # returns { user: { id, email, user_metadata } }
 
-# verify the MCP gate also accepts the same token
-curl https://api.<domain>/api/mcp/health -H "Authorization: Bearer $TOKEN"
-# returns { ok: true, workspaceId: "ws-acme" }
-
-# verify unauthenticated MCP is rejected
+# MCP health is authenticated and verifies the PostgreSQL connection.
 curl -o /dev/null -w '%{http_code}\n' https://api.<domain>/api/mcp/health
-# 401
+# 401 without a token
+curl https://api.<domain>/api/mcp/health -H "Authorization: Bearer $TOKEN"
+# 200 {"ok":true,...}
 ```
-
-If `/api/mcp/health` returns 200 without a token, **stop and fix `resolveActor` wiring** before proceeding — that's a silent auth bypass on the plugin surface.
 
 ### 1.2 ai-router (Python FastAPI)
 
@@ -255,6 +305,16 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 
 ---
 
+## 2.1 Observability checks
+
+Every BACKEND response includes an `X-Request-Id` header. Operators should copy that value from failed browser/API calls and search service logs for the same request ID.
+
+When `LOG_REQUESTS=1` is enabled, successful requests emit structured `http_request` JSON logs with `requestId`, `method`, `path`, `statusCode`, and `durationMs`. Unhandled errors emit structured `http_error` JSON logs with the same `requestId`; production logs omit stack traces.
+
+Before promoting a release, make one authenticated request with a known `X-Request-Id`, then confirm the response header and log record match. If request IDs or structured logs are missing, stop the rollout because incident diagnosis will be impaired.
+
+---
+
 ## 3. Common issues and diagnosis
 
 | Symptom | Likely cause | Fix |
@@ -267,8 +327,9 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 | ai-router 200s on unauthenticated requests in prod | demo-auth fallback active despite ENVIRONMENT | Verify both `ENVIRONMENT` and `ALLOW_DEMO_AUTH` env are set in the running container, not just the docker-compose template. |
 | BACKEND/messaging-backend exits with `ENABLE_DEV_TOKEN=1 is forbidden in production` | local smoke-test token endpoint enabled in prod | Set `ENABLE_DEV_TOKEN=0` or unset it. |
 | Frontend logs `401` on every call after a deploy | mismatched `JWT_SECRET` between BACKEND and ai-router/messaging | Compare secret values across services; **same string everywhere**. |
-| `/api/mcp/tools` returns 401 | client not forwarding Bearer, or JWT didn't include the verified actor shape | Inspect `Authorization` header; verify `resolveActor` in `backend/src/app.js` returns non-null for valid tokens. |
-| Audit log empty after restart | `MCP_DATA_FILE` not on a persistent volume | Point it at a real mount (e.g. `/var/lib/techit/plugins-mcp.json`); F3 file-store reads on boot. |
+| `/api/mcp/tools` returns 404 | `MCP_ENABLED` is absent or not exactly `true` | Validate the PostgreSQL/encryption/connector contract, then explicitly set `MCP_ENABLED=true`. |
+| BACKEND exits with `MCP_STORE=postgres is required` | production MCP was configured with a local/file adapter | Set `MCP_STORE=postgres` and `MCP_DATABASE_URL`; file persistence is never allowed in production. |
+| MCP connector boot fails with `=real is required` | an enabled connector would otherwise use its fake adapter | Configure the real mode and credential or remove that connector from `MCP_ENABLED_CONNECTORS`. |
 | Frontend shows React error on `/plugins` | `VITE_TECHIT_API` not set at build time | Rebuild with the env var; Vite inlines it at build, not runtime. |
 
 ---
@@ -279,18 +340,25 @@ Each service rolls back independently — the JWT contract is the only cross-ser
 DOMAIN=yourdomain.com
 EMAIL=smoke-$(date +%s)@x.test
 
-# 1. signup → token
+# 1. verify email, then signup → token
+curl -sS -X POST https://api.$DOMAIN/api/auth/send-otp \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\"}"
+read -r -p "OTP delivered to $EMAIL: " OTP_CODE
+EMAIL_VERIFICATION_TOKEN=$(curl -sS -X POST https://api.$DOMAIN/api/auth/verify-otp \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$EMAIL\",\"code\":\"$OTP_CODE\"}" | jq -r .verificationToken)
+
 TOKEN=$(curl -sS -X POST https://api.$DOMAIN/api/auth/signup \
   -H 'Content-Type: application/json' \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"hunter2!hunter2!\",\"firstName\":\"S\",\"lastName\":\"T\",\"otpVerified\":true}" \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"hunter2!hunter2!\",\"firstName\":\"S\",\"lastName\":\"T\",\"emailVerificationToken\":\"$EMAIL_VERIFICATION_TOKEN\"}" \
   | jq -r .token)
 [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo FAIL signup; exit 1; }
 
-# 2. four services accept the same token
+# 2. authenticated production services accept the same token
 for url in \
   "https://api.$DOMAIN/api/auth/session" \
   "https://api.$DOMAIN/api/users/me" \
-  "https://api.$DOMAIN/api/mcp/health" \
   "https://ai.$DOMAIN/api/v1/dashboard/intelligence" \
   "https://messaging.$DOMAIN/api/v1/conversations"
 do
@@ -302,13 +370,18 @@ done
 # 3. unauthenticated requests are rejected
 for url in \
   "https://api.$DOMAIN/api/auth/session" \
-  "https://api.$DOMAIN/api/mcp/health" \
   "https://ai.$DOMAIN/api/v1/dashboard/intelligence"
 do
   code=$(curl -sS -o /dev/null -w '%{http_code}' "$url")
   echo "$code  $url (no token)"
   [ "$code" = "401" ] || { echo FAIL "expected 401 from $url"; exit 1; }
 done
+
+# 4. MCP is authenticated and its health check includes PostgreSQL connectivity
+[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health)" = "401" ] \
+  || { echo FAIL "MCP health must reject anonymous access"; exit 1; }
+[ "$(curl -sS -o /dev/null -w '%{http_code}' https://api.$DOMAIN/api/mcp/health -H "Authorization: Bearer $TOKEN")" = "200" ] \
+  || { echo FAIL "MCP health or PostgreSQL unavailable"; exit 1; }
 
 echo "ALL GREEN"
 ```
@@ -319,12 +392,14 @@ If this cheat sheet exits non-zero, **do not flip DNS to the new deploy.** Roll 
 
 ## 5. Known soft spots (worth tightening before scale)
 
-These are open hardening items as of 2026-06-21 — not deploy blockers, but log them in your tracker:
+These are open hardening items as of 2026-08-13. Treat the first four as
+deployment blockers for the affected surface:
 
-- **No rate limit on `/api/auth/signin` or `/api/auth/send-otp`** (security sweep A1, finding #3) — facilitates brute force / OTP enumeration. Add `express-rate-limit` (5/min for signin, 3/10min for send-otp per IP).
-- **ai-router reads `credits_remaining` + `team_size` from JWT claims** (sweep A1, #1, HIGH) — if the issuer is ever compromised, attacker can fabricate paywall bypass. Hydrate from `users` table keyed by `sub` instead.
-- **Plugins-MCP file-store has a ~1–5ms write race** (sweep A1, #2) — concurrent `/api/mcp/invoke` calls can lose audit rows. Migrate to SQLite or add a write lock before scaling horizontally.
-- **Plugins-MCP hardcodes `WS = 'ws-acme'`** as the workspaceId (sweep A1, #10) — fine while single-tenant; lift to env var or per-user claim when multi-tenant lands.
+- **Browser JWTs remain in `localStorage`** — migrate to short-lived access tokens in Secure, HttpOnly, SameSite cookies with CSRF protection.
+- **Shared HS256 signing** — replace with EdDSA or RS256, key IDs, rotation and JWKS verification.
+- **MCP connector credentials are currently service-managed** — use least-privilege provider identities and separate credentials per environment; add per-workspace OAuth provisioning before offering user-owned integrations.
+- **WebSocket query-string tokens remain supported for legacy clients** — migrate clients to secure cookies or ephemeral single-use socket tickets, then remove the query fallback.
+- **Existing plaintext GitHub OAuth tokens** — reconnect accounts or run a controlled encryption migration before enabling GitHub features.
 
 ---
 
@@ -336,3 +411,31 @@ Same as the cross-repo alignment plan — read in order:
 3. `new-frontend/DEPLOYMENT.md` for the four `VITE_*` env vars at build time.
 
 The merged commits referenced by ID throughout (C1–C12, F1–F3, PR #5, #11, #23) are findable via `git log --grep='C2:'` etc.
+# AI usage reservation and settlement
+
+The platform backend is the commercial authority for both capped subscriptions
+and PAYG credits. Before calling the AI Router, issue a reservation-backed grant
+through `POST /internal/usage-settlement/grant`. After execution, the Router
+submits signed facts to `POST /internal/usage-settlement/settle`.
+
+Required environment variables:
+
+- `AI_ROUTER_SETTLEMENT_SECRET` — shared HMAC secret, at least 32 characters.
+- `AI_ROUTER_SERVICE_ID` — defaults to `ai-router`.
+- `AI_ROUTER_SETTLEMENT_MAX_SKEW_SECONDS` — defaults to 300.
+- `AI_USAGE_GRANT_SERVICE_ID` — trusted backend orchestrator identity.
+- `AI_USAGE_GRANT_SERVICE_SECRET` — separate HMAC key for reservation/grant issuance.
+- `AI_EXECUTION_GRANT_SECRET` — signs short-lived Router execution grants.
+- `AI_EXECUTION_GRANT_ISSUER` — defaults to `techit-backend`.
+- `AI_EXECUTION_GRANT_AUDIENCE` — defaults to `techit-ai-router`.
+
+Subscription reservations consume the active subscription allowance only.
+PAYG reservations consume wallet credits only. The caller must explicitly
+authorize PAYG overage; the backend never silently switches funding sources.
+Settlement is idempotent by request ID, releases failed reservations, and
+rejects conflicting replay payloads.
+
+The Router settlement credential can only submit facts and read settlement
+health. It cannot reserve credits or issue execution grants. The trusted
+backend caller that authenticates the user, selects the explicit funding
+source and derives the reserved units must use the separate grant-issuer key.

@@ -119,6 +119,30 @@ func TestCreateConversationAndHistory(t *testing.T) {
 	}
 }
 
+func TestConversationAndChannelHistoryRejectNonMembers(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u3", DisplayName: "U3"})
+	conv, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	st.Channels.AddMember("ch-private", "u1")
+	tok, _ := ver.Mint("u3", "U3", "investor")
+
+	for _, path := range []string{
+		"/api/v1/conversations/" + conv.ID + "/messages",
+		"/api/v1/channels/ch-private/messages",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s: want 403, got %d body=%s", path, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestChannelSendAndHistory(t *testing.T) {
 	r, ver, st := newAPI(t)
 	ctx := context.Background()
@@ -146,6 +170,25 @@ func TestChannelSendAndHistory(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
 	if len(hist.Messages) != 1 {
 		t.Fatalf("want 1 channel message, got %d", len(hist.Messages))
+	}
+}
+
+func TestChannelReadRejectsNonMember(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	st.Channels.AddMember("ch-private", "u1")
+	tok, _ := ver.Mint("u2", "U2", "collaborator")
+
+	body, _ := json.Marshal(map[string]string{"msgId": "01890000-0000-7000-8000-0000000000f1"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/channels/ch-private/read", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d body=%s", rec.Code, rec.Body)
 	}
 }
 
@@ -235,6 +278,65 @@ func TestFeedZoneFiltering(t *testing.T) {
 	if len(global.Posts) != 2 {
 		t.Fatalf("global want 2, got %d", len(global.Posts))
 	}
+
+	investorTok, _ := ver.Mint("i1", "I", "investor")
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "/api/v1/posts?zone=tribe", nil)
+	req.Header.Set("Authorization", "Bearer "+investorTok)
+	r.ServeHTTP(rec, req)
+	var investorTribe struct{ Posts []map[string]any }
+	_ = json.Unmarshal(rec.Body.Bytes(), &investorTribe)
+	if len(investorTribe.Posts) != 0 {
+		t.Fatalf("investor tribe should exclude unrelated roles: %s", rec.Body)
+	}
+}
+
+func TestFeedKeysetPagination(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	for index, id := range []string{
+		"01890000-0000-7000-8000-000000000001",
+		"01890000-0000-7000-8000-000000000002",
+		"01890000-0000-7000-8000-000000000003",
+	} {
+		_ = st.Posts.CreatePost(ctx, store.Post{
+			ID: id, AuthorID: "u1", AuthorRole: "founder", Audience: []string{"all"},
+			Kind: "update", Body: "post-" + string(rune('1'+index)),
+		})
+	}
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	requestPage := func(path string) []map[string]any {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: code=%d body=%s", path, rec.Code, rec.Body)
+		}
+		var payload struct{ Posts []map[string]any }
+		_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+		return payload.Posts
+	}
+
+	first := requestPage("/api/v1/posts?limit=2")
+	if len(first) != 2 || first[0]["body"] != "post-3" || first[1]["body"] != "post-2" {
+		t.Fatalf("unexpected first page: %#v", first)
+	}
+	second := requestPage("/api/v1/posts?limit=2&before=01890000-0000-7000-8000-000000000002")
+	if len(second) != 1 || second[0]["body"] != "post-1" {
+		t.Fatalf("unexpected second page: %#v", second)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/v1/posts?limit=500", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid limit: want 400, got %d", rec.Code)
+	}
 }
 
 func TestListConversationsEndpoint(t *testing.T) {
@@ -259,6 +361,55 @@ func TestListConversationsEndpoint(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if len(resp.Conversations) != 1 {
 		t.Fatalf("want 1 conversation, got %d", len(resp.Conversations))
+	}
+}
+
+func TestConversationUnreadClearsAfterRead(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	conv, _, _ := st.Conversations.GetOrCreateDM(ctx, "u1", "u2")
+	msgID := "01890000-0000-7000-8000-0000000000f1"
+	_ = st.Messages.InsertDM(ctx, store.Message{
+		ID: msgID, ConversationID: conv.ID, SenderID: "u2", Type: "text", Body: "unread",
+	}, "u1", "client-unread")
+	tok, _ := ver.Mint("u1", "U1", "founder")
+
+	readUnread := func() int {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/v1/conversations", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list code=%d body=%s", rec.Code, rec.Body)
+		}
+		var payload struct {
+			Conversations []struct {
+				Unread int `json:"unread"`
+			} `json:"conversations"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &payload)
+		if len(payload.Conversations) != 1 {
+			t.Fatalf("want one conversation: %s", rec.Body)
+		}
+		return payload.Conversations[0].Unread
+	}
+
+	if unread := readUnread(); unread != 1 {
+		t.Fatalf("unread before mark = %d, want 1", unread)
+	}
+	body, _ := json.Marshal(map[string]string{"msgId": msgID})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/v1/conversations/"+conv.ID+"/read", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mark read code=%d body=%s", rec.Code, rec.Body)
+	}
+	if unread := readUnread(); unread != 0 {
+		t.Fatalf("unread after mark = %d, want 0", unread)
 	}
 }
 

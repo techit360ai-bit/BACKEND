@@ -133,6 +133,150 @@ describe('GET /api/users/me', () => {
   })
 })
 
+describe('GET /api/users', () => {
+  it('returns safe live collaborator directory fields and excludes the authenticated user', async () => {
+    const collaborator = {
+      ...BASE_PROFILE,
+      id: 'user-uuid-2',
+      email: 'builder@example.com',
+      firstName: 'Live',
+      lastName: 'Builder',
+      role: 'collaborator',
+      bio: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      discipline: 'Engineering',
+      subSkills: ['API design'],
+      techStack: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      earliestStart: 'this-week',
+      commitmentStyle: 'deep',
+      equityPreference: 70,
+      minCashFloor: 1000,
+      industries: ['HealthTech'],
+      credibilityScore: 81,
+      isVerified: true,
+    }
+    readDb.mockReturnValue({
+      users: [BASE_USER, { ...BASE_USER, id: collaborator.id, email: collaborator.email }],
+      profiles: [BASE_PROFILE, collaborator],
+      feedPosts: [],
+      feedComments: [],
+      notifications: [],
+    })
+
+    const res = await request(app)
+      .get('/api/users?role=collaborator')
+      .set('Authorization', `Bearer ${validToken()}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.users).toEqual([{
+      id: 'user-uuid-2',
+      name: 'Live Builder',
+      role: 'collaborator',
+      title: 'Engineering',
+      headline: 'Backend systems',
+      skills: ['Node.js', 'Postgres'],
+      discipline: 'Engineering',
+      subSkills: ['API design'],
+      techStack: ['Node.js', 'Postgres'],
+      weeklyHours: 24,
+      timezone: 'UTC+1',
+      location: 'Nigeria',
+      earliestStart: 'this-week',
+      commitmentStyle: 'deep',
+      equityPreference: 70,
+      minCashFloor: 1000,
+      industries: ['HealthTech'],
+      avatarUrl: '',
+      credibilityScore: 81,
+      isVerified: true,
+    }])
+    expect(res.body.users[0]).not.toHaveProperty('email')
+  })
+
+  it('requires authentication', async () => {
+    const res = await request(app).get('/api/users?role=collaborator')
+    expect(res.status).toBe(401)
+  })
+})
+
+describe('POST /api/users/:id/connect', () => {
+  it('persists a factual structured collaboration invitation', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator', firstName: 'Live', lastName: 'Builder' }
+    const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/users/user-uuid-2/connect')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        invitation: {
+          projectId: 'project-1',
+          projectName: 'LedgerCare',
+          summary: 'LedgerCare helps clinics reconcile patient payments.',
+          scope: 'Build and test the first reconciliation API.',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: ['Node.js', 'Postgres'],
+          compensationMode: 'equity-heavy',
+          equityProposal: 4,
+          cashReward: 0,
+        },
+      })
+
+    expect(res.status).toBe(200)
+    expect(db.notifications[0]).toMatchObject({
+      userId: 'user-uuid-2',
+      type: 'collab',
+      metadata: {
+        invitation: {
+          projectId: 'project-1',
+          projectName: 'LedgerCare',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: ['Node.js', 'Postgres'],
+          compensationMode: 'equity-heavy',
+          equityProposal: 4,
+          cashReward: 0,
+        },
+      },
+    })
+    expect(db.notifications[0].content).toContain('Scope: Build and test the first reconciliation API.')
+    expect(db.notifications[0].content).toContain('Non-binding ownership proposal')
+  })
+
+  it('sanitizes and bounds untrusted invitation fields', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator' }
+    const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/users/user-uuid-2/connect')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        invitation: {
+          projectId: 'project-1',
+          projectName: '<b>LedgerCare</b>',
+          summary: `Useful ${'x'.repeat(700)}`,
+          scope: '<script>alert(1)</script> Build API',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: Array.from({ length: 20 }, (_, index) => `Skill ${index}`),
+          compensationMode: 'equity-cash',
+          equityProposal: 999,
+          cashReward: 250,
+        },
+      })
+
+    expect(res.status).toBe(200)
+    const invitation = db.notifications[0].metadata.invitation
+    expect(invitation.projectName).not.toContain('<')
+    expect(invitation.summary.length).toBeLessThanOrEqual(500)
+    expect(invitation.scope).not.toContain('<')
+    expect(invitation.requiredSkills).toHaveLength(12)
+    expect(invitation.equityProposal).toBe(30)
+    expect(invitation.cashReward).toBe(250)
+  })
+})
+
 // ── PATCH /api/users/me ───────────────────────────────────────────────────────
 
 describe('PATCH /api/users/me', () => {
@@ -223,6 +367,35 @@ describe('PATCH /api/users/me', () => {
     expect(res.status).toBe(200)
     expect(res.body.industries).toEqual(['FinTech', 'AI'])
     expect(res.body.investmentFocus).toEqual(['Seed'])
+  })
+
+  it('persists role-specific settings fields without allowing authorization changes', async () => {
+    const profile = { ...BASE_PROFILE }
+    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+
+    const res = await request(app)
+      .patch('/api/users/me')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        title: 'Founder and engineer',
+        yearsBuilding: 4,
+        openRoles: ['Backend Engineer'],
+        discipline: 'Engineering',
+        techStack: ['TypeScript'],
+        equityPreference: 60,
+        role: 'investor',
+      })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toMatchObject({
+      title: 'Founder and engineer',
+      yearsBuilding: 4,
+      openRoles: ['Backend Engineer'],
+      discipline: 'Engineering',
+      techStack: ['TypeScript'],
+      equityPreference: 60,
+      role: 'founder',
+    })
   })
 })
 

@@ -63,9 +63,8 @@ export function validateMcpStoreConfig(): void {
   if (!process.env.MCP_DATA_FILE) {
     throw new Error('MCP_DATA_FILE is required in production/staging and must point at persistent storage.');
   }
-  if (process.env.MCP_ALLOW_FILE_STORE === 'true') return;
   throw new Error(
-    'File-backed MCP persistence is not allowed in production/staging unless MCP_ALLOW_FILE_STORE=true is explicitly set.',
+    'File-backed MCP persistence is forbidden in production/staging. Use a transactional shared datastore.',
   );
 }
 
@@ -98,6 +97,7 @@ function load(): FileShape {
       `but new writes will overwrite it. Recover from backup if the audit ` +
       `trail mattered.`,
     );
+    if (PRODUCTION_ENVS.has((process.env.NODE_ENV || '').toLowerCase())) throw err;
     cache = { audit: [], approvalRequests: [], approvalDecisions: {}, contributions: [] };
   }
   return cache;
@@ -183,6 +183,10 @@ export class FileApprovalStore implements ApprovalStore {
   listForWorkspace(workspaceId: string): ApprovalRequest[] {
     return [...this.requests.values()].filter((req) => req.workspaceId === workspaceId);
   }
+
+  allApprovals(): ApprovalRequest[] {
+    return [...this.requests.values()];
+  }
 }
 
 export class FileContributionSink implements ContributionSink {
@@ -201,5 +205,9 @@ export class FileContributionSink implements ContributionSink {
 
   eventsForWorkspace(workspaceId: string): ContributionEvent[] {
     return this.events.filter((event) => event.workspaceId === workspaceId);
+  }
+
+  allEvents(): ContributionEvent[] {
+    return this.events.slice();
   }
 }

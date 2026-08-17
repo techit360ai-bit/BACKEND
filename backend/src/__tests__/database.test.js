@@ -100,9 +100,10 @@ describe('database persistence adapter', () => {
 
     closeDbForTests()
     const afterDryRuns = readDb()
-    expect(rolledBack.version).toBe('001_app_collections')
+    expect(rolledBack.version).toBe('006_discovery_intelligence')
     expect(afterDryRuns.notifications).toHaveLength(1)
     expect(afterDryRuns.notifications[0].id).toBe('notif-dry-run')
+    expect(afterDryRuns.hackathonInvitations).toEqual([])
   })
 
   it('preserves sequential writes under event-loop concurrency', async () => {

@@ -87,6 +87,15 @@ func handleChannelRead(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		me := currentUser(r)
 		chID := chi.URLParam(r, "id")
+		ok, err := d.ChannelStore.IsMember(r.Context(), chID, me)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !ok {
+			writeErr(w, http.StatusForbidden, "not a member")
+			return
+		}
 		var body struct {
 			MsgID string `json:"msgId"`
 		}

@@ -12,13 +12,40 @@
         "NODE_ENV",
         "PORT",
         "JWT_SECRET",
+        "JWT_ISSUER",
+        "JWT_AUDIENCE",
+        "OTP_HASH_SECRET",
         "CORS_ORIGINS",
         "FRONTEND_URL",
         "DB_DRIVER",
         "SQLITE_DB_PATH",
+        "DISCOVERY_DATABASE_URL",
+        "DISCOVERY_REDIS_URL",
         "RESEND_API_KEY",
         "FROM_EMAIL",
-        "MCP_DATA_FILE"
+        "MCP_ENABLED",
+        "MCP_STORE",
+        "MCP_DATABASE_URL",
+        "MCP_SECRET_KEY",
+        "MCP_ENABLED_CONNECTORS",
+        "GITHUB_CONNECTOR_MODE",
+        "MCP_GITHUB_TOKEN",
+        "NOTION_CONNECTOR_MODE",
+        "NOTION_TOKEN",
+        "FIGMA_CONNECTOR_MODE",
+        "FIGMA_TOKEN",
+        "WEB3_CONNECTOR_MODE",
+        "WEB3_RPC_URL",
+        "SIWE_EXPECTED_DOMAIN",
+        "SIWE_EXPECTED_URI",
+        "SIWE_EXPECTED_CHAIN_ID",
+        "GITHUB_CLIENT_ID",
+        "GITHUB_CLIENT_SECRET",
+        "GITHUB_REDIRECT_URI",
+        "GITHUB_TOKEN_ENCRYPTION_KEY",
+        "AI_ROUTER_SETTLEMENT_SECRET",
+        "AI_USAGE_GRANT_SERVICE_SECRET",
+        "AI_EXECUTION_GRANT_SECRET"
       ],
       "healthCheck": {
         "method": "GET",
@@ -27,8 +54,36 @@
       },
       "dependencies": [
         "sqlite-persistent-volume",
-        "plugins-mcp"
+        "plugins-mcp",
+        "postgres-mcp"
+        ,"postgres-discovery"
+        ,"redis-discovery"
       ]
+    },
+    {
+      "name": "discovery-worker",
+      "path": "backend",
+      "runtime": "nodejs-22",
+      "startCommand": "npm run discovery:worker --prefix backend",
+      "envFile": "backend/.env.example",
+      "requiredEnv": ["DISCOVERY_DATABASE_URL", "DISCOVERY_REDIS_URL", "JWT_SECRET"],
+      "healthCheck": { "command": "node --check scripts/discovery-worker.js" },
+      "dependencies": ["postgres-discovery", "redis-discovery", "node-backend"]
+    },
+    {
+      "name": "postgres-discovery",
+      "image": "pgvector/pgvector:pg16",
+      "provides": ["DISCOVERY_DATABASE_URL"],
+      "network": "private-only",
+      "backups": "encrypted-pitr",
+      "healthCheck": { "command": "pg_isready" }
+    },
+    {
+      "name": "redis-discovery",
+      "image": "redis:7",
+      "provides": ["DISCOVERY_REDIS_URL"],
+      "network": "private-only",
+      "healthCheck": { "command": "redis-cli ping" }
     },
     {
       "name": "plugins-mcp",
@@ -39,21 +94,49 @@
       "requiredEnv": [
         "NODE_ENV",
         "JWT_SECRET",
-        "MCP_DATA_FILE",
+        "MCP_ENABLED",
+        "MCP_STORE",
+        "MCP_DATABASE_URL",
+        "MCP_SECRET_KEY",
+        "MCP_ENABLED_CONNECTORS",
+        "GITHUB_CONNECTOR_MODE",
+        "MCP_GITHUB_TOKEN",
+        "NOTION_CONNECTOR_MODE",
+        "NOTION_TOKEN",
+        "FIGMA_CONNECTOR_MODE",
+        "FIGMA_TOKEN",
+        "WEB3_CONNECTOR_MODE",
+        "WEB3_RPC_URL",
+        "SIWE_EXPECTED_DOMAIN",
+        "SIWE_EXPECTED_URI",
+        "SIWE_EXPECTED_CHAIN_ID",
         "MCP_ALLOW_FILE_STORE",
         "MCP_ALLOW_STUB_CONNECTORS",
+        "MCP_SEED_DEMO_ACTIVITY",
         "MCP_APPROVAL_TTL_MS"
       ],
       "healthCheck": {
         "method": "GET",
         "path": "/api/mcp/health",
-        "authenticatedExpectedStatus": 200,
-        "unauthenticatedExpectedStatus": 401
+        "expectedStatus": 401,
+        "note": "Production MCP is enabled but health remains authenticated"
       },
       "dependencies": [
         "node-backend",
-        "persistent-volume"
+        "postgres-mcp"
       ]
+    },
+    {
+      "name": "postgres-mcp",
+      "image": "postgres:16",
+      "provides": [
+        "MCP_DATABASE_URL"
+      ],
+      "network": "private-only",
+      "backups": "encrypted-pitr",
+      "healthCheck": {
+        "command": "pg_isready"
+      }
     },
     {
       "name": "messaging-backend",
@@ -65,10 +148,13 @@
         "ENVIRONMENT",
         "PORT",
         "JWT_SECRET",
+        "JWT_ISSUER",
+        "JWT_AUDIENCE",
         "DATABASE_URL",
         "REDIS_URL",
         "CORS_ORIGINS",
         "ENABLE_DEV_TOKEN"
+        ,"DISCOVERY_API_URL"
       ],
       "healthCheck": {
         "method": "GET",

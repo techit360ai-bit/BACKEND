@@ -4,11 +4,26 @@ import jwt from 'jsonwebtoken'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
+import githubRoutes from './routes/github.js'
 import notificationRoutes from './routes/notifications.js'
 import userRoutes from './routes/users.js'
+import videoRoutes from './routes/video.js'
+import adminRoutes from './routes/admin.js'
+import contextRoutes from './routes/context.js'
+import domainRoutes from './routes/domain.js'
+import complianceRoutes from './routes/compliance.js'
+import usageSettlementRoutes from './routes/usageSettlement.js'
+import discoveryRoutes from './routes/discovery.js'
+import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
 const app = express()
+
+// Express must trust the platform's single reverse proxy for accurate client
+// IP rate limiting. Never use `true`, which trusts attacker-supplied chains.
+if (process.env.TRUST_PROXY_HOPS) {
+  app.set('trust proxy', Math.max(0, Number(process.env.TRUST_PROXY_HOPS) || 0))
+}
 
 function shouldLogRequests() {
   return process.env.NODE_ENV !== 'test' || process.env.LOG_REQUESTS === '1'
@@ -47,13 +62,39 @@ app.use(cors({
   origin: CORS_ORIGINS,
   credentials: true,
 }))
-app.use(express.json())
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-site')
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
+  next()
+})
+app.use(express.json({
+  limit: process.env.JSON_BODY_LIMIT || '1mb',
+  verify(req, _res, buffer) {
+    // Service-to-service HMAC verification must cover the exact bytes that
+    // crossed the wire, not a reconstructed object serialization.
+    req.rawBody = buffer.toString('utf8')
+  },
+}))
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
+app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
+app.use('/api/domain', domainRoutes)
+app.use('/api/compliance', complianceRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
+app.use('/api/github', githubRoutes)
+app.use('/api/video', videoRoutes)
+app.use('/api/context', contextRoutes)
+app.use('/api/discovery', discoveryRoutes)
+app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
 // invoke + approve. Mounted under /api/mcp so it never collides with the
@@ -70,31 +111,47 @@ export function mcpRoleFromClaim(role) {
   if (role === 'collaborator') return 'editor'
   return 'viewer'
 }
-await mountTechitApi(app, '/api/mcp', {
-  resolveActor(req) {
-    if (!JWT_SECRET) return null
-    const auth = req.headers?.authorization
-    if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
-    try {
-      const claims = jwt.verify(auth.slice(7), JWT_SECRET)
-      const workspaceId = typeof claims.workspaceId === 'string' ? claims.workspaceId : undefined
-      return {
-        actor: {
-          id: String(claims.sub ?? 'unknown'),
-          kind: claims.kind === 'agent' ? 'agent' : 'human',
-          role: mcpRoleFromClaim(String(claims.role ?? 'viewer')),
-          toolsAllowed: Array.isArray(claims.toolsAllowed) ? claims.toolsAllowed : undefined,
-          // Plumb workspaceId onto the actor so techit-service.toContext() can
-          // scope the invocation per-tenant instead of the seed 'ws-acme' (#9).
+// Fail closed: MCP is exposed only by an explicit opt-in. Production contract
+// validation requires all datastore, encryption, and real-connector settings.
+const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
+if (MCP_ENABLED) {
+  await mountTechitApi(app, '/api/mcp', {
+    resolveActor(req) {
+      if (!JWT_SECRET) return null
+      const auth = req.headers?.authorization
+      if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
+      try {
+        const claims = jwt.verify(auth.slice(7), JWT_SECRET, {
+          algorithms: ['HS256'],
+          ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
+          ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
+        })
+        const db = readDb()
+        const profile = db.profiles.find(row => row.id === claims.sub)
+        const testMode = process.env.NODE_ENV === 'test'
+        if (!profile && !testMode) return null
+        const workspaceId = typeof profile?.workspaceId === 'string'
+          ? profile.workspaceId
+          : testMode && typeof claims.workspaceId === 'string' ? claims.workspaceId : `user-${claims.sub}`
+        const persistedRole = testMode ? String(claims.role || profile?.role || 'founder') : profile?.role || 'founder'
+        return {
+          actor: {
+            id: String(claims.sub ?? 'unknown'),
+            kind: claims.kind === 'agent' ? 'agent' : 'human',
+            role: mcpRoleFromClaim(persistedRole),
+            toolsAllowed: Array.isArray(claims.toolsAllowed) ? claims.toolsAllowed : undefined,
+            // Plumb workspaceId onto the actor so techit-service.toContext() can
+            // scope the invocation per-tenant instead of the seed 'ws-acme' (#9).
+            workspaceId,
+          },
           workspaceId,
-        },
-        workspaceId,
+        }
+      } catch {
+        return null
       }
-    } catch {
-      return null
-    }
-  },
-})
+    },
+  })
+}
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }))
 

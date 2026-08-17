@@ -5,6 +5,7 @@ import { createHash } from 'crypto'
 import app from '../app.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
+const TEST_NODE_ENV = process.env.NODE_ENV || 'test'
 
 vi.mock('../config/database.js', () => ({
   readDb: vi.fn(),
@@ -89,8 +90,10 @@ vi.mock('resend', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  process.env.NODE_ENV = TEST_NODE_ENV
   process.env.RESEND_API_KEY = 're_test_key'
-  resendSend.mockResolvedValue({ id: 'email-1' })
+  delete process.env.FROM_EMAIL
+  resendSend.mockResolvedValue({ data: { id: 'email-1' }, error: null, headers: null })
   writeDb.mockImplementation(() => {})
   updateDb.mockImplementation(mutator => {
     const db = readDb()
@@ -342,7 +345,9 @@ describe('POST /api/auth/send-otp', () => {
     const written = writeDb.mock.calls[0][0]
     expect(written.otps).toHaveLength(1)
     expect(written.otps[0].email).toBe('otp@example.com')
-    expect(written.otps[0].code).toMatch(/^\d{6}$/)
+    expect(written.otps[0].code).toBeUndefined()
+    expect(written.otps[0].codeHmac).toMatch(/^[a-f0-9]{64}$/)
+    expect(written.otps[0].codeHash).toBeUndefined()
   })
 
   it('does not persist an OTP when email delivery fails', async () => {
@@ -356,6 +361,43 @@ describe('POST /api/auth/send-otp', () => {
 
     expect(res.status).toBe(502)
     expect(res.body.error).toMatch(/failed to send/i)
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
+  })
+
+  it('does not persist an OTP when Resend returns an error response', async () => {
+    readDb.mockReturnValue(makeDb())
+    resendSend.mockResolvedValue({
+      data: null,
+      error: { name: 'validation_error', message: 'Invalid from address' },
+      headers: null,
+    })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(res.body.error).toMatch(/failed to send/i)
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
+  })
+
+  it('does not use the Resend test sender for production OTP email', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.FROM_EMAIL = 'TechIT <onboarding@resend.dev>'
+    readDb.mockReturnValue(makeDb())
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/send-otp').send({
+      email: 'otp@example.com',
+    })
+
+    expect(res.status).toBe(502)
+    expect(resendSend).not.toHaveBeenCalled()
     expect(writeDb).not.toHaveBeenCalled()
 
     error.mockRestore()
@@ -578,6 +620,56 @@ describe('POST /api/auth/signout', () => {
   })
 })
 
+describe('POST /api/auth/change-password', () => {
+  it('verifies the current password and persists the replacement hash', async () => {
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
+
+    expect(res.status).toBe(200)
+    expect(writeDb).toHaveBeenCalledOnce()
+    expect(writeDb.mock.calls[0][0].users[0].passwordHash).toBe('hashed::NewSecret@99')
+  })
+
+  it('rejects an incorrect current password without writing', async () => {
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'WrongPass', newPassword: 'NewSecret@99' })
+
+    expect(res.status).toBe(401)
+    expect(writeDb).not.toHaveBeenCalled()
+  })
+
+  it('requires authentication and an eight-character replacement password', async () => {
+    const unauthenticated = await request(app)
+      .post('/api/auth/change-password')
+      .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
+    expect(unauthenticated.status).toBe(401)
+
+    readDb.mockReturnValue(makeDb({
+      users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
+      profiles: [makeProfile()],
+    }))
+    const short = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ currentPassword: 'CurrentPass', newPassword: 'short' })
+    expect(short.status).toBe(400)
+  })
+})
+
 // ── Password recovery ────────────────────────────────────────────────────────
 
 describe('Password recovery', () => {
@@ -622,6 +714,29 @@ describe('Password recovery', () => {
     expect(res.body.message).toMatch(/if an account exists/i)
     expect(res.body.resetToken).toBeUndefined()
     expect(writeDb).not.toHaveBeenCalled()
+  })
+
+  it('does not persist a password reset token when Resend returns an error response in production', async () => {
+    process.env.NODE_ENV = 'production'
+    process.env.FROM_EMAIL = 'TechIT <noreply@techit.example>'
+    resendSend.mockResolvedValue({
+      data: null,
+      error: { name: 'validation_error', message: 'Invalid from address' },
+      headers: null,
+    })
+    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const res = await request(app).post('/api/auth/forgot-password').send({
+      email: 'alice@example.com',
+    })
+
+    expect(res.status).toBe(200)
+    expect(res.body.message).toMatch(/if an account exists/i)
+    expect(res.body.resetToken).toBeUndefined()
+    expect(writeDb).not.toHaveBeenCalled()
+
+    error.mockRestore()
   })
 
   it('resets the password and consumes the reset token', async () => {
@@ -701,5 +816,19 @@ describe('Password recovery', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/invalid or expired/i)
+  })
+
+  it('rejects a weak replacement password before consuming the token', async () => {
+    readDb.mockReturnValue(makeDb({ users: [makeUser()], passwordResets: [] }))
+
+    const res = await request(app).post('/api/auth/reset-password').send({
+      email: 'alice@example.com',
+      token: 'reset-token',
+      password: 'short',
+    })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/at least 8 characters/i)
+    expect(updateDb).not.toHaveBeenCalled()
   })
 })

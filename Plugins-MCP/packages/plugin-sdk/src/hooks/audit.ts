@@ -4,7 +4,7 @@ import type { AuditInput, AuditResult } from '@techit/infra-audit';
 import type { CallContext } from '../contract/types.js';
 import type { SdkRuntime } from '../runtime.js';
 
-export function recordAudit(
+export async function recordAudit(
   runtime: SdkRuntime,
   ctx: CallContext,
   sourceTool: string,
@@ -12,7 +12,7 @@ export function recordAudit(
   result: AuditResult,
   resource?: string,
   detail?: Record<string, unknown>,
-): void {
+): Promise<void> {
   const input: AuditInput = {
     actor: ctx.actor.id,
     actorKind: ctx.actor.kind,
@@ -23,5 +23,5 @@ export function recordAudit(
     workspaceId: ctx.actor.workspaceId,
     detail,
   };
-  runtime.audit.write(input);
+  await runtime.audit.write(input);
 }

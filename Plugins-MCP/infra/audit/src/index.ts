@@ -37,9 +37,9 @@ export interface AuditInput {
 }
 
 export interface AuditLogger {
-  write(input: AuditInput): AuditEntry;
+  write(input: AuditInput): AuditEntry | Promise<AuditEntry>;
   /** Read-only view for verification/queries. */
-  entries(): readonly AuditEntry[];
+  entries(): readonly AuditEntry[] | Promise<readonly AuditEntry[]>;
 }
 
 let auditSeq = 0;
