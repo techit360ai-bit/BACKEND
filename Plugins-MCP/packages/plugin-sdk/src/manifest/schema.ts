@@ -39,7 +39,7 @@ export const EventSpec = z.object({
 export const MCPToolSpec = z.object({
   name: z.string().min(1),
   description: z.string().min(1),
-  input_schema: z.record(z.unknown()).default({}),
+  input_schema: z.record(z.string(), z.unknown()).default({}),
   destructive: z.boolean().default(false),
   /** Minimum human role required to invoke. */
   requiredRole: z.enum(['viewer', 'editor', 'admin', 'owner']).default('editor'),
