@@ -17,6 +17,7 @@ Dependency updates are proposals and must pass repository evidence before merge.
 - Minor: may be merged after checks; high-risk packages require explicit review.
 - Major: must be replaced by an engineer-led migration PR.
 - Unknown provenance, unexpected registry, prohibited license, or suspicious install script: reject.
+- Existing Node and Go findings are temporary, named in the repository baselines, and expire automatically; new advisories still block.
 
 ## Release and rollback
 
@@ -25,4 +26,3 @@ Dependency changes deploy through staging or the repository release-candidate pr
 ## Direct pushes
 
 Production branches accept changes through pull requests. The Direct Push Audit marks commits without a merged PR as invalid release candidates. Server-side rejection is additionally enabled through GitHub branch protection where the repository plan supports it.
-

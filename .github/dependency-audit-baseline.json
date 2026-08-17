@@ -1,0 +1,10 @@
+{
+  "expires": "2026-09-30",
+  "knownPackages": {
+    "ip-address": "Upgrade with SSRF and connector regression tests.",
+    "nanoid": "Upgrade transitive build dependency.",
+    "postcss": "Upgrade with frontend build validation.",
+    "react-router": "Upgrade as a coordinated router pair.",
+    "react-router-dom": "Upgrade as a coordinated router pair."
+  }
+}

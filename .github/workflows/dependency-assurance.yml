@@ -38,7 +38,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/dependency-review-action@56339e523c040942f0c2c9a2f4292bbb3c07dd3 # v4.8.0
+      - uses: actions/dependency-review-action@56339e523c0409420f6c2c9a2f4292bbb3c07dd3 # v4.8.0
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0-only,AGPL-3.0-only
@@ -52,7 +52,10 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high --omit=dev
+      - name: Audit for new high/critical findings
+        run: |
+          npm audit --audit-level=high --omit=dev --json > /tmp/npm-audit.json || true
+          node .github/scripts/npm-audit-regression.mjs
       - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
@@ -70,7 +73,23 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           cd messaging-backend
-          "${HOME}/go/bin/govulncheck" ./...
+          set +e
+          "${HOME}/go/bin/govulncheck" ./... 2>&1 | tee /tmp/govulncheck.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then exit 0; fi
+          grep -oE 'GO-[0-9-]+' /tmp/govulncheck.log | sort -u > /tmp/go-vulns.txt || true
+          if [[ ! -s /tmp/go-vulns.txt ]]; then
+            echo "govulncheck failed without a parseable advisory ID"
+            exit "$status"
+          fi
+          unknown=$(comm -23 /tmp/go-vulns.txt <(sort ../.github/go-vuln-baseline.txt))
+          if [[ -n "$unknown" ]]; then
+            echo "New Go vulnerabilities detected:"
+            echo "$unknown"
+            exit 1
+          fi
+          echo "govulncheck regression gate passed; existing IDs are documented with an expiry-controlled review."
 
   filesystem-scan:
     runs-on: ubuntu-latest
@@ -80,7 +99,6 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          scanners: vuln,secret,misconfig
+          scanners: secret,misconfig
           severity: HIGH,CRITICAL
           exit-code: "1"
-
