@@ -704,6 +704,33 @@ export function getRecommendations(userId, options = {}) {
   return updateDb(db => generateRecommendationsInDb(db, userId, options))
 }
 
+export function searchDiscovery(userId, query, options = {}) {
+  const text = String(query || '').trim().toLowerCase()
+  return updateDb(db => {
+    const config = getConfigInDb(db)
+    const profile = syncRecommendationProfileInDb(db, userId)
+    if (!profile) return { results: [], meta: { query: text, total: 0, personalized: false } }
+    const type = normalizeType(options.type)
+    const personalized = options.personalized !== false && String(options.personalized) !== 'false'
+    const limit = Math.max(1, Math.min(100, Number(options.limit || 30)))
+    const terms = words(text)
+    const results = buildCandidates(db, userId, profile.role)
+      .filter(candidate => !type || candidate.type === type)
+      .map(candidate => {
+        const haystack = words([candidate.title, candidate.subtitle, candidate.description, ...candidateTags(candidate)])
+        const lexicalScore = text ? overlap(terms, haystack) : 1
+        const personalizedScore = personalized ? (scoreCandidate(db, userId, profile, candidate, config, 'search')?.score || 0) : 0
+        return { ...candidate, lexicalScore, personalizedScore, score: clamp(lexicalScore * 0.7 + personalizedScore * 0.3) }
+      })
+      .filter(candidate => !text || candidate.lexicalScore > 0)
+      .sort((a, b) => b.score - a.score || String(a.title).localeCompare(String(b.title)))
+      .slice(0, limit)
+    recordActivityInDb(db, userId, 'search', 'search')
+    appendPlatformEventInDb(db, { userId, actorId: userId, eventType: 'search', surface: 'search', importance: 'LOW', metadata: { query: text, type: type || null, personalized, resultCount: results.length } })
+    return { results, meta: { query: text, total: results.length, personalized, completeDatasetAvailable: true } }
+  })
+}
+
 export function updateRecommendationProfile(userId, body = {}) {
   return updateDb(db => {
     const profile = syncRecommendationProfileInDb(db, userId, body)
@@ -1075,6 +1102,33 @@ export function completeCatchUp(userId) {
     state.updatedAt = nowIso()
     appendPlatformEventInDb(db, { userId, actorId: userId, eventType: 'catchup_completed', surface: 'return-intelligence', importance: 'LOW', metadata: { anchor } })
     return { completed: true, completedAt: catchUp.completedAt }
+  })
+}
+
+export function refreshReturnDigests() {
+  return updateDb(db => {
+    const config = getConfigInDb(db)
+    let created = 0
+    for (const profile of rows(db, 'profiles')) {
+      const state = rows(db, 'userActivityStates').find(item => item.userId === profile.id)
+      const anchor = state?.lastMeaningfulAt || state?.lastSessionAt || state?.lastLoginAt || profile.updatedAt || profile.createdAt
+      if (!anchor || Date.now() - new Date(anchor).getTime() < 24 * HOUR_MS) continue
+      const digestKey = `return-digest:${profile.id}:${String(anchor).slice(0, 10)}`
+      if (rows(db, 'notifications').some(item => item.metadata?.digestKey === digestKey)) continue
+      const items = returnItemsInDb(db, profile.id, anchor, Math.min(10, config.limits.returnWindow))
+      const important = items.filter(item => ['HIGH', 'CRITICAL'].includes(item.importance))
+      if (!important.length) continue
+      const categories = new Map()
+      for (const item of important) categories.set(item.category, (categories.get(item.category) || 0) + 1)
+      const summary = [...categories.entries()].slice(0, 3).map(([name, count]) => `${count} ${name.toLowerCase()}`).join(' and ')
+      rows(db, 'notifications').push({
+        id: createId('notif'), userId: profile.id, actorId: null, type: 'milestone', read: false,
+        content: `While you were away, ${summary} became relevant to you.`, author: 'TechIT Intelligence',
+        linkTo: '/feed?catchup=1', metadata: { digestKey, kind: 'return_intelligence', itemIds: important.map(item => item.id) }, createdAt: nowIso(),
+      })
+      created += 1
+    }
+    return { created }
   })
 }
 

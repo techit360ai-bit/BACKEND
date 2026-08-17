@@ -1,5 +1,6 @@
 import app from './app.js'
 import { validateDatabaseConfig } from './config/database.js'
+import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
 
 const PORT = process.env.PORT || 3000
 
@@ -36,6 +37,7 @@ function validateSecurityConfig() {
 
 validateDatabaseConfig()
 validateSecurityConfig()
+if (process.env.DISCOVERY_DATABASE_URL) await initializeDiscoveryInfrastructure()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

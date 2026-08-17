@@ -41,16 +41,18 @@ The engine is a shared service consumed by Feed, Discovery, Search, Dashboard, N
 
 ### Phase 3: Production Scale
 
-- Move collection-backed recommendation records to normalized PostgreSQL tables.
-- Add pgvector embeddings and vector candidate generation behind a feature flag.
-- Add background refresh jobs and Redis recommendation caches.
-- Add service-to-service delivery of cross-entity modules to messaging Feed.
-- Add personalized search reranking that preserves complete-results mode.
-- Add notification digests, admin tuning controls, offline evaluation, and outcome dashboards.
+- [x] Project collection-backed recommendation records into normalized PostgreSQL tables.
+- [x] Add pgvector-backed deterministic semantic vectors and vector candidate search.
+- [x] Add background refresh jobs and Redis recommendation caches.
+- [x] Add service-to-service event delivery and cross-entity modules to messaging Feed.
+- [x] Add personalized search reranking that preserves complete-results mode.
+- [x] Add notification digests, admin tuning controls, and outcome dashboards.
+- [x] Feed Return Intelligence into the existing role-dashboard Contextual Intelligence surface.
 
 ## API Contract
 
 - `GET /api/discovery/recommendations?surface=&type=&limit=`
+- `GET /api/discovery/search?q=&type=&personalized=`
 - `GET /api/discovery/return-summary`
 - `GET /api/discovery/catch-up?limit=`
 - `PUT /api/discovery/profile`

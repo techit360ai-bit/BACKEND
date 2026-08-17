@@ -15,6 +15,7 @@ import (
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/channel"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/config"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/demo"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/discovery"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/feed"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/hub"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/livekit"
@@ -65,6 +66,7 @@ func main() {
 	qaSvc := qa.New(pg.QA, demoSvc, h)
 	lkSvc := livekit.New(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitURL)
 	ver := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
+	discoveryClient := discovery.New(ctx, cfg.DiscoveryAPIURL)
 
 	gw := ws.New(ws.Deps{
 		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Channels: chSvc, Presence: presSvc,
@@ -75,6 +77,7 @@ func main() {
 		Messages: pg.Messages, Messaging: msgSvc, Channels: chSvc, ChannelStore: pg.Channels,
 		Feed: feedSvc, Demo: demoSvc, QA: qaSvc, LiveKit: lkSvc, Presence: presSvc,
 		EnableDevToken: cfg.EnableDevToken, CORSOrigins: cfg.CORSOrigins,
+		Discovery: discoveryClient,
 	})
 
 	mux := http.NewServeMux()

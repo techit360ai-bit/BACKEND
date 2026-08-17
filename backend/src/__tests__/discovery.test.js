@@ -164,4 +164,15 @@ describe('universal discovery API', () => {
     const after = await request(app).get('/api/discovery/return-summary').set('Authorization', `Bearer ${token()}`)
     expect(after.body.available).toBe(false)
   })
+
+  it('keeps personalized search transparent and returns complete persisted matches', async () => {
+    const res = await request(app)
+      .get('/api/discovery/search?q=FinPay&personalized=false')
+      .set('Authorization', `Bearer ${token()}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.meta.personalized).toBe(false)
+    expect(res.body.meta.completeDatasetAvailable).toBe(true)
+    expect(res.body.results[0].title).toBe('FinPay')
+  })
 })

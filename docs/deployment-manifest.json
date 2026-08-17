@@ -19,6 +19,8 @@
         "FRONTEND_URL",
         "DB_DRIVER",
         "SQLITE_DB_PATH",
+        "DISCOVERY_DATABASE_URL",
+        "DISCOVERY_REDIS_URL",
         "RESEND_API_KEY",
         "FROM_EMAIL",
         "MCP_ENABLED",
@@ -54,7 +56,32 @@
         "sqlite-persistent-volume",
         "plugins-mcp",
         "postgres-mcp"
+        ,"postgres-discovery"
+        ,"redis-discovery"
       ]
+    },
+    {
+      "name": "discovery-worker",
+      "path": "backend",
+      "runtime": "nodejs-22",
+      "startCommand": "npm run discovery:worker --prefix backend",
+      "requiredEnv": ["DISCOVERY_DATABASE_URL", "DISCOVERY_REDIS_URL", "JWT_SECRET"],
+      "dependencies": ["postgres-discovery", "redis-discovery", "node-backend"]
+    },
+    {
+      "name": "postgres-discovery",
+      "image": "pgvector/pgvector:pg16",
+      "provides": ["DISCOVERY_DATABASE_URL"],
+      "network": "private-only",
+      "backups": "encrypted-pitr",
+      "healthCheck": { "command": "pg_isready" }
+    },
+    {
+      "name": "redis-discovery",
+      "image": "redis:7",
+      "provides": ["DISCOVERY_REDIS_URL"],
+      "network": "private-only",
+      "healthCheck": { "command": "redis-cli ping" }
     },
     {
       "name": "plugins-mcp",
@@ -125,6 +152,7 @@
         "REDIS_URL",
         "CORS_ORIGINS",
         "ENABLE_DEV_TOKEN"
+        ,"DISCOVERY_API_URL"
       ],
       "healthCheck": {
         "method": "GET",

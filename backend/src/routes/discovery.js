@@ -10,6 +10,7 @@ import {
   putRecommendationProfile,
   recordActivity,
   returnSummary,
+  search,
 } from '../controllers/discoveryController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
@@ -17,6 +18,7 @@ const router = Router()
 
 router.use(requireAuth)
 router.get('/recommendations', listRecommendations)
+router.get('/search', search)
 router.put('/profile', putRecommendationProfile)
 router.post('/events', createRecommendationEvent)
 router.post('/activity', recordActivity)
