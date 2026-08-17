@@ -1,4 +1,4 @@
-import { createId, nowIso } from '../utils/api.js'
+import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
@@ -645,7 +645,259 @@ export function createEndorsement(userId, body) {
 
 export function listWorkspaces(userId) {
   const db = readDb()
-  return { workspaces: listOwned(db, 'workspaces', userId) }
+  const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active')
+  const membershipByWorkspace = new Map(memberships.map(row => [row.workspaceId, row]))
+  const workspaces = collection(db, 'workspaces')
+    .filter(row => row.ownerId === userId || membershipByWorkspace.has(row.id))
+    .sort(byNewest)
+    .map(workspace => ({
+      ...workspace,
+      isOwner: workspace.ownerId === userId,
+      accessLevel: workspace.ownerId === userId ? 'owner' : membershipByWorkspace.get(workspace.id)?.accessLevel || 'viewer',
+    }))
+  return { workspaces }
+}
+
+function workspaceAccess(db, workspaceId, userId) {
+  const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId)
+  if (!workspace) return null
+  if (workspace.ownerId === userId) return { workspace, isOwner: true, accessLevel: 'owner' }
+  const membership = collection(db, 'workspaceMembers').find(row =>
+    row.workspaceId === workspaceId && row.userId === userId && row.status === 'active'
+  )
+  if (!membership) return null
+  return { workspace, membership, isOwner: false, accessLevel: membership.accessLevel || 'viewer' }
+}
+
+function workspaceCanWrite(access, collectionName) {
+  if (access?.isOwner) return true
+  return access?.accessLevel === 'contributor' && ['workspaceTasks', 'workspaceReports'].includes(collectionName)
+}
+
+function publicWorkspaceInvitation(db, invitation) {
+  const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
+  const inviter = collection(db, 'profiles').find(row => row.id === invitation.invitedBy)
+  return {
+    id: invitation.id,
+    workspaceId: invitation.workspaceId,
+    workspaceName: workspace?.name || 'Workspace',
+    projectId: workspace?.projectId || invitation.projectId || null,
+    collaboratorId: invitation.collaboratorId,
+    inviterName: userName(inviter, 'Workspace owner'),
+    requestedRole: invitation.requestedRole,
+    scope: invitation.scope,
+    requiredSkills: invitation.requiredSkills,
+    compensationMode: invitation.compensationMode,
+    equityProposal: invitation.equityProposal,
+    cashReward: invitation.cashReward,
+    accessLevel: invitation.accessLevel,
+    status: invitation.status,
+    expiresAt: invitation.expiresAt,
+    createdAt: invitation.createdAt,
+    updatedAt: invitation.updatedAt,
+  }
+}
+
+export function createWorkspaceInvitation(userId, workspaceId, body) {
+  return updateDb(db => {
+    const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
+    if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    const collaboratorId = collaborationText(body.collaboratorId, 100)
+    if (!collaboratorId || collaboratorId === userId) return { ok: false, error: 'collaborator_invalid' }
+    const collaborator = collection(db, 'profiles').find(row => row.id === collaboratorId && profileHasRole(row, 'collaborator'))
+    if (!collaborator) return { ok: false, error: 'collaborator_not_found' }
+    const existingMember = collection(db, 'workspaceMembers').find(row =>
+      row.workspaceId === workspaceId && row.userId === collaboratorId && row.status === 'active'
+    )
+    if (existingMember) return { ok: false, error: 'already_member' }
+
+    const requestedRole = collaborationText(body.requestedRole, 80)
+    const scope = collaborationText(body.scope, 1000)
+    const requiredSkills = collaborationList(body.requiredSkills, 12, 60)
+    const accessLevel = body.accessLevel === 'viewer' ? 'viewer' : 'contributor'
+    const compensationMode = ['equity-heavy', 'equity-cash', 'cash-only'].includes(body.compensationMode)
+      ? body.compensationMode
+      : 'equity-heavy'
+    const equityProposal = compensationMode === 'cash-only' ? 0 : collaborationNumber(body.equityProposal, 0, 30)
+    const cashReward = compensationMode === 'equity-heavy' ? 0 : collaborationNumber(body.cashReward, 0, 1_000_000)
+    if (!requestedRole || !scope) return { ok: false, error: 'role_and_scope_required' }
+    if (compensationMode !== 'cash-only' && equityProposal <= 0) return { ok: false, error: 'ownership_proposal_required' }
+    if (compensationMode !== 'equity-heavy' && cashReward <= 0) return { ok: false, error: 'cash_support_required' }
+
+    const now = nowIso()
+    const expiresAt = new Date(Date.now() + 14 * DAY_MS).toISOString()
+    const pending = collection(db, 'workspaceInvitations').find(row =>
+      row.workspaceId === workspaceId && row.collaboratorId === collaboratorId && row.status === 'pending'
+    )
+    const invitation = pending || insertOwned(db, 'workspaceInvitations', userId, {
+      workspaceId,
+      projectId: workspace.projectId || null,
+      collaboratorId,
+      status: 'pending',
+    }, 'workspace_invite', 'invitedBy')
+    Object.assign(invitation, {
+      requestedRole,
+      scope,
+      requiredSkills,
+      compensationMode,
+      equityProposal,
+      cashReward,
+      accessLevel,
+      expiresAt,
+      updatedAt: now,
+    })
+
+    const inviter = collection(db, 'profiles').find(row => row.id === userId)
+    const notification = collection(db, 'notifications').find(row =>
+      row.userId === collaboratorId && row.type === 'collab' && row.metadata?.workspaceInvitationId === invitation.id
+    )
+    const content = `invited you to join ${workspace.name} as ${requestedRole} with ${equityProposal}% proposed ownership`
+    const notificationData = {
+      userId: collaboratorId,
+      actorId: userId,
+      type: 'collab',
+      read: false,
+      content,
+      author: userName(inviter),
+      linkTo: `/workspace-invitations/${invitation.id}`,
+      metadata: { workspaceInvitationId: invitation.id, workspaceId },
+      createdAt: notification?.createdAt || now,
+    }
+    if (notification) Object.assign(notification, notificationData)
+    else collection(db, 'notifications').push({ id: createId('notif'), ...notificationData })
+    return { ok: true, invitation: publicWorkspaceInvitation(db, invitation) }
+  })
+}
+
+export function getWorkspaceInvitation(userId, invitationId) {
+  const db = readDb()
+  const invitation = collection(db, 'workspaceInvitations').find(row =>
+    row.id === invitationId && row.collaboratorId === userId
+  )
+  if (!invitation) return null
+  const expired = invitation.status === 'pending' && new Date(invitation.expiresAt).getTime() <= Date.now()
+  return publicWorkspaceInvitation(db, expired ? { ...invitation, status: 'expired' } : invitation)
+}
+
+export function acceptWorkspaceInvitation(userId, invitationId) {
+  return updateDb(db => {
+    const invitation = collection(db, 'workspaceInvitations').find(row =>
+      row.id === invitationId && row.collaboratorId === userId
+    )
+    if (!invitation) return { ok: false, error: 'invitation_not_found' }
+    const existing = collection(db, 'workspaceMembers').find(row =>
+      row.workspaceId === invitation.workspaceId && row.userId === userId && row.status === 'active'
+    )
+    if (invitation.status === 'accepted' && existing) {
+      return { ok: true, invitation: publicWorkspaceInvitation(db, invitation), membership: existing }
+    }
+    if (invitation.status !== 'pending') return { ok: false, error: `invitation_${invitation.status}` }
+    if (new Date(invitation.expiresAt).getTime() <= Date.now()) {
+      invitation.status = 'expired'
+      invitation.updatedAt = nowIso()
+      return { ok: false, error: 'invitation_expired' }
+    }
+    const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
+    if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
+      workspaceId: workspace.id,
+      projectId: workspace.projectId || null,
+      userId,
+      accessLevel: invitation.accessLevel,
+      role: invitation.requestedRole,
+      status: 'active',
+      invitedBy: invitation.invitedBy,
+      invitationId: invitation.id,
+      joinedAt: nowIso(),
+    }, 'workspace_member', 'workspaceOwnerId')
+    invitation.status = 'accepted'
+    invitation.acceptedAt = nowIso()
+    invitation.updatedAt = invitation.acceptedAt
+    collection(db, 'notifications').push({
+      id: createId('notif'),
+      userId: workspace.ownerId,
+      actorId: userId,
+      type: 'collab',
+      read: false,
+      content: `accepted the invitation to join ${workspace.name}`,
+      linkTo: `/workspaces/copilot?ws=${encodeURIComponent(workspace.id)}&project=${encodeURIComponent(workspace.projectId || '')}`,
+      createdAt: nowIso(),
+    })
+    return { ok: true, invitation: publicWorkspaceInvitation(db, invitation), membership }
+  })
+}
+
+export function declineWorkspaceInvitation(userId, invitationId) {
+  return updateDb(db => {
+    const invitation = collection(db, 'workspaceInvitations').find(row =>
+      row.id === invitationId && row.collaboratorId === userId && row.status === 'pending'
+    )
+    if (!invitation) return { ok: false, error: 'invitation_not_found' }
+    invitation.status = 'declined'
+    invitation.declinedAt = nowIso()
+    invitation.updatedAt = invitation.declinedAt
+    const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
+    collection(db, 'notifications').push({
+      id: createId('notif'),
+      userId: invitation.invitedBy,
+      actorId: userId,
+      type: 'collab',
+      read: false,
+      content: `declined the invitation to join ${workspace?.name || 'your workspace'}`,
+      linkTo: '/feed/profile/' + userId,
+      createdAt: nowIso(),
+    })
+    return { ok: true, invitation: publicWorkspaceInvitation(db, invitation) }
+  })
+}
+
+export function listWorkspaceMembers(userId, workspaceId) {
+  const db = readDb()
+  const access = workspaceAccess(db, workspaceId, userId)
+  if (!access) return null
+  const ownerProfile = collection(db, 'profiles').find(row => row.id === access.workspace.ownerId)
+  const members = collection(db, 'workspaceMembers')
+    .filter(row => row.workspaceId === workspaceId && row.status === 'active')
+    .map(member => {
+      const profile = collection(db, 'profiles').find(row => row.id === member.userId)
+      return { ...member, name: userName(profile), avatarUrl: profile?.avatarUrl || '' }
+    })
+  return {
+    members: [{
+      id: `workspace_owner_${access.workspace.ownerId}`,
+      workspaceId,
+      userId: access.workspace.ownerId,
+      name: userName(ownerProfile),
+      accessLevel: 'owner',
+      role: 'Workspace owner',
+      status: 'active',
+    }, ...members],
+  }
+}
+
+export function removeWorkspaceMember(userId, workspaceId, memberId) {
+  return updateDb(db => {
+    const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
+    if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    const member = collection(db, 'workspaceMembers').find(row =>
+      row.id === memberId && row.workspaceId === workspaceId && row.status === 'active'
+    )
+    if (!member) return { ok: false, error: 'member_not_found' }
+    member.status = 'removed'
+    member.removedAt = nowIso()
+    member.updatedAt = member.removedAt
+    collection(db, 'notifications').push({
+      id: createId('notif'),
+      userId: member.userId,
+      actorId: userId,
+      type: 'collab',
+      read: false,
+      content: `removed your access to ${workspace.name}`,
+      linkTo: '/workspaces',
+      createdAt: nowIso(),
+    })
+    return { ok: true, member }
+  })
 }
 
 export function provisionWorkspace(userId, body) {
@@ -668,37 +920,51 @@ export function provisionWorkspace(userId, body) {
 
 export function workspaceContext(userId, workspaceId) {
   const db = readDb()
-  const workspace = findOwned(db, 'workspaces', workspaceId, userId)
-  if (!workspace) return null
-  const analysis = latestByProject(db, workspace.projectId)
+  const access = workspaceAccess(db, workspaceId, userId)
+  if (!access) return null
+  const analysis = latestByProject(db, access.workspace.projectId)
   return {
     workspaceId,
-    projectId: workspace.projectId || null,
+    projectId: access.workspace.projectId || null,
     venture: analysis?.blueprint || analysis || null,
     blueprintAvailable: Boolean(analysis?.blueprint || analysis),
+    isOwner: access.isOwner,
+    accessLevel: access.accessLevel,
   }
 }
 
 export function listWorkspaceCollection(userId, workspaceId, name) {
   const db = readDb()
-  const workspace = findOwned(db, 'workspaces', workspaceId, userId)
-  if (!workspace) return null
-  return collection(db, name).filter(row => row.workspaceId === workspaceId && row.ownerId === userId).sort(byNewest)
+  const access = workspaceAccess(db, workspaceId, userId)
+  if (!access) return null
+  if (!access.isOwner && ['workspaceAgents', 'workspaceConnectors'].includes(name)) return []
+  return collection(db, name).filter(row => row.workspaceId === workspaceId).sort(byNewest)
 }
 
 export function createWorkspaceCollectionItem(userId, workspaceId, name, body, prefix) {
   return updateDb(db => {
-    const workspace = findOwned(db, 'workspaces', workspaceId, userId)
-    if (!workspace) return null
-    return insertOwned(db, name, userId, { ...body, workspaceId }, prefix)
+    const access = workspaceAccess(db, workspaceId, userId)
+    if (!access || !workspaceCanWrite(access, name)) return null
+    return insertOwned(db, name, userId, { ...body, workspaceId, createdBy: userId }, prefix)
   })
 }
 
 export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body) {
   return updateDb(db => {
-    const workspace = findOwned(db, 'workspaces', workspaceId, userId)
-    if (!workspace) return null
-    return patchOwned(db, name, itemId, userId, { ...body, workspaceId })
+    const access = workspaceAccess(db, workspaceId, userId)
+    if (!access || !workspaceCanWrite(access, name)) return null
+    const rows = collection(db, name)
+    const idx = rows.findIndex(row => row.id === itemId && row.workspaceId === workspaceId)
+    if (idx === -1) return null
+    rows[idx] = {
+      ...rows[idx],
+      ...cleanObject(body),
+      id: rows[idx].id,
+      workspaceId,
+      ownerId: rows[idx].ownerId,
+      updatedAt: nowIso(),
+    }
+    return rows[idx]
   })
 }
 
@@ -1431,6 +1697,94 @@ export function genericList(userId, name) {
   return collection(db, name).filter(row => isRecordVisible(row, userId)).sort(byNewest)
 }
 
+function collaborationText(value, maxLength) {
+  if (typeof value !== 'string') return ''
+  return value.replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, maxLength)
+}
+
+function collaborationNumber(value, min, max) {
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : min
+}
+
+function collaborationList(value, maxItems = 12, maxLength = 60) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value.map(item => collaborationText(item, maxLength)).filter(Boolean))].slice(0, maxItems)
+}
+
+export function createCollaborationCall(userId, body) {
+  return updateDb(db => {
+    const projectId = collaborationText(body.projectId, 100)
+    const company = collaborationText(body.company || body.projectName, 120)
+    const summary = collaborationText(body.summary, 500)
+    const scope = collaborationText(body.scope, 1000)
+    const role = collaborationText(body.role || body.requestedRole, 80)
+    const skills = collaborationList(body.skills || body.requiredSkills)
+    const audienceRoles = collaborationList(body.audienceRoles, 3, 24)
+      .filter(audience => ['collaborator', 'founder', 'explorer'].includes(audience))
+    const compensationMode = ['equity-heavy', 'equity-cash', 'cash-only'].includes(body.compensationMode)
+      ? body.compensationMode
+      : 'equity-heavy'
+    const equityPercent = compensationMode === 'cash-only'
+      ? 0
+      : collaborationNumber(body.equityPercent, 0, 30)
+    const cashCompMonthly = compensationMode === 'equity-heavy'
+      ? 0
+      : collaborationNumber(body.cashCompMonthly, 0, 1_000_000)
+    const requestedDeadline = new Date(collaborationText(body.applyDeadline, 40))
+    const applyDeadline = Number.isFinite(requestedDeadline.getTime()) && requestedDeadline.getTime() > Date.now()
+      ? requestedDeadline.toISOString()
+      : new Date(Date.now() + 30 * DAY_MS).toISOString()
+
+    if (!projectId || !company || !summary || !scope || !role) return { ok: false, error: 'collaboration_call_fields_required' }
+    if (audienceRoles.length === 0) return { ok: false, error: 'audience_required' }
+    if (compensationMode !== 'cash-only' && equityPercent <= 0) return { ok: false, error: 'ownership_proposal_required' }
+    if ((compensationMode === 'equity-cash' || compensationMode === 'cash-only') && cashCompMonthly <= 0) {
+      return { ok: false, error: 'cash_support_required' }
+    }
+
+    const existing = collection(db, 'opportunities').find(row =>
+      row.ownerId === userId &&
+      row.type === 'collaboration' &&
+      row.projectId === projectId &&
+      row.role === role &&
+      row.status === 'open'
+    )
+    if (existing) return { ok: true, opportunity: existing, created: false }
+
+    const founder = collection(db, 'profiles').find(profile => profile.id === userId)
+    const opportunity = insertOwned(db, 'opportunities', userId, {
+      type: 'collaboration',
+      visibility: 'public',
+      status: 'open',
+      source: 'incubation_validation',
+      projectId,
+      title: `${role} for ${company}`.slice(0, 160),
+      company,
+      organizerName: userName(founder, company),
+      summary,
+      description: summary,
+      scope,
+      role,
+      skills,
+      compensationMode,
+      equityPercent,
+      cashCompMonthly,
+      timeCommitment: collaborationText(body.timeCommitment, 80),
+      timeline: collaborationText(body.timeline, 40),
+      commitmentStyle: collaborationText(body.commitmentStyle, 24),
+      industry: collaborationText(body.industry, 80),
+      stage: collaborationText(body.stage, 40),
+      tags: collaborationList(body.tags),
+      audienceRoles,
+      applyDeadline,
+      publishedAt: nowIso(),
+      poster: '',
+    }, 'opp')
+    return { ok: true, opportunity, created: true }
+  })
+}
+
 export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
   return updateDb(db => {
     const row = insertOwned(db, name, userId, body, prefix, field)
@@ -1617,6 +1971,7 @@ export function applyToOpportunity(userId, opportunityId, body) {
   return updateDb(db => {
     const opportunity = collection(db, 'opportunities').find(row => row.id === opportunityId)
     if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
+    if (opportunity.ownerId === userId) return { ok: false, error: 'self_application_not_allowed' }
 
     const existing = collection(db, 'opportunityApplications').find(row =>
       row.applicantId === userId && row.opportunityId === opportunityId

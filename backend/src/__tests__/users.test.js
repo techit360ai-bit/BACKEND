@@ -144,8 +144,16 @@ describe('GET /api/users', () => {
       role: 'collaborator',
       bio: 'Backend systems',
       skills: ['Node.js', 'Postgres'],
+      discipline: 'Engineering',
+      subSkills: ['API design'],
+      techStack: ['Node.js', 'Postgres'],
       weeklyHours: 24,
       timezone: 'UTC+1',
+      earliestStart: 'this-week',
+      commitmentStyle: 'deep',
+      equityPreference: 70,
+      minCashFloor: 1000,
+      industries: ['HealthTech'],
       credibilityScore: 81,
       isVerified: true,
     }
@@ -166,12 +174,20 @@ describe('GET /api/users', () => {
       id: 'user-uuid-2',
       name: 'Live Builder',
       role: 'collaborator',
-      title: '',
+      title: 'Engineering',
       headline: 'Backend systems',
       skills: ['Node.js', 'Postgres'],
+      discipline: 'Engineering',
+      subSkills: ['API design'],
+      techStack: ['Node.js', 'Postgres'],
       weeklyHours: 24,
       timezone: 'UTC+1',
       location: 'Nigeria',
+      earliestStart: 'this-week',
+      commitmentStyle: 'deep',
+      equityPreference: 70,
+      minCashFloor: 1000,
+      industries: ['HealthTech'],
       avatarUrl: '',
       credibilityScore: 81,
       isVerified: true,
@@ -182,6 +198,82 @@ describe('GET /api/users', () => {
   it('requires authentication', async () => {
     const res = await request(app).get('/api/users?role=collaborator')
     expect(res.status).toBe(401)
+  })
+})
+
+describe('POST /api/users/:id/connect', () => {
+  it('persists a factual structured collaboration invitation', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator', firstName: 'Live', lastName: 'Builder' }
+    const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/users/user-uuid-2/connect')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        invitation: {
+          projectId: 'project-1',
+          projectName: 'LedgerCare',
+          summary: 'LedgerCare helps clinics reconcile patient payments.',
+          scope: 'Build and test the first reconciliation API.',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: ['Node.js', 'Postgres'],
+          compensationMode: 'equity-heavy',
+          equityProposal: 4,
+          cashReward: 0,
+        },
+      })
+
+    expect(res.status).toBe(200)
+    expect(db.notifications[0]).toMatchObject({
+      userId: 'user-uuid-2',
+      type: 'collab',
+      metadata: {
+        invitation: {
+          projectId: 'project-1',
+          projectName: 'LedgerCare',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: ['Node.js', 'Postgres'],
+          compensationMode: 'equity-heavy',
+          equityProposal: 4,
+          cashReward: 0,
+        },
+      },
+    })
+    expect(db.notifications[0].content).toContain('Scope: Build and test the first reconciliation API.')
+    expect(db.notifications[0].content).toContain('Non-binding ownership proposal')
+  })
+
+  it('sanitizes and bounds untrusted invitation fields', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator' }
+    const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/users/user-uuid-2/connect')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        invitation: {
+          projectId: 'project-1',
+          projectName: '<b>LedgerCare</b>',
+          summary: `Useful ${'x'.repeat(700)}`,
+          scope: '<script>alert(1)</script> Build API',
+          requestedRole: 'Backend Engineer',
+          requiredSkills: Array.from({ length: 20 }, (_, index) => `Skill ${index}`),
+          compensationMode: 'equity-cash',
+          equityProposal: 999,
+          cashReward: 250,
+        },
+      })
+
+    expect(res.status).toBe(200)
+    const invitation = db.notifications[0].metadata.invitation
+    expect(invitation.projectName).not.toContain('<')
+    expect(invitation.summary.length).toBeLessThanOrEqual(500)
+    expect(invitation.scope).not.toContain('<')
+    expect(invitation.requiredSkills).toHaveLength(12)
+    expect(invitation.equityProposal).toBe(30)
+    expect(invitation.cashReward).toBe(250)
   })
 })
 

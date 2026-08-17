@@ -34,6 +34,8 @@ function makeDb(overrides = {}) {
     endorsements: [],
     projects: [],
     workspaces: [],
+    workspaceInvitations: [],
+    workspaceMembers: [],
     projectAnalyses: [],
     equityGrants: [],
     dilutionEvents: [],
@@ -430,6 +432,83 @@ describe('domain live-data endpoints', () => {
     expect(context.body.venture.investment_score).toBe(80)
   })
 
+  it('invites a collaborator and grants least-privilege workspace membership on acceptance', async () => {
+    const db = makeDb({
+      workspaces: [{ id: 'workspace_1', ownerId: 'user-uuid-1', projectId: 'project_live', name: 'LedgerCare Workspace' }],
+      workspaceConnectors: [{ id: 'connector_1', ownerId: 'user-uuid-1', workspaceId: 'workspace_1', provider: 'github' }],
+    })
+    readDb.mockReturnValue(db)
+
+    const invite = await request(app)
+      .post('/api/domain/workspaces/workspace_1/invitations')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        collaboratorId: 'user-uuid-3',
+        requestedRole: 'Backend Engineer',
+        scope: 'Own and test the reconciliation API.',
+        requiredSkills: ['Node.js', 'Postgres'],
+        compensationMode: 'equity-heavy',
+        equityProposal: 4,
+        accessLevel: 'contributor',
+      })
+
+    expect(invite.status).toBe(201)
+    expect(invite.body.invitation).toMatchObject({
+      workspaceId: 'workspace_1',
+      collaboratorId: 'user-uuid-3',
+      accessLevel: 'contributor',
+      status: 'pending',
+    })
+    expect(db.notifications[0].linkTo).toBe(`/workspace-invitations/${invite.body.invitation.id}`)
+
+    const hidden = await request(app)
+      .get(`/api/domain/workspace-invitations/${invite.body.invitation.id}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    expect(hidden.status).toBe(404)
+
+    const accepted = await request(app)
+      .post(`/api/domain/workspace-invitations/${invite.body.invitation.id}/accept`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.membership).toMatchObject({
+      workspaceId: 'workspace_1',
+      userId: 'user-uuid-3',
+      accessLevel: 'contributor',
+      status: 'active',
+    })
+
+    const collaboratorWorkspaces = await request(app)
+      .get('/api/domain/workspaces')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(collaboratorWorkspaces.body.workspaces[0]).toMatchObject({
+      id: 'workspace_1',
+      isOwner: false,
+      accessLevel: 'contributor',
+    })
+
+    const task = await request(app)
+      .post('/api/domain/workspaces/workspace_1/tasks')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+      .send({ title: 'Implement reconciliation endpoint' })
+    expect(task.status).toBe(201)
+
+    const connectors = await request(app)
+      .get('/api/domain/workspaces/workspace_1/connectors')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(connectors.status).toBe(200)
+    expect(connectors.body.connectors).toEqual([])
+
+    const removed = await request(app)
+      .delete(`/api/domain/workspaces/workspace_1/members/${accepted.body.membership.id}`)
+      .set('Authorization', `Bearer ${validToken()}`)
+    expect(removed.status).toBe(200)
+
+    const contextAfterRemoval = await request(app)
+      .get('/api/domain/workspaces/workspace_1/context')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'collaborator')}`)
+    expect(contextAfterRemoval.status).toBe(404)
+  })
+
   it('patches owned workspace collection items and generic opportunity records', async () => {
     const db = makeDb({
       workspaces: [{ id: 'workspace_1', ownerId: 'user-uuid-1', projectId: 'project_live', name: 'Live Workspace' }],
@@ -475,6 +554,78 @@ describe('domain live-data endpoints', () => {
     expect(oppPatch.status).toBe(200)
     expect(oppPatch.body.opportunity.status).toBe('applied')
     expect(db.opportunities[0].ownerId).toBe('user-uuid-1')
+  })
+
+  it('publishes an ownership-first collaboration call to selected role hubs', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        skills: ['Node.js', 'Postgres'],
+        compensationMode: 'equity-heavy',
+        equityPercent: 4,
+        cashCompMonthly: 5000,
+        audienceRoles: ['collaborator', 'founder', 'explorer', 'admin'],
+        timeCommitment: '20 hrs/week',
+      })
+
+    expect(res.status).toBe(201)
+    expect(res.body.opportunity).toMatchObject({
+      type: 'collaboration',
+      visibility: 'public',
+      ownerId: 'user-uuid-1',
+      compensationMode: 'equity-heavy',
+      equityPercent: 4,
+      cashCompMonthly: 0,
+      audienceRoles: ['collaborator', 'founder', 'explorer'],
+    })
+
+    const duplicate = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        compensationMode: 'equity-heavy',
+        equityPercent: 4,
+        audienceRoles: ['collaborator'],
+      })
+    expect(duplicate.status).toBe(200)
+    expect(db.opportunities).toHaveLength(1)
+  })
+
+  it('rejects an ownership-first call with no ownership proposal', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .post('/api/domain/opportunities/collaboration-calls')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({
+        projectId: 'project_live',
+        company: 'LedgerCare',
+        summary: 'LedgerCare helps clinics reconcile patient payments.',
+        scope: 'Own and test the reconciliation API.',
+        role: 'Backend Engineer',
+        compensationMode: 'equity-heavy',
+        equityPercent: 0,
+        audienceRoles: ['collaborator'],
+      })
+
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('ownership_proposal_required')
+    expect(db.opportunities).toHaveLength(0)
   })
 
   it('aggregates hackathon command-center metrics from persisted team activity', async () => {

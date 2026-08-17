@@ -3,6 +3,7 @@ import {
   analyses,
   analysisCreate,
   analysisGet,
+  collaborationCallCreate,
   collaboratorScores,
   contractCountersign,
   contractCreate,
@@ -74,9 +75,15 @@ import {
   watchlist,
   watchlistAdd,
   workspaceContextGet,
+  workspaceInvitationAccept,
+  workspaceInvitationCreate,
+  workspaceInvitationDecline,
+  workspaceInvitationGet,
   workspaceItemCreate,
   workspaceItemPatch,
   workspaceItems,
+  workspaceMemberDelete,
+  workspaceMembersGet,
   workspaceProvision,
   workspaces,
 } from '../controllers/domainController.js'
@@ -198,7 +205,13 @@ router.get('/hackathons/:hackathonId', hackathonGet)
 
 router.get('/workspaces', workspaces)
 router.post('/workspaces/provision', workspaceProvision)
+router.get('/workspace-invitations/:invitationId', workspaceInvitationGet)
+router.post('/workspace-invitations/:invitationId/accept', workspaceInvitationAccept)
+router.post('/workspace-invitations/:invitationId/decline', workspaceInvitationDecline)
 router.get('/workspaces/:workspaceId/context', workspaceContextGet)
+router.post('/workspaces/:workspaceId/invitations', workspaceInvitationCreate)
+router.get('/workspaces/:workspaceId/members', workspaceMembersGet)
+router.delete('/workspaces/:workspaceId/members/:memberId', workspaceMemberDelete)
 router.get('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItems)
 router.post('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemCreate)
 router.patch('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemPatch)
@@ -222,6 +235,7 @@ router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice',
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
+router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
 router.post('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericCreatePost)
 router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericPatchItem)
 router.post('/opportunities/:id/apply', opportunityApply)
