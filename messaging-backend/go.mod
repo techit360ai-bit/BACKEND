@@ -1,6 +1,6 @@
 module github.com/techit360ai-bit/BACKEND/messaging-backend
 
-go 1.24
+go 1.23.12
 
 require (
 	github.com/coder/websocket v1.8.14
