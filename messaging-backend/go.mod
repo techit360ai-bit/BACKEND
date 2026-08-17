@@ -3,7 +3,7 @@ module github.com/techit360ai-bit/BACKEND/messaging-backend
 go 1.23.12
 
 require (
-	github.com/coder/websocket v1.8.14
+	github.com/coder/websocket v1.8.15
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
