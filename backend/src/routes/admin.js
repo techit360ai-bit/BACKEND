@@ -1,5 +1,15 @@
 import { Router } from 'express'
-import { adminLogin, adminMe, adminList, adminCreate, adminUpdate, adminDelete } from '../controllers/adminAuthController.js'
+import {
+  adminCreate,
+  adminDelete,
+  adminDiscoveryAnalytics,
+  adminDiscoveryConfig,
+  adminList,
+  adminLogin,
+  adminMe,
+  adminUpdate,
+  adminUpdateDiscoveryConfig,
+} from '../controllers/adminAuthController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
@@ -23,5 +33,8 @@ router.get('/users', requireAdminAuth, requireSuperAdmin, adminList)
 router.post('/users', requireAdminAuth, requireSuperAdmin, adminCreate)
 router.patch('/users/:id', requireAdminAuth, requireSuperAdmin, adminUpdate)
 router.delete('/users/:id', requireAdminAuth, requireSuperAdmin, adminDelete)
+router.get('/discovery/config', requireAdminAuth, requireAdmin, adminDiscoveryConfig)
+router.patch('/discovery/config', requireAdminAuth, requireSuperAdmin, adminUpdateDiscoveryConfig)
+router.get('/discovery/analytics', requireAdminAuth, requireAdmin, adminDiscoveryAnalytics)
 
 export default router

@@ -13,6 +13,7 @@ import (
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/auth"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/channel"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/demo"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/discovery"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/feed"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/livekit"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/messaging"
@@ -37,6 +38,7 @@ type Deps struct {
 	Presence       *presence.Service
 	EnableDevToken bool
 	CORSOrigins    string
+	Discovery      *discovery.Client
 }
 
 type ctxKey string
@@ -81,6 +83,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Post("/moderation/posts/{id}/review", handleModerationReview(d))
 			r.Get("/feed/ranking/metrics", handleRankingMetrics(d))
 			r.Put("/feed/discovery/profile", handleDiscoveryProfile(d))
+			r.Get("/feed/modules", handleDiscoveryModules(d))
 			r.Post("/users/{userId}/follow", handleFollowUser(d))
 			r.Delete("/users/{userId}/follow", handleUnfollowUser(d))
 			r.Post("/users/{userId}/mute", handleCreatorControl(d, "mute", true))

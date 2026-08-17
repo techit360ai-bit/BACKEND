@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import { readDb, writeDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
+import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
@@ -211,4 +212,16 @@ export function adminDelete(req, res) {
   if (db.adminUsers.length === before) return res.status(404).json({ error: 'Admin not found' })
   writeDb(db)
   return res.json({ ok: true })
+}
+
+export function adminDiscoveryConfig(_req, res) {
+  return res.json({ config: getDiscoveryConfig() })
+}
+
+export function adminUpdateDiscoveryConfig(req, res) {
+  return res.json({ config: updateDiscoveryConfig(req.body) })
+}
+
+export function adminDiscoveryAnalytics(_req, res) {
+  return res.json({ analytics: getDiscoveryAnalytics() })
 }

@@ -1,6 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
+import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -187,6 +188,11 @@ export function createProject(userId, body) {
       hasWorkspace: Boolean(body.hasWorkspace || promotedTeam?.workspaceId),
       origin,
     }, 'project')
+    const event = appendPlatformEventInDb(db, {
+      userId, actorId: userId, eventType: 'project_created', entityType: 'project', entityId: project.id,
+      importance: 'MEDIUM', metadata: { industry: project.industry, skills: project.requiredSkills || project.skills || [] },
+    })
+    appendRelationshipInDb(db, userId, event)
 
     if (promotedTeam) {
       promotedTeam.promotedProjectId = project.id
@@ -1426,11 +1432,30 @@ export function genericList(userId, name) {
 }
 
 export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
-  return updateDb(db => insertOwned(db, name, userId, body, prefix, field))
+  return updateDb(db => {
+    const row = insertOwned(db, name, userId, body, prefix, field)
+    const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
+    const event = appendPlatformEventInDb(db, {
+      userId, actorId: userId, eventType: `${type}_created`, entityType: type, entityId: row.id,
+      importance: type === 'opportunity' ? 'HIGH' : 'MEDIUM',
+      metadata: { industry: row.industry, skills: row.requiredSkills || row.skills || [] },
+    })
+    appendRelationshipInDb(db, userId, event)
+    return row
+  })
 }
 
 export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
-  return updateDb(db => patchOwned(db, name, itemId, userId, body, field))
+  return updateDb(db => {
+    const row = patchOwned(db, name, itemId, userId, body, field)
+    if (!row) return null
+    const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
+    appendPlatformEventInDb(db, {
+      userId, actorId: userId, eventType: `${type}_updated`, entityType: type, entityId: row.id,
+      importance: type === 'opportunity' ? 'HIGH' : 'MEDIUM', metadata: { industry: row.industry, skills: row.requiredSkills || row.skills || [] },
+    })
+    return row
+  })
 }
 
 export function getNotificationPreferences(userId) {

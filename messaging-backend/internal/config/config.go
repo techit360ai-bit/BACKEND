@@ -16,7 +16,8 @@ type Config struct {
 	JWTAudience    string
 	CORSOrigins    string
 	Environment    string
-	EnableDevToken bool
+	EnableDevToken  bool
+	DiscoveryAPIURL string
 
 	LiveKitAPIKey    string
 	LiveKitAPISecret string
@@ -56,7 +57,8 @@ func Load() (Config, error) {
 		JWTAudience:    os.Getenv("JWT_AUDIENCE"),
 		CORSOrigins:    envOr("CORS_ORIGINS", ""),
 		Environment:    environment,
-		EnableDevToken: os.Getenv("ENABLE_DEV_TOKEN") == "1",
+		EnableDevToken:  os.Getenv("ENABLE_DEV_TOKEN") == "1",
+		DiscoveryAPIURL: strings.TrimRight(strings.TrimSpace(os.Getenv("DISCOVERY_API_URL")), "/"),
 
 		LiveKitAPIKey:    os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret: os.Getenv("LIVEKIT_API_SECRET"),

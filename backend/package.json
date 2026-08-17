@@ -9,6 +9,8 @@
     "db:migrate": "node --no-warnings scripts/migrate-db.js up",
     "db:migrate:dry-run": "node --no-warnings scripts/migrate-db.js up --dry-run",
     "db:rollback:dry-run": "node --no-warnings scripts/migrate-db.js down --dry-run",
+    "discovery:db:migrate": "node scripts/migrate-discovery-postgres.js",
+    "discovery:worker": "node --import tsx scripts/discovery-worker.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -23,6 +25,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
+    "pg": "^8.23.0",
+    "redis": "^6.2.1",
     "resend": "^6.12.4"
   },
   "devDependencies": {

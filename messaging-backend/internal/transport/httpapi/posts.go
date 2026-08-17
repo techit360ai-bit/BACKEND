@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/feed"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/discovery"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
 )
@@ -36,6 +37,16 @@ func feedErr(w http.ResponseWriter, err error) {
 func audience(d Deps, r *http.Request) []string {
 	ids, _ := d.Presence.ListOnline(r.Context())
 	return ids
+}
+
+func forwardDiscovery(d Deps, r *http.Request, eventType, entityType, entityID string, metadata map[string]any) {
+	if d.Discovery == nil {
+		return
+	}
+	d.Discovery.Enqueue(discovery.Event{
+		Token: r.Header.Get("Authorization"), EventType: eventType,
+		EntityType: entityType, EntityID: entityID, Surface: "feed", Metadata: metadata,
+	})
 }
 
 func handleListPosts(d Deps) http.HandlerFunc {
@@ -96,6 +107,7 @@ func handleCreatePost(d Deps) http.HandlerFunc {
 			feedErr(w, err)
 			return
 		}
+		forwardDiscovery(d, r, "content_created", "content", post.ID, map[string]any{"kind": post.Kind})
 		writeJSON(w, http.StatusOK, map[string]any{
 			"id": post.ID, "authorId": post.AuthorID, "authorRole": post.AuthorRole,
 			"audience": post.Audience, "kind": post.Kind, "body": post.Body, "ts": post.CreatedAt, "expiresAt": post.ExpiresAt,
@@ -112,6 +124,7 @@ func handleLikePost(d Deps) http.HandlerFunc {
 			feedErr(w, err)
 			return
 		}
+		forwardDiscovery(d, r, "like", "content", postID, nil)
 		writeJSON(w, http.StatusOK, map[string]any{"likeCount": n})
 	}
 }
@@ -130,13 +143,26 @@ func handleUnlikePost(d Deps) http.HandlerFunc {
 }
 
 func handleSavePost(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.SavePost(r.Context(), chi.URLParam(r, "id"), currentUser(r), true); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"saved": true}) }
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		if err := d.Feed.SavePost(r.Context(), id, currentUser(r), true); err != nil { feedErr(w, err); return }
+		forwardDiscovery(d, r, "save", "content", id, nil)
+		writeJSON(w, http.StatusOK, map[string]any{"saved": true})
+	}
 }
 func handleUnsavePost(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.SavePost(r.Context(), chi.URLParam(r, "id"), currentUser(r), false); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"saved": false}) }
 }
 func handlePostFeedback(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { var body struct{ Feedback string `json:"feedback"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.Feedback == "" { writeErr(w, http.StatusBadRequest, "feedback required"); return }; switch body.Feedback { case "hide", "not_interested", "mute", "block", "report": default: writeErr(w, http.StatusBadRequest, "unsupported feedback"); return }; if err := d.Feed.SetPostFeedback(r.Context(), chi.URLParam(r, "id"), currentUser(r), body.Feedback); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"feedback": body.Feedback}) }
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Feedback string `json:"feedback"` }
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.Feedback == "" { writeErr(w, http.StatusBadRequest, "feedback required"); return }
+		switch body.Feedback { case "hide", "not_interested", "mute", "block", "report": default: writeErr(w, http.StatusBadRequest, "unsupported feedback"); return }
+		id := chi.URLParam(r, "id")
+		if err := d.Feed.SetPostFeedback(r.Context(), id, currentUser(r), body.Feedback); err != nil { feedErr(w, err); return }
+		forwardDiscovery(d, r, body.Feedback, "content", id, nil)
+		writeJSON(w, http.StatusOK, map[string]any{"feedback": body.Feedback})
+	}
 }
 
 func handleCreatorControl(d Deps, control string, enabled bool) http.HandlerFunc {
@@ -163,7 +189,17 @@ func handleModerationReview(d Deps) http.HandlerFunc { return func(w http.Respon
 func handleRankingMetrics(d Deps) http.HandlerFunc { return func(w http.ResponseWriter, r *http.Request) { if !requireModerator(r) { writeErr(w, http.StatusForbidden, "moderator access required"); return }; metrics, err := d.Feed.RankingMetrics(r.Context()); if err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"metrics": metrics, "rankingVersion": "feed-v7"}) } }
 func handleDiscoveryProfile(d Deps) http.HandlerFunc { return func(w http.ResponseWriter,r *http.Request){ var p store.DiscoveryProfile; if json.NewDecoder(r.Body).Decode(&p)!=nil{writeErr(w,http.StatusBadRequest,"invalid discovery profile");return}; p.UserID=currentUser(r); if err:=d.Feed.UpsertDiscoveryProfile(r.Context(),p);err!=nil{feedErr(w,err);return};writeJSON(w,http.StatusOK,map[string]any{"saved":true}) } }
 func handleFeedEvent(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }; switch body.EventType { case "impression", "open", "like", "comment", "share", "save", "dismiss": default: writeErr(w, http.StatusBadRequest, "unsupported event type"); return }; body.Metadata = sanitizeFeedMetadata(body.Metadata); if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true}) }
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ PostID string `json:"postId"`; EventType string `json:"eventType"`; Metadata json.RawMessage `json:"metadata"` }
+		if json.NewDecoder(r.Body).Decode(&body) != nil || body.EventType == "" { writeErr(w, http.StatusBadRequest, "eventType required"); return }
+		switch body.EventType { case "impression", "open", "like", "comment", "share", "save", "dismiss": default: writeErr(w, http.StatusBadRequest, "unsupported event type"); return }
+		body.Metadata = sanitizeFeedMetadata(body.Metadata)
+		if err := d.Feed.RecordEvent(r.Context(), store.FeedEvent{ID: protocol.NewMsgID(), UserID: currentUser(r), PostID: body.PostID, EventType: body.EventType, Metadata: body.Metadata, CreatedAt: time.Now().UTC()}); err != nil { feedErr(w, err); return }
+		var metadata map[string]any
+		_ = json.Unmarshal(body.Metadata, &metadata)
+		forwardDiscovery(d, r, body.EventType, "content", body.PostID, metadata)
+		writeJSON(w, http.StatusAccepted, map[string]any{"recorded": true})
+	}
 }
 
 func sanitizeFeedMetadata(raw json.RawMessage) json.RawMessage {
@@ -176,7 +212,23 @@ func sanitizeFeedMetadata(raw json.RawMessage) json.RawMessage {
 	return out
 }
 func handleFollowUser(d Deps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.FollowUser(r.Context(), currentUser(r), chi.URLParam(r, "userId"), true); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"following": true}) }
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "userId")
+		if err := d.Feed.FollowUser(r.Context(), currentUser(r), id, true); err != nil { feedErr(w, err); return }
+		forwardDiscovery(d, r, "follow", "person", id, nil)
+		writeJSON(w, http.StatusOK, map[string]any{"following": true})
+	}
+}
+
+func handleDiscoveryModules(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if d.Discovery == nil { writeErr(w, http.StatusServiceUnavailable, "discovery integration disabled"); return }
+		body, status, err := d.Discovery.Modules(r.Context(), r.Header.Get("Authorization"), r.URL.Query())
+		if err != nil { writeErr(w, http.StatusBadGateway, err.Error()); return }
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write(body)
+	}
 }
 func handleUnfollowUser(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) { if err := d.Feed.FollowUser(r.Context(), currentUser(r), chi.URLParam(r, "userId"), false); err != nil { feedErr(w, err); return }; writeJSON(w, http.StatusOK, map[string]any{"following": false}) }
