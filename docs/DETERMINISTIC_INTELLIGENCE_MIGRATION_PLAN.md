@@ -101,7 +101,7 @@ Rules:
 
 ## Implementation Phases
 
-### Phase 0 - Baseline and Freeze
+### Phase 0 - Baseline and Freeze (complete)
 
 - Inventory all AI Router call sites using `_call_ai`, `call_provider_model`, and provider adapters.
 - Record current response schemas, score formulas, policy IDs, and existing Backend consumers.
@@ -113,7 +113,7 @@ Rules:
   - `AI_ROUTER_REQUIRED_FOR_TASKS`
   - `EMBEDDING_REFRESH_MODE` (`deterministic`, `provider`, `local`)
 
-### Phase 1 - Extract Shared Score Kernels
+### Phase 1 - Extract Shared Score Kernels (complete)
 
 Create a Backend module, for example `backend/src/services/intelligence/scoreKernels.js`, with pure functions and no network calls.
 
@@ -137,7 +137,7 @@ Verification:
 - Boundary tests cover missing, zero, maximum, stale, and invalid inputs.
 - No score kernel imports HTTP clients, provider SDKs, or AI Router clients.
 
-### Phase 2 - Backend Deterministic Services
+### Phase 2 - Backend Deterministic Services (complete)
 
 Add service boundaries around the kernels:
 
@@ -161,7 +161,7 @@ Integrate these services with the existing:
 - PostgreSQL/pgvector projection
 - Redis refresh queue and cache
 
-### Phase 3 - Discovery, Feed, and Return Intelligence Cutover
+### Phase 3 - Discovery, Feed, and Return Intelligence Cutover (complete)
 
 Keep the current Backend Discovery implementation as the primary implementation.
 
@@ -178,7 +178,7 @@ Complete the cutover so the following are Backend-only:
 
 AI may optionally rewrite a reason into natural language after the deterministic recommendation has been persisted. If AI fails, the deterministic reason is returned unchanged.
 
-### Phase 4 - Training, Profile, Trust, and Admin Cutover
+### Phase 4 - Training, Profile, Trust, and Admin Cutover (complete)
 
 Move high-frequency non-generative logic:
 
@@ -190,7 +190,7 @@ Move high-frequency non-generative logic:
 
 Retain AI only for optional coaching, explanation, or incident summaries.
 
-### Phase 5 - Optional AI Enrichment Gateway
+### Phase 5 - Optional AI Enrichment Gateway (complete)
 
 Create one Backend client, such as `aiNarrativeClient.js`, with:
 
@@ -219,7 +219,7 @@ Disallowed AI authority:
 - Invent a candidate or evidence source.
 - Trigger deployment, investment, or irreversible state changes.
 
-### Phase 6 - Embedding and Semantic Matching Cost Control
+### Phase 6 - Embedding and Semantic Matching Cost Control (complete)
 
 Default to the existing deterministic embedding/fingerprint path for discovery infrastructure.
 
@@ -233,7 +233,7 @@ Use provider embeddings only when all conditions hold:
 
 Support a local embedding model as a later alternative. Store embedding model, version, timestamp, and source. Do not make semantic embeddings a safety or permission requirement.
 
-### Phase 7 - Runtime Modes and Provider Decoupling
+### Phase 7 - Runtime Modes and Provider Decoupling (complete)
 
 Change AI Router runtime requirements from unconditional production provider keys to explicit modes:
 
@@ -243,7 +243,7 @@ Change AI Router runtime requirements from unconditional production provider key
 
 Update `runtime_config.py`, deployment manifests, health checks, and runbooks accordingly. Provider credentials should be required only if the selected mode or enabled feature needs them.
 
-### Phase 8 - Rollout, Measurement, and Removal
+### Phase 8 - Rollout, Measurement, and Removal (implementation complete; production canary remains operational)
 
 - Shadow-run Backend kernels against current AI Router deterministic outputs.
 - Compare score drift, recommendation ordering, evidence statuses, and meaningful outcomes.
@@ -333,4 +333,3 @@ Every migrated service must pass:
 - Moving external verification credentials into Backend score kernels.
 - Making deterministic scores equivalent to calibrated probabilities.
 - Treating a free hosted model as token-free or risk-free.
-

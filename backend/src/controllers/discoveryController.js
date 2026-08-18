@@ -19,6 +19,7 @@ import {
   semanticEntitySearch,
   setCachedDiscovery,
 } from '../services/discoveryInfrastructure.js'
+import { intelligenceFlags } from '../services/intelligence/featureFlags.js'
 
 function badRequest(res, error) {
   return res.status(400).json({ error: error instanceof Error ? error.message : String(error) })
@@ -35,7 +36,7 @@ export async function listRecommendations(req, res) {
   if (cached) return res.json({ ...cached, meta: { ...cached.meta, cached: true } })
   const result = getRecommendations(req.user.id, options)
   await Promise.allSettled([setCachedDiscovery(cacheKey, result), persistDiscoveryBatch(result)])
-  return res.json(result)
+  return res.json({ ...result, intelligence: { schema_version: 'intelligence-v1', deterministic: intelligenceFlags.deterministicEnabled, ai_enrichment: false } })
 }
 
 export function putRecommendationProfile(req, res) {
@@ -76,7 +77,7 @@ export function createFeedback(req, res) {
 }
 
 export function returnSummary(req, res) {
-  return res.json(getReturnSummary(req.user.id))
+  return res.json({ ...getReturnSummary(req.user.id), intelligence: { schema_version: 'intelligence-v1', deterministic: true, ai_enrichment: false } })
 }
 
 export function catchUp(req, res) {

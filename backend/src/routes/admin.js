@@ -9,6 +9,7 @@ import {
   adminMe,
   adminUpdate,
   adminUpdateDiscoveryConfig,
+  adminIntelligenceTelemetry,
 } from '../controllers/adminAuthController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
@@ -36,5 +37,6 @@ router.delete('/users/:id', requireAdminAuth, requireSuperAdmin, adminDelete)
 router.get('/discovery/config', requireAdminAuth, requireAdmin, adminDiscoveryConfig)
 router.patch('/discovery/config', requireAdminAuth, requireSuperAdmin, adminUpdateDiscoveryConfig)
 router.get('/discovery/analytics', requireAdminAuth, requireAdmin, adminDiscoveryAnalytics)
+router.get('/intelligence/telemetry', requireAdminAuth, requireAdmin, adminIntelligenceTelemetry)
 
 export default router
