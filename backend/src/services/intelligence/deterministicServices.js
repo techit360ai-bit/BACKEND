@@ -24,7 +24,18 @@ function numericFields(input, fields) {
 }
 
 export function calculateGsis(input = {}) {
-  const components = values(input.components || input.component_scores || input)
+  const source = values(input.components || input.component_scores || input)
+  const components = {
+    product_progress: source.product_progress ?? source.pps,
+    execution_velocity: source.execution_velocity ?? source.evi,
+    market_readiness: source.market_readiness ?? source.mrs,
+    beta_satisfaction: source.beta_satisfaction ?? source.bss,
+    revenue_growth: source.revenue_growth ?? source.rgs,
+    founder_reputation: source.founder_reputation ?? source.frs,
+    community_influence: source.community_influence ?? source.cis,
+    investor_interest: source.investor_interest ?? source.iis,
+    compliance: source.compliance ?? source.cs,
+  }
   const fields = ['product_progress', 'execution_velocity', 'market_readiness', 'beta_satisfaction', 'revenue_growth', 'founder_reputation', 'community_influence', 'investor_interest', 'compliance']
   const present = numericFields(components, fields)
   const missing = fields.filter(field => !present.includes(field))
