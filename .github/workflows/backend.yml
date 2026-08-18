@@ -213,7 +213,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          if [[ "$COMMIT_MESSAGE" =~ ^Merge pull request #[0-9]+ ]]; then exit 0; fi
+          case "$COMMIT_MESSAGE" in Merge\ pull\ request\ \#*) exit 0;; esac
           count="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '[.[] | select(.merged_at != null)] | length')"
           test "$count" -gt 0
 
