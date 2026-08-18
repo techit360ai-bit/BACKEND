@@ -1,0 +1,25 @@
+name: Direct Push Audit
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  verify-pr-provenance:
+    name: Verify PR Provenance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an associated merged pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls"             --jq '[.[] | select(.merged_at != null)] | length')"
+          if [[ "$count" -lt 1 ]]; then
+            echo "Direct push detected on main. Production commits must arrive through a merged PR."
+            exit 1
+          fi
+
