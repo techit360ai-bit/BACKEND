@@ -24,6 +24,10 @@ on:
       - "package-lock.json"
       - ".github/workflows/backend.yml"
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   node-backend:
     name: Node Backend Tests
