@@ -4,6 +4,7 @@ import { readDb, writeDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
+import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTelemetry.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
@@ -101,6 +102,10 @@ export function adminMe(req, res) {
     permissions: admin.permissions,
     lastLoginAt: admin.lastLoginAt,
   })
+}
+
+export function adminIntelligenceTelemetry(_req, res) {
+  return res.json({ telemetry: migrationTelemetrySnapshot() })
 }
 
 export function adminList(req, res) {
