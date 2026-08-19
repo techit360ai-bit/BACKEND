@@ -4,6 +4,7 @@ import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readDb, updateDb, writeDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
+import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
 import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
@@ -37,7 +38,7 @@ function getResend() {
 function makeToken(userId, profile = null) {
   const claims = {
     sub: userId,
-    role: profile?.role || 'founder',
+    role: profile?.role || 'explorer',
     workspaceId: profile?.workspaceId || `user-${userId}`,
   }
   return jwt.sign(claims, JWT_SECRET, {
@@ -59,7 +60,7 @@ function buildProfile(data, now) {
     countryCode: data.countryCode || '',
     avatarUrl: null,
     bio: null,
-    role: data.role || 'founder',
+    role: normalizeRole(data.role || 'explorer'),
     secondaryRoles: [],
     creditBalance: 0,
     credibilityScore: 0,
@@ -170,7 +171,7 @@ async function sendPasswordResetEmail(email, resetUrl) {
 export async function signup(req, res) {
   const {
     email: rawEmail, password, firstName, lastName,
-    phone = '', country = '', countryCode = '', role = 'founder',
+    phone = '', country = '', countryCode = '', role = 'explorer',
     emailVerificationToken,
   } = req.body
   const email = normalizeEmail(rawEmail)
@@ -193,7 +194,8 @@ export async function signup(req, res) {
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
   const id = randomUUID()
   const now = new Date().toISOString()
-  const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role }, now)
+  const requestedRole = normalizeRole(role || 'explorer')
+  const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role: requestedRole }, now)
   const result = updateDb(db => {
     if (db.users.find(u => u.email === email)) {
       return { status: 409, error: 'Email already in use' }
@@ -212,6 +214,7 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
+  activateRoleAssignment(id, requestedRole, {})
   const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
@@ -244,6 +247,7 @@ export async function signin(req, res) {
   const profile = db.profiles.find(p => p.id === user.id) || null
   recordActivityInDb(db, user.id, 'login', 'auth')
   writeDb(db)
+  roleAssignments(user.id)
 
   const credentials = issueSession(user, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
@@ -261,7 +265,8 @@ export function session(req, res) {
   const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
   writeDb(db)
-  return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext })
+  const assignments = roleAssignments(req.user.id)
+  return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
 }
 
 export function signout(req, res) {

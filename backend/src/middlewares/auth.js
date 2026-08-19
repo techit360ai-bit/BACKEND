@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
+import { normalizeRole } from '../services/multiRoleContextService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -41,9 +42,12 @@ export function requireAuth(req, res, next) {
   if (!profile && process.env.NODE_ENV !== 'test') {
     return res.status(401).json({ error: 'User profile is unavailable' })
   }
-  const persistedRole = profile?.role || 'founder'
-  const activeRole = profile?.activeRole || persistedRole
-  const persistedRoles = [...new Set([persistedRole, ...(profile?.secondaryRoles || []), ...(profile?.roles || [])])]
+  const persistedRole = profile?.role || 'explorer'
+  const assignmentRows = (db.userRoles || []).filter(row => row.userId === user.id && row.active !== false && row.status === 'active')
+  const persistedRoles = [...new Set(['explorer', ...assignmentRows.map(row => normalizeRole(row.role)), persistedRole, ...(profile?.secondaryRoles || []).map(normalizeRole), ...(profile?.roles || []).map(normalizeRole)])]
+  const activeContext = (db.activeContexts || []).find(row => row.userId === user.id && row.status === 'active') || null
+  const requestedActiveRole = normalizeRole(activeContext?.role || profile?.activeRole || persistedRole)
+  const activeRole = persistedRoles.includes(requestedActiveRole) ? requestedActiveRole : 'explorer'
   req.user = {
     id: user.id,
     email: user.email,
@@ -53,6 +57,7 @@ export function requireAuth(req, res, next) {
     role: process.env.NODE_ENV === 'test' ? (payload.role || activeRole) : activeRole,
     roles: process.env.NODE_ENV === 'test' ? [...new Set([payload.role, ...persistedRoles].filter(Boolean))] : persistedRoles,
     workspaceId: profile?.workspaceId || `user-${user.id}`,
+    activeContext: activeContext || { role: activeRole, workspaceId: null, organizationId: null, resourceType: null, resourceId: null },
     // Raw platform JWT, so controllers can forward it to ai-router
     // (which verifies the same JWT_SECRET). See aiRouterClient.js.
     token,

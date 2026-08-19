@@ -2,6 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
 import { reserveCapabilityConsumption, settleCapabilityConsumption } from './capabilityConsumptionService.js'
+import { activateRoleAssignment, switchContext } from './multiRoleContextService.js'
 
 export const ASSURANCE_LEVELS = Object.freeze({
   CLAIMED: 0,
@@ -38,7 +39,14 @@ export const CAPABILITY_POLICIES = Object.freeze({
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const profileFor = (db, userId) => collection(db, 'profiles').find(row => row.id === userId) || null
-const rolesFor = (profile, userRoles = []) => [...new Set([profile?.role, ...(profile?.secondaryRoles || []), ...(profile?.roles || []), ...userRoles.map(row => row.role)].map(normalizeRole).filter(Boolean))]
+const rolesFor = (profile, userRoles = []) => {
+  const assignments = userRoles.filter(row => row.active !== false && row.status === 'active')
+  const assignedNames = new Set(userRoles.map(row => normalizeRole(row.role)).filter(Boolean))
+  const legacy = [profile?.role, ...(profile?.secondaryRoles || []), ...(profile?.roles || [])]
+    .map(normalizeRole)
+    .filter(role => role && !assignedNames.has(role))
+  return [...new Set(['explorer', ...assignments.map(row => normalizeRole(row.role)), ...legacy])]
+}
 
 function legacyAssurance(profile, role) {
   if (!profile) return 'CLAIMED'
@@ -155,7 +163,7 @@ export function authorizeCapability(userId, capability, context = {}) {
 
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
   return (req, res, next) => {
-    const decision = authorizeCapability(req.user.id, capability, { ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
+    const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
     void auditCapabilityDecision(decision, req.user.id)
     if (decision.allowed) {
       req.capabilityDecision = decision
@@ -173,37 +181,28 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
 }
 
 export function switchActiveRole(userId, role) {
-  const normalized = normalizeRole(role)
+  const result = switchContext(userId, { role })
+  if (!result.ok) return result
   return updateDb(db => {
-    const profile = profileFor(db, userId)
-    if (!profile) return { ok: false, error: 'profile_not_found' }
-    const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
-    if (!roles.includes(normalized)) return { ok: false, error: 'role_not_activated' }
-    profile.activeRole = normalized; profile.updatedAt = nowIso()
+    const normalized = normalizeRole(role)
     const trust = ensureTrustProfile(db, userId, normalized); trust.activeRole = normalized
     collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'active_role_switched', role: normalized, policyVersion: 'capability-v1', createdAt: nowIso() })
-    return { ok: true, activeRole: normalized, roles }
+    return { ...result, activeRole: normalized, roles: result.availableContexts.map(item => item.role) }
   })
 }
 
 export function roleActivation(userId, role, profilePatch = {}) {
-  const normalized = normalizeRole(role)
-  if (!['founder', 'collaborator', 'investor', 'organization', 'explorer'].includes(normalized)) return { ok: false, error: 'role_unavailable' }
+  const activated = activateRoleAssignment(userId, role, profilePatch)
+  if (!activated.ok) return activated
   return updateDb(db => {
+    const normalized = normalizeRole(role)
     const profile = profileFor(db, userId)
-    if (!profile) return { ok: false, error: 'profile_not_found' }
-    profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)
-    profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || nowIso(), updatedAt: nowIso() } }
     const roleProfiles = collection(db, 'roleProfiles')
-    const roleProfile = roleProfiles.find(row => row.userId === userId && row.role === normalized)
-    if (roleProfile) Object.assign(roleProfile, profile.roleProfiles[normalized])
-    else roleProfiles.push({ id: createId('role_profile'), userId, role: normalized, ...profile.roleProfiles[normalized] })
-    const roles = collection(db, 'userRoles')
-    let record = roles.find(row => row.userId === userId && row.role === normalized)
-    if (!record) { record = { id: createId('user_role'), userId, role: normalized, status: 'active', assurance: 'CLAIMED', createdAt: nowIso() }; roles.push(record) }
-    record.status = 'active'; record.updatedAt = nowIso()
+    const roleProfile = roleProfiles.find(row => row.userId === userId && normalizeRole(row.role) === normalized)
+    if (roleProfile) Object.assign(roleProfile, profile?.roleProfiles?.[normalized] || {})
+    else roleProfiles.push({ id: createId('role_profile'), userId, role: normalized, ...(profile?.roleProfiles?.[normalized] || {}) })
     ensureTrustProfile(db, userId, normalized)
     collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'role_activated', role: normalized, previousState: null, newState: 'CLAIMED', policyVersion: 'capability-v1', createdAt: nowIso() })
-    return { ok: true, role: normalized, profile, userRole: record }
+    return { ...activated, profile }
   })
 }
