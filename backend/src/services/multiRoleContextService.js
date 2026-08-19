@@ -88,8 +88,13 @@ export function availableContexts(userId) {
 }
 
 export function getActiveContext(userId) {
-  const db = readDb()
-  const context = contextFor(db, userId)
+  let db = readDb()
+  let context = contextFor(db, userId)
+  if (!context && profileFor(db, userId)) {
+    availableContexts(userId)
+    db = readDb()
+    context = contextFor(db, userId)
+  }
   const profile = profileFor(db, userId)
   if (context) return context
   return { id: null, userId, role: normalizeRole(profile?.activeRole || profile?.role || 'explorer'), roleAssignmentId: null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: null, lastActiveAt: null, updatedAt: null }
