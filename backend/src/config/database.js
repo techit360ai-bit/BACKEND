@@ -132,6 +132,12 @@ const INITIAL = {
   verificationAuditLogs: [],
   capabilityPolicies: [],
   authorizationAuditLogs: [],
+  mfaProfiles: [],
+  mfaAssertions: [],
+  evidenceObjects: [],
+  capabilityConsumptions: [],
+  capabilityAnalytics: [],
+  verificationNotificationRuns: [],
 }
 
 let sqliteDb = null

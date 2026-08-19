@@ -2,6 +2,8 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import crypto from 'node:crypto'
 import { ensureTrustProfile } from './capabilityAuthorization.js'
+import { issueExecutionGrant } from './usageGrantService.js'
+import { analyzeVerificationEvidence } from './aiRouterClient.js'
 
 const collections = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const roleName = value => String(value || '').toLowerCase() === 'organisation' ? 'organization' : String(value || '').toLowerCase()
@@ -89,6 +91,17 @@ export function submitEvidence(userId, requestId, body = {}) {
   })
 }
 
+export async function analyzeEvidence(userId, token, requestId, body = {}) {
+  const db = readDb(); const request = collections(db, 'verificationRequests').find(row => row.id === requestId && row.userId === userId)
+  if (!request) return { ok: false, error: 'verification_request_not_found' }
+  const requestKey = `verification-analysis-${requestId}-${String(body.evidenceId || createId('evidence')).slice(-32)}`
+  const grant = issueExecutionGrant({ userId, requestId: requestKey, taskType: 'evidence_research', estimatedCredits: 1, fundingSource: body.fundingSource || 'payg', maxInputTokens: 4000, maxOutputTokens: 1500 })
+  if (!grant.ok) return grant
+  const advisory = await analyzeVerificationEvidence(token, grant.grant.token, { role: request.role, claim: request.claimType, source: body.source, metadata: body.metadata, evidence_text: body.evidenceText })
+  if (!advisory) return { ok: false, error: 'ai_advisory_unavailable' }
+  return updateDb(state => { const evidence = (state.verificationEvidence || []).find(row => row.id === body.evidenceId && row.userId === userId); if (evidence) { evidence.aiAdvisory = advisory; evidence.updatedAt = nowIso() }; return { ok: true, advisory, authorizationAuthority: false } })
+}
+
 export function reviewVerification(adminId, requestId, body = {}) {
   const decision = String(body.decision || '').toLowerCase()
   if (!['approve', 'reject', 'request_evidence', 'escalate'].includes(decision)) return { ok: false, error: 'invalid_review_decision' }
@@ -174,4 +187,28 @@ export function updateRiskState(adminId, userId, state, note = '') {
     audit(db, { userId, action: 'risk_state_updated', actorId: adminId, previousState, newState: normalized, note: row.note })
     return { ok: true, risk: row }
   })
+}
+
+export function generateReverificationNotifications(at = new Date()) {
+  return updateDb(db => {
+    const now = at.getTime(); const windows = [30, 14, 7, 1]; let created = 0
+    for (const profile of collections(db, 'verificationProfiles')) {
+      if (!profile.expiresAt) continue
+      const days = Math.ceil((new Date(profile.expiresAt).getTime() - now) / 86400000)
+      const window = windows.find(value => days <= value && days > value - 7)
+      if (!window) continue
+      const digestKey = `reverification:${profile.userId}:${profile.role}:${profile.expiresAt}:${window}`
+      if (collections(db, 'notifications').some(row => row.metadata?.digestKey === digestKey)) continue
+      collections(db, 'notifications').push({ id: createId('notif'), userId: profile.userId, type: 'verification', author: 'TechIT Trust', content: `Your ${profile.role} verification expires in ${Math.max(1, days)} day${days === 1 ? '' : 's'}. Renew it to keep affected capabilities.`, linkTo: `/verification/${profile.role}`, read: false, metadata: { digestKey, role: profile.role, expiresAt: profile.expiresAt }, createdAt: nowIso() }); created++
+    }
+    collections(db, 'verificationNotificationRuns').push({ id: createId('verification_notification_run'), created, runAt: nowIso() })
+    return { ok: true, created }
+  })
+}
+
+export function verificationAnalytics() {
+  const db = readDb(); const events = collections(db, 'capabilityAnalytics'); const decisions = collections(db, 'authorizationAuditLogs')
+  const byCapability = {}
+  for (const event of events) { const row = byCapability[event.capability] ||= { allowed: 0, denied: 0, completed: 0, released: 0 }; if (event.eventType === 'capability_allowed') row.allowed++; if (event.eventType === 'capability_denied') row.denied++; if (event.eventType === 'capability_completed') row.completed++; if (event.eventType === 'capability_released') row.released++ }
+  return { generatedAt: nowIso(), requests: collections(db, 'verificationRequests').length, pendingReviews: collections(db, 'verificationRequests').filter(row => ['pending', 'in_review'].includes(row.status)).length, evidence: collections(db, 'verificationEvidence').length, decisions: decisions.length, byCapability }
 }
