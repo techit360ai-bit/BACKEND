@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireAdmin } from '../utils/roleGuards.js'
-import { activateRole, adminCapabilityPolicies, adminCapabilityPolicyUpdate, adminReverificationNotifications, adminRiskUpdate, adminVerificationAnalytics, adminVerificationQueue, adminVerificationReview, capabilities, capabilityCheck, evidenceUploadFinalize, evidenceUploadUrl, mfaEnroll, mfaStatusGet, mfaVerify, organizationClaim, organizationCreate, organizationMemberAdd, organizationMembership, switchRole, trustProfile, verificationEvidence, verificationEvidenceAnalyze, verificationRequest, verificationStatus } from '../controllers/authorizationController.js'
+import { activateRole, adminCapabilityPolicies, adminCapabilityPolicyUpdate, adminReverificationNotifications, adminRiskUpdate, adminVerificationAnalytics, adminVerificationQueue, adminVerificationReview, capabilities, capabilityCheck, deactivateRole, evidenceUploadFinalize, evidenceUploadUrl, mfaEnroll, mfaStatusGet, mfaVerify, organizationClaim, organizationCreate, organizationMemberAdd, organizationMembership, roleAssignmentList, switchRole, trustProfile, verificationEvidence, verificationEvidenceAnalyze, verificationRequest, verificationStatus } from '../controllers/authorizationController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { rateLimit } from 'express-rate-limit'
 
@@ -13,6 +13,8 @@ router.get('/capabilities', requireAuth, capabilities)
 router.post('/capabilities/check', requireAuth, capabilityCheck)
 router.post('/roles/activate', requireAuth, activateRole)
 router.post('/roles/switch', requireAuth, switchRole)
+router.get('/roles/assignments', requireAuth, roleAssignmentList)
+router.post('/roles/:role/deactivate', requireAuth, deactivateRole)
 router.get('/verification/status', requireAuth, verificationStatus)
 router.post('/verification/request', requireAuth, verificationLimit, verificationRequest)
 router.post('/verification/requests/:requestId/evidence', requireAuth, evidenceLimit, verificationEvidence)

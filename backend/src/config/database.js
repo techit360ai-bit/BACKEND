@@ -140,6 +140,9 @@ const INITIAL = {
   verificationNotificationRuns: [],
   userSessions: [],
   authSecurityEvents: [],
+  activeContexts: [],
+  contextHistory: [],
+  roleHistory: [],
 }
 
 let sqliteDb = null

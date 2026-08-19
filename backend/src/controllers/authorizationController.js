@@ -1,4 +1,5 @@
 import { readDb } from '../config/database.js'
+import { deactivateRoleAssignment, roleAssignments } from '../services/multiRoleContextService.js'
 import { auditCapabilityDecision, authorizeCapability, CAPABILITY_POLICIES, capabilityPolicy, roleActivation, switchActiveRole, trustProfileFor, updateCapabilityPolicy } from '../services/capabilityAuthorization.js'
 import { addOrganizationMember, analyzeEvidence, claimOrganization, createOrganization, generateReverificationNotifications, getVerificationProfile, organizationMemberships, requestVerification, reviewVerification, submitEvidence, updateRiskState, verificationAnalytics } from '../services/trustVerificationService.js'
 import { beginMfaEnrollment, mfaStatus, verifyMfa } from '../services/mfaService.js'
@@ -8,9 +9,11 @@ const body = req => req.body && typeof req.body === 'object' ? req.body : {}
 const result = (res, value, success = 200) => value?.ok === false ? res.status(value.error === 'profile_not_found' ? 404 : 400).json(value) : res.status(success).json(value)
 
 export function capabilities(_req, res) { return res.json({ capabilities: Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: capabilityPolicy(capability) })) }) }
-export function capabilityCheck(req, res) { const decision = authorizeCapability(req.user.id, String(body(req).capability || req.query.capability || ''), { ...(body(req).context || {}), mfaAssertion: req.get('x-mfa-assertion') }); auditCapabilityDecision(decision, req.user.id); return res.json(decision) }
+export function capabilityCheck(req, res) { const decision = authorizeCapability(req.user.id, String(body(req).capability || req.query.capability || ''), { ...(req.user.activeContext || {}), ...(body(req).context || {}), mfaAssertion: req.get('x-mfa-assertion') }); auditCapabilityDecision(decision, req.user.id); return res.json(decision) }
 export function activateRole(req, res) { return result(res, roleActivation(req.user.id, body(req).role, body(req).profile || {}), 201) }
 export function switchRole(req, res) { return result(res, switchActiveRole(req.user.id, body(req).role)) }
+export function roleAssignmentList(req, res) { return res.json(roleAssignments(req.user.id)) }
+export function deactivateRole(req, res) { return result(res, deactivateRoleAssignment(req.user.id, req.params.role)) }
 export function verificationStatus(req, res) { return res.json(getVerificationProfile(req.user.id, req.query.role)) }
 export function verificationRequest(req, res) { return result(res, requestVerification(req.user.id, body(req)), 201) }
 export function verificationEvidence(req, res) { return result(res, submitEvidence(req.user.id, req.params.requestId, body(req)), 201) }

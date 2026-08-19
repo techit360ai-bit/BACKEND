@@ -15,6 +15,17 @@ function hashToken(value) { return crypto.createHash('sha256').update(value).dig
 function browserRequest(req) { return !req.headers.authorization && Boolean(req.headers.cookie || req.headers['x-techit-client'] === 'web') }
 function cookieOptions(maxAge) { return { ...cookieBase(), maxAge: maxAge * 1000 } }
 function sessionFromDb(db, identifier) { return (db.userSessions || []).find(row => row.sessionIdentifier === identifier) }
+function contextClaims(userId, profile) {
+  const db = readDb()
+  const context = (db.activeContexts || []).find(row => row.userId === userId && row.status === 'active')
+  return {
+    active_role: context?.role || profile?.activeRole || profile?.role || 'explorer',
+    organization_id: context?.organizationId || null,
+    resource_type: context?.resourceType || null,
+    resource_id: context?.resourceId || null,
+    workspaceId: context?.workspaceId || profile?.workspaceId || `user-${userId}`,
+  }
+}
 function userAgentParts(userAgent = '') { const value = String(userAgent); return { browser: /Edg/i.test(value) ? 'Edge' : /Chrome/i.test(value) ? 'Chrome' : /Safari/i.test(value) ? 'Safari' : /Firefox/i.test(value) ? 'Firefox' : 'Unknown', platform: /Android/i.test(value) ? 'Android' : /iPhone|iPad/i.test(value) ? 'iOS' : /Windows/i.test(value) ? 'Windows' : /Mac OS/i.test(value) ? 'macOS' : /Linux/i.test(value) ? 'Linux' : 'Unknown' } }
 function event(db, payload) { (db.authSecurityEvents || (db.authSecurityEvents = [])).push({ id: createId('auth_event'), createdAt: nowIso(), ...payload }) }
 export function mobileClient(req) { return String(req.get('x-techit-client') || '').toLowerCase() === 'mobile' }
@@ -22,7 +33,7 @@ export function mobileClient(req) { return String(req.get('x-techit-client') || 
 export function issueSession(user, profile, req, { rememberMe = true } = {}) {
   const sessionIdentifier = randomToken(); const refreshToken = randomToken(); const now = Date.now(); const parts = userAgentParts(req.get('user-agent'))
   const session = { id: createId('session'), userId: user.id, sessionIdentifier, refreshTokenHash: hashToken(refreshToken), deviceIdentifier: String(req.get('x-device-id') || '').slice(0, 160) || null, deviceName: String(req.get('x-device-name') || '').slice(0, 120) || null, platform: parts.platform, browser: parts.browser, ipAddress: req.ip || null, userAgent: String(req.get('user-agent') || '').slice(0, 500), createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), expiresAt: new Date(now + (rememberMe ? SESSION_TTL_SECONDS : 86400) * 1000).toISOString(), lastRefreshedAt: new Date(now).toISOString(), revokedAt: null, rememberMe, rotationCounter: 0 }
-  const accessToken = jwt.sign({ sub: user.id, role: profile?.role || 'founder', workspaceId: profile?.workspaceId || `user-${user.id}`, sid: sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+  const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), sid: sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
   if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateDb(db => { (db.userSessions || (db.userSessions = [])).push(session); event(db, { userId: user.id, sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: session.userAgent, metadata: { rememberMe, browser: parts.browser, platform: parts.platform } }) })
   return { accessToken, refreshToken, session }
 }
@@ -41,7 +52,7 @@ export function rotateSession(refreshToken, req) {
     if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now()) { if (row) { row.revokedAt = nowIso(); event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'refresh_token_rejected', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { reason: row.revokedAt ? 'revoked' : 'expired' } }) }; return { ok: false, error: 'refresh_token_invalid' } }
     const user = db.users.find(item => item.id === row.userId); const profile = db.profiles.find(item => item.id === row.userId); if (!user) return { ok: false, error: 'user_not_found' }
     const nextRefresh = randomToken(); const now = nowIso(); row.previousRefreshTokenHash = row.refreshTokenHash; row.refreshTokenHash = hashToken(nextRefresh); row.rotationCounter = Number(row.rotationCounter || 0) + 1; row.lastRefreshedAt = now; row.lastActiveAt = now
-    const accessToken = jwt.sign({ sub: user.id, role: profile?.role || 'founder', workspaceId: profile?.workspaceId || `user-${user.id}`, sid: row.sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+    const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
     event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_refreshed', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { rotationCounter: row.rotationCounter } })
     return { ok: true, accessToken, refreshToken: nextRefresh, session: row, user, profile }
   })

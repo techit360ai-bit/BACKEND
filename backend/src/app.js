@@ -137,7 +137,7 @@ if (MCP_ENABLED) {
         const workspaceId = typeof profile?.workspaceId === 'string'
           ? profile.workspaceId
           : testMode && typeof claims.workspaceId === 'string' ? claims.workspaceId : `user-${claims.sub}`
-        const persistedRole = testMode ? String(claims.role || profile?.role || 'founder') : profile?.role || 'founder'
+        const persistedRole = testMode ? String(claims.role || profile?.role || 'explorer') : profile?.role || 'explorer'
         return {
           actor: {
             id: String(claims.sub ?? 'unknown'),
