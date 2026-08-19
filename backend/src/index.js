@@ -3,6 +3,7 @@ import { validateDatabaseConfig } from './config/database.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
 import { generateReverificationNotifications } from './services/trustVerificationService.js'
 import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
+import { cleanupSessions } from './services/sessionService.js'
 
 const PORT = process.env.PORT || 3000
 
@@ -56,6 +57,8 @@ const reverificationTimer = setInterval(() => {
   try { generateReverificationNotifications() } catch (error) { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) }
 }, reverificationIntervalMs)
 reverificationTimer.unref?.()
+const sessionCleanupTimer = setInterval(() => { try { cleanupSessions() } catch (error) { console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
+sessionCleanupTimer.unref?.()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

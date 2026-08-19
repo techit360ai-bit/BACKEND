@@ -138,6 +138,8 @@ const INITIAL = {
   capabilityConsumptions: [],
   capabilityAnalytics: [],
   verificationNotificationRuns: [],
+  userSessions: [],
+  authSecurityEvents: [],
 }
 
 let sqliteDb = null
