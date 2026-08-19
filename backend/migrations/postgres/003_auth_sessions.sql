@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   user_id TEXT NOT NULL,
   session_identifier TEXT NOT NULL UNIQUE,
   refresh_token_hash TEXT NOT NULL UNIQUE,
+  previous_refresh_token_hash TEXT,
   device_identifier TEXT,
   device_name TEXT,
   platform TEXT,

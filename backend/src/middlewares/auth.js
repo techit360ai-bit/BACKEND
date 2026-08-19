@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
-import { accessTokenFromRequest, validateSessionBinding } from '../services/sessionService.js'
+import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -32,6 +32,7 @@ export function requireAuth(req, res, next) {
 
   const binding = validateSessionBinding(payload)
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
+  touchSession(payload.sid)
 
   const db = readDb()
   const user = db.users.find(u => u.id === payload.sub)

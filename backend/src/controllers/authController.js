@@ -6,7 +6,7 @@ import { readDb, updateDb, writeDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
-import { clearSessionCookies, issueSession, listSessions, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
+import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -213,9 +213,10 @@ export async function signup(req, res) {
   }
 
   const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
-  setSessionCookies(res, credentials)
+  if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
     token: credentials.accessToken,
+    ...(mobileClient(req) ? { refreshToken: credentials.refreshToken } : {}),
     user: { id, email, user_metadata: {} },
     profile,
   })
@@ -245,9 +246,10 @@ export async function signin(req, res) {
   writeDb(db)
 
   const credentials = issueSession(user, profile, req, { rememberMe: req.body.rememberMe !== false })
-  setSessionCookies(res, credentials)
+  if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.json({
     token: credentials.accessToken,
+    ...(mobileClient(req) ? { refreshToken: credentials.refreshToken } : {}),
     user: { id: user.id, email: user.email, user_metadata: {} },
     profile,
   })
@@ -271,7 +273,7 @@ export function signout(req, res) {
 export function refresh(req, res) {
   const result = rotateSession(refreshTokenFromRequest(req), req)
   if (!result.ok) { clearSessionCookies(res); return res.status(401).json({ error: result.error }) }
-  setSessionCookies(res, result); return res.json({ token: result.accessToken, user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
+  if (!mobileClient(req)) setSessionCookies(res, result); return res.json({ token: result.accessToken, ...(mobileClient(req) ? { refreshToken: result.refreshToken } : {}), user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
 }
 
 export function activeSessions(req, res) { return res.json({ sessions: listSessions(req.user.id, req.user.sessionId) }) }
