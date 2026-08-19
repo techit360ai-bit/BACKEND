@@ -10,6 +10,7 @@
     "db:migrate:dry-run": "node --no-warnings scripts/migrate-db.js up --dry-run",
     "db:rollback:dry-run": "node --no-warnings scripts/migrate-db.js down --dry-run",
     "discovery:db:migrate": "node scripts/migrate-discovery-postgres.js",
+    "trust:db:migrate": "node scripts/migrate-trust-postgres.js",
     "discovery:worker": "node --import tsx scripts/discovery-worker.js",
     "test": "vitest run",
     "test:watch": "vitest"

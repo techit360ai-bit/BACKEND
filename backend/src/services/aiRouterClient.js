@@ -76,3 +76,17 @@ export async function recordGsisRecommendationOutcome(token, recommendationId, o
     return null
   }
 }
+
+export async function analyzeVerificationEvidence(token, executionGrant, evidence) {
+  if (!token || !executionGrant) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/verification/evidence/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-AI-Execution-Grant': executionGrant },
+      body: JSON.stringify(evidence), signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    const result = await res.json()
+    return result?.authorization_authority === false && result?.human_review_required === true ? result : null
+  } catch { return null }
+}
