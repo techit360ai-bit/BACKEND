@@ -6,6 +6,7 @@ import { readDb, updateDb, writeDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
+import { clearSessionCookies, issueSession, listSessions, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -211,8 +212,10 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
+  const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
+  setSessionCookies(res, credentials)
   return res.status(201).json({
-    token: makeToken(id, profile),
+    token: credentials.accessToken,
     user: { id, email, user_metadata: {} },
     profile,
   })
@@ -241,8 +244,10 @@ export async function signin(req, res) {
   recordActivityInDb(db, user.id, 'login', 'auth')
   writeDb(db)
 
+  const credentials = issueSession(user, profile, req, { rememberMe: req.body.rememberMe !== false })
+  setSessionCookies(res, credentials)
   return res.json({
-    token: makeToken(user.id, profile),
+    token: credentials.accessToken,
     user: { id: user.id, email: user.email, user_metadata: {} },
     profile,
   })
@@ -251,14 +256,28 @@ export async function signin(req, res) {
 export function session(req, res) {
   const db = readDb()
   const profile = db.profiles.find(p => p.id === req.user.id) || null
+  const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
   writeDb(db)
-  return res.json({ user: req.user, profile })
+  return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext })
 }
 
-export function signout(_req, res) {
+export function signout(req, res) {
+  if (req.user.sessionId) revokeSession(req.user.id, req.user.sessionId)
+  clearSessionCookies(res)
   return res.json({ message: 'Signed out' })
 }
+
+export function refresh(req, res) {
+  const result = rotateSession(refreshTokenFromRequest(req), req)
+  if (!result.ok) { clearSessionCookies(res); return res.status(401).json({ error: result.error }) }
+  setSessionCookies(res, result); return res.json({ token: result.accessToken, user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
+}
+
+export function activeSessions(req, res) { return res.json({ sessions: listSessions(req.user.id, req.user.sessionId) }) }
+export function revokeActiveSession(req, res) { const result = revokeSession(req.user.id, req.params.sessionId); return result.ok ? res.json(result) : res.status(404).json(result) }
+export function revokeOtherSessions(req, res) { return res.json(revokeAllSessions(req.user.id, req.user.sessionId)) }
+export function revokeEverySession(req, res) { const result = revokeAllSessions(req.user.id); clearSessionCookies(res); return res.json(result) }
 
 export async function changePassword(req, res) {
   const currentPassword = String(req.body.currentPassword || '')
@@ -282,6 +301,8 @@ export async function changePassword(req, res) {
     if (!target) return false
     target.passwordHash = passwordHash
     target.updatedAt = new Date().toISOString()
+    for (const session of current.userSessions || []) if (session.userId === req.user.id && !session.revokedAt) session.revokedAt = new Date().toISOString()
+    ;(current.authSecurityEvents || (current.authSecurityEvents = [])).push({ id: randomUUID(), userId: req.user.id, eventType: 'password_changed', createdAt: new Date().toISOString() })
     return true
   })
   if (!updated) return res.status(404).json({ error: 'User not found' })

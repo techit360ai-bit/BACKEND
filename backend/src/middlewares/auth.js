@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
+import { accessTokenFromRequest, validateSessionBinding } from '../services/sessionService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -13,11 +14,11 @@ if (!JWT_SECRET) {
 }
 
 export function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization
-  if (!authHeader?.startsWith('Bearer ')) {
+  const credential = accessTokenFromRequest(req)
+  if (!credential) {
     return res.status(401).json({ error: 'No token provided' })
   }
-  const token = authHeader.slice(7)
+  const token = credential.token
   let payload
   try {
     payload = jwt.verify(token, JWT_SECRET, {
@@ -28,6 +29,9 @@ export function requireAuth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
+
+  const binding = validateSessionBinding(payload)
+  if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
 
   const db = readDb()
   const user = db.users.find(u => u.id === payload.sub)
@@ -51,6 +55,8 @@ export function requireAuth(req, res, next) {
     // Raw platform JWT, so controllers can forward it to ai-router
     // (which verifies the same JWT_SECRET). See aiRouterClient.js.
     token,
+    sessionId: payload.sid || null,
+    authSource: credential.source,
     user_metadata: {},
   }
   next()
