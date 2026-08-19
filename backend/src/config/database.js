@@ -116,6 +116,22 @@ const INITIAL = {
   dataResidencyPreferences: [],
   subprocessors: [],
   breachRecords: [],
+  userRoles: [],
+  roleProfiles: [],
+  verificationProfiles: [],
+  verificationRequests: [],
+  verificationEvidence: [],
+  trustProfiles: [],
+  trustSignals: [],
+  organizations: [],
+  organizationDomains: [],
+  organizationMemberships: [],
+  organizationClaims: [],
+  riskProfiles: [],
+  manualReviews: [],
+  verificationAuditLogs: [],
+  capabilityPolicies: [],
+  authorizationAuditLogs: [],
 }
 
 let sqliteDb = null

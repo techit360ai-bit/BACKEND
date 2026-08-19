@@ -37,13 +37,16 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'User profile is unavailable' })
   }
   const persistedRole = profile?.role || 'founder'
+  const activeRole = profile?.activeRole || persistedRole
+  const persistedRoles = [...new Set([persistedRole, ...(profile?.secondaryRoles || []), ...(profile?.roles || [])])]
   req.user = {
     id: user.id,
     email: user.email,
     // Authorization comes from current backend state, not stale token claims.
     // Test fixtures historically model role in the JWT only; production and
     // staging always use the persisted role authority.
-    role: process.env.NODE_ENV === 'test' ? (payload.role || persistedRole) : persistedRole,
+    role: process.env.NODE_ENV === 'test' ? (payload.role || activeRole) : activeRole,
+    roles: process.env.NODE_ENV === 'test' ? [...new Set([payload.role, ...persistedRoles].filter(Boolean))] : persistedRoles,
     workspaceId: profile?.workspaceId || `user-${user.id}`,
     // Raw platform JWT, so controllers can forward it to ai-router
     // (which verifies the same JWT_SECRET). See aiRouterClient.js.

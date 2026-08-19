@@ -1,7 +1,8 @@
 export function requireRole(...roles) {
   const allowed = new Set(roles.flat().filter(Boolean))
   return (req, res, next) => {
-    if (!allowed.size || allowed.has(req.user?.role)) return next()
+    const userRoles = new Set([req.user?.role, ...(req.user?.roles || [])])
+    if (!allowed.size || [...allowed].some(role => userRoles.has(role))) return next()
     return res.status(403).json({ error: 'Role not permitted' })
   }
 }

@@ -89,6 +89,7 @@ import {
 } from '../controllers/domainController.js'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireRole } from '../utils/roleGuards.js'
+import { requireCapability } from '../services/capabilityAuthorization.js'
 
 const router = Router()
 
@@ -138,13 +139,13 @@ router.post('/organization/demo-day/publish', requireRole('organization', 'organ
 router.get('/organization/demo-day/matches/:projectId', requireRole('organization', 'organisation'), orgInvestorMatches)
 router.get('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEvents)
 router.post('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEventCreate)
-router.get('/organization/demo-day/analytics', requireRole('organization', 'organisation'), orgDemoDayAnalytics)
+router.get('/organization/demo-day/analytics', requireRole('organization', 'organisation'), requireCapability('organization.analytics'), orgDemoDayAnalytics)
 router.get('/organization/marketplace', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericListGet)
-router.post('/organization/marketplace', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericCreatePost)
+router.post('/organization/marketplace', requireCapability('organization.opportunity.create'), bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericCreatePost)
 router.patch('/organization/marketplace/:id', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericPatchItem)
 router.get('/organization/talent', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericListGet)
-router.post('/organization/talent', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericCreatePost)
-router.patch('/organization/talent/:id', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericPatchItem)
+router.post('/organization/talent', requireCapability('organization.recruit'), bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericCreatePost)
+router.patch('/organization/talent/:id', requireCapability('organization.recruit'), bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericPatchItem)
 router.get('/organization/settings', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericListGet)
 router.post('/organization/settings', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericCreatePost)
 router.patch('/organization/settings/:id', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericPatchItem)
@@ -166,13 +167,13 @@ router.get('/investor/watchlist', watchlist)
 router.post('/investor/watchlist', watchlistAdd)
 router.get('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorList)
 router.post('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorCreate)
-router.get('/investor/deal-rooms', bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorList)
-router.post('/investor/deal-rooms', bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorCreate)
-router.get('/investor/data-rooms', bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorList)
-router.post('/investor/data-rooms', bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorCreate)
+router.get('/investor/deal-rooms', requireCapability('dealroom.access'), bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorList)
+router.post('/investor/deal-rooms', requireCapability('dealroom.access'), bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorCreate)
+router.get('/investor/data-rooms', requireCapability('dealroom.access'), bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorList)
+router.post('/investor/data-rooms', requireCapability('dealroom.access'), bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorCreate)
 router.get('/investor/reputation', bindCollection('investorReputation', 'reputation', 'reputation', 'reputation'), investorList)
 router.post('/investor/reputation', bindCollection('investorReputation', 'reputation', 'reputation', 'reputation'), investorCreate)
-router.get('/investor/heatmap', bindCollection('dealFlowSnapshots', 'heatmap', 'heatmapPoint', 'heatmap'), investorList)
+router.get('/investor/heatmap', requireCapability('investor.intelligence.view'), bindCollection('dealFlowSnapshots', 'heatmap', 'heatmapPoint', 'heatmap'), investorList)
 
 router.get('/incubation/intakes', intakes)
 router.post('/incubation/intakes', intakeCreate)
