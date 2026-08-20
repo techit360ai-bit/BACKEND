@@ -43,7 +43,7 @@ export function getMentorshipRoom(userId, roomId) {
   const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId && (item.status === 'published' || owner(item, userId)))
   if (!room) return null
   const mentees = rows(db, 'mentorshipMentees').filter(item => item.roomId === roomId && item.status !== 'removed')
-  return { room: publicRoom({ ...room, menteeCount: mentees.length }), mentees, tasks: rows(db, 'mentorshipTasks').filter(item => item.roomId === roomId), messages: rows(db, 'mentorshipMessages').filter(item => item.roomId === roomId).slice(-100) }
+  return { room: publicRoom({ ...room, menteeCount: mentees.length }), mentees, tasks: rows(db, 'mentorshipTasks').filter(item => item.roomId === roomId), messages: rows(db, 'mentorshipMessages').filter(item => item.roomId === roomId).slice(-100), resources: rows(db, 'mentorshipResources').filter(item => item.roomId === roomId) }
 }
 
 export function createMentorshipRoom(userId, body = {}) {
@@ -141,6 +141,19 @@ export function createMentorshipMessage(userId, roomId, body = {}) {
     const content = clean(body.content)
     if (!content) return { ok: false, error: 'content_required' }
     const message = { id: createId('mentor_message'), roomId, senderId: userId, content, createdAt: nowIso() }; rows(db, 'mentorshipMessages').push(message); return { ok: true, message }
+  })
+}
+
+export function createMentorshipResource(userId, roomId, body = {}) {
+  return updateDb(db => {
+    const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
+    if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
+    const title = clean(body.title); const url = clean(body.url)
+    if (!title || !url) return { ok: false, error: 'title_and_url_required' }
+    let parsed; try { parsed = new URL(url) } catch { return { ok: false, error: 'invalid_url' } }
+    if (!['https:', 'http:'].includes(parsed.protocol)) return { ok: false, error: 'invalid_url' }
+    const resource = { id: createId('mentor_resource'), roomId, title, url: parsed.toString(), kind: clean(body.kind) || 'link', createdBy: userId, createdAt: nowIso() }
+    rows(db, 'mentorshipResources').push(resource); return { ok: true, resource }
   })
 }
 

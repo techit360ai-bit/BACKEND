@@ -544,7 +544,7 @@ export function genericCreatePost(req, res) {
 }
 
 export function genericPatchItem(req, res) {
-  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId, req.body)
+  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
 }

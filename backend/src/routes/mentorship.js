@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { analytics, applicationReview, applications, feedPublish, inviteCreate, inviteResolve, inviteRevoke, messageCreate, opportunityBroadcast, roomApply, roomCreate, roomGet, roomPatch, rooms, sharePayload, taskCreate, taskPatch } from '../controllers/mentorshipController.js'
+import { analytics, applicationReview, applications, feedPublish, inviteCreate, inviteResolve, inviteRevoke, messageCreate, opportunityBroadcast, resourceCreate, roomApply, roomCreate, roomGet, roomPatch, rooms, sharePayload, taskCreate, taskPatch } from '../controllers/mentorshipController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -11,6 +11,7 @@ router.patch('/rooms/:roomId', roomPatch)
 router.post('/rooms/:roomId/apply', roomApply)
 router.post('/rooms/:roomId/tasks', taskCreate)
 router.post('/rooms/:roomId/messages', messageCreate)
+router.post('/rooms/:roomId/resources', resourceCreate)
 router.get('/rooms/:roomId/share', sharePayload)
 router.post('/rooms/:roomId/share/feed', feedPublish)
 router.post('/rooms/:roomId/share/opportunity', opportunityBroadcast)
