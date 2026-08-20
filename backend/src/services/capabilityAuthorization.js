@@ -17,7 +17,7 @@ const ROLE_ALIASES = { organisation: 'organization', user: 'explorer', explorer:
 const normalizeRole = value => ROLE_ALIASES[String(value || '').toLowerCase()] || String(value || '').toLowerCase()
 const rank = value => ASSURANCE_LEVELS[String(value || 'CLAIMED').toUpperCase()] ?? ASSURANCE_LEVELS.CLAIMED
 const activeSubscription = (db, userId) => (db.subscriptions || []).find(row => row.userId === userId && ['active', 'trialing'].includes(row.status)) || null
-const KNOWN_ROLES = new Set(['founder', 'collaborator', 'investor', 'organization', 'explorer'])
+const KNOWN_ROLES = new Set(['founder', 'collaborator', 'investor', 'mentor', 'organization', 'explorer'])
 const KNOWN_FUNDING = new Set(['subscription', 'credits', 'subscription_or_credits', undefined])
 
 export const CAPABILITY_POLICIES = Object.freeze({
@@ -35,6 +35,11 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'organization.recruit': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.analytics': { roles: ['organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.opportunity.create': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED' },
+  'mentorship.room.create': { roles: ['investor', 'mentor'], assurance: 'PROFILED' },
+  'mentorship.room.manage': { roles: ['investor', 'mentor'], assurance: 'PROFILED' },
+  'mentorship.application.review': { roles: ['investor', 'mentor'], assurance: 'PROFILED' },
+  'mentorship.invite.share': { roles: ['investor', 'mentor'], assurance: 'PROFILED' },
+  'mentorship.apply': { roles: [], assurance: 'CLAIMED' },
 })
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }

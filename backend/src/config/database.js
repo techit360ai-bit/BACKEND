@@ -23,6 +23,7 @@ const INITIAL = {
   mentorshipMentees: [],
   mentorshipTasks: [],
   mentorshipApplications: [],
+  mentorshipInvitations: [],
   mentorshipMessages: [],
   feedPosts: [],
   feedComments: [],
