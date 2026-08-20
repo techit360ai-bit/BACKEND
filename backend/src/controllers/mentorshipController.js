@@ -1,0 +1,28 @@
+import { authorizeCapability, auditCapabilityDecision } from '../services/capabilityAuthorization.js'
+import { applyToMentorshipRoom, broadcastMentorshipOpportunity, createMentorshipInvite, createMentorshipMessage, createMentorshipResource, createMentorshipRoom, createMentorshipTask, getMentorshipRoom, listMentorshipApplications, listMentorshipRooms, mentorshipAnalytics, publishMentorshipFeed, resolveMentorshipInvite, revokeMentorshipInvite, reviewMentorshipApplication, updateMentorshipRoom, updateMentorshipTask } from '../services/mentorshipService.js'
+
+function guard(req, capability) {
+  const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), mfaAssertion: req.get('x-mfa-assertion') })
+  auditCapabilityDecision(decision, req.user.id)
+  return decision
+}
+function deny(res, decision) { return res.status(403).json({ error: decision.code, capability: decision.capability, decision }) }
+
+export function rooms(req, res) { return res.json(listMentorshipRooms(req.user.id, { mine: req.query.mine === 'true', status: req.query.status || 'published' })) }
+export function roomGet(req, res) { const result = getMentorshipRoom(req.user.id, req.params.roomId); return result ? res.json(result) : res.status(404).json({ error: 'room_not_found' }) }
+export function roomCreate(req, res) { const decision = guard(req, 'mentorship.room.create'); if (!decision.allowed) return deny(res, decision); const result = createMentorshipRoom(req.user.id, req.body); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
+export function roomPatch(req, res) { const decision = guard(req, 'mentorship.room.manage'); if (!decision.allowed) return deny(res, decision); const result = updateMentorshipRoom(req.user.id, req.params.roomId, req.body); return result.ok ? res.json(result) : res.status(404).json(result) }
+export function roomApply(req, res) { const result = applyToMentorshipRoom(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(result.idempotent ? 200 : 201).json(result) : res.status(result.error === 'room_not_found' ? 404 : 400).json(result) }
+export function applications(req, res) { const decision = guard(req, 'mentorship.application.review'); if (!decision.allowed) return deny(res, decision); return res.json(listMentorshipApplications(req.user.id, { roomId: req.query.roomId, status: req.query.status })) }
+export function applicationReview(req, res) { const decision = guard(req, 'mentorship.application.review'); if (!decision.allowed) return deny(res, decision); const result = reviewMentorshipApplication(req.user.id, req.params.applicationId, req.body.status); return result.ok ? res.json(result) : res.status(400).json(result) }
+export function taskCreate(req, res) { const decision = guard(req, 'mentorship.room.manage'); if (!decision.allowed) return deny(res, decision); const result = createMentorshipTask(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
+export function taskPatch(req, res) { const result = updateMentorshipTask(req.user.id, req.params.taskId, req.body); return result.ok ? res.json(result) : res.status(404).json(result) }
+export function messageCreate(req, res) { const result = createMentorshipMessage(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(201).json(result) : res.status(403).json(result) }
+export function resourceCreate(req, res) { const decision = guard(req, 'mentorship.room.manage'); if (!decision.allowed) return deny(res, decision); const result = createMentorshipResource(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
+export function inviteCreate(req, res) { const decision = guard(req, 'mentorship.invite.share'); if (!decision.allowed) return deny(res, decision); const result = createMentorshipInvite(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(201).json(result) : res.status(404).json(result) }
+export function inviteResolve(req, res) { const result = resolveMentorshipInvite(req.user.id, req.params.token); return result.ok ? res.json(result) : res.status(404).json(result) }
+export function inviteRevoke(req, res) { const decision = guard(req, 'mentorship.invite.share'); if (!decision.allowed) return deny(res, decision); const result = revokeMentorshipInvite(req.user.id, req.params.inviteId); return result.ok ? res.json(result) : res.status(404).json(result) }
+export function feedPublish(req, res) { const decision = guard(req, 'mentorship.invite.share'); if (!decision.allowed) return deny(res, decision); const result = publishMentorshipFeed(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(result.idempotent ? 200 : 201).json(result) : res.status(404).json(result) }
+export function opportunityBroadcast(req, res) { const decision = guard(req, 'mentorship.invite.share'); if (!decision.allowed) return deny(res, decision); const result = broadcastMentorshipOpportunity(req.user.id, req.params.roomId, req.body); return result.ok ? res.status(result.idempotent ? 200 : 201).json(result) : res.status(404).json(result) }
+export function sharePayload(req, res) { const room = getMentorshipRoom(req.user.id, req.params.roomId); return room ? res.json(room.room.share) : res.status(404).json({ error: 'room_not_found' }) }
+export function analytics(req, res) { const decision = guard(req, 'mentorship.room.manage'); if (!decision.allowed) return deny(res, decision); return res.json(mentorshipAnalytics(req.user.id, req.query.roomId)) }
