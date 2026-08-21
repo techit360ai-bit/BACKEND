@@ -11,6 +11,7 @@ import videoRoutes from './routes/video.js'
 import adminRoutes from './routes/admin.js'
 import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
+import investorIntelligenceRoutes from './routes/investorIntelligence.js'
 import mentorshipRoutes from './routes/mentorship.js'
 import complianceRoutes from './routes/compliance.js'
 import usageSettlementRoutes from './routes/usageSettlement.js'
@@ -90,6 +91,7 @@ app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/domain', domainRoutes)
+app.use('/api/investor-intelligence', investorIntelligenceRoutes)
 app.use('/api/mentorship', mentorshipRoutes)
 app.use('/api/compliance', complianceRoutes)
 app.use('/api/notifications', notificationRoutes)
