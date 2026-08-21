@@ -1,5 +1,5 @@
 import { authorizeCapability, auditCapabilityDecision } from '../services/capabilityAuthorization.js'
-import { investorAdvisoryEvidence, investorIntelligenceOverview, investorRiskSignals, investorStartupIntelligence } from '../services/investorIntelligenceService.js'
+import { investorAdvisoryEvidence, investorDailyBrief, investorIntelligenceOverview, investorRiskSignals, investorStartupIntelligence } from '../services/investorIntelligenceService.js'
 import { requestInvestorAdvisory } from '../services/aiRouterClient.js'
 
 function guard(req, capability) {
@@ -44,6 +44,12 @@ export function risks(req, res) {
   const decision = guard(req, 'investor.risk.monitor')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorRiskSignals(req.user.id))
+}
+
+export function brief(req, res) {
+  const decision = guard(req, 'investor.mentorship.intelligence')
+  if (!decision.allowed) return deny(res, decision)
+  return res.json(investorDailyBrief(req.user.id))
 }
 
 export async function advisory(req, res) {

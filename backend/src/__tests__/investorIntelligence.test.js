@@ -52,4 +52,12 @@ describe('investor mentorship intelligence', () => {
     expect(response.body.advisoryOnly).toBe(true)
     expect(response.body.evidence.startups).toHaveLength(1)
   })
+
+  it('returns a deterministic daily brief with actionable attention items', async () => {
+    const response = await request(app).get('/api/investor-intelligence/brief').set('Authorization', `Bearer ${token()}`)
+    expect(response.status).toBe(200)
+    expect(response.body.deterministic).toBe(true)
+    expect(response.body.totalStartups).toBe(1)
+    expect(response.body.milestonesCompleted).toBe(1)
+  })
 })

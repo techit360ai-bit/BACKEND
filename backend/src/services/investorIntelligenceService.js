@@ -126,6 +126,23 @@ export function investorRiskSignals(investorId) {
   return { risks: overview.startups.filter(row => ['moderate', 'high'].includes(row.riskLevel)).map(row => ({ startupId: row.startupId, name: row.name, severity: row.riskLevel, reasons: row.evidence, recommendedAction: row.riskLevel === 'high' ? 'Review the latest authorized progress before the next portfolio discussion.' : 'Monitor the next milestone and progress update.', deterministic: true })) }
 }
 
+export function investorDailyBrief(investorId) {
+  const overview = investorIntelligenceOverview(investorId)
+  const completedMilestones = overview.startups.reduce((sum, row) => sum + row.milestones.completed, 0)
+  const overdueMilestones = overview.startups.reduce((sum, row) => sum + row.milestones.overdue, 0)
+  const attention = overview.startups.filter(row => ['moderate', 'high'].includes(row.riskLevel)).sort((a, b) => (b.riskLevel === 'high' ? 1 : 0) - (a.riskLevel === 'high' ? 1 : 0)).slice(0, 5)
+  return {
+    portfolio: overview.portfolio,
+    totalStartups: overview.startups.length,
+    significantChanges: overview.changes.length,
+    milestonesCompleted: completedMilestones,
+    milestonesOverdue: overdueMilestones,
+    attention: attention.map(row => ({ startupId: row.startupId, name: row.name, riskLevel: row.riskLevel, evidence: row.evidence, recommendedAction: row.riskLevel === 'high' ? 'Review the latest authorized progress before the next portfolio discussion.' : 'Monitor the next milestone and progress update.' })),
+    generatedAt: overview.generatedAt,
+    deterministic: true,
+  }
+}
+
 export function investorAdvisoryEvidence(investorId, startupId = null) {
   const db = readDb(); const ids = authorizedProjectIds(db, investorId); const selected = startupId ? (ids.has(startupId) ? [startupId] : []) : [...ids]
   const startups = selected.map(id => buildStartup(db, investorId, id)).filter(Boolean)
