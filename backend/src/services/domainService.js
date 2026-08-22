@@ -1032,7 +1032,7 @@ export function organizationDashboard(userId) {
         activePrograms: intelligence.metrics.activePrograms,
         hackathons: intelligence.metrics.activePrograms,
         members: intelligence.metrics.members,
-        opportunities: intelligence.metrics.partners,
+        opportunities: intelligence.metrics.opportunities,
         activeCohorts: intelligence.metrics.activeCohorts,
         startups: intelligence.metrics.startups,
         mentors: intelligence.metrics.mentors,
