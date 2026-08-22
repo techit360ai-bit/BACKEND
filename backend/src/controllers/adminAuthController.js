@@ -5,6 +5,7 @@ import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
 import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTelemetry.js'
+import { upsertComparable } from '../services/investorDealRoomCompletionService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
@@ -107,6 +108,7 @@ export function adminMe(req, res) {
 export function adminIntelligenceTelemetry(_req, res) {
   return res.json({ telemetry: migrationTelemetrySnapshot() })
 }
+export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
 export function adminList(req, res) {
   const db = readDb()

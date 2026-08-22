@@ -46,9 +46,41 @@ function matchesDeclaredType(buffer, contentType) {
   if (contentType === 'image/jpeg') return buffer.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
   return true
 }
+async function validatePrivateObject({ objectKey, contentType, expectedSizeBytes }) {
+  const downloadUrl = presign('GET', objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
+  try {
+    const response = await fetch(downloadUrl, { signal: AbortSignal.timeout(20000) })
+    if (!response.ok) return { ok: false, error: 'evidence_object_unavailable' }
+    const buffer = Buffer.from(await response.arrayBuffer())
+    if (buffer.length !== expectedSizeBytes || buffer.length > maxBytes()) return { ok: false, error: 'evidence_size_mismatch' }
+    if (!matchesDeclaredType(buffer, contentType)) return { ok: false, error: 'evidence_signature_mismatch' }
+    const scan = await clamScan(buffer)
+    return scan.clean ? { ok: true, sha256: hash(buffer), scan } : { ok: false, error: scan.error || 'malware_detected', scan }
+  } catch { return { ok: false, error: 'evidence_scan_failed' } }
+}
+
+export function createPrivateUpload({ namespace, ownerId, objectId, contentType, sizeBytes }) {
+  const normalizedType = String(contentType || '').toLowerCase(); const bytes = Number(sizeBytes || 0)
+  if (!allowedTypes.has(normalizedType)) return { ok: false, error: 'unsupported_evidence_type' }
+  if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes()) return { ok: false, error: 'invalid_evidence_size', maxBytes: maxBytes() }
+  const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[normalizedType]
+  const safeNamespace = String(namespace || 'private').replace(/[^a-zA-Z0-9/_-]/g, '')
+  const objectKey = `${safeNamespace}/${ownerId}/${objectId}.${extension}`
+  const uploadUrl = presign('PUT', objectKey)
+  if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
+  return { ok: true, objectKey, uploadUrl, requiredHeaders: { 'Content-Type': normalizedType } }
+}
+
+export async function finalizePrivateUpload({ objectKey, contentType, expectedSizeBytes }) {
+  return validatePrivateObject({ objectKey, contentType, expectedSizeBytes })
+}
+
+export function privateDownloadUrl(objectKey, expires = 300) { return presign('GET', objectKey, expires) }
+
 export async function finalizeEvidenceUpload(userId, objectId) {
   const object = (readDb().evidenceObjects || []).find(row => row.id === objectId && row.userId === userId); if (!object) return { ok: false, error: 'evidence_object_not_found' }
   const downloadUrl = presign('GET', object.objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
-  try { const response = await fetch(downloadUrl, { signal: AbortSignal.timeout(20000) }); if (!response.ok) return { ok: false, error: 'evidence_object_unavailable' }; const buffer = Buffer.from(await response.arrayBuffer()); if (buffer.length !== object.sizeBytes || buffer.length > maxBytes()) return { ok: false, error: 'evidence_size_mismatch' }; if (!matchesDeclaredType(buffer, object.contentType)) return { ok: false, error: 'evidence_signature_mismatch' }; const scan = await clamScan(buffer); return updateDb(db => { const row = db.evidenceObjects.find(item => item.id === objectId); row.status = scan.clean ? 'available' : 'quarantined'; row.malwareStatus = scan.clean ? 'clean' : 'infected_or_unavailable'; row.sha256 = hash(buffer); row.scan = scan; row.updatedAt = nowIso(); return scan.clean ? { ok: true, object: row } : { ok: false, error: scan.error || 'malware_detected', object: row } }) } catch { return { ok: false, error: 'evidence_scan_failed' } }
+  const result = await validatePrivateObject({ objectKey: object.objectKey, contentType: object.contentType, expectedSizeBytes: object.sizeBytes })
+  return updateDb(db => { const row = db.evidenceObjects.find(item => item.id === objectId); row.status = result.ok ? 'available' : 'quarantined'; row.malwareStatus = result.ok ? 'clean' : 'infected_or_unavailable'; row.sha256 = result.sha256 || null; row.scan = result.scan || null; row.updatedAt = nowIso(); return result.ok ? { ok: true, object: row } : { ok: false, error: result.error, object: row } })
 }
 export function evidenceObject(userId, objectId, admin = false) { const row = (readDb().evidenceObjects || []).find(item => item.id === objectId && (admin || item.userId === userId)); if (!row || row.status !== 'available') return { ok: false, error: 'evidence_object_unavailable' }; return { ok: true, object: row, downloadUrl: presign('GET', row.objectKey, 300) } }
