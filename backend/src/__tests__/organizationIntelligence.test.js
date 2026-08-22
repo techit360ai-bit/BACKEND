@@ -59,4 +59,18 @@ describe('Organization intelligence context and deterministic operations', () =>
     const report = await request(app).post('/api/organization-intelligence/reports/generate').set('Authorization', `Bearer ${token('org-owner', 'organization')}`).send({ type: 'executive', window: '30d' })
     expect(report.status).toBe(201); expect(report.body.report.sourceLabels.overview).toBe('platform_calculated'); expect(db.organizationReports).toHaveLength(1)
   })
+
+  it('returns deterministic allocation, alumni, and cohort benchmark views', async () => {
+    db.organizationResources = [{ id: 'resource-1', organizationId: 'org-owner', projectId: 'startup-1', kind: 'guide' }]
+    db.workspaceTasks = [{ id: 'task-1', organizationId: 'org-owner', projectId: 'startup-1', status: 'completed' }]
+    db.organizationCohorts = [{ id: 'cohort-1', organizationId: 'org-owner', name: 'Cohort 1' }]
+    db.projects[0].cohortId = 'cohort-1'
+    db.projects[0].status = 'graduated'
+    const allocation = await request(app).get('/api/organization-intelligence/resource-allocation').set('Authorization', `Bearer ${token('member', 'explorer')}`)
+    const alumni = await request(app).get('/api/organization-intelligence/alumni').set('Authorization', `Bearer ${token('member', 'explorer')}`)
+    const benchmarks = await request(app).get('/api/organization-intelligence/cohort-benchmarks').set('Authorization', `Bearer ${token('member', 'explorer')}`)
+    expect(allocation.status).toBe(200); expect(allocation.body.allocation[0].utilization).toBe(100)
+    expect(alumni.status).toBe(200); expect(alumni.body.summary.alumni).toBe(1)
+    expect(benchmarks.status).toBe(200); expect(benchmarks.body.benchmark[0].cohortId).toBe('cohort-1')
+  })
 })

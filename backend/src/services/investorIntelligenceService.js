@@ -143,6 +143,16 @@ export function investorDailyBrief(investorId) {
   }
 }
 
+export function investorAlerts(investorId) {
+  const overview = investorIntelligenceOverview(investorId)
+  return { alerts: overview.startups.filter(row => ['moderate', 'high'].includes(row.riskLevel)).map(row => ({ id: `startup-risk:${row.startupId}`, startupId: row.startupId, name: row.name, severity: row.riskLevel, title: row.riskLevel === 'high' ? 'Startup requires attention' : 'Startup is being monitored', evidence: row.evidence, recommendedAction: row.riskLevel === 'high' ? 'Review the latest authorized progress before the next portfolio discussion.' : 'Monitor the next milestone and progress update.', createdAt: overview.generatedAt })), generatedAt: overview.generatedAt, deterministic: true }
+}
+
+export function investorReports(investorId) {
+  const brief = investorDailyBrief(investorId)
+  return { reports: [{ id: `daily-brief:${investorId}:${brief.generatedAt.slice(0, 10)}`, type: 'daily_brief', generatedAt: brief.generatedAt, summary: brief, deterministic: true }], deterministic: true }
+}
+
 export function investorAdvisoryEvidence(investorId, startupId = null) {
   const db = readDb(); const ids = authorizedProjectIds(db, investorId); const selected = startupId ? (ids.has(startupId) ? [startupId] : []) : [...ids]
   const startups = selected.map(id => buildStartup(db, investorId, id)).filter(Boolean)
