@@ -6,6 +6,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
 import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTelemetry.js'
 import { upsertComparable } from '../services/investorDealRoomCompletionService.js'
+import { requestAdminRouterTelemetry } from '../services/aiRouterClient.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
@@ -148,6 +149,11 @@ export function adminIntelligenceTelemetry(_req, res) {
     return current
   })
   return res.json({ telemetry, platform, history: (db.adminTelemetrySnapshots || []).slice(-100) })
+}
+export async function adminAiRouterTelemetry(_req, res) {
+  const result = await requestAdminRouterTelemetry()
+  if (!result.ok) return res.status(result.status).json({ error: result.error })
+  return res.json({ source: 'ai-router', telemetry: result.telemetry, generatedAt: new Date().toISOString() })
 }
 export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 

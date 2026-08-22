@@ -28,7 +28,10 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   delete process.env.LOG_REQUESTS
+  delete process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET
+  delete process.env.ADMIN_AI_ROUTER_TELEMETRY_SERVICE_ID
 })
 
 describe('security and observability gates', () => {
@@ -124,6 +127,29 @@ describe('security and observability gates', () => {
 
     expect(res.status).toBe(401)
     expect(res.body.error).toMatch(/admin not found or inactive/i)
+  })
+
+  it('proxies AI Router telemetry with service HMAC only after backend admin authorization', async () => {
+    const db = {
+      users: [], profiles: [],
+      adminUsers: [{ id: 'admin-1', email: 'admin@example.com', role: 'super_admin', active: true, permissions: ['all'] }],
+    }
+    readDb.mockReturnValue(db)
+    process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET = 'admin-telemetry-test-secret-at-least-32-characters'
+    process.env.ADMIN_AI_ROUTER_TELEMETRY_SERVICE_ID = 'platform-backend'
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ counters: { provider_attempts: 2 } }) })
+    vi.stubGlobal('fetch', fetchMock)
+    const adminToken = jwt.sign({ sub: 'admin-1', role: 'super_admin' }, TEST_SECRET, { expiresIn: '1h' })
+
+    const res = await request(app).get('/api/admin/ai-router/telemetry').set('Authorization', `Bearer ${adminToken}`)
+
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toMatch(/\/internal\/admin\/telemetry$/)
+    expect(options.headers.Authorization).toBeUndefined()
+    expect(options.headers['X-TechIT-Service-Id']).toBe('platform-backend')
+    expect(options.headers['X-TechIT-Signature']).toMatch(/^[a-f0-9]{64}$/)
   })
 
   it('returns and logs the same request id for unhandled errors', async () => {

@@ -9,8 +9,34 @@
 // unreachable this returns null and the caller falls back to deterministic,
 // rule-based text. It never fabricates numeric data.
 
+import crypto from 'node:crypto'
+
 const AI_ROUTER_URL = (process.env.AI_ROUTER_URL || 'http://localhost:8000').replace(/\/$/, '')
 const TIMEOUT_MS = Number(process.env.AI_ROUTER_TIMEOUT_MS || '6000') || 6000
+
+export async function requestAdminRouterTelemetry() {
+  const secret = process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET || ''
+  const serviceId = process.env.ADMIN_AI_ROUTER_TELEMETRY_SERVICE_ID || 'platform-backend'
+  if (!secret) return { ok: false, status: 503, error: 'admin_telemetry_service_not_configured' }
+  const path = '/internal/admin/telemetry'
+  const timestamp = String(Math.floor(Date.now() / 1000))
+  const canonical = `${timestamp}.GET.${path}.`
+  const signature = crypto.createHmac('sha256', secret).update(canonical).digest('hex')
+  try {
+    const response = await fetch(`${AI_ROUTER_URL}${path}`, {
+      headers: {
+        'X-TechIT-Service-Id': serviceId,
+        'X-TechIT-Timestamp': timestamp,
+        'X-TechIT-Signature': signature,
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!response.ok) return { ok: false, status: response.status, error: 'ai_router_admin_telemetry_rejected' }
+    return { ok: true, status: 200, telemetry: await response.json() }
+  } catch {
+    return { ok: false, status: 502, error: 'ai_router_admin_telemetry_unavailable' }
+  }
+}
 
 /**
  * Ask ai-router to compute a GSIS narrative for a set of component scores.
