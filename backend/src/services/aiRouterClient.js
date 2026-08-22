@@ -92,3 +92,17 @@ export async function requestInvestorAdvisory(token, evidence) {
     return null
   }
 }
+
+export async function requestOrganizationAdvisory(token, evidence) {
+  if (!token) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/organization/intelligence/advisory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ evidence }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
+}

@@ -1,0 +1,1 @@
+DELETE FROM app_collections WHERE name IN ('organizationHealthSnapshots','organizationRiskSignals','organizationActions','organizationActivityEvents','organizationKpiDefinitions','organizationKpiValues','organizationAuditEvents','organizationReportSchedules','organizationPartners','organizationCohorts','organizationResources','organizationRecommendations','organizationReports');
