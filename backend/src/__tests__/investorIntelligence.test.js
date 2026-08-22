@@ -60,4 +60,12 @@ describe('investor mentorship intelligence', () => {
     expect(response.body.totalStartups).toBe(1)
     expect(response.body.milestonesCompleted).toBe(1)
   })
+
+  it('exposes scoped alerts and deterministic reports', async () => {
+    const alerts = await request(app).get('/api/investor-intelligence/alerts').set('Authorization', `Bearer ${token()}`)
+    const reports = await request(app).get('/api/investor-intelligence/reports').set('Authorization', `Bearer ${token()}`)
+    expect(alerts.status).toBe(200); expect(alerts.body.deterministic).toBe(true); expect(Array.isArray(alerts.body.alerts)).toBe(true)
+    expect(reports.status).toBe(200); expect(reports.body.deterministic).toBe(true); expect(reports.body.reports[0].type).toBe('daily_brief')
+    expect(db.creditLedger).toHaveLength(0); expect(db.usageReservations).toHaveLength(0)
+  })
 })

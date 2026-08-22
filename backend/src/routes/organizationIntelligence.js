@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { actionCreate, actionPatch, actions, activity, auditEvents, auditVerify, briefing, briefingEvidence, cohortCreate, cohorts, kpiSave, kpis, memberPatch, members, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceCreate, resources, risks, startups } from '../controllers/organizationIntelligenceController.js'
+import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, kpiSave, kpis, memberPatch, members, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, startups } from '../controllers/organizationIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -32,4 +32,7 @@ router.get('/audit/events', auditEvents)
 router.get('/startups', startups)
 router.get('/programs/:programId/health', programHealth)
 router.post('/reports/generate', reportGenerate)
+router.get('/resource-allocation', resourceAllocation)
+router.get('/alumni', alumniOutcomes)
+router.get('/cohort-benchmarks', cohortBenchmarks)
 export default router
