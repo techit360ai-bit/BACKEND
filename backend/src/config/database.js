@@ -134,6 +134,7 @@ const INITIAL = {
   userActivityStates: [],
   catchUpStates: [],
   adminUsers: [],
+  adminTelemetrySnapshots: [],
   organizationMarketplace: [],
   organizationTalent: [],
   organizationSettings: [],

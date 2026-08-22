@@ -8,9 +8,10 @@ const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 vi.mock('../config/database.js', () => ({
   readDb: vi.fn(),
   writeDb: vi.fn(),
+  updateDb: vi.fn(),
 }))
 
-import { readDb } from '../config/database.js'
+import { readDb, updateDb } from '../config/database.js'
 
 function token(claims = {}) {
   return jwt.sign({ sub: 'user-1', ...claims }, TEST_SECRET, { expiresIn: '1h' })
@@ -22,6 +23,7 @@ beforeEach(() => {
     users: [{ id: 'user-1', email: 'alice@example.com' }],
     profiles: [{ id: 'user-1', email: 'alice@example.com', role: 'founder' }],
   })
+  updateDb.mockImplementation(mutator => mutator(readDb()))
 })
 
 afterEach(() => {

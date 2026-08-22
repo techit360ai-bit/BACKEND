@@ -2,6 +2,7 @@ import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
+import { organizationOverview } from './organizationIntelligenceService.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -1023,6 +1024,24 @@ export function requestWithdrawal(userId, body) {
 }
 
 export function organizationDashboard(userId) {
+  const intelligence = organizationOverview(userId)
+  if (intelligence?.ok) {
+    return {
+      dashboard: null,
+      metrics: {
+        activePrograms: intelligence.metrics.activePrograms,
+        hackathons: intelligence.metrics.activePrograms,
+        members: intelligence.metrics.members,
+        opportunities: intelligence.metrics.partners,
+        activeCohorts: intelligence.metrics.activeCohorts,
+        startups: intelligence.metrics.startups,
+        mentors: intelligence.metrics.mentors,
+      },
+      activity: [],
+      charts: {},
+      intelligence,
+    }
+  }
   const db = readDb()
   const dashboard = collection(db, 'organizationDashboards').find(row => row.ownerId === userId) || null
   const hackathons = collection(db, 'hackathons').filter(row => row.ownerId === userId)

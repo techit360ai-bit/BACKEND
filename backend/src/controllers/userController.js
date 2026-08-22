@@ -43,7 +43,7 @@ export function updateMe(req, res) {
 function publicProfile(profile, db, viewerId) {
   const posts = db.feedPosts.filter(p => p.authorId === profile.id)
   const comments = db.feedComments.filter(c => c.authorId === profile.id)
-  const connections = db.notifications.filter(n => n.userId === profile.id && n.type === 'collab').length
+  const connections = (db.networkEdges || []).filter(edge => edge.sourceId === profile.id || edge.targetId === profile.id).length
   const recentActivity = [
     ...posts.map(p => ({
       id: p.id,
@@ -76,8 +76,8 @@ function publicProfile(profile, db, viewerId) {
     avatar: profile.avatarUrl || avatarGradient(profile.id),
     isOwnProfile: viewerId === profile.id,
     stats: {
-      decay: 1,
-      stageProgress: profile.isOnboarded ? 100 : 20,
+      decay: null,
+      stageProgress: null,
       posts: posts.length,
       answers: comments.length,
       connections,
