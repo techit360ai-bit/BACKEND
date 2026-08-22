@@ -129,6 +129,16 @@ export function adminIntelligenceTelemetry(_req, res) {
     notifications: count('notifications'),
     authSecurityEvents: count('authSecurityEvents'),
     authorizationAuditLogs: count('authorizationAuditLogs'),
+    investorNdaSignatures: count('ndaSignatures'),
+    investorQuestionnaires: count('investorQuestionnaireSubmissions'),
+    investorVerifiedRevenue: (db.revenueVerifications || []).filter(row => row.status === 'verified').length,
+    investorReferencesCompleted: (db.referenceRequests || []).filter(row => ['completed', 'submitted'].includes(row.status)).length,
+    investorIcProceed: (db.icReviews || []).filter(row => row.recommendation === 'proceed').length,
+    mentorshipActiveRooms: (db.mentorshipRooms || []).filter(row => row.status === 'published').length,
+    mentorshipAcceptedApplications: (db.mentorshipApplications || []).filter(row => row.status === 'accepted').length,
+    mentorshipCompletedTasks: (db.mentorshipTasks || []).filter(row => ['completed', 'done'].includes(String(row.status || '').toLowerCase())).length,
+    organizationOpenRisks: (db.organizationRiskSignals || []).filter(row => !['resolved', 'dismissed'].includes(row.status)).length,
+    organizationOverdueActions: (db.organizationActions || []).filter(row => row.dueDate && new Date(row.dueDate).getTime() < Date.now() && !['completed', 'dismissed'].includes(row.status)).length,
     generatedAt: new Date().toISOString(),
   }
   updateDb(current => {
