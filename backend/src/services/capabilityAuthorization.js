@@ -40,6 +40,10 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'organization.recruit': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.analytics': { roles: ['organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.opportunity.create': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED' },
+  'mentorship.room.create': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
+  'mentorship.room.manage': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
+  'mentorship.application.review': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
+  'mentorship.invite.share': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
 })
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }

@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { readDb, writeDb } from '../config/database.js'
+import { readDb, writeDb, updateDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
@@ -106,7 +106,48 @@ export function adminMe(req, res) {
 }
 
 export function adminIntelligenceTelemetry(_req, res) {
-  return res.json({ telemetry: migrationTelemetrySnapshot() })
+  const db = readDb()
+  const count = name => Array.isArray(db[name]) ? db[name].length : 0
+  const telemetry = migrationTelemetrySnapshot()
+  const platform = {
+    users: count('users'),
+    verifiedUsers: (db.profiles || []).filter(row => row.isVerified === true).length,
+    projects: count('projects'),
+    activeProjects: (db.projects || []).filter(row => !['completed', 'archived', 'closed'].includes(String(row.status || '').toLowerCase())).length,
+    mentorshipRooms: count('mentorshipRooms'),
+    mentorshipApplications: count('mentorshipApplications'),
+    mentorshipTasks: count('mentorshipTasks'),
+    organizations: count('organizations'),
+    organizationMembers: count('organizationMemberships'),
+    organizationPrograms: count('organizationPrograms'),
+    organizationCohorts: count('organizationCohorts'),
+    organizationRisks: count('organizationRiskSignals'),
+    organizationActions: count('organizationActions'),
+    investorDealRooms: count('dealRooms'),
+    diligenceItems: count('diligenceItems'),
+    investorRecommendations: count('investorRecommendations'),
+    notifications: count('notifications'),
+    authSecurityEvents: count('authSecurityEvents'),
+    authorizationAuditLogs: count('authorizationAuditLogs'),
+    investorNdaSignatures: count('ndaSignatures'),
+    investorQuestionnaires: count('investorQuestionnaireSubmissions'),
+    investorVerifiedRevenue: (db.revenueVerifications || []).filter(row => row.status === 'verified').length,
+    investorReferencesCompleted: (db.referenceRequests || []).filter(row => ['completed', 'submitted'].includes(row.status)).length,
+    investorIcProceed: (db.icReviews || []).filter(row => row.recommendation === 'proceed').length,
+    mentorshipActiveRooms: (db.mentorshipRooms || []).filter(row => row.status === 'published').length,
+    mentorshipAcceptedApplications: (db.mentorshipApplications || []).filter(row => row.status === 'accepted').length,
+    mentorshipCompletedTasks: (db.mentorshipTasks || []).filter(row => ['completed', 'done'].includes(String(row.status || '').toLowerCase())).length,
+    organizationOpenRisks: (db.organizationRiskSignals || []).filter(row => !['resolved', 'dismissed'].includes(row.status)).length,
+    organizationOverdueActions: (db.organizationActions || []).filter(row => row.dueDate && new Date(row.dueDate).getTime() < Date.now() && !['completed', 'dismissed'].includes(row.status)).length,
+    generatedAt: new Date().toISOString(),
+  }
+  updateDb(current => {
+    if (!Array.isArray(current.adminTelemetrySnapshots)) current.adminTelemetrySnapshots = []
+    current.adminTelemetrySnapshots.push({ id: createId('admin_telemetry'), ...platform })
+    if (current.adminTelemetrySnapshots.length > 1000) current.adminTelemetrySnapshots.splice(0, current.adminTelemetrySnapshots.length - 1000)
+    return current
+  })
+  return res.json({ telemetry, platform, history: (db.adminTelemetrySnapshots || []).slice(-100) })
 }
 export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 

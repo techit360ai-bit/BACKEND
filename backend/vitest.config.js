@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/__tests__/**/*.test.js'],
+    pool: 'forks',
+    maxWorkers: 1,
+    minWorkers: 1,
     env: {
       JWT_SECRET: 'test_jwt_secret_do_not_use_in_production',
       BCRYPT_ROUNDS: '2',

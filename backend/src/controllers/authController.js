@@ -171,7 +171,7 @@ async function sendPasswordResetEmail(email, resetUrl) {
 export async function signup(req, res) {
   const {
     email: rawEmail, password, firstName, lastName,
-    phone = '', country = '', countryCode = '', role = 'explorer',
+    phone = '', country = '', countryCode = '', role = 'founder',
     emailVerificationToken,
   } = req.body
   const email = normalizeEmail(rawEmail)
@@ -194,7 +194,7 @@ export async function signup(req, res) {
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
   const id = randomUUID()
   const now = new Date().toISOString()
-  const requestedRole = normalizeRole(role || 'explorer')
+  const requestedRole = normalizeRole(role || 'founder')
   const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role: requestedRole }, now)
   const result = updateDb(db => {
     if (db.users.find(u => u.email === email)) {
@@ -207,6 +207,9 @@ export async function signup(req, res) {
 
     db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
     db.profiles.push(profile)
+    const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
+    ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
+    ;(db.activeContexts || (db.activeContexts = [])).push({ id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now })
     return { status: 201, profile }
   })
 
@@ -214,7 +217,6 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
-  activateRoleAssignment(id, requestedRole, {})
   const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
