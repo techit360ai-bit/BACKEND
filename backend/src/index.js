@@ -4,6 +4,7 @@ import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastru
 import { generateReverificationNotifications } from './services/trustVerificationService.js'
 import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
 import { cleanupSessions } from './services/sessionService.js'
+import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 
 const PORT = process.env.PORT || 3000
 
@@ -59,6 +60,8 @@ const reverificationTimer = setInterval(() => {
 reverificationTimer.unref?.()
 const sessionCleanupTimer = setInterval(() => { try { cleanupSessions() } catch (error) { console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
 sessionCleanupTimer.unref?.()
+const dealRoomMaintenanceTimer = setInterval(() => { try { runDealRoomMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
+dealRoomMaintenanceTimer.unref?.()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

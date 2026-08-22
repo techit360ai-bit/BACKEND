@@ -1,0 +1,1 @@
+DELETE FROM app_collections WHERE name IN ('investorQuestionnaireTemplates','investorQuestionnaireSubmissions','revenueVerifications','referenceRequests','comparableTransactions','icApprovalHistory','investorPacks','dealClosingItems');

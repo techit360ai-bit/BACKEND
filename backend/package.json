@@ -11,6 +11,7 @@
     "db:rollback:dry-run": "node --no-warnings scripts/migrate-db.js down --dry-run",
     "discovery:db:migrate": "node scripts/migrate-discovery-postgres.js",
     "trust:db:migrate": "node scripts/migrate-trust-postgres.js",
+    "investor-deal-room:db:migrate": "node scripts/migrate-investor-deal-room-postgres.js",
     "discovery:worker": "node --import tsx scripts/discovery-worker.js",
     "test": "vitest run",
     "test:watch": "vitest"

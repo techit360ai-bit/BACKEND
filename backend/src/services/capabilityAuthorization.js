@@ -31,7 +31,7 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'investor.portfolio.analytics': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'investor.risk.monitor': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'investor.ai.recommendations': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'investor.dealroom.create': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
+  'investor.dealroom.create': { roles: ['investor'], assurance: 'VERIFIED' },
   'investor.dealroom.view': { roles: ['investor', 'founder'], assurance: 'PROFILED' },
   'investor.dealroom.manage': { roles: ['investor', 'founder'], assurance: 'PROFILED' },
   'investor.dealroom.internal': { roles: ['investor'], assurance: 'PROFILED' },
