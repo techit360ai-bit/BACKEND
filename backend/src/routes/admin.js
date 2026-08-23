@@ -11,6 +11,7 @@ import {
   adminUpdateDiscoveryConfig,
   adminIntelligenceTelemetry,
   adminComparableUpsert,
+  adminAiRouterTelemetry,
 } from '../controllers/adminAuthController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
@@ -39,6 +40,7 @@ router.get('/discovery/config', requireAdminAuth, requireAdmin, adminDiscoveryCo
 router.patch('/discovery/config', requireAdminAuth, requireSuperAdmin, adminUpdateDiscoveryConfig)
 router.get('/discovery/analytics', requireAdminAuth, requireAdmin, adminDiscoveryAnalytics)
 router.get('/intelligence/telemetry', requireAdminAuth, requireAdmin, adminIntelligenceTelemetry)
+router.get('/ai-router/telemetry', requireAdminAuth, requireAdmin, adminAiRouterTelemetry)
 router.post('/investor/comparables', requireAdminAuth, requireAdmin, adminComparableUpsert)
 
 export default router
