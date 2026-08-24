@@ -74,6 +74,9 @@ import {
   opportunityApply,
   watchlist,
   watchlistAdd,
+  watchlistRemove,
+  watchlistPreferences,
+  watchlistPreferencesPatch,
   workspaceContextGet,
   workspaceInvitationAccept,
   workspaceInvitationCreate,
@@ -168,6 +171,9 @@ router.patch('/organization/community/:id', requireCapability('organization.prof
 router.get('/investor/deal-flow', dealFlow)
 router.get('/investor/watchlist', watchlist)
 router.post('/investor/watchlist', watchlistAdd)
+router.delete('/investor/watchlist/:projectId', watchlistRemove)
+router.get('/investor/watchlist/preferences', watchlistPreferences)
+router.patch('/investor/watchlist/preferences', watchlistPreferencesPatch)
 router.get('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorList)
 router.post('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorCreate)
 router.get('/investor/deal-rooms', requireCapability('dealroom.access', undefined, { consume: true }), bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorList)

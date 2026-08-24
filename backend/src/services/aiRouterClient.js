@@ -119,6 +119,20 @@ export async function requestInvestorAdvisory(token, evidence) {
   }
 }
 
+export async function requestInvestorEvi(token, projectId, startupData) {
+  if (!token || !projectId) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/investor/evi/${encodeURIComponent(projectId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(startupData || {}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
+
 export async function requestOrganizationAdvisory(token, evidence) {
   if (!token) return null
   try {

@@ -77,12 +77,38 @@ function contextFor(db, userId) {
   return collection(db, 'activeContexts').find(row => row.userId === userId && row.status === 'active') || null
 }
 
+// Explorer is the platform's base access assignment, not an additional
+// switchable operating context once a user has a registered specialized role.
+// Keep it persisted for backwards compatibility, but omit it from the
+// available-context surface so single-role users do not get a misleading
+// context switcher.
+function presentableContexts(rows) {
+  const activeSpecialized = rows.some(row => SPECIALIZED_ROLES.includes(normalizeRole(row.role)) && row.status === 'active')
+  return rows
+    .filter(row => ['active', 'pending', 'pending_verification'].includes(row.status))
+    .filter(row => !(activeSpecialized && normalizeRole(row.role) === 'explorer'))
+    .map(row => ({ role: normalizeRole(row.role), roleAssignmentId: row.id, status: row.status, assurance: row.assurance || 'CLAIMED', isPrimary: Boolean(row.isPrimary) }))
+}
+
 export function availableContexts(userId) {
   return updateDb(db => {
     const { roles } = synchronizeLegacyRoles(db, userId)
-    const contexts = roles.filter(row => ['active', 'pending', 'pending_verification'].includes(row.status)).map(row => ({ role: normalizeRole(row.role), roleAssignmentId: row.id, status: row.status, assurance: row.assurance || 'CLAIMED', isPrimary: Boolean(row.isPrimary) }))
+    const contexts = presentableContexts(roles)
     const profile = profileFor(db, userId)
-    const activeContext = contextFor(db, userId)
+    let activeContext = contextFor(db, userId)
+    const primaryRole = normalizeRole(profile?.activeRole || profile?.role || roles.find(row => row.isPrimary)?.role || 'explorer')
+    const primaryAssignment = roles.find(row => normalizeRole(row.role) === primaryRole && row.status === 'active') || roles.find(row => Boolean(row.isPrimary) && row.status === 'active')
+    // Repair legacy sessions that were created without a context or were
+    // incorrectly initialized as Explorer. An explicit context switch is
+    // preserved; this branch only repairs the default/initial state.
+    if (!activeContext || (activeContext.role === 'explorer' && primaryRole !== 'explorer' && !profile?.activeRole)) {
+      const now = nowIso()
+      const next = { id: activeContext?.id || createId('context'), userId, role: primaryRole, roleAssignmentId: primaryAssignment?.id || null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: activeContext?.startedAt || now, lastActiveAt: now, updatedAt: now }
+      if (activeContext) Object.assign(activeContext, next)
+      else collection(db, 'activeContexts').push(next)
+      activeContext = next
+      if (profile && !profile.activeRole) { profile.activeRole = primaryRole; profile.updatedAt = now }
+    }
     return { contexts, activeContext, profile: profile ? { activeRole: normalizeRole(profile.activeRole || activeContext?.role || profile.role || 'explorer') } : null }
   })
 }
@@ -122,7 +148,7 @@ export function switchContext(userId, input = {}) {
 
 function availableContextsFromDb(db, userId) {
   const { roles } = synchronizeLegacyRoles(db, userId)
-  return roles.filter(row => ['active', 'pending', 'pending_verification'].includes(row.status)).map(row => ({ role: normalizeRole(row.role), roleAssignmentId: row.id, status: row.status, assurance: row.assurance || 'CLAIMED', isPrimary: Boolean(row.isPrimary) }))
+  return presentableContexts(roles)
 }
 
 export function touchContext(userId, input = {}) {
