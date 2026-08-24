@@ -44,6 +44,10 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'mentorship.room.manage': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.application.review': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.invite.share': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
+  'mentorship.hub.view': { roles: [], assurance: 'CLAIMED' },
+  'mentorship.room.apply': { roles: [], assurance: 'CLAIMED' },
+  'mentorship.invite.accept': { roles: [], assurance: 'CLAIMED' },
+  'mentorship.analytics.view': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
 })
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }

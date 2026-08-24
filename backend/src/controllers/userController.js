@@ -1,6 +1,7 @@
 import { readDb, updateDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
+import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -20,7 +21,9 @@ export function getMe(req, res) {
   const db = readDb()
   const profile = db.profiles.find(p => p.id === req.user.id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
-  return res.json(profile)
+  const response = { ...profile }
+  if (profile.avatarObjectKey) response.avatarUrl = privateDownloadUrl(profile.avatarObjectKey, 900)
+  return res.json(response)
 }
 
 export function updateMe(req, res) {
@@ -38,6 +41,46 @@ export function updateMe(req, res) {
   })
   if (!result) return res.status(404).json({ error: 'Profile not found' })
   return res.json(result)
+}
+
+export function avatarUploadUrl(req, res) {
+  const contentType = String(req.body?.contentType || '').toLowerCase()
+  const sizeBytes = Number(req.body?.sizeBytes || 0)
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) return res.status(400).json({ error: 'unsupported_avatar_type' })
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > 5 * 1024 * 1024) return res.status(400).json({ error: 'invalid_avatar_size' })
+  const upload = createPrivateUpload({ namespace: 'profile-avatars', ownerId: req.user.id, objectId: createId('avatar'), contentType, sizeBytes })
+  return upload.ok ? res.json({ objectKey: upload.objectKey, uploadUrl: upload.uploadUrl, requiredHeaders: upload.requiredHeaders, expiresIn: 900 }) : res.status(503).json({ error: upload.error || 'avatar_storage_unavailable' })
+}
+
+export async function avatarFinalize(req, res) {
+  const objectKey = String(req.body?.objectKey || '')
+  const contentType = String(req.body?.contentType || '').toLowerCase()
+  const sizeBytes = Number(req.body?.sizeBytes || 0)
+  if (!objectKey.startsWith(`profile-avatars/${req.user.id}/`)) return res.status(403).json({ error: 'avatar_object_forbidden' })
+  const scan = await finalizePrivateUpload({ objectKey, contentType, expectedSizeBytes: sizeBytes })
+  if (!scan.ok) return res.status(400).json({ error: scan.error || 'avatar_scan_failed' })
+  const profile = updateDb(db => {
+    const row = db.profiles.find(item => item.id === req.user.id)
+    if (!row) return null
+    row.avatarObjectKey = objectKey
+    row.avatarContentType = contentType
+    row.avatarSizeBytes = sizeBytes
+    row.avatarUpdatedAt = nowIso()
+    row.avatarUrl = privateDownloadUrl(objectKey, 900)
+    row.updatedAt = nowIso()
+    return row
+  })
+  return profile ? res.json({ profile, avatarUrl: profile.avatarUrl, scan }) : res.status(404).json({ error: 'Profile not found' })
+}
+
+export function avatarRemove(req, res) {
+  const profile = updateDb(db => {
+    const row = db.profiles.find(item => item.id === req.user.id)
+    if (!row) return null
+    row.avatarObjectKey = null; row.avatarUrl = null; row.avatarContentType = null; row.avatarSizeBytes = 0; row.updatedAt = nowIso()
+    return row
+  })
+  return profile ? res.json({ ok: true, profile }) : res.status(404).json({ error: 'Profile not found' })
 }
 
 function publicProfile(profile, db, viewerId) {

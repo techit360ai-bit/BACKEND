@@ -15,7 +15,7 @@ const publicRoom = room => {
 const profileName = (db, userId) => userName(rows(db, 'profiles').find(p => p.id === userId), 'TechIT Mentor')
 function buildSharePayload(room) {
   const baseUrl = process.env.FRONTEND_URL || process.env.PUBLIC_APP_URL || 'https://techit.network'
-  const url = `${baseUrl.replace(/\/$/, '')}/investor/mentorship/rooms/${encodeURIComponent(room.id)}`
+  const url = `${baseUrl.replace(/\/$/, '')}/investor/mentorship/room/${encodeURIComponent(room.id)}`
   const text = `${room.name} - ${room.description || 'Join this TechIT mentorship room.'}`
   return {
     url,
@@ -174,6 +174,28 @@ export function resolveMentorshipInvite(userId, token) {
   const room = rows(db, 'mentorshipRooms').find(item => item.id === invite.roomId && item.status === 'published')
   if (!room) return { ok: false, error: 'room_not_found' }
   return { ok: true, room: publicRoom(room), invitation: { id: invite.id, expiresAt: invite.expiresAt } }
+}
+
+export function acceptMentorshipInvite(userId, token, body = {}) {
+  return updateDb(db => {
+    const invite = rows(db, 'mentorshipInvitations').find(item => item.tokenHash === hashToken(token))
+    if (!invite || invite.revokedAt || new Date(invite.expiresAt).getTime() <= Date.now() || (invite.maxUses > 0 && invite.uses >= invite.maxUses)) {
+      return { ok: false, error: 'invite_invalid_or_expired' }
+    }
+    const room = rows(db, 'mentorshipRooms').find(item => item.id === invite.roomId && item.status === 'published')
+    if (!room) return { ok: false, error: 'room_not_found' }
+    if (room.mentorId === userId) return { ok: false, error: 'mentor_cannot_join' }
+    const existing = rows(db, 'mentorshipMentees').find(item => item.roomId === room.id && item.userId === userId && item.status === 'active')
+    if (existing) return { ok: true, idempotent: true, room: publicRoom({ ...room, menteeCount: rows(db, 'mentorshipMentees').filter(item => item.roomId === room.id && item.status !== 'removed').length }), membership: existing }
+    const enrolled = rows(db, 'mentorshipMentees').filter(item => item.roomId === room.id && item.status === 'active').length
+    if (enrolled >= room.capacity) return { ok: false, error: 'room_capacity_reached' }
+    const membership = { id: createId('mentor_mentee'), roomId: room.id, userId, invitationId: invite.id, status: 'active', progress: 0, joinedAt: nowIso(), updatedAt: nowIso() }
+    rows(db, 'mentorshipMentees').push(membership)
+    invite.uses = Number(invite.uses || 0) + 1
+    invite.lastUsedAt = nowIso()
+    rows(db, 'notifications').push({ id: createId('notif'), userId: room.mentorId, actorId: userId, type: 'milestone', content: `A founder joined ${room.name}`, linkTo: `/investor/mentorship/room/${room.id}`, metadata: { roomId: room.id, invitationId: invite.id }, read: false, createdAt: nowIso() })
+    return { ok: true, room: publicRoom({ ...room, menteeCount: enrolled + 1 }), membership }
+  })
 }
 
 export function revokeMentorshipInvite(userId, inviteId) { return updateDb(db => { const invite = rows(db, 'mentorshipInvitations').find(item => item.id === inviteId && item.createdBy === userId); if (!invite) return { ok: false, error: 'invite_not_found' }; invite.revokedAt = nowIso(); return { ok: true } }) }

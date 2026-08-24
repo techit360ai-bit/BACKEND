@@ -1089,6 +1089,31 @@ export function addWatchlist(userId, body) {
   })
 }
 
+export function removeWatchlist(userId, projectId) {
+  return updateDb(db => {
+    const before = collection(db, 'investorWatchlists').length
+    db.investorWatchlists = collection(db, 'investorWatchlists').filter(row => !(row.investorId === userId && row.projectId === projectId))
+    return { ok: db.investorWatchlists.length < before }
+  })
+}
+
+export function listWatchlistPreferences(userId) {
+  const db = readDb()
+  const row = collection(db, 'investorWatchlistPreferences').find(item => item.investorId === userId)
+  return { preferences: { velocity: row?.velocity !== false, risk: row?.risk !== false, milestone: row?.milestone === true, trust: row?.trust === true, dealStatus: row?.dealStatus === true } }
+}
+
+export function updateWatchlistPreferences(userId, body = {}) {
+  return updateDb(db => {
+    const rows = collection(db, 'investorWatchlistPreferences')
+    const row = rows.find(item => item.investorId === userId) || { id: createId('watch_pref'), investorId: userId, createdAt: nowIso() }
+    for (const key of ['velocity', 'risk', 'milestone', 'trust', 'dealStatus']) if (body[key] !== undefined) row[key] = Boolean(body[key])
+    row.updatedAt = nowIso()
+    if (!rows.includes(row)) rows.push(row)
+    return { preferences: { velocity: row.velocity !== false, risk: row.risk !== false, milestone: row.milestone === true, trust: row.trust === true, dealStatus: row.dealStatus === true } }
+  })
+}
+
 export function listIntakes(userId) {
   const db = readDb()
   return { intakes: listOwned(db, 'ventureIntakes', userId) }

@@ -1,5 +1,8 @@
 import {
   addWatchlist,
+  removeWatchlist,
+  listWatchlistPreferences,
+  updateWatchlistPreferences,
   collaboratorEarnings,
   collaboratorEquity,
   countersignContract,
@@ -347,6 +350,13 @@ export function watchlistAdd(req, res) {
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
+
+export function watchlistRemove(req, res) {
+  return res.json(removeWatchlist(req.user.id, String(req.params.projectId || '').trim()))
+}
+
+export function watchlistPreferences(req, res) { return res.json(listWatchlistPreferences(req.user.id)) }
+export function watchlistPreferencesPatch(req, res) { return res.json(updateWatchlistPreferences(req.user.id, req.body || {})) }
 
 export function investorList(req, res) {
   return res.json({ [req.responseKey]: investorCollection(req.user.id, req.collectionName) })
