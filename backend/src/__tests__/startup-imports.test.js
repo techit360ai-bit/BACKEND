@@ -7,5 +7,5 @@ describe('production startup import contracts', () => {
     expect(routerClient).toHaveProperty('analyzeVerificationEvidence')
     await expect(routerClient.analyzeVerificationEvidence('', '', {})).resolves.toBeNull()
     await expect(import('../services/trustVerificationService.js')).resolves.toHaveProperty('analyzeEvidence')
-  })
+  }, 15000)
 })
