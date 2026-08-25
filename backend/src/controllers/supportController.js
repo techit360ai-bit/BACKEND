@@ -21,6 +21,8 @@ import {
   attachMetadata,
   correctiveAction,
   supportPermissionAllowed,
+  initAttachment,
+  finalizeAttachment,
 } from '../services/supportService.js'
 import { requestSupportIntelligence } from '../services/aiRouterClient.js'
 
@@ -37,6 +39,8 @@ export function userCaseFeedback(req, res) { return sendResult(res, submitFeedba
 export function userCaseReopen(req, res) { return sendResult(res, reopenCase(req.user.id, req.params.caseId)) }
 export function userKnowledge(_req, res) { return sendResult(res, listKnowledgeBase()) }
 export function userCaseAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, false), 201) }
+export function userAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, false), 201) }
+export async function userAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, false)) }
 export function adminCaseList(req, res) { return sendResult(res, listAdminCases(req.query)) }
 export function adminCaseGet(req, res) { return sendResult(res, getCase(req.user.id, req.params.caseId, true)) }
 export function adminCaseMessage(req, res) { return sendResult(res, addMessage(req.user.id, req.params.caseId, req.body, true), 201) }
@@ -56,6 +60,8 @@ export function adminMaintenance(_req, res) { return sendResult(res, runMaintena
 export function adminKnowledgeSave(req, res) { return sendResult(res, saveKnowledgeArticle(req.user.id, req.body)) }
 export function adminTemplateSave(req, res) { return sendResult(res, saveTemplate(req.user.id, req.body)) }
 export function adminAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, true), 201) }
+export function adminAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, true), 201) }
+export async function adminAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, true)) }
 export function adminCorrectiveAction(req, res) { const needed = req.body.action === 'reissue_credits' ? 'support.modify_credits' : req.body.action?.includes('entitlement') ? 'support.modify_billing' : 'support.modify_account'; if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed }); return sendResult(res, correctiveAction(req.user.id, req.params.caseId, req.body), 202) }
 export async function adminAi(req, res) {
   const result = await requestSupportIntelligence(req.user.token, { mode: req.body.mode || 'draft_response', case: req.body.case, messages: req.body.messages, knowledge: req.body.knowledge })

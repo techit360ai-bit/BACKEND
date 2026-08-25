@@ -29,6 +29,10 @@ import {
   adminAi,
   caseStream,
   supportHealth,
+  userAttachmentInit,
+  userAttachmentFinalize,
+  adminAttachmentInit,
+  adminAttachmentFinalize,
 } from '../controllers/supportController.js'
 
 const router = Router()
@@ -44,6 +48,8 @@ router.post('/cases/:caseId/feedback', requireAuth, userCaseFeedback)
 router.post('/cases/:caseId/reopen', requireAuth, userCaseReopen)
 router.get('/knowledge-base', requireAuth, userKnowledge)
 router.post('/cases/:caseId/attachments', requireAuth, userCaseAttachment)
+router.post('/cases/:caseId/attachments/init', requireAuth, userAttachmentInit)
+router.post('/cases/:caseId/attachments/:attachmentId/finalize', requireAuth, userAttachmentFinalize)
 
 router.get('/admin/overview', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminOverview)
 router.get('/admin/cases', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminCaseList)
@@ -58,6 +64,8 @@ router.get('/admin/analytics', requireAdminAuth, requireAdmin, requireSupportPer
 router.get('/admin/intelligence', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminIntelligence)
 router.post('/admin/maintenance/run', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminMaintenance)
 router.post('/admin/cases/:caseId/attachments', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachment)
+router.post('/admin/cases/:caseId/attachments/init', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachmentInit)
+router.post('/admin/cases/:caseId/attachments/:attachmentId/finalize', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachmentFinalize)
 router.post('/admin/cases/:caseId/actions', requireAdminAuth, requireAdmin, adminCorrectiveAction)
 router.post('/admin/knowledge-base', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_knowledge_base'), adminKnowledgeSave)
 router.post('/admin/templates', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_knowledge_base'), adminTemplateSave)
