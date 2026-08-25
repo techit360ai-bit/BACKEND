@@ -297,7 +297,7 @@ export function runMaintenance() {
     const now = Date.now(); const changed = []; const resolvedGrace = Number(setting(db, 'resolutionGraceHours', 72)) * 3600000
     for (const row of rows(db, 'supportCases')) {
       if (!['resolved', 'closed'].includes(row.status) && new Date(row.resolutionDueAt).getTime() <= now && row.status !== 'escalated') { row.status = 'escalated'; row.escalationLevel = Math.max(2, Number(row.escalationLevel) || 1); row.escalationStatus = 'sla_breached'; row.updatedAt = nowIso(); event(db, row.id, 'support_case_sla_breached', 'system', { resolutionDueAt: row.resolutionDueAt }); changed.push(row.id) }
-      if (row.status === 'escalated' && row.escalationStatus === 'sla_breached') notify(db, row.userId, `${row.caseNumber} has been escalated because its resolution SLA was reached.`, row.id)
+      if (row.status === 'escalated' && row.escalationStatus === 'sla_breached' && !row.slaBreachNotifiedAt) { row.slaBreachNotifiedAt = nowIso(); notify(db, row.userId, `${row.caseNumber} has been escalated because its resolution SLA was reached.`, row.id) }
       if (row.status === 'resolved' && row.resolvedAt && new Date(row.resolvedAt).getTime() + resolvedGrace <= now) { row.status = 'closed'; row.closedAt = nowIso(); row.updatedAt = nowIso(); event(db, row.id, 'support_case_closed', 'system', { reason: 'resolution_grace_expired' }); notify(db, row.userId, `${row.caseNumber} was closed after the resolution grace period.`, row.id); changed.push(row.id) }
     }
     const threshold = Number(setting(db, 'incidentThreshold', 5)); const cutoff = now - 30 * 60000
