@@ -25,6 +25,7 @@ import {
   finalizeAttachment,
 } from '../services/supportService.js'
 import { requestSupportIntelligence } from '../services/aiRouterClient.js'
+import { reconcileEntitlement } from '../services/supportBillingAdapter.js'
 
 function sendResult(res, value, fallbackStatus = 200) {
   if (!value?.ok) return res.status(value?.status || 400).json({ error: value?.error || 'support_request_failed', ...(value?.case ? { case: value.case } : {}) })
@@ -62,7 +63,7 @@ export function adminTemplateSave(req, res) { return sendResult(res, saveTemplat
 export function adminAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, true), 201) }
 export function adminAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, true), 201) }
 export async function adminAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, true)) }
-export function adminCorrectiveAction(req, res) { const needed = req.body.action === 'reissue_credits' ? 'support.modify_credits' : req.body.action?.includes('entitlement') ? 'support.modify_billing' : 'support.modify_account'; if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed }); return sendResult(res, correctiveAction(req.user.id, req.params.caseId, req.body), 202) }
+export async function adminCorrectiveAction(req, res) { const needed = req.body.action === 'reissue_credits' ? 'support.modify_credits' : req.body.action?.includes('entitlement') ? 'support.modify_billing' : 'support.modify_account'; if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed }); if (req.body.confirm !== true || !String(req.body.reason || '').trim()) return res.status(400).json({ error: 'confirmation_and_reason_required' }); if (['retry_entitlement_sync', 'recalculate_entitlement'].includes(req.body.action)) return sendResult(res, await reconcileEntitlement(req.user.id, req.params.caseId, req.body.reason)); return sendResult(res, correctiveAction(req.user.id, req.params.caseId, req.body), 202) }
 export async function adminAi(req, res) {
   const result = await requestSupportIntelligence(req.user.token, { mode: req.body.mode || 'draft_response', case: req.body.case, messages: req.body.messages, knowledge: req.body.knowledge })
   return result ? res.json({ ok: true, intelligence: result }) : res.status(503).json({ error: 'support_ai_unavailable' })
