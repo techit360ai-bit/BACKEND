@@ -71,3 +71,4 @@ export function caseStream(req, res) {
   res.write(`event: support_ready\ndata: ${JSON.stringify({ caseId })}\n\n`)
   const timer = setInterval(send, 5000); req.on('close', () => clearInterval(timer))
 }
+export function supportHealth(_req, res) { return res.json({ status: 'ok', feature: 'CUSTOMER_SUPPORT_SYSTEM', enabled: process.env.CUSTOMER_SUPPORT_SYSTEM !== '0' }) }

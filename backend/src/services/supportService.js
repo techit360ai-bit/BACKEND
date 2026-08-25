@@ -199,7 +199,8 @@ export function listAdminCases(filters = {}) {
     const user = rows(db, 'users').find(item => item.id === row.userId) || {}
     const profile = rows(db, 'profiles').find(item => item.id === row.userId) || {}
     const project = rows(db, 'projects').find(item => item.ownerId === row.userId || item.userId === row.userId) || {}
-    return [row.caseNumber, row.subject, row.description, row.userId, user.email, profile.firstName, profile.lastName, profile.orgName, project.name, project.title].some(value => String(value || '').toLowerCase().includes(query))
+    const payments = rows(db, 'paymentIntents').filter(item => item.userId === row.userId)
+    return [row.caseNumber, row.subject, row.description, row.userId, user.email, profile.firstName, profile.lastName, profile.orgName, project.name, project.title, ...payments.flatMap(item => [item.id, item.reference, item.transactionId, item.providerReference])].some(value => String(value || '').toLowerCase().includes(query))
   })
   return { ok: true, cases: cases.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).map(publicCase) }
 }

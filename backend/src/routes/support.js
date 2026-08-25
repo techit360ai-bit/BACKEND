@@ -28,9 +28,12 @@ import {
   userCaseAttachment,
   adminAi,
   caseStream,
+  supportHealth,
 } from '../controllers/supportController.js'
 
 const router = Router()
+
+router.get('/health', supportHealth)
 
 router.get('/cases', requireAuth, userCaseList)
 router.post('/cases', requireAuth, userCaseCreate)
