@@ -98,6 +98,12 @@ export function ensureTrustProfile(db, userId, role = null) {
   return next
 }
 
+// Read-only trust projection used by the authorization controller. Keep this
+// separate from ensureTrustProfile so GET requests do not mutate persistence.
+export function trustProfileFor(userId, role = null) {
+  return derivedTrustProfile(readDb(), userId, role)
+}
+
 export function capabilityPolicy(capability, db = readDb()) {
   const stored = collection(db, 'capabilityPolicies').find(row => row.capability === capability && row.active !== false)
   return stored ? { ...CAPABILITY_POLICIES[capability], ...stored.policy } : CAPABILITY_POLICIES[capability] || null

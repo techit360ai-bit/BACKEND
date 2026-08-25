@@ -146,3 +146,27 @@ export async function requestOrganizationAdvisory(token, evidence) {
     return await res.json()
   } catch { return null }
 }
+
+/**
+ * Request non-authoritative AI analysis of verification evidence.
+ * Deterministic assurance and authorization remain owned by the backend.
+ */
+export async function analyzeVerificationEvidence(token, executionGrant, evidence) {
+  if (!token || !executionGrant) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/incubation/evidence/research`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        'X-AI-Execution-Grant': executionGrant,
+      },
+      body: JSON.stringify(evidence || {}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
