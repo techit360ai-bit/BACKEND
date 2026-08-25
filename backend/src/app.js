@@ -22,6 +22,7 @@ import discoveryRoutes from './routes/discovery.js'
 import intelligenceRoutes from './routes/intelligence.js'
 import authorizationRoutes from './routes/authorization.js'
 import trustRoutes from './routes/trust.js'
+import supportRoutes from './routes/support.js'
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -110,6 +111,7 @@ app.use('/api/discovery', discoveryRoutes)
 app.use('/api/intelligence', intelligenceRoutes)
 app.use('/api/authorization', authorizationRoutes)
 app.use('/api/trust', trustRoutes)
+app.use('/api/support', supportRoutes)
 app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
