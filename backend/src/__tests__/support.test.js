@@ -9,7 +9,7 @@ vi.mock('../config/database.js', () => ({
   updateDb: vi.fn(mutator => mutator(db)),
 }))
 
-const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase } = await import('../services/supportService.js')
+const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance } = await import('../services/supportService.js')
 
 beforeEach(() => {
   for (const key of Object.keys(db)) db[key].length = 0
@@ -52,5 +52,15 @@ describe('customer support cases', () => {
     expect(listAdminCases().cases).toHaveLength(1)
     expect(submitFeedback('user-2', created.case.id, { rating: 4, resolutionStatus: 'yes' }).ok).toBe(true)
     expect(submitFeedback('user-2', created.case.id, { rating: 5 }).error).toBe('feedback_already_submitted')
+  })
+
+  it('supports business-hour configuration, locking, controlled actions, and maintenance', () => {
+    configureSupport('admin-1', { businessHoursEnabled: true, duplicateCooldownHours: 2, resolutionGraceHours: 1, retentionDays: 1, incidentThreshold: 2, teams: [{ name: 'Billing', level: 2, categories: ['billing'] }] })
+    const created = createCase('user-3', { category: 'billing', subject: 'Payment issue', description: 'Payment failed.' })
+    expect(created.ok).toBe(true)
+    expect(acquireCaseLock('admin-1', created.case.id).ok).toBe(true)
+    expect(acquireCaseLock('admin-2', created.case.id).error).toBe('case_locked')
+    expect(correctiveAction('admin-1', created.case.id, { action: 'reissue_credits', amount: 10, confirm: true, reason: 'Verified entitlement mismatch' }).ok).toBe(true)
+    expect(runMaintenance().ok).toBe(true)
   })
 })

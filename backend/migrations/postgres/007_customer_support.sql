@@ -1,0 +1,16 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE TABLE IF NOT EXISTS support_cases (id TEXT PRIMARY KEY, case_number TEXT NOT NULL UNIQUE, user_id TEXT NOT NULL, user_role TEXT NOT NULL, category TEXT NOT NULL, subcategory TEXT, subject TEXT NOT NULL, description TEXT NOT NULL, priority TEXT NOT NULL, severity TEXT NOT NULL, status TEXT NOT NULL, assigned_admin_id TEXT, assigned_team TEXT, escalation_level INTEGER NOT NULL DEFAULT 1, escalation_status TEXT NOT NULL DEFAULT 'none', first_response_due_at TIMESTAMPTZ, resolution_due_at TIMESTAMPTZ, first_responded_at TIMESTAMPTZ, resolved_at TIMESTAMPTZ, closed_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS support_messages (id TEXT PRIMARY KEY, case_id TEXT NOT NULL REFERENCES support_cases(id), sender_type TEXT NOT NULL, sender_id TEXT NOT NULL, message TEXT NOT NULL, is_internal BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS support_events (id TEXT PRIMARY KEY, case_id TEXT, event_type TEXT NOT NULL, actor_id TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS support_audit_logs (id TEXT PRIMARY KEY, case_id TEXT, action TEXT NOT NULL, actor_id TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_support_cases_queue ON support_cases(status, priority, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_cases_user ON support_cases(user_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_messages_case ON support_messages(case_id, created_at);
+CREATE OR REPLACE FUNCTION support_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'support evidence is append-only'; END $$;
+DROP TRIGGER IF EXISTS trg_support_messages_immutable ON support_messages;
+CREATE TRIGGER trg_support_messages_immutable BEFORE UPDATE OR DELETE ON support_messages FOR EACH ROW EXECUTE FUNCTION support_append_only();
+DROP TRIGGER IF EXISTS trg_support_events_immutable ON support_events;
+CREATE TRIGGER trg_support_events_immutable BEFORE UPDATE OR DELETE ON support_events FOR EACH ROW EXECUTE FUNCTION support_append_only();
+DROP TRIGGER IF EXISTS trg_support_audit_immutable ON support_audit_logs;
+CREATE TRIGGER trg_support_audit_immutable BEFORE UPDATE OR DELETE ON support_audit_logs FOR EACH ROW EXECUTE FUNCTION support_append_only();
+REVOKE UPDATE, DELETE ON support_messages, support_events, support_audit_logs FROM PUBLIC;

@@ -6,6 +6,7 @@ import { initializeTrustPostgresProjection } from './services/trustPostgresProje
 import { cleanupSessions } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
+import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
 
 const PORT = process.env.PORT || 3000
 
@@ -67,6 +68,8 @@ const dealRoomMaintenanceTimer = setInterval(() => { try { runDealRoomMaintenanc
 dealRoomMaintenanceTimer.unref?.()
 const organizationIntelligenceTimer = setInterval(() => { try { runOrganizationIntelligenceMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
 organizationIntelligenceTimer.unref?.()
+const supportMaintenanceTimer = setInterval(() => { try { runSupportMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message })) } }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
+supportMaintenanceTimer.unref?.()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

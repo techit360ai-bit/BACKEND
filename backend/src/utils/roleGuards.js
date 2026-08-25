@@ -17,3 +17,11 @@ export function requireSuperAdmin(req, res, next) {
   if (req.user?.role === 'super_admin') return next()
   return res.status(403).json({ error: 'Super admin access required' })
 }
+
+export function requireSupportPermission(permission) {
+  return (req, res, next) => {
+    const permissions = new Set(req.user?.permissions || [])
+    if (req.user?.role === 'super_admin' || permissions.has('all') || permissions.has(permission)) return next()
+    return res.status(403).json({ error: 'Support permission required', permission })
+  }
+}

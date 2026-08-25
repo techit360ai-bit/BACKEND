@@ -170,3 +170,12 @@ export async function analyzeVerificationEvidence(token, executionGrant, evidenc
     return null
   }
 }
+
+export async function requestSupportIntelligence(token, input = {}) {
+  if (!token) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/support/intelligence`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
