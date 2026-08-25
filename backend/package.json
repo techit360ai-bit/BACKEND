@@ -4,6 +4,7 @@
   "description": "",
   "main": "src/index.js",
   "scripts": {
+    "prestart": "npm run startup:check",
     "start": "node --import tsx src/index.js",
     "startup:check": "node --import tsx scripts/check-startup-imports.js",
     "dev": "node --import tsx --watch src/index.js",
