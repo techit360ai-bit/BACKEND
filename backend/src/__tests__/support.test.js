@@ -9,7 +9,7 @@ vi.mock('../config/database.js', () => ({
   updateDb: vi.fn(mutator => mutator(db)),
 }))
 
-const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance } = await import('../services/supportService.js')
+const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance, initAttachment } = await import('../services/supportService.js')
 
 beforeEach(() => {
   for (const key of Object.keys(db)) db[key].length = 0
@@ -62,5 +62,14 @@ describe('customer support cases', () => {
     expect(acquireCaseLock('admin-2', created.case.id).error).toBe('case_locked')
     expect(correctiveAction('admin-1', created.case.id, { action: 'reissue_credits', amount: 10, confirm: true, reason: 'Verified entitlement mismatch' }).ok).toBe(true)
     expect(runMaintenance().ok).toBe(true)
+  })
+
+  it('enforces owner isolation, internal note separation, and attachment storage policy', () => {
+    const created = createCase('user-1', { category: 'platform', subject: 'Private', description: 'Card 4111111111111111 email me@example.com' })
+    expect(getCase('user-2', created.case.id).error).toBe('case_not_found')
+    addMessage('admin-1', created.case.id, { message: 'Internal diagnostic', internal: true }, true)
+    expect(getCase('user-1', created.case.id).messages.some(row => row.message.includes('Internal diagnostic'))).toBe(false)
+    const attachment = initAttachment('user-1', created.case.id, { name: 'receipt-4111111111111111.pdf', contentType: 'application/pdf', sizeBytes: 100 })
+    expect(['evidence_storage_not_configured', 'support_disabled']).toContain(attachment.error)
   })
 })
