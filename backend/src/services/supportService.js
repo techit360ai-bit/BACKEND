@@ -315,6 +315,11 @@ export function analytics() {
   return { ok: true, analytics: { total: cases.length, byCategory: by('category'), byPriority: by('priority'), byStatus: by('status'), satisfaction: feedback.length ? Math.round(feedback.reduce((sum, row) => sum + row.rating, 0) / feedback.length * 100) / 100 : null, feedbackCount: feedback.length, averageFirstResponseHours: averageHours(responseTimes), averageResolutionHours: averageHours(resolutionTimes), reopenRate: cases.length ? Math.round(cases.filter(row => row.status === 'reopened').length / cases.length * 10000) / 100 : 0, incidents: rows(db, 'supportIncidents'), intelligenceSignals: rows(db, 'supportIntelligenceSignals') } }
 }
 
+export function intelligenceProjection() {
+  const db = readDb(); const cases = rows(db, 'supportCases'); const open = cases.filter(row => !['resolved', 'closed'].includes(row.status)); const topCategory = Object.entries(cases.reduce((acc, row) => { acc[row.category] = (acc[row.category] || 0) + 1; return acc }, {})).sort((a, b) => b[1] - a[1])[0] || null
+  return { ok: true, projection: { source: 'CUSTOMER_CARE', sourceClassification: 'PLATFORM_USER_EXPERIENCE_EVIDENCE', generatedAt: nowIso(), openCases: open.length, strongestComplaint: topCategory ? { category: topCategory[0], count: topCategory[1] } : null, incidents: rows(db, 'supportIncidents').filter(row => row.status === 'open'), signals: rows(db, 'supportIntelligenceSignals').slice(-50), recommendedAction: topCategory ? `Investigate recurring ${topCategory[0]} support complaints.` : null } }
+}
+
 export function submitFeedback(userId, caseId, body = {}) {
   const rating = Number(body.rating)
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) return { ok: false, status: 400, error: 'rating_must_be_1_to_5' }

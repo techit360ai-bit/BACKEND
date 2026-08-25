@@ -22,6 +22,7 @@ import {
   adminCorrectiveAction,
   adminKnowledgeSave,
   adminTemplateSave,
+  adminIntelligence,
   userCaseReopen,
   userKnowledge,
   userCaseAttachment,
@@ -51,6 +52,7 @@ router.post('/admin/cases/:caseId/messages', requireAdminAuth, requireAdmin, req
 router.get('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminConfig)
 router.patch('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminConfigUpdate)
 router.get('/admin/analytics', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminAnalytics)
+router.get('/admin/intelligence', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminIntelligence)
 router.post('/admin/maintenance/run', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminMaintenance)
 router.post('/admin/cases/:caseId/attachments', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachment)
 router.post('/admin/cases/:caseId/actions', requireAdminAuth, requireAdmin, adminCorrectiveAction)

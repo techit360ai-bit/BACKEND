@@ -13,6 +13,7 @@ import {
   diagnostics,
   runMaintenance,
   supportConfiguration,
+  intelligenceProjection,
   reopenCase,
   listKnowledgeBase,
   saveKnowledgeArticle,
@@ -50,6 +51,7 @@ export function adminLock(req, res) { return sendResult(res, acquireCaseLock(req
 export function adminConfig(req, res) { return sendResult(res, supportConfiguration()) }
 export function adminConfigUpdate(req, res) { return sendResult(res, configureSupport(req.user.id, req.body)) }
 export function adminAnalytics(_req, res) { return sendResult(res, analytics()) }
+export function adminIntelligence(_req, res) { return sendResult(res, intelligenceProjection()) }
 export function adminMaintenance(_req, res) { return sendResult(res, runMaintenance()) }
 export function adminKnowledgeSave(req, res) { return sendResult(res, saveKnowledgeArticle(req.user.id, req.body)) }
 export function adminTemplateSave(req, res) { return sendResult(res, saveTemplate(req.user.id, req.body)) }
