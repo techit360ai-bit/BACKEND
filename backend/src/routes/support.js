@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import crypto from 'node:crypto'
 import { requireAdminAuth, requireAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSupportPermission } from '../utils/roleGuards.js'
 import {
@@ -38,6 +39,7 @@ import {
 const router = Router()
 
 router.get('/health', supportHealth)
+router.post('/internal/maintenance', (req, res, next) => { const expected = Buffer.from(process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET || ''); const actual = Buffer.from(String(req.get('X-TechIT-Internal-Secret') || '')); if (!expected.length || expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return res.status(401).json({ error: 'invalid_internal_secret' }); next() }, adminMaintenance)
 
 router.get('/cases', requireAuth, userCaseList)
 router.post('/cases', requireAuth, userCaseCreate)

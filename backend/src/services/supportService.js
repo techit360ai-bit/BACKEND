@@ -1,6 +1,7 @@
 import { readDb, updateDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
+import { deliverSupportNotification } from './supportNotificationService.js'
 
 const CATEGORIES = new Set(['account', 'billing', 'credits', 'platform', 'projects', 'privacy', 'security', 'other'])
 const STATUSES = new Set(['received', 'triaging', 'processing', 'waiting_for_user', 'escalated', 'resolved', 'closed', 'reopened'])
@@ -102,6 +103,8 @@ function event(db, caseId, eventType, actorId, metadata = {}) {
 function notify(db, userId, content, caseId, type = 'milestone') {
   if (!userId) return
   rows(db, 'notifications').push({ id: createId('notif'), userId, actorId: 'system', type, read: false, content, author: 'TechIT Support', linkTo: `/support?case=${encodeURIComponent(caseId)}`, metadata: { supportCaseId: caseId }, createdAt: nowIso() })
+  const supportCase = rows(db, 'supportCases').find(row => row.id === caseId)
+  void deliverSupportNotification({ userId, subject: type === 'comment' ? 'New support response' : 'Support case update', message: content, caseNumber: supportCase?.caseNumber || caseId, eventType: type })
 }
 
 function publicCase(row) {

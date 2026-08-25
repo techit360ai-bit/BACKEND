@@ -50,6 +50,7 @@ function validateSecurityConfig() {
   ]) {
     if ((process.env[name] || '').length < 32) throw new Error(`${name} must be at least 32 characters`)
   }
+  if (!process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET || process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET.length < 32) throw new Error('BACKEND_SUPPORT_MAINTENANCE_SECRET must be at least 32 characters')
 }
 
 validateDatabaseConfig()
