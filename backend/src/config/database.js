@@ -204,6 +204,10 @@ const INITIAL = {
   activeContexts: [],
   contextHistory: [],
   roleHistory: [],
+  techitMoments: [],
+  techitMomentShares: [],
+  techitMomentReferrals: [],
+  techitMomentEvents: [],
 }
 
 let sqliteDb = null
