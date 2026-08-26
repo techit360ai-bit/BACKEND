@@ -208,6 +208,12 @@ const INITIAL = {
   techitMomentShares: [],
   techitMomentReferrals: [],
   techitMomentEvents: [],
+  academyCurricula: [],
+  academyModules: [],
+  academyProgress: [],
+  academyAssessments: [],
+  academyEvents: [],
+  academyBadges: [],
 }
 
 let sqliteDb = null

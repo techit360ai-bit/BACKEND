@@ -179,3 +179,37 @@ export async function requestSupportIntelligence(token, input = {}) {
     return await res.json()
   } catch { return null }
 }
+
+export async function requestAcademyEnrichment(token, input = {}) {
+  if (!token) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/modules/enrich`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
+}
+
+export async function requestAcademyModuleGeneration(token, input = {}) {
+  if (!token) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/modules/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(input),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}
+
+export async function requestAcademyExerciseReview(token, input = {}) {
+  if (!token) return null
+  try {
+    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/exercises/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
+    if (!res.ok) return null
+    return await res.json()
+  } catch { return null }
+}

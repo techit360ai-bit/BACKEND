@@ -1,0 +1,44 @@
+import { academyProjects, getAcademyCurriculum, triggerAcademyAdaptation, startAcademyModule, heartbeatAcademyModule, saveAcademyReflection, scoreAcademyQuiz, saveAcademyExercise, applyAcademyExerciseReview, applyAcademyEnrichment, applyAcademyGeneratedLessons, completeAcademyModule, academyBadges } from '../services/academyService.js'
+import { requestAcademyEnrichment, requestAcademyExerciseReview, requestAcademyModuleGeneration } from '../services/aiRouterClient.js'
+
+function send(res, value, created = false) { return res.status(value?.status || (value?.ok === false ? 400 : created ? 201 : 200)).json(value) }
+export function projects(req, res) { return send(res, academyProjects(req.user.id, req.user.role)) }
+export function adapt(req, res) { return send(res, triggerAcademyAdaptation(req.user.id, req.user.role, String(req.body?.projectId || ''), String(req.body?.triggerEvent || ''))) }
+export async function curriculum(req, res) {
+  const result = getAcademyCurriculum(req.user.id, req.user.role, String(req.query.projectId || ''))
+  if (!result.ok) return send(res, result)
+  const needsGeneration = result.curriculum.modules.some(module => !module.generatedLesson)
+  if (needsGeneration) {
+    const generated = await requestAcademyModuleGeneration(req.user.token, {
+      curriculumId: result.curriculum.id,
+      role: result.curriculum.role,
+      project: { id: result.curriculum.projectId, name: result.curriculum.projectName, stage: result.curriculum.stage },
+      modules: result.curriculum.modules.map(module => ({
+        id: module.id,
+        title: module.title,
+        description: module.description,
+        objective: module.objective,
+        phase: module.phase,
+        tags: module.tags,
+        verifiedCases: module.content.caseStudies,
+      })),
+    })
+    if (generated?.modules?.length) applyAcademyGeneratedLessons(req.user.id, result.curriculum.id, generated)
+  }
+  const enrichment = await requestAcademyEnrichment(req.user.token, { curriculumId: result.curriculum.id, project: { id: result.curriculum.projectId, name: result.curriculum.projectName, stage: result.curriculum.stage }, role: result.curriculum.role, modules: result.curriculum.modules.map(module => ({ id: module.id, title: module.title, objective: module.objective, phase: module.phase })) })
+  if (enrichment?.modules) applyAcademyEnrichment(req.user.id, result.curriculum.id, enrichment)
+  return send(res, getAcademyCurriculum(req.user.id, req.user.role, String(req.query.projectId || '')))
+}
+export function start(req, res) { return send(res, startAcademyModule(req.user.id, req.params.curriculumId, req.params.moduleId), true) }
+export function heartbeat(req, res) { return send(res, heartbeatAcademyModule(req.user.id, req.params.curriculumId, req.params.moduleId, req.body?.sessionId)) }
+export function reflection(req, res) { return send(res, saveAcademyReflection(req.user.id, req.params.curriculumId, req.params.moduleId, req.body?.text)) }
+export function quiz(req, res) { return send(res, scoreAcademyQuiz(req.user.id, req.params.curriculumId, req.params.moduleId, req.body?.answers)) }
+export async function exercise(req, res) {
+  const submitted = saveAcademyExercise(req.user.id, req.params.curriculumId, req.params.moduleId, req.body?.submission)
+  if (!submitted.ok) return send(res, submitted)
+  const review = await requestAcademyExerciseReview(req.user.token, submitted.exercise)
+  if (!review) return send(res, { ok: true, reviewStatus: 'pending', message: 'Exercise saved. Review is pending.' })
+  return send(res, applyAcademyExerciseReview(req.user.id, req.params.curriculumId, req.params.moduleId, review))
+}
+export function complete(req, res) { return send(res, completeAcademyModule(req.user.id, req.params.curriculumId, req.params.moduleId)) }
+export function badges(req, res) { return send(res, academyBadges(req.user.id)) }
