@@ -90,7 +90,7 @@ function candidates(db, userId, role) {
 
 function profileFor(db, userId) { return rows(db, 'profiles').find(row => row.id === userId) || rows(db, 'users').find(row => row.id === userId) || null }
 function toPublic(moment) {
-  return { id: moment.id, role: moment.role, kind: moment.kind, title: moment.title, subtitle: moment.subtitle, body: moment.body, metrics: moment.metrics, publicSlug: moment.publicSlug, publicUrl: moment.publicUrl, createdAt: moment.createdAt, generatedAt: moment.generatedAt, shareCount: moment.shareCount || 0 }
+  return { id: moment.id, role: moment.role, kind: moment.kind, title: moment.title, subtitle: moment.subtitle, body: moment.body, metrics: moment.metrics, publicSlug: moment.publicSlug, publicUrl: moment.publicUrl, status: moment.status, createdAt: moment.createdAt, generatedAt: moment.generatedAt, shareCount: moment.shareCount || 0 }
 }
 
 export function generateMoments(userId, role) {
@@ -103,7 +103,7 @@ export function generateMoments(userId, role) {
       if (existing) { output.push(existing); continue }
       const slug = `${normalizedRole}-${candidate.kind}-${randomBytes(8).toString('hex')}`
       const createdAt = nowIso()
-      const moment = { id: createId('moment'), userId, role: normalizedRole, kind: candidate.kind, title: candidate.title, subtitle: candidate.subtitle, body: candidate.body, metrics: candidate.metrics, sourceKey: candidate.scopeKey, sourceEventIds: [], publicSlug: slug, publicUrl: publicUrl(slug), status: 'published', shareCount: 0, referralCount: 0, createdAt, updatedAt: createdAt, generatedAt: createdAt, generatedFrom: 'backend_deterministic' }
+      const moment = { id: createId('moment'), userId, role: normalizedRole, kind: candidate.kind, title: candidate.title, subtitle: candidate.subtitle, body: candidate.body, metrics: candidate.metrics, sourceKey: candidate.scopeKey, sourceEventIds: [], publicSlug: slug, publicUrl: publicUrl(slug), status: 'pending', shareCount: 0, referralCount: 0, createdAt, updatedAt: createdAt, generatedAt: createdAt, generatedFrom: 'backend_deterministic' }
       collection.push(moment); rows(state, 'techitMomentEvents').push({ id: createId('moment_event'), momentId: moment.id, userId, type: 'moment_generated', metadata: { kind: moment.kind, sourceKey: moment.sourceKey }, createdAt })
       output.push(moment)
     }
@@ -115,6 +115,26 @@ export function generateMoments(userId, role) {
 export function listMoments(userId, role) {
   generateMoments(userId, role)
   const db = readDb(); return { ok: true, moments: rows(db, 'techitMoments').filter(row => row.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toPublic) }
+}
+
+export function nextMomentPrompt(userId, role) {
+  generateMoments(userId, role)
+  const db = readDb()
+  const moment = rows(db, 'techitMoments')
+    .filter(row => row.userId === userId && row.status === 'pending')
+    .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0]
+  return { ok: true, moment: moment ? toPublic(moment) : null }
+}
+
+export function dismissMoment(userId, momentId) {
+  return updateDb(db => {
+    const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
+    if (!moment || moment.status !== 'pending') return { ok: false, status: 404, error: 'moment_not_found' }
+    const createdAt = nowIso()
+    moment.status = 'dismissed'; moment.dismissedAt = createdAt; moment.updatedAt = createdAt
+    rows(db, 'techitMomentEvents').push({ id: createId('moment_event'), momentId, userId, type: 'moment_dismissed', metadata: {}, createdAt })
+    return { ok: true }
+  })
 }
 
 export function getMoment(userId, momentId) {
@@ -139,6 +159,7 @@ export function recordShare(userId, momentId, channel) {
     if (!moment) return { ok: false, status: 404, error: 'moment_not_found' }
     const shareId = createId('moment_share'); const text = `${moment.title} — ${moment.subtitle} Built and shared on TechIT Network.`
     const share = { id: shareId, momentId, userId, channel, createdAt: nowIso() }; rows(db, 'techitMomentShares').push(share); rows(db, 'techitMomentEvents').push({ id: createId('moment_event'), momentId, userId, type: 'moment_shared', metadata: { shareId, channel }, createdAt: share.createdAt }); moment.shareCount = Number(moment.shareCount || 0) + 1; moment.updatedAt = share.createdAt
+    moment.status = 'published'; moment.publishedAt = moment.publishedAt || share.createdAt
     return { ok: true, shareId, channel, publicUrl: moment.publicUrl, shareText: text, channelUrl: shareUrl(channel, moment.publicUrl, text, shareId), workflow: channel === 'instagram' ? 'native_share_or_copy' : 'direct_or_copy' }
   })
 }

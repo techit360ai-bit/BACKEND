@@ -6,7 +6,7 @@ const db = {
 }
 
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
-const { generateMoments, listMoments, getMoment, recordShare, getPublicMoment, recordVisit, analytics } = await import('../services/techitMomentsService.js')
+const { generateMoments, listMoments, nextMomentPrompt, dismissMoment, getMoment, recordShare, getPublicMoment, recordVisit, analytics } = await import('../services/techitMomentsService.js')
 
 beforeEach(() => { for (const value of Object.values(db)) value.length = 0 })
 
@@ -28,14 +28,25 @@ describe('TechIT Moments', () => {
     expect(db.techitMoments.filter(row => row.kind === 'task_shipped')).toHaveLength(1)
   })
 
-  it('keeps owner access isolated and exposes a public-safe card by slug', () => {
+  it('keeps new Moments private until the user chooses to share', () => {
     db.feedPosts.push({ id: 'post-1', authorId: 'explorer-1', body: 'Public contribution' })
     const [moment] = generateMoments('explorer-1', 'explorer').moments
     expect(getMoment('another-user', moment.id).error).toBe('moment_not_found')
+    expect(getPublicMoment(moment.publicSlug).error).toBe('moment_not_found')
+    recordShare('explorer-1', moment.id, 'copy')
     const publicResult = getPublicMoment(moment.publicSlug)
     expect(publicResult.ok).toBe(true)
     expect(publicResult.moment.userId).toBeUndefined()
     expect(publicResult.moment.sourceKey).toBeUndefined()
+  })
+
+  it('returns only pending prompts and records deterministic dismissal', () => {
+    db.projects.push({ id: 'project-1', ownerId: 'founder-1' })
+    const prompt = nextMomentPrompt('founder-1', 'founder').moment
+    expect(prompt?.status).toBe('pending')
+    expect(dismissMoment('founder-1', prompt.id).ok).toBe(true)
+    expect(nextMomentPrompt('founder-1', 'founder').moment).toBeNull()
+    expect(db.techitMomentEvents.some(row => row.type === 'moment_dismissed')).toBe(true)
   })
 
   it('records allowlisted share channels including Facebook and an Instagram fallback', () => {
