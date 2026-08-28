@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { makeHarness, ownerActor, WS } from './helpers.js';
 
 describe('GitHub destination synchronization', () => {
+  it('returns provider-derived commit and workflow evidence', async () => {
+    const { client } = await makeHarness();
+    const ctx = { actor: ownerActor(), resourceWorkspaceId: WS };
+    expect(await client.invoke('github', 'get_commit_checks', { projectId: 'project-1', repo: 'havitec/techit', commitSha: 'abc' }, ctx)).toMatchObject({ ok: true, data: { providerStatus: 'success' } });
+    expect(await client.invoke('github', 'get_workflow_run', { projectId: 'project-1', repo: 'havitec/techit', runId: 42 }, ctx)).toMatchObject({ ok: true, data: { status: 'success' } });
+  });
+
   it('reads a remote head and requires approval before pushing files', async () => {
     const { client, runtime, contributions } = await makeHarness();
     const ctx = { actor: ownerActor(), resourceWorkspaceId: WS };

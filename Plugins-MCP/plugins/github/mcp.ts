@@ -40,6 +40,14 @@ export class GitHubMCPServer extends BaseMCPServer {
       this.api.getPrStatus(String(p.repo), Number(p.number)),
     );
 
+    this.handle('get_commit_checks', async (p) =>
+      this.api.getCommitChecks(String(p.repo), String(p.commitSha)),
+    );
+
+    this.handle('get_workflow_run', async (p) =>
+      this.api.getWorkflowRun(String(p.repo), Number(p.runId)),
+    );
+
     this.handle('get_repository_state', async (p) =>
       this.api.getRepositoryState(String(p.repo), String(p.branch || 'main')),
     );

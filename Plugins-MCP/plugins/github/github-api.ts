@@ -51,6 +51,20 @@ export interface GhPushResult {
   filesChanged: number;
 }
 
+export interface GhCommitChecks {
+  commitSha: string;
+  providerStatus: 'success' | 'failure' | 'pending';
+  checks: { name: string; conclusion: 'success' | 'failure' | 'pending' }[];
+  url: string;
+}
+
+export interface GhWorkflowRun {
+  runId: number;
+  status: 'success' | 'failure' | 'pending';
+  url: string;
+  checks: { name: string; conclusion: 'success' | 'failure' | 'pending' }[];
+}
+
 export interface GhFileChange {
   path: string;
   content?: string;
@@ -62,6 +76,8 @@ export interface GitHubApi {
   readFile(repo: string, path: string, ref?: string): Promise<string>;
   listIssues(repo: string, state?: string): Promise<GhIssue[]>;
   getPrStatus(repo: string, num: number): Promise<GhPrStatus>;
+  getCommitChecks(repo: string, commitSha: string): Promise<GhCommitChecks>;
+  getWorkflowRun(repo: string, runId: number): Promise<GhWorkflowRun>;
   getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState>;
   pushFiles(input: { repo: string; branch: string; expectedHeadSha: string; message: string; files: GhFileChange[] }): Promise<GhPushResult>;
   createPullRequest(input: {
@@ -105,6 +121,14 @@ export class FakeGitHubApi implements GitHubApi {
       mergeable: true,
       checks: [{ name: 'ci', conclusion: 'success' }],
     };
+  }
+
+  async getCommitChecks(_repo: string, commitSha: string): Promise<GhCommitChecks> {
+    return { commitSha, providerStatus: 'success', checks: [{ name: 'ci', conclusion: 'success' }], url: `https://github.com/checks/${commitSha}` };
+  }
+
+  async getWorkflowRun(_repo: string, runId: number): Promise<GhWorkflowRun> {
+    return { runId, status: 'success', url: `https://github.com/actions/runs/${runId}`, checks: [{ name: 'workflow', conclusion: 'success' }] };
   }
 
   async getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState> {
@@ -213,6 +237,18 @@ export class RealGitHubApi implements GitHubApi {
         conclusion: check.status !== 'completed' ? 'pending' : check.conclusion === 'success' ? 'success' : 'failure',
       })),
     };
+  }
+
+  async getCommitChecks(repo: string, commitSha: string): Promise<GhCommitChecks> {
+    const data = await this.request<{ check_runs: { name: string; conclusion: string | null; status: string; html_url?: string }[] }>(`/repos/${repo}/commits/${commitSha}/check-runs?per_page=100`);
+    const checks = data.check_runs.map(check => ({ name: check.name, conclusion: check.status !== 'completed' ? 'pending' as const : check.conclusion === 'success' ? 'success' as const : 'failure' as const }));
+    return { commitSha, providerStatus: checks.length > 0 && checks.every(check => check.conclusion === 'success') ? 'success' : checks.some(check => check.conclusion === 'failure') ? 'failure' : 'pending', checks, url: data.check_runs[0]?.html_url || `https://github.com/${repo}/commit/${commitSha}/checks` };
+  }
+
+  async getWorkflowRun(repo: string, runId: number): Promise<GhWorkflowRun> {
+    const run = await this.request<{ id: number; status: string; conclusion: string | null; html_url: string; name: string }>(`/repos/${repo}/actions/runs/${runId}`);
+    const conclusion = run.status !== 'completed' ? 'pending' : run.conclusion === 'success' ? 'success' : 'failure';
+    return { runId: run.id, status: conclusion, url: run.html_url, checks: [{ name: run.name || `workflow-${run.id}`, conclusion }] };
   }
 
   async getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState> {

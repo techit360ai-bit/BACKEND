@@ -9,6 +9,7 @@ import type { Actor, AgentDefinition, Role } from '@techit/core';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
+import { registerBitbucketPlugin, registerGitLabPlugin } from '@techit/plugin-git-host';
 import { registerNotionPlugin } from '@techit/plugin-notion';
 import { registerFigmaPlugin } from '@techit/plugin-figma';
 import { registerWeb3Plugin } from '@techit/plugin-web3';
@@ -32,7 +33,7 @@ import {
 // always come through mount.ts with a verified JWT claim — see
 // resolveActor in app.js, which sets ActorInput.workspaceId from the token.
 const WS = 'ws-acme';
-const CONNECTOR_NAMES = ['github', 'notion', 'figma', 'web3', 'ai'] as const;
+const CONNECTOR_NAMES = ['github', 'gitlab', 'bitbucket', 'notion', 'figma', 'web3', 'ai'] as const;
 type ConnectorName = typeof CONNECTOR_NAMES[number];
 
 export interface ActorInput {
@@ -111,6 +112,8 @@ async function build(): Promise<TechitService> {
   const registry = new MCPRegistry();
   const connectors = enabledConnectors();
   if (connectors.has('github')) await registerGithubPlugin({ runtime, registry, workspaceId: WS });
+  if (connectors.has('gitlab')) await registerGitLabPlugin({ runtime, registry });
+  if (connectors.has('bitbucket')) await registerBitbucketPlugin({ runtime, registry });
   if (connectors.has('notion')) await registerNotionPlugin({ runtime, registry, workspaceId: WS });
   if (connectors.has('figma')) await registerFigmaPlugin({ runtime, registry, workspaceId: WS });
   if (connectors.has('web3')) await registerWeb3Plugin({ runtime, registry, workspaceId: WS });
@@ -203,6 +206,8 @@ function validateProductionConfig(): void {
   if (connectors.size === 0) throw new Error('MCP_ENABLED_CONNECTORS must enable at least one production connector.');
   const requirements: Record<ConnectorName, { mode: string; vars: string[] }> = {
     github: { mode: 'GITHUB_CONNECTOR_MODE', vars: ['MCP_GITHUB_TOKEN'] },
+    gitlab: { mode: 'GITLAB_CONNECTOR_MODE', vars: ['MCP_GITLAB_TOKEN'] },
+    bitbucket: { mode: 'BITBUCKET_CONNECTOR_MODE', vars: ['MCP_BITBUCKET_TOKEN'] },
     notion: { mode: 'NOTION_CONNECTOR_MODE', vars: ['NOTION_TOKEN'] },
     figma: { mode: 'FIGMA_CONNECTOR_MODE', vars: ['FIGMA_TOKEN'] },
     web3: { mode: 'WEB3_CONNECTOR_MODE', vars: ['SIWE_EXPECTED_DOMAIN', 'SIWE_EXPECTED_URI', 'SIWE_EXPECTED_CHAIN_ID'] },
