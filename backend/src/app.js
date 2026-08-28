@@ -25,6 +25,8 @@ import trustRoutes from './routes/trust.js'
 import supportRoutes from './routes/support.js'
 import techitMomentsRoutes from './routes/techitMoments.js'
 import academyRoutes from './routes/academy.js'
+import codeWorkspaceRoutes from './routes/codeWorkspace.js'
+import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 
@@ -116,6 +118,7 @@ app.use('/api/trust', trustRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/moments', techitMomentsRoutes)
 app.use('/api/academy', academyRoutes)
+app.use('/api/code', codeWorkspaceRoutes)
 app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
@@ -171,6 +174,14 @@ if (MCP_ENABLED) {
       } catch {
         return null
       }
+    },
+    authorizeInvocation({ resolved, plugin, tool, params }) {
+      if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
+      if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
+      return { allowed: true }
+    },
+    onSuccessfulInvocation({ resolved, plugin, tool, params, data }) {
+      if (plugin === 'github' && tool === 'push_files') projectCodeCommit(resolved.actor.id, params, data)
     },
   })
 }

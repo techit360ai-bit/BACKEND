@@ -1,0 +1,16 @@
+import { listProjectFiles, readProjectFile, saveProjectFile, moveProjectFile, deleteProjectFile, projectFileHistory, codeWorkspaceSnapshot, detectProjectAdapter, recordRuntimeSession, saveSyncState, createBridgeGrant, recordDeployment } from '../services/codeWorkspaceService.js'
+import { reconcileGithubPush } from '../services/codeExecutionProjectionService.js'
+const send = (res, value, created = false) => res.status(value?.status || (value?.ok === false ? 400 : created ? 201 : 200)).json(value)
+export const files = (req, res) => send(res, listProjectFiles(req.user.id, req.params.workspaceId, req.query.includeDeleted === 'true'))
+export const file = (req, res) => send(res, readProjectFile(req.user.id, req.params.workspaceId, req.query.path))
+export const save = (req, res) => send(res, saveProjectFile(req.user.id, req.params.workspaceId, req.body), true)
+export const move = (req, res) => send(res, moveProjectFile(req.user.id, req.params.workspaceId, req.query.path, req.body))
+export const remove = (req, res) => send(res, deleteProjectFile(req.user.id, req.params.workspaceId, req.query.path, req.body?.expectedVersion))
+export const history = (req, res) => send(res, projectFileHistory(req.user.id, req.params.workspaceId, req.query.path))
+export const snapshot = (req, res) => send(res, codeWorkspaceSnapshot(req.user.id, req.params.workspaceId))
+export const adapter = (req, res) => send(res, detectProjectAdapter(req.user.id, req.params.workspaceId))
+export const runtime = (req, res) => send(res, recordRuntimeSession(req.user.id, req.params.workspaceId, req.body), true)
+export const sync = (req, res) => send(res, saveSyncState(req.user.id, req.params.workspaceId, req.body), true)
+export const bridge = (req, res) => send(res, createBridgeGrant(req.user.id, req.params.workspaceId, req.body), true)
+export const deployment = (req, res) => send(res, recordDeployment(req.user.id, req.params.workspaceId, req.body), true)
+export const githubWebhook = (req, res) => send(res, reconcileGithubPush(req.headers, req.body, req.rawBody))
