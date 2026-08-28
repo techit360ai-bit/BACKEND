@@ -4,6 +4,7 @@
   "private": true,
   "workspaces": [
     "backend",
+    "code-bridge",
     "frontend",
     "Plugins-MCP",
     "Plugins-MCP/packages/*",

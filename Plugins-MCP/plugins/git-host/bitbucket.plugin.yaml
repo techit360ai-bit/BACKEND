@@ -1,0 +1,29 @@
+name: bitbucket
+version: 0.1.0
+displayName: Bitbucket
+auth: { kind: api_key, scopes: [repository, pipeline] }
+capabilities: { read: true, write: true, execute: true }
+resources:
+  - { type: repository, artifactType: code }
+  - { type: pipeline, artifactType: workflow }
+events: { transport: webhook, types: [repo:push, pipeline:completed] }
+mcp:
+  enabled: true
+  tools:
+    - name: get_repository_state
+      description: Read the current branch head and file manifest for conflict-aware synchronization.
+      requiredRole: viewer
+      input_schema: { type: object, properties: { projectId: { type: string }, repo: { type: string }, branch: { type: string } }, required: [projectId, repo, branch] }
+    - name: read_file
+      description: Read a file from a configured Bitbucket repository.
+      requiredRole: viewer
+      input_schema: { type: object, properties: { projectId: { type: string }, repo: { type: string }, path: { type: string }, ref: { type: string } }, required: [projectId, repo, path] }
+    - name: get_commit_checks
+      description: Read provider pipeline evidence for a commit.
+      requiredRole: viewer
+      input_schema: { type: object, properties: { projectId: { type: string }, repo: { type: string }, commitSha: { type: string } }, required: [projectId, repo, commitSha] }
+    - name: push_files
+      description: Push a version-checked commit to Bitbucket through the shared approval gate.
+      requiredRole: editor
+      destructive: true
+      input_schema: { type: object, properties: { projectId: { type: string }, repo: { type: string }, branch: { type: string }, expectedHeadSha: { type: string }, message: { type: string }, files: { type: array }, approvalRequestId: { type: string } }, required: [projectId, repo, branch, expectedHeadSha, message, files] }

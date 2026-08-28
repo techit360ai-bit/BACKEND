@@ -1,5 +1,7 @@
-import { listProjectFiles, readProjectFile, saveProjectFile, moveProjectFile, deleteProjectFile, projectFileHistory, codeWorkspaceSnapshot, detectProjectAdapter, recordRuntimeSession, saveSyncState, createBridgeGrant, recordDeployment } from '../services/codeWorkspaceService.js'
+import { listProjectFiles, readProjectFile, saveProjectFile, moveProjectFile, deleteProjectFile, projectFileHistory, codeWorkspaceSnapshot, detectProjectAdapter, recordRuntimeSession, saveSyncState, createBridgeGrant, recordDeployment, listCodeDestinations, verifyCodeDeployment } from '../services/codeWorkspaceService.js'
 import { reconcileGithubPush } from '../services/codeExecutionProjectionService.js'
+import { applyCodeExecutionRun, createCodeExecutionRun, finalizeCodeExecutionRun, getCodeExecutionRun, recordCodeExecutionStage, recordCodeReviewDecision } from '../services/codeExecutionRunService.js'
+import { bridgeTokenFromRequest, codeBridgeSnapshot, exchangeCodeBridgeGrant, revokeCodeBridgeSessions, syncCodeBridgeFiles } from '../services/codeBridgeService.js'
 const send = (res, value, created = false) => res.status(value?.status || (value?.ok === false ? 400 : created ? 201 : 200)).json(value)
 export const files = (req, res) => send(res, listProjectFiles(req.user.id, req.params.workspaceId, req.query.includeDeleted === 'true'))
 export const file = (req, res) => send(res, readProjectFile(req.user.id, req.params.workspaceId, req.query.path))
@@ -13,4 +15,16 @@ export const runtime = (req, res) => send(res, recordRuntimeSession(req.user.id,
 export const sync = (req, res) => send(res, saveSyncState(req.user.id, req.params.workspaceId, req.body), true)
 export const bridge = (req, res) => send(res, createBridgeGrant(req.user.id, req.params.workspaceId, req.body), true)
 export const deployment = (req, res) => send(res, recordDeployment(req.user.id, req.params.workspaceId, req.body), true)
+export const destinations = (req, res) => send(res, listCodeDestinations(req.user.id, req.params.workspaceId))
+export const deploymentVerification = (req, res) => send(res, verifyCodeDeployment(req.user.id, req.params.workspaceId, req.params.deploymentId, req.body), true)
+export const executionCreate = (req, res) => send(res, createCodeExecutionRun(req.user.id, req.params.workspaceId, req.body), true)
+export const executionGet = (req, res) => send(res, getCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId))
+export const executionStage = (req, res) => send(res, recordCodeExecutionStage(req.user.id, req.params.workspaceId, req.params.runId, req.body), true)
+export const executionReview = (req, res) => send(res, recordCodeReviewDecision(req.user.id, req.params.workspaceId, req.params.runId, req.body), true)
+export const executionFinalize = (req, res) => send(res, finalizeCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId))
+export const executionApply = (req, res) => send(res, applyCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId, req.body))
+export const bridgeExchange = (req, res) => send(res, exchangeCodeBridgeGrant(req.body), true)
+export const bridgeSnapshot = (req, res) => send(res, codeBridgeSnapshot(bridgeTokenFromRequest(req), req.params.workspaceId))
+export const bridgeSync = (req, res) => send(res, syncCodeBridgeFiles(bridgeTokenFromRequest(req), req.params.workspaceId, req.body))
+export const bridgeRevoke = (req, res) => send(res, revokeCodeBridgeSessions(req.user.id, req.params.workspaceId))
 export const githubWebhook = (req, res) => send(res, reconcileGithubPush(req.headers, req.body, req.rawBody))
