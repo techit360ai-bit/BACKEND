@@ -33,11 +33,37 @@ export interface GhIssue {
   state: 'open' | 'closed';
 }
 
+export interface GhRepositoryState {
+  repo: string;
+  branch: string;
+  headSha: string;
+  treeSha: string;
+  files: { path: string; sha: string; size: number }[];
+}
+
+export interface GhPushResult {
+  repo: string;
+  branch: string;
+  previousHeadSha: string;
+  commitSha: string;
+  commitUrl: string;
+  message: string;
+  filesChanged: number;
+}
+
+export interface GhFileChange {
+  path: string;
+  content?: string;
+  delete?: boolean;
+}
+
 export interface GitHubApi {
   listRepositories(org?: string): Promise<GhRepo[]>;
   readFile(repo: string, path: string, ref?: string): Promise<string>;
   listIssues(repo: string, state?: string): Promise<GhIssue[]>;
   getPrStatus(repo: string, num: number): Promise<GhPrStatus>;
+  getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState>;
+  pushFiles(input: { repo: string; branch: string; expectedHeadSha: string; message: string; files: GhFileChange[] }): Promise<GhPushResult>;
   createPullRequest(input: {
     repo: string;
     head: string;
@@ -51,6 +77,7 @@ export interface GitHubApi {
 export class FakeGitHubApi implements GitHubApi {
   private prSeq = 100;
   private runSeq = 5000;
+  private commitSeq = 1;
   readonly created: { prs: GhPullRequest[]; runs: { repo: string; workflow: string; ref: string }[] } = {
     prs: [],
     runs: [],
@@ -78,6 +105,18 @@ export class FakeGitHubApi implements GitHubApi {
       mergeable: true,
       checks: [{ name: 'ci', conclusion: 'success' }],
     };
+  }
+
+  async getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState> {
+    const headSha = `fake-head-${this.commitSeq}`;
+    return { repo, branch, headSha, treeSha: `fake-tree-${this.commitSeq}`, files: [{ path: 'README.md', sha: 'fake-readme', size: 20 }] };
+  }
+
+  async pushFiles(input: { repo: string; branch: string; expectedHeadSha: string; message: string; files: GhFileChange[] }): Promise<GhPushResult> {
+    const current = await this.getRepositoryState(input.repo, input.branch);
+    if (input.expectedHeadSha !== current.headSha) throw new Error(`github conflict: expected ${input.expectedHeadSha}, remote is ${current.headSha}`);
+    this.commitSeq += 1;
+    return { repo: input.repo, branch: input.branch, previousHeadSha: current.headSha, commitSha: `fake-head-${this.commitSeq}`, commitUrl: `https://github.com/${input.repo}/commit/fake-head-${this.commitSeq}`, message: input.message, filesChanged: input.files.length };
   }
 
   async createPullRequest(input: {
@@ -174,6 +213,33 @@ export class RealGitHubApi implements GitHubApi {
         conclusion: check.status !== 'completed' ? 'pending' : check.conclusion === 'success' ? 'success' : 'failure',
       })),
     };
+  }
+
+  async getRepositoryState(repo: string, branch: string): Promise<GhRepositoryState> {
+    const refPath = branch.split('/').map(encodeURIComponent).join('/');
+    const ref = await this.request<{ object: { sha: string } }>(`/repos/${repo}/git/ref/heads/${refPath}`);
+    const commit = await this.request<{ tree: { sha: string } }>(`/repos/${repo}/git/commits/${ref.object.sha}`);
+    const tree = await this.request<{ tree: { path: string; type: string; sha: string; size?: number }[] }>(`/repos/${repo}/git/trees/${commit.tree.sha}?recursive=1`);
+    return { repo, branch, headSha: ref.object.sha, treeSha: commit.tree.sha, files: tree.tree.filter(item => item.type === 'blob').slice(0, 5000).map(item => ({ path: item.path, sha: item.sha, size: Number(item.size || 0) })) };
+  }
+
+  async pushFiles(input: { repo: string; branch: string; expectedHeadSha: string; message: string; files: GhFileChange[] }): Promise<GhPushResult> {
+    const state = await this.getRepositoryState(input.repo, input.branch);
+    if (state.headSha !== input.expectedHeadSha) throw new Error(`github conflict: expected ${input.expectedHeadSha}, remote is ${state.headSha}`);
+    const treeItems = [];
+    for (const file of input.files) {
+      if (file.delete === true) {
+        treeItems.push({ path: file.path, mode: '100644', type: 'blob', sha: null });
+      } else {
+        const blob = await this.request<{ sha: string }>(`/repos/${input.repo}/git/blobs`, { method: 'POST', body: JSON.stringify({ content: file.content || '', encoding: 'utf-8' }) });
+        treeItems.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.sha });
+      }
+    }
+    const tree = await this.request<{ sha: string }>(`/repos/${input.repo}/git/trees`, { method: 'POST', body: JSON.stringify({ base_tree: state.treeSha, tree: treeItems }) });
+    const commit = await this.request<{ sha: string; html_url?: string }>(`/repos/${input.repo}/git/commits`, { method: 'POST', body: JSON.stringify({ message: input.message, tree: tree.sha, parents: [state.headSha] }) });
+    const refPath = input.branch.split('/').map(encodeURIComponent).join('/');
+    await this.request(`/repos/${input.repo}/git/refs/heads/${refPath}`, { method: 'PATCH', body: JSON.stringify({ sha: commit.sha, force: false }) });
+    return { repo: input.repo, branch: input.branch, previousHeadSha: state.headSha, commitSha: commit.sha, commitUrl: commit.html_url || `https://github.com/${input.repo}/commit/${commit.sha}`, message: input.message, filesChanged: input.files.length };
   }
 
   async createPullRequest(input: {

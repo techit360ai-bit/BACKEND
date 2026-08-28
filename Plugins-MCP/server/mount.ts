@@ -55,11 +55,13 @@ export interface MountOptions {
    * actors — only suitable for local dev.
    */
   resolveActor?: (req: Req) => ResolvedActor | null | Promise<ResolvedActor | null>;
+  authorizeInvocation?: (input: { resolved: ResolvedActor; plugin: string; tool: string; params: Record<string, unknown> }) => { allowed: true } | { allowed: false; status?: number; error: string } | Promise<{ allowed: true } | { allowed: false; status?: number; error: string }>;
+  onSuccessfulInvocation?: (input: { resolved: ResolvedActor; plugin: string; tool: string; params: Record<string, unknown>; data: unknown }) => void | Promise<void>;
 }
 
 export async function mountTechitApi(app: App, base = '/api', opts: MountOptions = {}): Promise<void> {
   const svc = await getTechitService();
-  const { resolveActor } = opts;
+  const { resolveActor, authorizeInvocation, onSuccessfulInvocation } = opts;
 
   async function gate(req: Req, res: Res): Promise<ResolvedActor | null> {
     if (!resolveActor) {
@@ -120,7 +122,16 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
       res.status(400).json({ ok: false, error: { code: 'invalid_input', error: 'plugin and tool are required' } });
       return;
     }
-    const result = await svc.invoke(plugin, tool, params ?? {}, resolved.actor);
+    const normalizedParams = params && typeof params === 'object' && !Array.isArray(params) ? params as Record<string, unknown> : {};
+    if (authorizeInvocation) {
+      const decision = await authorizeInvocation({ resolved, plugin, tool, params: normalizedParams });
+      if (!decision.allowed) {
+        res.status(decision.status || 403).json({ ok: false, error: { code: 'permission_denied', error: decision.error } });
+        return;
+      }
+    }
+    const result = await svc.invoke(plugin, tool, normalizedParams, resolved.actor);
+    if (result.ok && onSuccessfulInvocation) await onSuccessfulInvocation({ resolved, plugin, tool, params: normalizedParams, data: result.data });
     res.json(result);
   });
 

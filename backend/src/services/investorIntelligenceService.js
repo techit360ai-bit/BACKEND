@@ -38,7 +38,8 @@ function projectActivity(db, projectId, project) {
   const events = [...rows(db, 'projectActivities'), ...rows(db, 'startupActivities'), ...rows(db, 'recommendationEvents')]
     .filter(row => row.projectId === projectId || row.startupId === projectId)
     .sort((a, b) => isoTime(b.createdAt || b.updatedAt) - isoTime(a.createdAt || a.updatedAt))
-  return { events, lastMeaningfulAt: events[0]?.createdAt || events[0]?.updatedAt || project?.updatedAt || project?.createdAt || null }
+  const codeCommits = events.filter(row => row.type === 'code_commit_pushed' || row.kind === 'code_commit')
+  return { events, codeCommits, lastMeaningfulAt: events[0]?.createdAt || events[0]?.updatedAt || project?.updatedAt || project?.createdAt || null }
 }
 
 function buildStartup(db, investorId, projectId) {
@@ -65,6 +66,7 @@ function buildStartup(db, investorId, projectId) {
     mentorship.rooms.length ? `${mentorship.rooms.length} mentorship room(s)` : null,
     mentorship.tasks.length ? `${mentorship.completedTasks}/${mentorship.tasks.length} mentorship tasks completed` : null,
     activity.lastMeaningfulAt ? `last meaningful activity ${activity.lastMeaningfulAt}` : null,
+    activity.codeCommits.length ? `${activity.codeCommits.length} verified code commit(s) recorded` : null,
   ])
   return {
     startupId: projectId,
@@ -82,6 +84,7 @@ function buildStartup(db, investorId, projectId) {
     mentorship: { rooms: mentorship.rooms.length, activeMentees: mentorship.mentees.filter(row => row.status === 'active').length, tasks: mentorship.tasks.length, completedTasks: mentorship.completedTasks, completion: mentorshipCompletion },
     milestones: { total: milestones.length, completed: completedMilestones, overdue: overdueMilestones },
     lastMeaningfulAt: activity.lastMeaningfulAt,
+    executionEvidence: { verifiedCodeCommits: activity.codeCommits.length, latestCommitAt: activity.codeCommits[0]?.createdAt || null },
     evidence,
     deterministic: true,
   }
