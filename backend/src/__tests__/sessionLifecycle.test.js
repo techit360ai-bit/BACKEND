@@ -10,10 +10,10 @@ function req() { return { ip: '127.0.0.1', get(name) { return name === 'user-age
 
 describe('persistent session lifecycle', () => {
   let db
-  beforeEach(() => { process.env.JWT_SECRET = TEST_SECRET; db = { users: [{ id: 'u1', email: 'a@example.com' }], profiles: [{ id: 'u1', role: 'founder' }], userSessions: [], authSecurityEvents: [] }; readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => { const result = fn(db); writeDb(db); return result }) })
+  beforeEach(() => { process.env.JWT_SECRET = TEST_SECRET; db = { users: [{ id: 'u1', email: 'a@example.com' }], profiles: [{ id: 'u1', role: 'founder', firstName: 'Ada', lastName: 'Okafor', username: 'ada', isVerified: true, credibilityScore: 72 }], subscriptions: [{ id: 'sub-1', userId: 'u1', status: 'active', planName: 'Pro' }], userSessions: [], authSecurityEvents: [] }; readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => { const result = fn(db); writeDb(db); return result }) })
   it('issues a session-bound access token and rotates refresh credentials', () => {
     const issued = issueSession(db.users[0], db.profiles[0], req()); expect(issued.session.sessionIdentifier).toBeTruthy(); expect(db.userSessions).toHaveLength(1)
-    const claims = jwt.verify(issued.accessToken, TEST_SECRET); expect(claims.sid).toBe(issued.session.sessionIdentifier); expect(validateSessionBinding(claims).valid).toBe(true)
+    const claims = jwt.verify(issued.accessToken, TEST_SECRET); expect(claims.sid).toBe(issued.session.sessionIdentifier); expect(claims).toMatchObject({ name: 'Ada Okafor', username: 'ada', verified: true, subscriber: true, credibility_score: 72, subscription_tier: 'Pro' }); expect(validateSessionBinding(claims).valid).toBe(true)
     const rotated = rotateSession(issued.refreshToken, req()); expect(rotated.ok).toBe(true); expect(rotated.refreshToken).not.toBe(issued.refreshToken); const replay = rotateSession(issued.refreshToken, req()); expect(replay.error).toBe('refresh_token_reuse_detected'); expect(db.userSessions[0].revokedAt).toBeTruthy()
   })
   it('lists device sessions and revokes every session', () => {

@@ -46,11 +46,24 @@ func SanitizeAudience(aud []string) []string {
 
 // User is the minimal identity record, upserted from JWT claims on first connect.
 type User struct {
-	ID          string
-	DisplayName string
-	AvatarURL   string
-	Role        string
-	CreatedAt   time.Time
+	ID               string
+	DisplayName      string
+	Username         string
+	AvatarURL        string
+	Role             string
+	Verified         bool
+	Subscriber       bool
+	SubscriptionTier string
+	CredibilityScore int
+	IdentityPresent  bool
+	CreatedAt        time.Time
+}
+
+type Mention struct {
+	UserID   string `json:"userId"`
+	Username string `json:"username"`
+	Start    int    `json:"start"`
+	End      int    `json:"end"`
 }
 
 // Message is a DM or channel message. Exactly one of ConversationID / ChannelID
@@ -62,6 +75,7 @@ type Message struct {
 	SenderID       string
 	Type           string
 	Body           string
+	Mentions       []Mention
 	CreatedAt      time.Time
 }
 
@@ -76,20 +90,30 @@ const (
 
 // Conversation is a 1:1 DM (exactly two participants in Phase 1).
 type Conversation struct {
-	ID        string
-	CreatedAt time.Time
+	ID            string
+	InitiatedBy   string
+	RequestStatus string
+	CreatedAt     time.Time
 }
 
 // ConvSummary is a read-model row for the DM list: the other participant, the
 // last message, and the unread count for the requesting user.
 type ConvSummary struct {
-	ConversationID string
-	OtherUserID    string
-	OtherName      string
-	LastBody       string
-	LastTS         time.Time
-	LastMsgID      string
-	Unread         int
+	ConversationID        string
+	OtherUserID           string
+	OtherName             string
+	OtherUsername         string
+	OtherAvatarURL        string
+	OtherRole             string
+	OtherVerified         bool
+	OtherSubscriber       bool
+	OtherCredibilityScore int
+	RequestStatus         string
+	InitiatedBy           string
+	LastBody              string
+	LastTS                time.Time
+	LastMsgID             string
+	Unread                int
 }
 
 // Channel is a group/Hangout channel.
@@ -102,20 +126,21 @@ type Channel struct {
 
 // Post is a social-feed post.
 type Post struct {
-	ID         string
-	AuthorID   string
-	AuthorRole string
-	Audience   []string
-	Kind       string
-	Body       string
-	CreatedAt  time.Time
-	ExpiresAt *time.Time
-	ContentFingerprint string
-	ModerationStatus string
-	AbuseScore int
+	ID                   string
+	AuthorID             string
+	AuthorRole           string
+	Audience             []string
+	Kind                 string
+	Body                 string
+	Mentions             []Mention
+	CreatedAt            time.Time
+	ExpiresAt            *time.Time
+	ContentFingerprint   string
+	ModerationStatus     string
+	AbuseScore           int
 	RecommendationReason string
-	MatchedSignals []string
-	RankingVersion string
+	MatchedSignals       []string
+	RankingVersion       string
 }
 
 // Comment is a comment on a Post.
@@ -124,6 +149,7 @@ type Comment struct {
 	PostID    string
 	AuthorID  string
 	Body      string
+	Mentions  []Mention
 	CreatedAt time.Time
 }
 
@@ -131,6 +157,8 @@ type Comment struct {
 type UserStore interface {
 	Upsert(ctx context.Context, u User) error
 	Get(ctx context.Context, id string) (User, error)
+	GetByUsername(ctx context.Context, username string) (User, error)
+	Search(ctx context.Context, query, excludeUserID string, limit int) ([]User, error)
 }
 
 // ConversationStore manages 1:1 conversations and read cursors.
@@ -138,6 +166,10 @@ type ConversationStore interface {
 	// GetOrCreateDM returns the existing conversation between the two users or
 	// creates one. The returned bool is true if newly created.
 	GetOrCreateDM(ctx context.Context, userA, userB string) (Conversation, bool, error)
+	GetOrCreateDMRequest(ctx context.Context, userA, userB, initiatedBy, requestStatus string) (Conversation, bool, error)
+	FindDM(ctx context.Context, userA, userB string) (Conversation, error)
+	Get(ctx context.Context, convID string) (Conversation, error)
+	SetRequestStatus(ctx context.Context, convID, status string) error
 	// Participants returns the user IDs in a conversation.
 	Participants(ctx context.Context, convID string) ([]string, error)
 	// IsParticipant reports whether userID belongs to convID.
@@ -165,6 +197,7 @@ type MessageStore interface {
 	ExistsByClientMsgID(ctx context.Context, convID, senderID, clientMsgID string) (string, bool, error)
 	// BelongsToConversation reports whether msgID is a message in convID.
 	BelongsToConversation(ctx context.Context, msgID, convID string) (bool, error)
+	CountByConversationSender(ctx context.Context, convID, senderID string) (int, error)
 }
 
 // ChannelStore manages group channels, membership, and read cursors.
@@ -204,6 +237,7 @@ type PostStore interface {
 	SetPostFeedback(ctx context.Context, postID, userID, feedback string) error
 	FollowUser(ctx context.Context, followerID, followeeID string, following bool) error
 	IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error)
+	HasCreatorControl(ctx context.Context, userID, creatorID, control string) (bool, error)
 	RecordFeedEvent(ctx context.Context, event FeedEvent) error
 	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
 	FollowedUserIDs(ctx context.Context, userID string) ([]string, error)
@@ -222,11 +256,32 @@ type PostStore interface {
 	PostInteractionCount(ctx context.Context, userID, postID string) (int, error)
 }
 
-type FeedEvent struct { ID, UserID, PostID, EventType string; Metadata []byte; CreatedAt time.Time }
-type RankingDecision struct { ID, UserID, PostID, Category, RankingVersion, Variant string; Score float64; Signals []string; CreatedAt time.Time }
-type ModerationReview struct { PostID, Status, Reason, ReviewerID string; AbuseScore int; CreatedAt, ReviewedAt time.Time }
-type DiscoveryProfile struct { UserID, Location string; Skills, Industries, Interests []string; Credibility, StartupQuality, ContributionScore float64 }
-type RankingMetrics struct { Variant string; Decisions, Impressions, Opens, Saves, Shares int; AverageScore float64 }
+type FeedEvent struct {
+	ID, UserID, PostID, EventType string
+	Metadata                      []byte
+	CreatedAt                     time.Time
+}
+type RankingDecision struct {
+	ID, UserID, PostID, Category, RankingVersion, Variant string
+	Score                                                 float64
+	Signals                                               []string
+	CreatedAt                                             time.Time
+}
+type ModerationReview struct {
+	PostID, Status, Reason, ReviewerID string
+	AbuseScore                         int
+	CreatedAt, ReviewedAt              time.Time
+}
+type DiscoveryProfile struct {
+	UserID, Location                               string
+	Skills, Industries, Interests                  []string
+	Credibility, StartupQuality, ContributionScore float64
+}
+type RankingMetrics struct {
+	Variant                                      string
+	Decisions, Impressions, Opens, Saves, Shares int
+	AverageScore                                 float64
+}
 
 // Router delivers a server->client envelope to a user's live connections.
 // Implemented by the hub in Plan 2; the messaging service depends only on this.

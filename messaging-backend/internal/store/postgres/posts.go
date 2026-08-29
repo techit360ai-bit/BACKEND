@@ -23,8 +23,9 @@ func (s *PostStore) CreatePost(ctx context.Context, p store.Post) error {
 	if role == "" {
 		role = "community"
 	}
-	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint, moderation_status, abuse_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE(NULLIF($10,''),'visible'),$11)`,
-		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, p.CreatedAt, p.ExpiresAt, p.ContentFingerprint, p.ModerationStatus, p.AbuseScore)
+	mentions, _ := json.Marshal(p.Mentions)
+	_, err := s.pool.Exec(ctx, `INSERT INTO posts (id, author_id, author_role, audience, kind, body, mentions, created_at, expires_at, content_fingerprint, moderation_status, abuse_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,COALESCE(NULLIF($11,''),'visible'),$12)`,
+		p.ID, p.AuthorID, role, aud, p.Kind, p.Body, mentions, p.CreatedAt, p.ExpiresAt, p.ContentFingerprint, p.ModerationStatus, p.AbuseScore)
 	return err
 }
 
@@ -42,7 +43,7 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint, moderation_status, abuse_score FROM posts`
+	q := `SELECT id, author_id, author_role, audience, kind, body, mentions, created_at, expires_at, content_fingerprint, moderation_status, abuse_score FROM posts`
 	// Expired opportunities/posts are never eligible for discovery. Posts with
 	// no expiry remain valid indefinitely.
 	conds := []string{"(expires_at IS NULL OR expires_at > now())", "moderation_status <> 'blocked'", "abuse_score < 5"}
@@ -70,9 +71,11 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	var out []store.Post
 	for rows.Next() {
 		var p store.Post
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore); err != nil {
+		var mentions []byte
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &mentions, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal(mentions, &p.Mentions)
 		out = append(out, p)
 	}
 	return out, rows.Err()
@@ -95,13 +98,14 @@ func (s *PostStore) LikeCount(ctx context.Context, postID string) (int, error) {
 }
 
 func (s *PostStore) AddComment(ctx context.Context, c store.Comment) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO post_comments (id, post_id, author_id, body, created_at) VALUES ($1,$2,$3,$4,$5)`,
-		c.ID, c.PostID, c.AuthorID, c.Body, c.CreatedAt)
+	mentions, _ := json.Marshal(c.Mentions)
+	_, err := s.pool.Exec(ctx, `INSERT INTO post_comments (id, post_id, author_id, body, mentions, created_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		c.ID, c.PostID, c.AuthorID, c.Body, mentions, c.CreatedAt)
 	return err
 }
 
 func (s *PostStore) ListComments(ctx context.Context, postID string) ([]store.Comment, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, post_id, author_id, body, created_at FROM post_comments WHERE post_id=$1 ORDER BY id`, postID)
+	rows, err := s.pool.Query(ctx, `SELECT id, post_id, author_id, body, mentions, created_at FROM post_comments WHERE post_id=$1 ORDER BY id`, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -109,9 +113,11 @@ func (s *PostStore) ListComments(ctx context.Context, postID string) ([]store.Co
 	var out []store.Comment
 	for rows.Next() {
 		var c store.Comment
-		if err := rows.Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &c.CreatedAt); err != nil {
+		var mentions []byte
+		if err := rows.Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &mentions, &c.CreatedAt); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal(mentions, &c.Mentions)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -127,13 +133,19 @@ func (s *PostStore) PostExists(ctx context.Context, postID string) (bool, error)
 }
 
 func (s *PostStore) SavePost(ctx context.Context, postID, userID string, saved bool) error {
-	if saved { _, err := s.pool.Exec(ctx, `INSERT INTO feed_post_saves (post_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, postID, userID); return err }
-	_, err := s.pool.Exec(ctx, `DELETE FROM feed_post_saves WHERE post_id=$1 AND user_id=$2`, postID, userID); return err
+	if saved {
+		_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_saves (post_id,user_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, postID, userID)
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_post_saves WHERE post_id=$1 AND user_id=$2`, postID, userID)
+	return err
 }
 
 func (s *PostStore) SetPostFeedback(ctx context.Context, postID, userID, feedback string) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_feedback (post_id,user_id,feedback) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING` , postID, userID, feedback)
-	if err != nil { return err }
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_post_feedback (post_id,user_id,feedback) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, postID, userID, feedback)
+	if err != nil {
+		return err
+	}
 	if feedback == "report" {
 		_, err = s.pool.Exec(ctx, `UPDATE posts SET abuse_score = abuse_score + 1, moderation_status = CASE WHEN abuse_score + 1 >= 5 THEN 'blocked' WHEN abuse_score + 1 >= 3 THEN 'pending_review' ELSE moderation_status END WHERE id=$1`, postID)
 	}
@@ -141,28 +153,70 @@ func (s *PostStore) SetPostFeedback(ctx context.Context, postID, userID, feedbac
 }
 
 func (s *PostStore) FollowUser(ctx context.Context, followerID, followeeID string, following bool) error {
-	if following { _, err := s.pool.Exec(ctx, `INSERT INTO feed_follows (follower_id,followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, followerID, followeeID); return err }
-	_, err := s.pool.Exec(ctx, `DELETE FROM feed_follows WHERE follower_id=$1 AND followee_id=$2`, followerID, followeeID); return err
+	if following {
+		_, err := s.pool.Exec(ctx, `INSERT INTO feed_follows (follower_id,followee_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, followerID, followeeID)
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_follows WHERE follower_id=$1 AND followee_id=$2`, followerID, followeeID)
+	return err
 }
-func (s *PostStore) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) { var exists bool; err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feed_follows WHERE follower_id=$1 AND followee_id=$2)`, followerID, followeeID).Scan(&exists); return exists, err }
+func (s *PostStore) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feed_follows WHERE follower_id=$1 AND followee_id=$2)`, followerID, followeeID).Scan(&exists)
+	return exists, err
+}
+func (s *PostStore) HasCreatorControl(ctx context.Context, userID, creatorID, control string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM feed_creator_controls WHERE user_id=$1 AND creator_id=$2 AND control=$3)`, userID, creatorID, control).Scan(&exists)
+	return exists, err
+}
 
 func (s *PostStore) RecordFeedEvent(ctx context.Context, event store.FeedEvent) error {
-	_, err := s.pool.Exec(ctx, `INSERT INTO feed_events (id,user_id,post_id,event_type,metadata,created_at) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6)`, event.ID, event.UserID, event.PostID, event.EventType, event.Metadata, event.CreatedAt); return err
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_events (id,user_id,post_id,event_type,metadata,created_at) VALUES ($1,$2,NULLIF($3,'')::uuid,$4,$5,$6)`, event.ID, event.UserID, event.PostID, event.EventType, event.Metadata, event.CreatedAt)
+	return err
 }
 
 func (s *PostStore) SuppressedPostIDs(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT DISTINCT p.id FROM posts p LEFT JOIN feed_creator_controls c ON c.creator_id=p.author_id AND c.user_id=$1 WHERE (EXISTS (SELECT 1 FROM feed_post_feedback f WHERE f.post_id=p.id AND f.user_id=$1 AND f.feedback IN ('hide','not_interested','block')) OR c.control IS NOT NULL)`, userID); if err != nil { return nil, err }; defer rows.Close()
-	var out []string; for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { return nil, err }; out = append(out, id) }; return out, rows.Err()
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT p.id FROM posts p LEFT JOIN feed_creator_controls c ON c.creator_id=p.author_id AND c.user_id=$1 WHERE (EXISTS (SELECT 1 FROM feed_post_feedback f WHERE f.post_id=p.id AND f.user_id=$1 AND f.feedback IN ('hide','not_interested','block')) OR c.control IS NOT NULL)`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (s *PostStore) FollowedUserIDs(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT followee_id FROM feed_follows WHERE follower_id=$1`, userID); if err != nil { return nil, err }; defer rows.Close()
-	var out []string; for rows.Next() { var id string; if err := rows.Scan(&id); err != nil { return nil, err }; out = append(out, id) }; return out, rows.Err()
+	rows, err := s.pool.Query(ctx, `SELECT followee_id FROM feed_follows WHERE follower_id=$1`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (s *PostStore) SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error {
-	if enabled { _, err := s.pool.Exec(ctx, `INSERT INTO feed_creator_controls (user_id,creator_id,control) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, userID, creatorID, control); return err }
-	_, err := s.pool.Exec(ctx, `DELETE FROM feed_creator_controls WHERE user_id=$1 AND creator_id=$2 AND control=$3`, userID, creatorID, control); return err
+	if enabled {
+		_, err := s.pool.Exec(ctx, `INSERT INTO feed_creator_controls (user_id,creator_id,control) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, userID, creatorID, control)
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `DELETE FROM feed_creator_controls WHERE user_id=$1 AND creator_id=$2 AND control=$3`, userID, creatorID, control)
+	return err
 }
 
 func (s *PostStore) FeedEventCount(ctx context.Context, userID string) (int, error) {
@@ -179,32 +233,106 @@ func (s *PostStore) CreatorPostCount(ctx context.Context, creatorID string) (int
 
 func (s *PostStore) RecordRankingDecisions(ctx context.Context, decisions []store.RankingDecision) error {
 	for _, decision := range decisions {
-		signals, err := json.Marshal(decision.Signals); if err != nil { return err }
-		if _, err := s.pool.Exec(ctx, `INSERT INTO feed_ranking_decisions (id,user_id,post_id,category,ranking_version,variant,score,signals,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, decision.ID, decision.UserID, decision.PostID, decision.Category, decision.RankingVersion, decision.Variant, decision.Score, signals, decision.CreatedAt); err != nil { return err }
+		signals, err := json.Marshal(decision.Signals)
+		if err != nil {
+			return err
+		}
+		if _, err := s.pool.Exec(ctx, `INSERT INTO feed_ranking_decisions (id,user_id,post_id,category,ranking_version,variant,score,signals,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, decision.ID, decision.UserID, decision.PostID, decision.Category, decision.RankingVersion, decision.Variant, decision.Score, signals, decision.CreatedAt); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (s *PostStore) ListRankingDecisions(ctx context.Context, userID string, limit int) ([]store.RankingDecision, error) {
-	if limit <= 0 || limit > 100 { limit = 50 }
-	rows, err := s.pool.Query(ctx, `SELECT id,user_id,post_id,category,ranking_version,variant,score,signals,created_at FROM feed_ranking_decisions WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, userID, limit); if err != nil { return nil, err }; defer rows.Close()
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id,user_id,post_id,category,ranking_version,variant,score,signals,created_at FROM feed_ranking_decisions WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var out []store.RankingDecision
-	for rows.Next() { var d store.RankingDecision; var raw []byte; if err := rows.Scan(&d.ID,&d.UserID,&d.PostID,&d.Category,&d.RankingVersion,&d.Variant,&d.Score,&raw,&d.CreatedAt); err != nil { return nil, err }; if err := json.Unmarshal(raw, &d.Signals); err != nil { d.Signals = nil }; out = append(out, d) }
+	for rows.Next() {
+		var d store.RankingDecision
+		var raw []byte
+		if err := rows.Scan(&d.ID, &d.UserID, &d.PostID, &d.Category, &d.RankingVersion, &d.Variant, &d.Score, &raw, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &d.Signals); err != nil {
+			d.Signals = nil
+		}
+		out = append(out, d)
+	}
 	return out, rows.Err()
 }
 
 func (s *PostStore) ListModerationQueue(ctx context.Context, limit int) ([]store.Post, error) {
-	if limit <= 0 || limit > 100 { limit = 50 }
-	rows, err := s.pool.Query(ctx, `SELECT id,author_id,author_role,audience,kind,body,created_at,expires_at,content_fingerprint,moderation_status,abuse_score FROM posts WHERE moderation_status='pending_review' OR abuse_score > 0 ORDER BY abuse_score DESC, created_at DESC LIMIT $1`, limit); if err != nil { return nil, err }; defer rows.Close()
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `SELECT id,author_id,author_role,audience,kind,body,created_at,expires_at,content_fingerprint,moderation_status,abuse_score FROM posts WHERE moderation_status='pending_review' OR abuse_score > 0 ORDER BY abuse_score DESC, created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var out []store.Post
-	for rows.Next() { var p store.Post; if err := rows.Scan(&p.ID,&p.AuthorID,&p.AuthorRole,&p.Audience,&p.Kind,&p.Body,&p.CreatedAt,&p.ExpiresAt,&p.ContentFingerprint,&p.ModerationStatus,&p.AbuseScore); err != nil { return nil, err }; out = append(out, p) }
+	for rows.Next() {
+		var p store.Post
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
 	return out, rows.Err()
 }
 
-func (s *PostStore) ReviewPost(ctx context.Context, postID, reviewerID, status, reason string) error { _, err := s.pool.Exec(ctx, `UPDATE posts SET moderation_status=$1, moderation_reason=$2, reviewed_by=$3, reviewed_at=now() WHERE id=$4`, status, reason, reviewerID, postID); return err }
-func (s *PostStore) SaveCount(ctx context.Context, postID string) (int, error) { var n int; err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_post_saves WHERE post_id=$1`, postID).Scan(&n); return n, err }
-func (s *PostStore) ShareCount(ctx context.Context, postID string) (int, error) { var n int; err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_events WHERE post_id=$1 AND event_type='share'`, postID).Scan(&n); return n, err }
-func (s *PostStore) GetDiscoveryProfile(ctx context.Context, userID string) (store.DiscoveryProfile, error) { var p store.DiscoveryProfile; p.UserID=userID; err := s.pool.QueryRow(ctx, `SELECT location,skills,industries,interests,credibility,startup_quality,contribution_score FROM feed_discovery_profiles WHERE user_id=$1`, userID).Scan(&p.Location,&p.Skills,&p.Industries,&p.Interests,&p.Credibility,&p.StartupQuality,&p.ContributionScore); if errors.Is(err, pgx.ErrNoRows) { return p,nil }; return p,err }
-func (s *PostStore) UpsertDiscoveryProfile(ctx context.Context, p store.DiscoveryProfile) error { _,err:=s.pool.Exec(ctx, `INSERT INTO feed_discovery_profiles (user_id,location,skills,industries,interests,credibility,startup_quality,contribution_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (user_id) DO UPDATE SET location=EXCLUDED.location,skills=EXCLUDED.skills,industries=EXCLUDED.industries,interests=EXCLUDED.interests,credibility=EXCLUDED.credibility,startup_quality=EXCLUDED.startup_quality,contribution_score=EXCLUDED.contribution_score,updated_at=now()`,p.UserID,p.Location,p.Skills,p.Industries,p.Interests,p.Credibility,p.StartupQuality,p.ContributionScore); return err }
-func (s *PostStore) RankingMetrics(ctx context.Context) ([]store.RankingMetrics,error) { rows,err:=s.pool.Query(ctx, `SELECT d.variant,count(DISTINCT d.id),avg(d.score),count(*) FILTER (WHERE e.event_type='impression'),count(*) FILTER (WHERE e.event_type='open'),count(*) FILTER (WHERE e.event_type='save'),count(*) FILTER (WHERE e.event_type='share') FROM feed_ranking_decisions d LEFT JOIN feed_events e ON e.user_id=d.user_id AND e.post_id=d.post_id AND e.created_at>=d.created_at GROUP BY d.variant`); if err!=nil{return nil,err}; defer rows.Close(); var out []store.RankingMetrics; for rows.Next(){var m store.RankingMetrics;if err:=rows.Scan(&m.Variant,&m.Decisions,&m.AverageScore,&m.Impressions,&m.Opens,&m.Saves,&m.Shares);err!=nil{return nil,err};out=append(out,m)};return out,rows.Err() }
-func (s *PostStore) PostInteractionCount(ctx context.Context, userID, postID string) (int,error) { var n int; err:=s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_events WHERE user_id=$1 AND post_id=$2 AND event_type IN ('open','like','comment','save','share')`,userID,postID).Scan(&n); return n,err }
+func (s *PostStore) ReviewPost(ctx context.Context, postID, reviewerID, status, reason string) error {
+	_, err := s.pool.Exec(ctx, `UPDATE posts SET moderation_status=$1, moderation_reason=$2, reviewed_by=$3, reviewed_at=now() WHERE id=$4`, status, reason, reviewerID, postID)
+	return err
+}
+func (s *PostStore) SaveCount(ctx context.Context, postID string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_post_saves WHERE post_id=$1`, postID).Scan(&n)
+	return n, err
+}
+func (s *PostStore) ShareCount(ctx context.Context, postID string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_events WHERE post_id=$1 AND event_type='share'`, postID).Scan(&n)
+	return n, err
+}
+func (s *PostStore) GetDiscoveryProfile(ctx context.Context, userID string) (store.DiscoveryProfile, error) {
+	var p store.DiscoveryProfile
+	p.UserID = userID
+	err := s.pool.QueryRow(ctx, `SELECT location,skills,industries,interests,credibility,startup_quality,contribution_score FROM feed_discovery_profiles WHERE user_id=$1`, userID).Scan(&p.Location, &p.Skills, &p.Industries, &p.Interests, &p.Credibility, &p.StartupQuality, &p.ContributionScore)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return p, nil
+	}
+	return p, err
+}
+func (s *PostStore) UpsertDiscoveryProfile(ctx context.Context, p store.DiscoveryProfile) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO feed_discovery_profiles (user_id,location,skills,industries,interests,credibility,startup_quality,contribution_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (user_id) DO UPDATE SET location=EXCLUDED.location,skills=EXCLUDED.skills,industries=EXCLUDED.industries,interests=EXCLUDED.interests,credibility=EXCLUDED.credibility,startup_quality=EXCLUDED.startup_quality,contribution_score=EXCLUDED.contribution_score,updated_at=now()`, p.UserID, p.Location, p.Skills, p.Industries, p.Interests, p.Credibility, p.StartupQuality, p.ContributionScore)
+	return err
+}
+func (s *PostStore) RankingMetrics(ctx context.Context) ([]store.RankingMetrics, error) {
+	rows, err := s.pool.Query(ctx, `SELECT d.variant,count(DISTINCT d.id),avg(d.score),count(*) FILTER (WHERE e.event_type='impression'),count(*) FILTER (WHERE e.event_type='open'),count(*) FILTER (WHERE e.event_type='save'),count(*) FILTER (WHERE e.event_type='share') FROM feed_ranking_decisions d LEFT JOIN feed_events e ON e.user_id=d.user_id AND e.post_id=d.post_id AND e.created_at>=d.created_at GROUP BY d.variant`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.RankingMetrics
+	for rows.Next() {
+		var m store.RankingMetrics
+		if err := rows.Scan(&m.Variant, &m.Decisions, &m.AverageScore, &m.Impressions, &m.Opens, &m.Saves, &m.Shares); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+func (s *PostStore) PostInteractionCount(ctx context.Context, userID, postID string) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM feed_events WHERE user_id=$1 AND post_id=$2 AND event_type IN ('open','like','comment','save','share')`, userID, postID).Scan(&n)
+	return n, err
+}

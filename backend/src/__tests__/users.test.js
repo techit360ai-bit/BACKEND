@@ -173,6 +173,7 @@ describe('GET /api/users', () => {
     expect(res.body.users).toEqual([{
       id: 'user-uuid-2',
       name: 'Live Builder',
+      username: null,
       role: 'collaborator',
       title: 'Engineering',
       headline: 'Backend systems',
@@ -190,7 +191,11 @@ describe('GET /api/users', () => {
       industries: ['HealthTech'],
       avatarUrl: '',
       credibilityScore: 81,
+      credibilityLevel: 'high',
       isVerified: true,
+      subscriber: false,
+      subscriptionLabel: null,
+      sharedContext: false,
     }])
     expect(res.body.users[0]).not.toHaveProperty('email')
   })
@@ -198,6 +203,16 @@ describe('GET /api/users', () => {
   it('requires authentication', async () => {
     const res = await request(app).get('/api/users?role=collaborator')
     expect(res.status).toBe(401)
+  })
+
+  it('searches members by human name and returns deterministic messaging identity signals', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', firstName: 'Ada', lastName: 'Okafor', username: 'ada.builds', isVerified: false, credibilityScore: 64 }
+    readDb.mockReturnValue({ users: [BASE_USER, { ...BASE_USER, id: target.id }], profiles: [BASE_PROFILE, target], subscriptions: [{ id: 'sub-1', userId: target.id, status: 'active', planName: 'Pro' }], workspaceMembers: [], organizationMemberships: [], networkEdges: [] })
+    const res = await request(app).get('/api/users?q=ada&limit=10').set('Authorization', `Bearer ${validToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.users).toHaveLength(1)
+    expect(res.body.users[0]).toMatchObject({ id: target.id, name: 'Ada Okafor', username: 'ada.builds', subscriber: true, subscriptionLabel: 'Subscriber', credibilityScore: 64, credibilityLevel: 'established' })
+    expect(res.body.users[0]).not.toHaveProperty('email')
   })
 })
 

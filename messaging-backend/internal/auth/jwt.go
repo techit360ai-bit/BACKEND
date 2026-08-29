@@ -12,9 +12,16 @@ import (
 
 // Claims is the messaging identity extracted from a token.
 type Claims struct {
-	UserID string
-	Name   string
-	Role   string
+	UserID           string
+	Name             string
+	Role             string
+	Username         string
+	AvatarURL        string
+	Verified         bool
+	Subscriber       bool
+	SubscriptionTier string
+	CredibilityScore int
+	IdentityPresent  bool
 }
 
 // Verifier verifies and mints HS256 tokens with a shared secret.
@@ -78,7 +85,19 @@ func (v *Verifier) Verify(token string) (Claims, error) {
 	}
 	name, _ := mc["name"].(string)
 	role, _ := mc["role"].(string)
-	return Claims{UserID: sub, Name: name, Role: role}, nil
+	username, _ := mc["username"].(string)
+	avatarURL, _ := mc["avatar_url"].(string)
+	verified, _ := mc["verified"].(bool)
+	subscriber, _ := mc["subscriber"].(bool)
+	subscriptionTier, _ := mc["subscription_tier"].(string)
+	credibilityScore := 0
+	if raw, ok := mc["credibility_score"].(float64); ok {
+		credibilityScore = int(raw)
+	}
+	_, hasVerified := mc["verified"]
+	_, hasSubscriber := mc["subscriber"]
+	_, hasCredibility := mc["credibility_score"]
+	return Claims{UserID: sub, Name: name, Role: role, Username: username, AvatarURL: avatarURL, Verified: verified, Subscriber: subscriber, SubscriptionTier: subscriptionTier, CredibilityScore: credibilityScore, IdentityPresent: hasVerified || hasSubscriber || hasCredibility || username != ""}, nil
 }
 
 // Mint creates a token valid for 24h (dev/testing only).

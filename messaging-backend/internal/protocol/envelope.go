@@ -36,6 +36,7 @@ const (
 	TypePostNew         = "post.new"
 	TypePostLiked       = "post.liked"
 	TypePostComment     = "post.comment"
+	TypeMentionNew      = "mention.new"
 	TypeQANew           = "qa.new"
 	TypeQAVoted         = "qa.voted"
 	TypeQAResolved      = "qa.resolved"
@@ -60,9 +61,9 @@ type ReadUptoPayload struct {
 
 // CreatePostPayload is the body of a create-post request (REST).
 type CreatePostPayload struct {
-	Kind     string   `json:"kind"`
-	Body     string   `json:"body"`
-	Audience []string `json:"audience,omitempty"`
+	Kind      string   `json:"kind"`
+	Body      string   `json:"body"`
+	Audience  []string `json:"audience,omitempty"`
 	ExpiresAt string   `json:"expiresAt,omitempty"`
 }
 

@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 
@@ -23,10 +24,11 @@ func (s *MessageStore) InsertDM(ctx context.Context, m store.Message, recipientI
 	if clientMsgID != "" {
 		cmid = clientMsgID
 	}
+	mentions, _ := json.Marshal(m.Mentions)
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO messages (id, conversation_id, sender_id, client_msg_id, type, body, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-		m.ID, m.ConversationID, m.SenderID, cmid, m.Type, m.Body, m.CreatedAt); err != nil {
+		INSERT INTO messages (id, conversation_id, sender_id, client_msg_id, type, body, mentions, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+		m.ID, m.ConversationID, m.SenderID, cmid, m.Type, m.Body, mentions, m.CreatedAt); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO message_receipts (message_id, user_id, state) VALUES ($1,$2,'sent')`, m.ID, recipientID); err != nil {
@@ -48,7 +50,7 @@ func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, befor
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, conversation_id, sender_id, type, body, created_at
+	q := `SELECT id, conversation_id, sender_id, type, body, mentions, created_at
 	      FROM messages WHERE conversation_id=$1`
 	args := []any{convID}
 	if before != "" {
@@ -64,12 +66,20 @@ func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, befor
 	var out []store.Message
 	for rows.Next() {
 		var m store.Message
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &m.CreatedAt); err != nil {
+		var raw []byte
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &raw, &m.CreatedAt); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal(raw, &m.Mentions)
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+func (s *MessageStore) CountByConversationSender(ctx context.Context, convID, senderID string) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT count(*) FROM messages WHERE conversation_id=$1 AND sender_id=$2`, convID, senderID).Scan(&count)
+	return count, err
 }
 
 func (s *MessageStore) ExistsByClientMsgID(ctx context.Context, convID, senderID, clientMsgID string) (string, bool, error) {
