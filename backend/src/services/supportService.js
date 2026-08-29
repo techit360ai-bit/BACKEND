@@ -1,7 +1,7 @@
 import { readDb, updateDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
-import { deliverSupportNotification } from './supportNotificationService.js'
+import { deliverSupportNotification, deliverSupportTeamNotification } from './supportNotificationService.js'
 
 const CATEGORIES = new Set(['account', 'billing', 'credits', 'platform', 'projects', 'privacy', 'security', 'other'])
 const STATUSES = new Set(['received', 'triaging', 'processing', 'waiting_for_user', 'escalated', 'resolved', 'closed', 'reopened'])
@@ -14,7 +14,7 @@ const DEFAULT_SLA = {
   low: { firstResponseMinutes: 1440, resolutionMinutes: 7200 },
 }
 
-const SUPPORT_PERMISSIONS = new Set(['support.view', 'support.create', 'support.reply', 'support.assign', 'support.escalate', 'support.resolve', 'support.close', 'support.view_sensitive', 'support.modify_account', 'support.modify_billing', 'support.modify_credits', 'support.view_audit', 'support.manage_sla', 'support.manage_categories', 'support.manage_knowledge_base'])
+const SUPPORT_PERMISSIONS = new Set(['support.view', 'support.create', 'support.reply', 'support.assign', 'support.escalate', 'support.resolve', 'support.close', 'support.reopen', 'support.view_sensitive', 'support.modify_account', 'support.modify_billing', 'support.modify_credits', 'support.view_audit', 'support.view_intelligence', 'support.manage_sla', 'support.manage_categories', 'support.manage_teams', 'support.manage_knowledge_base', 'support.manage_templates', 'support.run_maintenance', 'support.manage_retention'])
 const BUSINESS_DAYS = new Set([1, 2, 3, 4, 5])
 
 export function supportEnabled() {
@@ -27,7 +27,7 @@ function rows(db, name) {
 }
 
 function setting(db, key, fallback) {
-  const row = rows(db, 'supportSettings').find(item => item.key === key)
+  const row = rows(db, 'supportSettings').slice().reverse().find(item => item.key === key)
   return row?.value ?? fallback
 }
 
@@ -107,6 +107,22 @@ function notify(db, userId, content, caseId, type = 'milestone') {
   void deliverSupportNotification({ userId, subject: type === 'comment' ? 'New support response' : 'Support case update', message: content, caseNumber: supportCase?.caseNumber || caseId, eventType: type })
 }
 
+function notifyTeam(db, supportCase, team, content, eventType = 'assignment') {
+  if (!team) return
+  const admins = rows(db, 'adminUsers')
+  const adminIds = new Set(team.memberAdminIds || [])
+  for (const adminId of adminIds) {
+    rows(db, 'notifications').push({ id: createId('notif'), userId: adminId, actorId: 'system', type: `support_${eventType}`, read: false, content, author: 'TechIT Support', linkTo: `/customer-care?case=${encodeURIComponent(supportCase.caseNumber)}`, metadata: { supportCaseId: supportCase.id, team: team.name }, createdAt: nowIso() })
+  }
+  void deliverSupportTeamNotification({ team, adminUsers: admins, subject: subjectForEvent(eventType), message: content, caseNumber: supportCase.caseNumber, eventType })
+}
+
+function subjectForEvent(eventType) {
+  if (eventType === 'escalation') return 'Support case escalated'
+  if (eventType === 'sla') return 'Support SLA alert'
+  return 'Support case assigned'
+}
+
 function publicCase(row) {
   if (!row) return null
   const { internalContext, ...safe } = row
@@ -167,7 +183,10 @@ export function getCase(userId, caseId, admin = false) {
   if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }
   const messages = rows(db, 'supportMessages').filter(row => row.caseId === supportCase.id && (admin || !row.isInternal))
   const events = rows(db, 'supportEvents').filter(row => row.caseId === supportCase.id)
-  return { ok: true, case: publicCase(supportCase), messages, events }
+  const attachments = rows(db, 'supportAttachments').filter(row => row.caseId === supportCase.id).map(({ objectKey, ...safe }) => safe)
+  const feedback = rows(db, 'supportFeedback').find(row => row.caseId === supportCase.id) || null
+  const assignments = rows(db, 'supportAssignments').filter(row => row.caseId === supportCase.id)
+  return { ok: true, case: publicCase(supportCase), messages, events, attachments, feedback, assignments }
 }
 
 export function addMessage(userId, caseId, body = {}, admin = false) {
@@ -188,6 +207,10 @@ export function addMessage(userId, caseId, body = {}, admin = false) {
     supportCase.updatedAt = now
     event(db, supportCase.id, 'support_case_message_received', userId, { senderType: item.senderType, internal: item.isInternal })
     if (admin && !item.isInternal) notify(db, supportCase.userId, `TechIT Support replied to ${supportCase.caseNumber}.`, supportCase.id, 'comment')
+    if (!admin && !item.isInternal && supportCase.assignedTeam) {
+      const team = rows(db, 'supportTeams').find(row => row.id === supportCase.assignedTeam || row.name === supportCase.assignedTeam)
+      if (team) notifyTeam(db, supportCase, team, `New customer message on ${supportCase.caseNumber}: ${item.message}`, 'message')
+    }
     return { ok: true, message: item, case: publicCase(supportCase) }
   })
 }
@@ -209,6 +232,15 @@ export function listAdminCases(filters = {}) {
   return { ok: true, cases: cases.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).map(publicCase) }
 }
 
+export function supportDirectory() {
+  const db = readDb()
+  return {
+    ok: true,
+    admins: rows(db, 'adminUsers').filter(row => row.active !== false).map(row => ({ id: row.id, email: row.email, firstName: row.firstName, lastName: row.lastName, role: row.role })),
+    teams: rows(db, 'supportTeams').filter(row => row.active !== false).map(row => ({ id: row.id, name: row.name, level: row.level, categories: row.categories || [], memberAdminIds: row.memberAdminIds || [], notifyEmail: row.notifyEmail !== false, notifyWhatsapp: row.notifyWhatsapp !== false })),
+  }
+}
+
 export function reopenCase(userId, caseId) {
   return updateDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
@@ -226,6 +258,9 @@ export function saveKnowledgeArticle(adminId, body = {}) { return updateDb(db =>
 
 export function saveTemplate(adminId, body = {}) { return updateDb(db => { const name = text(body.name, 120); const content = text(body.content, 4000); if (!name || !content) return { ok: false, status: 400, error: 'template_name_and_content_required' }; const template = { id: body.id || createId('support_template'), name, content, category: text(body.category, 40) || 'other', active: body.active !== false, updatedBy: adminId, updatedAt: nowIso(), createdAt: body.createdAt || nowIso() }; const existing = rows(db, 'supportTemplates').find(row => row.id === template.id); if (existing) Object.assign(existing, template); else rows(db, 'supportTemplates').push(template); event(db, template.id, 'support_template_updated', adminId, { templateId: template.id }); return { ok: true, template } }) }
 
+export function listTemplates() { const db = readDb(); return { ok: true, templates: rows(db, 'supportTemplates').filter(row => row.active !== false) } }
+export function listKnowledgeBaseAdmin() { const db = readDb(); return { ok: true, articles: rows(db, 'supportKnowledgeBase').filter(row => row.active !== false) } }
+
 export function attachMetadata(userId, caseId, body = {}, admin = false) { return updateDb(db => { const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const name = text(body.name, 180); const contentType = text(body.contentType, 120); const sizeBytes = Number(body.sizeBytes); if (!name || !contentType || !Number.isFinite(sizeBytes) || sizeBytes < 0 || sizeBytes > 10 * 1024 * 1024) return { ok: false, status: 400, error: 'invalid_attachment_metadata' }; const item = { id: createId('support_attachment'), caseId: supportCase.id, name: maskSensitive(name), contentType, sizeBytes, objectKey: null, uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_added', userId, { attachmentId: item.id, sizeBytes }); return { ok: true, attachment: item } }) }
 
 export function initAttachment(userId, caseId, body = {}, admin = false) { const supportCase = readDb().supportCases?.find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const itemId = createId('support_attachment'); const upload = createPrivateUpload({ namespace: 'support', ownerId: supportCase.userId, objectId: itemId, contentType: body.contentType, sizeBytes: body.sizeBytes }); if (!upload.ok) return { ...upload, status: 503 }; return updateDb(db => { const item = { id: itemId, caseId: supportCase.id, name: maskSensitive(text(body.name, 180)), contentType: String(body.contentType || '').toLowerCase(), sizeBytes: Number(body.sizeBytes), objectKey: upload.objectKey, status: 'upload_pending', uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_upload_started', userId, { attachmentId: item.id }); return { ok: true, attachment: item, uploadUrl: upload.uploadUrl, requiredHeaders: upload.requiredHeaders } }) }
@@ -240,14 +275,35 @@ export function updateCase(adminId, caseId, body = {}) {
     const previous = { status: supportCase.status, priority: supportCase.priority, assignedAdminId: supportCase.assignedAdminId, assignedTeam: supportCase.assignedTeam, escalationLevel: supportCase.escalationLevel }
     if (body.status && STATUSES.has(body.status)) supportCase.status = body.status
     if (body.priority && PRIORITIES.has(body.priority)) supportCase.priority = body.priority
-    if (body.assignedAdminId !== undefined) supportCase.assignedAdminId = body.assignedAdminId || null
-    if (body.assignedTeam !== undefined) supportCase.assignedTeam = text(body.assignedTeam, 80) || null
+    if (body.assignedAdminId !== undefined) {
+      const assignedAdminId = text(body.assignedAdminId, 120) || null
+      if (assignedAdminId && rows(db, 'adminUsers').length && !rows(db, 'adminUsers').some(row => row.id === assignedAdminId && row.active !== false)) return { ok: false, status: 400, error: 'assigned_admin_not_found' }
+      supportCase.assignedAdminId = assignedAdminId
+    }
+    if (body.assignedTeam !== undefined) {
+      const assignedTeam = text(body.assignedTeam, 80) || null
+      if (assignedTeam && rows(db, 'supportTeams').length && !rows(db, 'supportTeams').some(row => (row.id === assignedTeam || row.name === assignedTeam) && row.active !== false)) return { ok: false, status: 400, error: 'assigned_team_not_found' }
+      supportCase.assignedTeam = assignedTeam
+    }
     if (body.escalationLevel !== undefined) supportCase.escalationLevel = Math.min(5, Math.max(1, Number(body.escalationLevel) || 1))
     if (body.status === 'resolved') supportCase.resolvedAt = nowIso()
     if (body.status === 'closed') supportCase.closedAt = nowIso()
     supportCase.updatedAt = nowIso()
+    if (previous.assignedAdminId !== supportCase.assignedAdminId || previous.assignedTeam !== supportCase.assignedTeam) {
+      rows(db, 'supportAssignments').push({ id: createId('support_assignment'), caseId: supportCase.id, previousAdminId: previous.assignedAdminId, previousTeam: previous.assignedTeam, adminId: supportCase.assignedAdminId, team: supportCase.assignedTeam, assignedAt: nowIso(), reason: text(body.assignmentReason, 500) || null })
+      const team = rows(db, 'supportTeams').find(row => row.id === supportCase.assignedTeam || row.name === supportCase.assignedTeam)
+      if (team) notifyTeam(db, supportCase, team, `${supportCase.caseNumber} was assigned to ${team.name}.`, 'assignment')
+      const assignedAdmin = rows(db, 'adminUsers').find(row => row.id === supportCase.assignedAdminId && row.active !== false)
+      if (assignedAdmin) notifyTeam(db, supportCase, { name: `${assignedAdmin.firstName || ''} ${assignedAdmin.lastName || ''}`.trim() || assignedAdmin.email, memberAdminIds: [assignedAdmin.id], notificationEmails: [assignedAdmin.email], whatsappNumbers: [assignedAdmin.phone || assignedAdmin.whatsapp] }, `You were assigned ${supportCase.caseNumber}: ${supportCase.subject}`, 'assignment')
+    }
     event(db, supportCase.id, 'support_case_updated', adminId, { previous, next: { status: supportCase.status, priority: supportCase.priority, assignedAdminId: supportCase.assignedAdminId } })
-    if (previous.status !== supportCase.status) notify(db, supportCase.userId, `${supportCase.caseNumber} is now ${supportCase.status.replaceAll('_', ' ')}.`, supportCase.id)
+    if (previous.status !== supportCase.status) {
+      notify(db, supportCase.userId, `${supportCase.caseNumber} is now ${supportCase.status.replaceAll('_', ' ')}.`, supportCase.id)
+      if (supportCase.assignedTeam) {
+        const team = rows(db, 'supportTeams').find(row => row.id === supportCase.assignedTeam || row.name === supportCase.assignedTeam)
+        if (team && ['escalated'].includes(supportCase.status)) notifyTeam(db, supportCase, team, `${supportCase.caseNumber} is now ${supportCase.status.replaceAll('_', ' ')}.`, 'escalation')
+      }
+    }
     return { ok: true, case: publicCase(supportCase) }
   })
 }
@@ -282,7 +338,21 @@ export function configureSupport(adminId, body = {}) {
     if (typeof body.businessHoursEnabled === 'boolean') rows(db, 'supportSettings').push({ key: 'businessHoursEnabled', value: body.businessHoursEnabled, updatedBy: adminId, updatedAt: nowIso() })
     for (const key of ['duplicateCooldownHours', 'resolutionGraceHours', 'retentionDays', 'incidentThreshold']) if (body[key] !== undefined) rows(db, 'supportSettings').push({ key, value: Math.max(1, Number(body[key]) || 1), updatedBy: adminId, updatedAt: nowIso() })
     if (Array.isArray(body.categories)) for (const item of body.categories) { const key = text(item.key, 40).toLowerCase(); if (!key) continue; const current = rows(db, 'supportCategories').find(row => row.key === key); const next = { id: current?.id || createId('support_category'), key, label: text(item.label, 100) || key, exemptFromCooldown: item.exemptFromCooldown === true, active: item.active !== false, updatedBy: adminId, updatedAt: nowIso() }; if (current) Object.assign(current, next); else rows(db, 'supportCategories').push(next) }
-    if (Array.isArray(body.teams)) for (const item of body.teams) { const name = text(item.name, 80); if (!name) continue; const current = rows(db, 'supportTeams').find(row => row.name === name); const next = { id: current?.id || createId('support_team'), name, level: Math.min(5, Math.max(1, Number(item.level) || 1)), categories: Array.isArray(item.categories) ? item.categories.slice(0, 30) : [], active: item.active !== false, updatedBy: adminId, updatedAt: nowIso() }; if (current) Object.assign(current, next); else rows(db, 'supportTeams').push(next) }
+    if (Array.isArray(body.teams)) for (const item of body.teams) {
+      const name = text(item.name, 80); if (!name) continue
+      const current = rows(db, 'supportTeams').find(row => row.id === item.id || row.name === name)
+      const next = {
+        id: current?.id || text(item.id, 120) || createId('support_team'), name,
+        level: Math.min(5, Math.max(1, Number(item.level) || 1)),
+        categories: Array.isArray(item.categories) ? item.categories.slice(0, 30).map(value => text(value, 40)) : [],
+        memberAdminIds: Array.isArray(item.memberAdminIds) ? item.memberAdminIds.slice(0, 100).map(value => text(value, 120)).filter(Boolean) : (current?.memberAdminIds || []),
+        notificationEmails: Array.isArray(item.notificationEmails) ? item.notificationEmails.slice(0, 100).map(value => text(value, 180).toLowerCase()).filter(value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) : (current?.notificationEmails || []),
+        whatsappNumbers: Array.isArray(item.whatsappNumbers) ? item.whatsappNumbers.slice(0, 100).map(value => text(value, 30)).filter(value => /^\+?[1-9]\d{7,19}$/.test(value.replace(/[\s().-]/g, ''))) : (current?.whatsappNumbers || []),
+        notifyEmail: item.notifyEmail !== false, notifyWhatsapp: item.notifyWhatsapp !== false,
+        active: item.active !== false, updatedBy: adminId, updatedAt: nowIso(),
+      }
+      if (current) Object.assign(current, next); else rows(db, 'supportTeams').push(next)
+    }
     event(db, null, 'support_configuration_updated', adminId, { keys: Object.keys(body) })
     return { ok: true, settings: rows(db, 'supportSettings'), sla: rows(db, 'supportSlaPolicies').filter(row => row.active !== false) }
   })
@@ -296,7 +366,7 @@ export function runMaintenance() {
   return updateDb(db => {
     const now = Date.now(); const changed = []; const resolvedGrace = Number(setting(db, 'resolutionGraceHours', 72)) * 3600000
     for (const row of rows(db, 'supportCases')) {
-      if (!['resolved', 'closed'].includes(row.status) && new Date(row.resolutionDueAt).getTime() <= now && row.status !== 'escalated') { row.status = 'escalated'; row.escalationLevel = Math.max(2, Number(row.escalationLevel) || 1); row.escalationStatus = 'sla_breached'; row.updatedAt = nowIso(); event(db, row.id, 'support_case_sla_breached', 'system', { resolutionDueAt: row.resolutionDueAt }); changed.push(row.id) }
+      if (!['resolved', 'closed'].includes(row.status) && new Date(row.resolutionDueAt).getTime() <= now && row.status !== 'escalated') { row.status = 'escalated'; row.escalationLevel = Math.max(2, Number(row.escalationLevel) || 1); row.escalationStatus = 'sla_breached'; row.updatedAt = nowIso(); event(db, row.id, 'support_case_sla_breached', 'system', { resolutionDueAt: row.resolutionDueAt }); const team = rows(db, 'supportTeams').find(teamRow => teamRow.id === row.assignedTeam || teamRow.name === row.assignedTeam); if (team) notifyTeam(db, row, team, `${row.caseNumber} breached its resolution SLA and was escalated.`, 'sla'); changed.push(row.id) }
       if (row.status === 'escalated' && row.escalationStatus === 'sla_breached' && !row.slaBreachNotifiedAt) { row.slaBreachNotifiedAt = nowIso(); notify(db, row.userId, `${row.caseNumber} has been escalated because its resolution SLA was reached.`, row.id) }
       if (row.status === 'resolved' && row.resolvedAt && new Date(row.resolvedAt).getTime() + resolvedGrace <= now) { row.status = 'closed'; row.closedAt = nowIso(); row.updatedAt = nowIso(); event(db, row.id, 'support_case_closed', 'system', { reason: 'resolution_grace_expired' }); notify(db, row.userId, `${row.caseNumber} was closed after the resolution grace period.`, row.id); changed.push(row.id) }
     }

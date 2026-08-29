@@ -23,6 +23,9 @@ import {
   supportPermissionAllowed,
   initAttachment,
   finalizeAttachment,
+  supportDirectory,
+  listKnowledgeBaseAdmin,
+  listTemplates,
 } from '../services/supportService.js'
 import { requestSupportIntelligence } from '../services/aiRouterClient.js'
 import { reconcileEntitlement } from '../services/supportBillingAdapter.js'
@@ -43,23 +46,41 @@ export function userCaseAttachment(req, res) { return sendResult(res, attachMeta
 export function userAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, false), 201) }
 export async function userAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, false)) }
 export function adminCaseList(req, res) { return sendResult(res, listAdminCases(req.query)) }
+export function adminDirectory(_req, res) { return sendResult(res, supportDirectory()) }
 export function adminCaseGet(req, res) { return sendResult(res, getCase(req.user.id, req.params.caseId, true)) }
 export function adminCaseMessage(req, res) { return sendResult(res, addMessage(req.user.id, req.params.caseId, req.body, true), 201) }
 export function adminCaseUpdate(req, res) {
-  const needed = req.body.status === 'resolved' ? 'support.resolve' : req.body.status === 'closed' ? 'support.close' : req.body.status === 'escalated' ? 'support.escalate' : 'support.assign'
+  const needed = req.body.status === 'resolved' ? 'support.resolve' : req.body.status === 'closed' ? 'support.close' : req.body.status === 'escalated' ? 'support.escalate' : req.body.status === 'reopened' ? 'support.reopen' : 'support.assign'
   if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed })
   return sendResult(res, updateCase(req.user.id, req.params.caseId, req.body))
 }
 export function adminOverview(_req, res) { return sendResult(res, supportOverview()) }
 export function adminDiagnostics(req, res) { return sendResult(res, diagnostics(req.user.id, req.params.caseId, true)) }
 export function adminLock(req, res) { return sendResult(res, acquireCaseLock(req.user.id, req.params.caseId)) }
-export function adminConfig(req, res) { return sendResult(res, supportConfiguration()) }
-export function adminConfigUpdate(req, res) { return sendResult(res, configureSupport(req.user.id, req.body)) }
+export function adminConfig(req, res) {
+  const result = supportConfiguration()
+  if (result.ok && !supportPermissionAllowed(req.user, 'support.manage_teams')) result.teams = (result.teams || []).map(({ notificationEmails, whatsappNumbers, ...team }) => team)
+  if (result.ok && !supportPermissionAllowed(req.user, 'support.manage_knowledge_base')) result.knowledgeBase = []
+  if (result.ok && !supportPermissionAllowed(req.user, 'support.manage_templates')) result.templates = []
+  return sendResult(res, result)
+}
+export function adminConfigUpdate(req, res) {
+  const body = req.body || {}
+  const required = new Set()
+  if (body.sla || body.businessHoursEnabled !== undefined || body.duplicateCooldownHours !== undefined || body.resolutionGraceHours !== undefined || body.incidentThreshold !== undefined) required.add('support.manage_sla')
+  if (body.retentionDays !== undefined) required.add('support.manage_retention')
+  if (body.categories) required.add('support.manage_categories')
+  if (body.teams) required.add('support.manage_teams')
+  for (const permission of required) if (!supportPermissionAllowed(req.user, permission)) return res.status(403).json({ error: 'Support permission required', permission })
+  return sendResult(res, configureSupport(req.user.id, body))
+}
 export function adminAnalytics(_req, res) { return sendResult(res, analytics()) }
 export function adminIntelligence(_req, res) { return sendResult(res, intelligenceProjection()) }
 export function adminMaintenance(_req, res) { return sendResult(res, runMaintenance()) }
 export function adminKnowledgeSave(req, res) { return sendResult(res, saveKnowledgeArticle(req.user.id, req.body)) }
 export function adminTemplateSave(req, res) { return sendResult(res, saveTemplate(req.user.id, req.body)) }
+export function adminKnowledgeList(_req, res) { return sendResult(res, listKnowledgeBaseAdmin()) }
+export function adminTemplateList(_req, res) { return sendResult(res, listTemplates()) }
 export function adminAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, true), 201) }
 export function adminAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, true), 201) }
 export async function adminAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, true)) }
