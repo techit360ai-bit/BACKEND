@@ -59,10 +59,13 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware(d.Verifier))
 			r.Post("/conversations", handleCreateConversation(d))
+			r.Get("/users/search", handleSearchUsers(d))
 			r.Get("/conversations", handleListConversations(d))
 			r.Get("/conversations/{id}/messages", handleHistory(d))
 			r.Post("/conversations/{id}/messages", handleRESTSend(d))
 			r.Post("/conversations/{id}/read", handleMarkRead(d))
+			r.Post("/conversations/{id}/request/accept", handleMessageRequestStatus(d, "active"))
+			r.Post("/conversations/{id}/request/decline", handleMessageRequestStatus(d, "declined"))
 			r.Get("/users/online", handleOnline(d))
 
 			r.Get("/channels", handleListChannels(d))
@@ -147,4 +150,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+func writeCodeErr(w http.ResponseWriter, code int, errorCode, message string) {
+	writeJSON(w, code, map[string]string{"error": errorCode, "message": message})
 }

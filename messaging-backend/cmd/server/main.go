@@ -59,8 +59,10 @@ func main() {
 
 	presSvc := presence.New(presence.NewRedisStore(rps.Client()), nil)
 	msgSvc := messaging.New(pg.Conversations, pg.Messages, h)
+	msgSvc.SetUsers(pg.Users)
 	chSvc := channel.New(pg.Channels, h)
 	feedSvc := feed.New(pg.Posts, h)
+	feedSvc.SetUsers(pg.Users)
 	feedSvc.SetCache(feed.NewRedisCache(rps.Client()))
 	demoSvc := demo.New(pg.Demo)
 	qaSvc := qa.New(pg.QA, demoSvc, h)

@@ -74,7 +74,7 @@ func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
 
 	// Upsert identity from claims (a precondition for sending: messages FK to
 	// users). Best-effort but logged — a failure means later sends will error.
-	if err := g.d.Users.Upsert(connCtx, store.User{ID: claims.UserID, DisplayName: claims.Name, Role: claims.Role}); err != nil {
+	if err := g.d.Users.Upsert(connCtx, store.User{ID: claims.UserID, DisplayName: claims.Name, Username: claims.Username, AvatarURL: claims.AvatarURL, Role: claims.Role, Verified: claims.Verified, Subscriber: claims.Subscriber, SubscriptionTier: claims.SubscriptionTier, CredibilityScore: claims.CredibilityScore, IdentityPresent: claims.IdentityPresent}); err != nil {
 		log.Printf("ws: user upsert failed for %s: %v", claims.UserID, err)
 	}
 

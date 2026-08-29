@@ -18,6 +18,10 @@ type ConversationStore struct{ pool *pgxpool.Pool }
 // concurrent creates: INSERT ... ON CONFLICT DO NOTHING means at most one row
 // wins, and the losers fall through to a SELECT. Order-insensitive.
 func (s *ConversationStore) GetOrCreateDM(ctx context.Context, a, b string) (store.Conversation, bool, error) {
+	return s.GetOrCreateDMRequest(ctx, a, b, a, "active")
+}
+
+func (s *ConversationStore) GetOrCreateDMRequest(ctx context.Context, a, b, initiatedBy, requestStatus string) (store.Conversation, bool, error) {
 	lo, hi := a, b
 	if lo > hi {
 		lo, hi = hi, lo
@@ -33,9 +37,9 @@ func (s *ConversationStore) GetOrCreateDM(ctx context.Context, a, b string) (sto
 	newID := uuid.Must(uuid.NewV7()).String()
 	var gotID string
 	err = tx.QueryRow(ctx,
-		`INSERT INTO conversations (id, dm_key) VALUES ($1,$2)
+		`INSERT INTO conversations (id, dm_key, initiated_by, request_status) VALUES ($1,$2,$3,$4)
 		 ON CONFLICT (dm_key) WHERE dm_key IS NOT NULL DO NOTHING
-		 RETURNING id`, newID, dmKey).Scan(&gotID)
+		 RETURNING id`, newID, dmKey, initiatedBy, requestStatus).Scan(&gotID)
 	if err == nil {
 		// We created the conversation: insert both participants exactly once.
 		if _, err := tx.Exec(ctx,
@@ -46,7 +50,7 @@ func (s *ConversationStore) GetOrCreateDM(ctx context.Context, a, b string) (sto
 		if err := tx.Commit(ctx); err != nil {
 			return store.Conversation{}, false, err
 		}
-		return store.Conversation{ID: gotID}, true, nil
+		return store.Conversation{ID: gotID, InitiatedBy: initiatedBy, RequestStatus: requestStatus}, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return store.Conversation{}, false, err
@@ -54,13 +58,47 @@ func (s *ConversationStore) GetOrCreateDM(ctx context.Context, a, b string) (sto
 
 	// Conflict: a conversation for this pair already exists. Participants are
 	// already present from the winning create; just look up the id.
-	if err := tx.QueryRow(ctx, `SELECT id FROM conversations WHERE dm_key=$1`, dmKey).Scan(&gotID); err != nil {
+	var existing store.Conversation
+	if err := tx.QueryRow(ctx, `SELECT id, COALESCE(initiated_by::text,''), request_status, created_at FROM conversations WHERE dm_key=$1`, dmKey).Scan(&existing.ID, &existing.InitiatedBy, &existing.RequestStatus, &existing.CreatedAt); err != nil {
 		return store.Conversation{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Conversation{}, false, err
 	}
-	return store.Conversation{ID: gotID}, false, nil
+	return existing, false, nil
+}
+
+func (s *ConversationStore) FindDM(ctx context.Context, a, b string) (store.Conversation, error) {
+	lo, hi := a, b
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	var c store.Conversation
+	err := s.pool.QueryRow(ctx, `SELECT id,COALESCE(initiated_by::text,''),request_status,created_at FROM conversations WHERE dm_key=$1`, lo+"|"+hi).Scan(&c.ID, &c.InitiatedBy, &c.RequestStatus, &c.CreatedAt)
+	if err != nil {
+		return store.Conversation{}, notFound(err)
+	}
+	return c, nil
+}
+
+func (s *ConversationStore) Get(ctx context.Context, convID string) (store.Conversation, error) {
+	var c store.Conversation
+	err := s.pool.QueryRow(ctx, `SELECT id,COALESCE(initiated_by::text,''),request_status,created_at FROM conversations WHERE id=$1`, convID).Scan(&c.ID, &c.InitiatedBy, &c.RequestStatus, &c.CreatedAt)
+	if err != nil {
+		return store.Conversation{}, notFound(err)
+	}
+	return c, nil
+}
+
+func (s *ConversationStore) SetRequestStatus(ctx context.Context, convID, status string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE conversations SET request_status=$2, accepted_at=CASE WHEN $2='active' THEN now() ELSE accepted_at END, declined_at=CASE WHEN $2='declined' THEN now() ELSE declined_at END WHERE id=$1`, convID, status)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *ConversationStore) Participants(ctx context.Context, convID string) ([]string, error) {
@@ -125,6 +163,8 @@ func (s *ConversationStore) SummariesForUser(ctx context.Context, userID string)
 		SELECT cp.conversation_id,
 		       other.user_id,
 		       COALESCE(u.display_name, ''),
+		       COALESCE(u.username, ''), COALESCE(u.avatar_url,''), COALESCE(u.role,''), u.verified, u.subscriber, u.credibility_score,
+		       c.request_status, COALESCE(c.initiated_by::text,''),
 		       COALESCE(lm.body, ''),
 		       lm.created_at,
 		       COALESCE(lm.id::text, ''),
@@ -133,6 +173,7 @@ func (s *ConversationStore) SummariesForUser(ctx context.Context, userID string)
 		            AND m2.sender_id <> $1
 		            AND (cp.last_read_msg_id IS NULL OR m2.id > cp.last_read_msg_id)) AS unread
 		FROM conversation_participants cp
+		JOIN conversations c ON c.id=cp.conversation_id
 		JOIN conversation_participants other
 		  ON other.conversation_id = cp.conversation_id AND other.user_id <> cp.user_id
 		LEFT JOIN users u ON u.id = other.user_id
@@ -151,7 +192,7 @@ func (s *ConversationStore) SummariesForUser(ctx context.Context, userID string)
 	for rows.Next() {
 		var c store.ConvSummary
 		var lastTS *time.Time
-		if err := rows.Scan(&c.ConversationID, &c.OtherUserID, &c.OtherName, &c.LastBody, &lastTS, &c.LastMsgID, &c.Unread); err != nil {
+		if err := rows.Scan(&c.ConversationID, &c.OtherUserID, &c.OtherName, &c.OtherUsername, &c.OtherAvatarURL, &c.OtherRole, &c.OtherVerified, &c.OtherSubscriber, &c.OtherCredibilityScore, &c.RequestStatus, &c.InitiatedBy, &c.LastBody, &lastTS, &c.LastMsgID, &c.Unread); err != nil {
 			return nil, err
 		}
 		if lastTS != nil {

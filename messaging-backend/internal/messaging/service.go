@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/mentions"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
 )
@@ -20,12 +21,15 @@ var ErrNotParticipant = errors.New("not a participant")
 // ErrMessageNotInConversation is returned when a referenced message does not
 // belong to the conversation it is being acted on within.
 var ErrMessageNotInConversation = errors.New("message not in conversation")
+var ErrMessageRequestPending = errors.New("message request is pending")
+var ErrMessageRequestDeclined = errors.New("message request was declined")
 
 // Service handles DM messaging.
 type Service struct {
 	convos store.ConversationStore
 	msgs   store.MessageStore
 	router store.Router
+	users  store.UserStore
 	now    func() time.Time
 }
 
@@ -33,6 +37,7 @@ type Service struct {
 func New(c store.ConversationStore, m store.MessageStore, r store.Router) *Service {
 	return &Service{convos: c, msgs: m, router: r, now: time.Now}
 }
+func (s *Service) SetUsers(users store.UserStore) { s.users = users }
 
 // AckResult is returned to the sender after a durable write.
 type AckResult struct {
@@ -55,6 +60,25 @@ func (s *Service) SendDM(ctx context.Context, senderID string, p protocol.SendPa
 	}
 	if !ok {
 		return AckResult{}, ErrNotParticipant
+	}
+	conversation, err := s.convos.Get(ctx, p.ConvID)
+	if err != nil {
+		return AckResult{}, err
+	}
+	if conversation.RequestStatus == "declined" {
+		return AckResult{}, ErrMessageRequestDeclined
+	}
+	if conversation.RequestStatus == "pending" {
+		if senderID != conversation.InitiatedBy {
+			return AckResult{}, ErrMessageRequestPending
+		}
+		count, err := s.msgs.CountByConversationSender(ctx, p.ConvID, senderID)
+		if err != nil {
+			return AckResult{}, err
+		}
+		if count > 0 {
+			return AckResult{}, ErrMessageRequestPending
+		}
 	}
 
 	// dedup
@@ -90,6 +114,7 @@ func (s *Service) SendDM(ctx context.Context, senderID string, p protocol.SendPa
 		SenderID:       senderID,
 		Type:           msgType,
 		Body:           p.Body,
+		Mentions:       mentions.Resolve(ctx, s.users, p.Body),
 		CreatedAt:      s.now().UTC(),
 	}
 	// PERSIST BEFORE ACK
@@ -101,7 +126,7 @@ func (s *Service) SendDM(ctx context.Context, senderID string, p protocol.SendPa
 	// route message.new to recipient
 	newEnv := mustEnvelope(protocol.TypeMessageNew, map[string]any{
 		"id": m.ID, "convId": m.ConversationID, "senderId": senderID,
-		"type": m.Type, "body": m.Body, "ts": ack.TS,
+		"type": m.Type, "body": m.Body, "mentions": m.Mentions, "ts": ack.TS,
 	})
 	delivered, err := s.router.RouteToUser(ctx, recipientID, newEnv)
 	if err != nil {
@@ -113,6 +138,9 @@ func (s *Service) SendDM(ctx context.Context, senderID string, p protocol.SendPa
 			"msgId": m.ID, "userId": recipientID, "state": string(store.ReceiptDelivered),
 		})
 		_, _ = s.router.RouteToUser(ctx, senderID, recEnv)
+	}
+	for _, mentionedID := range mentions.UserIDs(m.Mentions, senderID) {
+		_, _ = s.router.RouteToUser(ctx, mentionedID, mustEnvelope(protocol.TypeMentionNew, map[string]any{"entityType": "message", "entityId": m.ID, "conversationId": m.ConversationID, "actorId": senderID, "mentions": m.Mentions}))
 	}
 	return ack, nil
 }

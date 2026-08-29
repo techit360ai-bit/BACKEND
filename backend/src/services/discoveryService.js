@@ -815,6 +815,22 @@ export function recordRecommendationEvent(userId, body = {}) {
     const event = appendPlatformEventInDb(db, { ...body, userId, actorId: userId, eventType })
     if (profile) updateBehaviorSignals(profile, event)
     appendEdge(db, userId, event)
+    if (eventType === 'mention') {
+      const actor = rows(db, 'profiles').find(row => row.id === userId)
+      const targets = [...new Set(Array.isArray(body.metadata?.targetUserIds) ? body.metadata.targetUserIds : [])]
+        .filter(targetId => targetId && targetId !== userId && rows(db, 'profiles').some(row => row.id === targetId))
+        .slice(0, 10)
+      for (const targetId of targets) {
+        const duplicate = rows(db, 'notifications').some(row => row.userId === targetId && row.type === 'mention' && row.metadata?.entityId === event.entityId)
+        if (duplicate) continue
+        rows(db, 'notifications').push({
+          id: createId('notif'), userId: targetId, actorId: userId, type: 'mention', read: false,
+          content: 'mentioned you in a TechIT conversation', author: userName(actor),
+          linkTo: body.metadata?.linkTo || '/feed/notifications',
+          metadata: { entityType: event.entityType, entityId: event.entityId }, createdAt: nowIso(),
+        })
+      }
+    }
     recordActivityInDb(db, userId, eventType, body.surface, body.occurredAt)
     return event
   })

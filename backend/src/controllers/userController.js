@@ -107,6 +107,7 @@ function publicProfile(profile, db, viewerId) {
   return {
     id: profile.id,
     name: userName(profile),
+    username: profile.username || null,
     role: profile.orgName ? profile.orgName : profile.role,
     category: profile.industries?.[0] || profile.investmentFocus?.[0] || 'General',
     stage: profile.startupStage || (profile.isOnboarded ? 'Active' : 'Setup'),
@@ -117,6 +118,13 @@ function publicProfile(profile, db, viewerId) {
     bio: profile.bio || '',
     website: profile.website || profile.portfolioUrl || profile.linkedinUrl || profile.githubUrl || '',
     avatar: profile.avatarUrl || avatarGradient(profile.id),
+    avatarUrl: profile.avatarUrl || '',
+    isVerified: Boolean(profile.isVerified),
+    credibilityScore: boundedNumber(profile.credibilityScore, 0, 100),
+    credibilityLevel: credibilityLevel(profile.credibilityScore),
+    subscriber: activeSubscription(db, profile.id) !== null,
+    subscriptionLabel: activeSubscription(db, profile.id) ? 'Subscriber' : null,
+    sharedContext: sharedPlatformContext(db, viewerId, profile.id),
     isOwnProfile: viewerId === profile.id,
     stats: {
       decay: null,
@@ -128,6 +136,42 @@ function publicProfile(profile, db, viewerId) {
     skills: profile.skills || [],
     recentActivity,
   }
+}
+
+function activeSubscription(db, userId) {
+  return (db.subscriptions || []).find(row => (
+    row.userId === userId && ['active', 'trialing'].includes(String(row.status || '').toLowerCase())
+  )) || null
+}
+
+function credibilityLevel(value) {
+  const score = boundedNumber(value, 0, 100)
+  if (score >= 80) return 'high'
+  if (score >= 50) return 'established'
+  if (score > 0) return 'building'
+  return 'new'
+}
+
+function activeMemberships(db, collectionName, userId, key) {
+  return new Set((db[collectionName] || [])
+    .filter(row => row.userId === userId && !['revoked', 'suspended', 'inactive'].includes(String(row.status || '').toLowerCase()))
+    .map(row => row[key])
+    .filter(Boolean))
+}
+
+function sharedPlatformContext(db, viewerId, candidateId) {
+  if (!viewerId || !candidateId || viewerId === candidateId) return false
+  const viewerWorkspaces = activeMemberships(db, 'workspaceMembers', viewerId, 'workspaceId')
+  const candidateWorkspaces = activeMemberships(db, 'workspaceMembers', candidateId, 'workspaceId')
+  for (const id of viewerWorkspaces) if (candidateWorkspaces.has(id)) return true
+
+  const viewerOrganizations = activeMemberships(db, 'organizationMemberships', viewerId, 'organizationId')
+  const candidateOrganizations = activeMemberships(db, 'organizationMemberships', candidateId, 'organizationId')
+  for (const id of viewerOrganizations) if (candidateOrganizations.has(id)) return true
+
+  const reciprocalConnections = (db.networkEdges || []).filter(edge => edge.type === 'CONNECTS')
+  return reciprocalConnections.some(edge => edge.fromEntityId === viewerId && edge.toEntityId === candidateId)
+    && reciprocalConnections.some(edge => edge.fromEntityId === candidateId && edge.toEntityId === viewerId)
 }
 
 function hasDirectoryRole(profile, role) {
@@ -159,10 +203,12 @@ function safeStringArray(value, maxItems = 24, maxLength = 80) {
   return [...new Set(value.map(item => plainText(item, maxLength)).filter(Boolean))].slice(0, maxItems)
 }
 
-function directoryProfile(profile) {
+function directoryProfile(profile, db, viewerId) {
+  const subscription = activeSubscription(db, profile.id)
   return {
     id: profile.id,
     name: userName(profile),
+    username: profile.username || null,
     role: profile.role || 'collaborator',
     title: profile.title || profile.discipline || '',
     headline: profile.bio || '',
@@ -180,17 +226,30 @@ function directoryProfile(profile) {
     industries: safeStringArray(profile.industries, 12),
     avatarUrl: profile.avatarUrl || '',
     credibilityScore: boundedNumber(profile.credibilityScore, 0, 100),
+    credibilityLevel: credibilityLevel(profile.credibilityScore),
     isVerified: Boolean(profile.isVerified),
+    subscriber: subscription !== null,
+    subscriptionLabel: subscription ? 'Subscriber' : null,
+    sharedContext: sharedPlatformContext(db, viewerId, profile.id),
   }
 }
 
 export function listUsers(req, res) {
   const requestedRole = String(req.query.role || '').trim().toLowerCase()
+  const query = plainText(String(req.query.q || ''), 80).toLowerCase().replace(/^@/, '')
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20) || 20))
   const db = readDb()
   const users = db.profiles
     .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
-    .map(directoryProfile)
+    .filter(profile => {
+      if (!query) return true
+      const haystack = [profile.id, userName(profile), profile.username, profile.title, profile.role, profile.orgName]
+        .filter(Boolean).join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+    .map(profile => directoryProfile(profile, db, req.user.id))
     .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, limit)
   return res.json({ users })
 }
 
