@@ -150,6 +150,7 @@ Recently resolved cases may be reopened. Closed cases are immutable historical r
 
 - Authenticated users can access only their own cases.
 - Admin routes require admin authentication and explicit `support.*` permission.
+- Team assignments fan out in-app notifications and, when configured, email through Resend and WhatsApp through `WHATSAPP_NOTIFICATION_URL`.
 - Internal notes are filtered from customer responses.
 - Sensitive number and email patterns are masked in support text.
 - Attachments use private signed URLs and are finalized through storage validation.
@@ -175,10 +176,14 @@ CLAMAV_HOST=<clamav service>
 RESEND_API_KEY=<resend key>
 FROM_EMAIL=TechIT <verified-domain-sender>
 PUSH_NOTIFICATION_URL=<optional push adapter>
+WHATSAPP_NOTIFICATION_URL=<optional WhatsApp adapter>
+WHATSAPP_NOTIFICATION_SECRET=<shared adapter secret>
 PAYSTACK_SECRET_KEY=<optional provider key>
 FLUTTERWAVE_SECRET_KEY=<optional provider key>
 STRIPE_SECRET_KEY=<optional provider key>
 BACKEND_SUPPORT_MAINTENANCE_URL=https://api.example.com/api/support/internal/maintenance
+WHATSAPP_NOTIFICATION_URL=https://your-notification-adapter.example/whatsapp
+WHATSAPP_NOTIFICATION_SECRET=<shared secret for the adapter>
 ```
 
 Do not put provider keys, payment credentials, card data, CVV, tokens, or passwords into support records.
@@ -225,6 +230,7 @@ GET    /api/support/knowledge-base
 ```text
 GET    /api/support/admin/overview
 GET    /api/support/admin/cases
+GET    /api/support/admin/directory
 GET    /api/support/admin/cases/:caseId
 GET    /api/support/admin/cases/:caseId/diagnostics
 POST   /api/support/admin/cases/:caseId/lock
@@ -240,7 +246,9 @@ GET    /api/support/admin/analytics
 GET    /api/support/admin/intelligence
 POST   /api/support/admin/maintenance/run
 POST   /api/support/admin/knowledge-base
+GET    /api/support/admin/knowledge-base
 POST   /api/support/admin/templates
+GET    /api/support/admin/templates
 ```
 
 ## Testing Completed
@@ -287,4 +295,3 @@ Local implementation is complete and repositories are clean. Production verifica
 - Deployment platform access and approval policies.
 
 The team should not claim production readiness until those external checks pass in the target environment.
-

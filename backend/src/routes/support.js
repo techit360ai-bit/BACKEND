@@ -34,6 +34,9 @@ import {
   userAttachmentFinalize,
   adminAttachmentInit,
   adminAttachmentFinalize,
+  adminDirectory,
+  adminKnowledgeList,
+  adminTemplateList,
 } from '../controllers/supportController.js'
 
 const router = Router()
@@ -55,22 +58,25 @@ router.post('/cases/:caseId/attachments/:attachmentId/finalize', requireAuth, us
 
 router.get('/admin/overview', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminOverview)
 router.get('/admin/cases', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminCaseList)
+router.get('/admin/directory', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminDirectory)
 router.get('/admin/cases/:caseId', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminCaseGet)
 router.get('/admin/cases/:caseId/diagnostics', requireAdminAuth, requireAdmin, requireSupportPermission('support.view_sensitive'), adminDiagnostics)
 router.post('/admin/cases/:caseId/lock', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminLock)
 router.patch('/admin/cases/:caseId', requireAdminAuth, requireAdmin, adminCaseUpdate)
 router.post('/admin/cases/:caseId/messages', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminCaseMessage)
-router.get('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminConfig)
-router.patch('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminConfigUpdate)
+router.get('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminConfig)
+router.patch('/admin/config', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminConfigUpdate)
 router.get('/admin/analytics', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminAnalytics)
-router.get('/admin/intelligence', requireAdminAuth, requireAdmin, requireSupportPermission('support.view'), adminIntelligence)
-router.post('/admin/maintenance/run', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_sla'), adminMaintenance)
+router.get('/admin/intelligence', requireAdminAuth, requireAdmin, requireSupportPermission('support.view_intelligence'), adminIntelligence)
+router.post('/admin/maintenance/run', requireAdminAuth, requireAdmin, requireSupportPermission('support.run_maintenance'), adminMaintenance)
 router.post('/admin/cases/:caseId/attachments', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachment)
 router.post('/admin/cases/:caseId/attachments/init', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachmentInit)
 router.post('/admin/cases/:caseId/attachments/:attachmentId/finalize', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAttachmentFinalize)
 router.post('/admin/cases/:caseId/actions', requireAdminAuth, requireAdmin, adminCorrectiveAction)
 router.post('/admin/knowledge-base', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_knowledge_base'), adminKnowledgeSave)
-router.post('/admin/templates', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_knowledge_base'), adminTemplateSave)
+router.get('/admin/knowledge-base', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_knowledge_base'), adminKnowledgeList)
+router.post('/admin/templates', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_templates'), adminTemplateSave)
+router.get('/admin/templates', requireAdminAuth, requireAdmin, requireSupportPermission('support.manage_templates'), adminTemplateList)
 router.post('/admin/cases/:caseId/ai', requireAdminAuth, requireAdmin, requireSupportPermission('support.reply'), adminAi)
 
 export default router

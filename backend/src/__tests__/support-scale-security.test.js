@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const db = { supportCases: [], supportMessages: [], supportEvents: [], supportAssignments: [], supportFeedback: [], supportSlaPolicies: [], supportCategories: [], supportTeams: [], supportKnowledgeBase: [], supportTemplates: [], supportAuditLogs: [], supportLocks: [], supportAttachments: [], supportIncidents: [], supportIntelligenceSignals: [], supportSettings: [], notifications: [], users: [], profiles: [], subscriptions: [], walletAccounts: [], creditLedger: [], paymentIntents: [], projects: [] }
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
-vi.mock('../services/supportNotificationService.js', () => ({ deliverSupportNotification: vi.fn(async () => ({ ok: true })) }))
+vi.mock('../services/supportNotificationService.js', () => ({ deliverSupportNotification: vi.fn(async () => ({ ok: true })), deliverSupportTeamNotification: vi.fn(async () => ({ ok: true })) }))
 const service = await import('../services/supportService.js')
 
 beforeEach(() => { for (const value of Object.values(db)) if (Array.isArray(value)) value.length = 0 })

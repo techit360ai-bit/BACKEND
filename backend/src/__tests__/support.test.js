@@ -9,7 +9,7 @@ vi.mock('../config/database.js', () => ({
   updateDb: vi.fn(mutator => mutator(db)),
 }))
 
-const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance, initAttachment } = await import('../services/supportService.js')
+const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance, initAttachment, supportDirectory } = await import('../services/supportService.js')
 
 beforeEach(() => {
   for (const key of Object.keys(db)) db[key].length = 0
@@ -55,13 +55,33 @@ describe('customer support cases', () => {
   })
 
   it('supports business-hour configuration, locking, controlled actions, and maintenance', () => {
-    configureSupport('admin-1', { businessHoursEnabled: true, duplicateCooldownHours: 2, resolutionGraceHours: 1, retentionDays: 1, incidentThreshold: 2, teams: [{ name: 'Billing', level: 2, categories: ['billing'] }] })
+    db.adminUsers = [{ id: 'admin-1', email: 'billing@example.com', active: true }]
+    configureSupport('admin-1', { businessHoursEnabled: true, duplicateCooldownHours: 2, resolutionGraceHours: 1, retentionDays: 1, incidentThreshold: 2, teams: [{ name: 'Billing', level: 2, categories: ['billing'], memberAdminIds: ['admin-1'], notificationEmails: ['queue@example.com'], whatsappNumbers: ['+2348012345678'] }] })
     const created = createCase('user-3', { category: 'billing', subject: 'Payment issue', description: 'Payment failed.' })
     expect(created.ok).toBe(true)
     expect(acquireCaseLock('admin-1', created.case.id).ok).toBe(true)
     expect(acquireCaseLock('admin-2', created.case.id).error).toBe('case_locked')
     expect(correctiveAction('admin-1', created.case.id, { action: 'reissue_credits', amount: 10, confirm: true, reason: 'Verified entitlement mismatch' }).ok).toBe(true)
     expect(runMaintenance().ok).toBe(true)
+    expect(supportDirectory().teams[0]).toMatchObject({ name: 'Billing', memberAdminIds: ['admin-1'] })
+  })
+
+  it('records assignment history and rejects unknown assignees', () => {
+    db.adminUsers = [{ id: 'admin-1', email: 'admin@example.com', active: true }]
+    configureSupport('admin-1', { teams: [{ name: 'Engineering', level: 3, categories: ['platform'], memberAdminIds: ['admin-1'] }] })
+    const created = createCase('user-4', { category: 'platform', subject: 'Bug', description: 'Build failed.' })
+    expect(updateCase('admin-1', created.case.id, { assignedTeam: 'Engineering', assignedAdminId: 'admin-1', assignmentReason: 'Platform queue' }).ok).toBe(true)
+    expect(db.supportAssignments).toHaveLength(1)
+    expect(updateCase('admin-1', created.case.id, { assignedAdminId: 'missing' }).error).toBe('assigned_admin_not_found')
+  })
+
+  it('uses the latest configuration value when settings are changed', () => {
+    configureSupport('admin-1', { duplicateCooldownHours: 24 })
+    configureSupport('admin-1', { duplicateCooldownHours: 2 })
+    const first = createCase('user-5', { category: 'other', subject: 'Question', description: 'One' })
+    expect(first.ok).toBe(true)
+    updateCase('admin-1', first.case.id, { status: 'resolved' })
+    expect(createCase('user-5', { category: 'other', subject: 'Question again', description: 'Two' }).error).toBe('case_cooldown')
   })
 
   it('enforces owner isolation, internal note separation, and attachment storage policy', () => {
