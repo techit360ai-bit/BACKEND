@@ -1,0 +1,63 @@
+name: Deploy Node Backend to Render
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: Public Node backend URL
+        required: true
+        default: https://techit-backend.onrender.com
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-node-backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-verify:
+    name: Deploy and verify Explorer signup
+    runs-on: ubuntu-latest
+    env:
+      RENDER_BACKEND_DEPLOY_HOOK: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK }}
+      BACKEND_URL: ${{ inputs.backend_url }}
+    steps:
+      - name: Require dedicated Node backend deploy hook
+        run: |
+          if [ -z "$RENDER_BACKEND_DEPLOY_HOOK" ]; then
+            echo "Add the Node service deploy hook as repository secret RENDER_BACKEND_DEPLOY_HOOK."
+            echo "Do not reuse RENDER_MESSAGING_DEPLOY_HOOK; Render deploy hooks are service-specific."
+            exit 1
+          fi
+
+      - name: Trigger Render deployment
+        run: |
+          status="$(curl --silent --show-error --output /tmp/render-deploy.json --write-out '%{http_code}' --request POST "$RENDER_BACKEND_DEPLOY_HOOK")"
+          cat /tmp/render-deploy.json || true
+          test "$status" -ge 200
+          test "$status" -lt 300
+
+      - name: Wait for current backend contract
+        run: |
+          for attempt in $(seq 1 40); do
+            health_status="$(curl --silent --output /tmp/support-health.json --write-out '%{http_code}' "$BACKEND_URL/api/support/health" || true)"
+            if [ "$health_status" = "200" ]; then
+              cat /tmp/support-health.json
+              exit 0
+            fi
+            echo "Attempt $attempt: backend is not serving the current support contract yet (HTTP $health_status)."
+            sleep 15
+          done
+          echo "Render did not expose the current backend build within 10 minutes."
+          exit 1
+
+      - name: Verify Explorer signup role contract
+        run: |
+          status="$(curl --silent --show-error --output /tmp/explorer-signup.json --write-out '%{http_code}' \
+            --request POST "$BACKEND_URL/api/auth/signup" \
+            --header 'Content-Type: application/json' \
+            --data '{"email":"explorer-deploy-contract@example.invalid","password":"Explorer!123","firstName":"Explorer","lastName":"Contract","role":"explorer"}')"
+          cat /tmp/explorer-signup.json
+          test "$status" = "400"
+          jq -e '.error == "Email must be verified before creating an account"' /tmp/explorer-signup.json
