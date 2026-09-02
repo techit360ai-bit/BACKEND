@@ -1726,14 +1726,29 @@ export function walletList(userId, name) {
 }
 
 export function createPaymentIntent(userId, body) {
-  return updateDb(db => ({ paymentIntent: insertOwned(db, 'paymentIntents', userId, {
-    amount: Number(body.amount || 0),
-    currency: body.currency || 'USD',
-    credits: Number(body.credits || 0),
-    status: 'pending',
-    provider: body.provider || null,
-    idemKey: body.idemKey,
-  }, 'pay', 'userId') }))
+  return updateDb(db => {
+    const idemKey = typeof body.idemKey === 'string' && body.idemKey.trim() ? body.idemKey.trim() : null
+    const existing = idemKey && collection(db, 'paymentIntents').find(row => row.userId === userId && row.idemKey === idemKey)
+    if (existing) return { paymentIntent: existing, idempotent: true }
+    const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
+    const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
+    if (packageId && !pack) return { ok: false, error: 'credit_package_not_found' }
+    if (!packageId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_required' }
+    const amount = pack ? Number(pack.amount ?? pack.price ?? 0) : Number(body.amount || 0)
+    const credits = pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : Number(body.credits || 0)
+    const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
+      packageId: pack?.id || packageId || null,
+      planId: typeof body.planId === 'string' ? body.planId.trim() : null,
+      amount,
+      currency: pack?.currency || body.currency || 'USD',
+      credits,
+      status: 'pending',
+      provider: body.provider || null,
+      idemKey,
+      createdAt: nowIso(),
+    }, 'pay', 'userId')
+    return { paymentIntent }
+  })
 }
 
 export function genericList(userId, name) {

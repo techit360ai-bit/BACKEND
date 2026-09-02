@@ -1,5 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
+import { verifyMfaAssertion } from './mfaService.js'
+import { reserveCapabilityConsumption, settleCapabilityConsumption } from './capabilityConsumptionService.js'
 
 export const ASSURANCE_LEVELS = Object.freeze({
   CLAIMED: 0,
@@ -40,6 +42,8 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'organization.recruit': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.analytics': { roles: ['organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
   'organization.opportunity.create': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED' },
+  'workspace.copilot': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
+  'workspace.advanced_ai': { roles: ['founder', 'collaborator'], assurance: 'PROFILED', funding: 'subscription_or_credits', credits: 5 },
   'mentorship.room.create': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.room.manage': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.application.review': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
@@ -79,7 +83,9 @@ export function availableCredits(db, userId) {
 
 export function subscriptionEntitlement(db, userId) {
   const subscription = activeSubscription(db, userId)
-  return { active: Boolean(subscription), plan: subscription?.plan || subscription?.planId || null, status: subscription?.status || 'none', expiresAt: subscription?.expiresAt || subscription?.currentPeriodEnd || null }
+  const plan = subscription?.plan || subscription?.planId || null
+  const planRecord = collection(db, 'billingPlans').find(row => row.id === plan || row.slug === plan || row.name === plan)
+  return { active: Boolean(subscription), plan, status: subscription?.status || 'none', expiresAt: subscription?.expiresAt || subscription?.currentPeriodEnd || null, entitlements: subscription?.entitlements || planRecord?.entitlements || planRecord?.capabilities || {} }
 }
 
 export function ensureTrustProfile(db, userId, role = null) {
@@ -144,7 +150,7 @@ export function authorizeCapability(userId, capability, context = {}) {
   const verification = (db.verificationProfiles || []).find(row => row.userId === userId && normalizeRole(row.role) === activeRole)
   const verificationExpired = verification?.expiresAt && new Date(verification.expiresAt).getTime() <= Date.now()
   const currentAssurance = verificationExpired ? 'PROFILED' : (verification?.assurance || trust.assuranceByRole?.[activeRole] || legacyAssurance(profile, activeRole))
-  const roles = rolesFor(profile, (db.userRoles || []).filter(row => row.userId === userId && row.active !== false))
+  const roles = rolesFor(profile, (db.userRoles || []).filter(row => row.userId === userId && row.active !== false && row.status !== 'suspended' && row.status !== 'revoked'))
   const risk = (db.riskProfiles || []).find(row => row.userId === userId)?.state || trust.riskState || 'NORMAL'
   const subscription = subscriptionEntitlement(db, userId)
   const credits = availableCredits(db, userId)
@@ -155,6 +161,8 @@ export function authorizeCapability(userId, capability, context = {}) {
   if (policy.funding === 'subscription' && !subscription.active) reasons.push('active_subscription_required')
   if (policy.funding === 'credits' && credits < Number(policy.credits || 0)) reasons.push('credits_required')
   if (policy.funding === 'subscription_or_credits' && !subscription.active && credits < Number(policy.credits || 0)) reasons.push('subscription_or_credits_required')
+  if (subscription.active && subscription.entitlements?.[capability] === false) reasons.push('plan_capability_not_included')
+  if (policy.mfaRequired && !verifyMfaAssertion(userId, context.mfaAssertion)) reasons.push('mfa_required')
   if (context.organizationId) {
     const membership = collection(db, 'organizationMemberships').find(row => row.organizationId === context.organizationId && row.userId === userId && row.status === 'active')
     if (!membership) reasons.push('organization_membership_required')
@@ -163,12 +171,22 @@ export function authorizeCapability(userId, capability, context = {}) {
   return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, requiredCredits: Number(policy.credits || 0), policy }
 }
 
-export function requireCapability(capability, contextFactory = () => ({})) {
+export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
   return (req, res, next) => {
-    const decision = authorizeCapability(req.user.id, capability, contextFactory(req))
+    const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
     void auditCapabilityDecision(decision, req.user.id)
-    if (decision.allowed) { req.capabilityDecision = decision; return next() }
-    return res.status(['active_subscription_required', 'credits_required', 'subscription_or_credits_required'].includes(decision.code) ? 402 : 403).json({ error: decision.code, capability, decision, verification: decision.code === 'verification_required' ? { required: decision.policy?.assurance } : undefined })
+    if (decision.allowed) {
+      req.capabilityDecision = decision
+      if (options.consume) {
+        const key = req.get('idempotency-key') || `${req.user.id}:${capability}:${req.id}`
+        const reservation = reserveCapabilityConsumption(req.user.id, decision, key)
+        if (!reservation.ok) return res.status(['insufficient_credits', 'subscription_allowance_exhausted'].includes(reservation.error) ? 402 : 409).json(reservation)
+        req.capabilityConsumption = reservation.consumption
+        res.on('finish', () => { void settleCapabilityConsumption(reservation.consumption.id, res.statusCode) })
+      }
+      return next()
+    }
+    return res.status(['active_subscription_required', 'credits_required', 'subscription_or_credits_required', 'plan_capability_not_included'].includes(decision.code) ? 402 : 403).json({ error: decision.code, capability, decision, verification: decision.code === 'verification_required' ? { required: decision.policy?.assurance } : undefined })
   }
 }
 

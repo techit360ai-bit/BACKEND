@@ -1,0 +1,20 @@
+import { Router } from 'express'
+import { requireAuth } from '../middlewares/auth.js'
+import { capabilities, creditsEstimate, entitlements, evaluate, forecast, funnel, nextAction, paywall, paywallEvent, paymentFulfill, progress, workflowResume, workflowSave } from '../controllers/tvceController.js'
+
+const router = Router()
+router.use(requireAuth)
+router.get('/capabilities', capabilities)
+router.get('/entitlements', entitlements)
+router.post('/entitlements/check', evaluate)
+router.post('/paywall/evaluate', paywall)
+router.post('/paywall/events', paywallEvent)
+router.post('/credits/estimate', creditsEstimate)
+router.get('/wallet/forecast', forecast)
+router.get('/next-best-action', nextAction)
+router.get('/progress', progress)
+router.get('/analytics/funnel', funnel)
+router.post('/workflow', workflowSave)
+router.post('/workflow/:workflowId/resume', workflowResume)
+router.post('/payments/:paymentId/fulfill', paymentFulfill)
+export default router

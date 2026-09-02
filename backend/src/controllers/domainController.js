@@ -536,7 +536,9 @@ export function walletListGet(req, res) {
 }
 
 export function walletPaymentIntent(req, res) {
-  return created(res, createPaymentIntent(req.user.id, req.body))
+  const result = createPaymentIntent(req.user.id, req.body)
+  if (result?.ok === false) return res.status(400).json(result)
+  return created(res, result)
 }
 
 export function genericListGet(req, res) {

@@ -18,6 +18,7 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey) {
     if (!reservation.ok) return reservation
   }
   return updateDb(db => {
+    if (!Array.isArray(db.capabilityConsumptions)) db.capabilityConsumptions = []
     const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', createdAt: now, updatedAt: now }
     db.capabilityConsumptions.push(consumption); return { ok: true, idempotent: false, consumption }
   })
@@ -33,6 +34,7 @@ export function settleCapabilityConsumption(consumptionId, responseStatus) {
     if (!settlement.ok) return settlement
   }
   return updateDb(db => {
+    if (!Array.isArray(db.capabilityAnalytics)) db.capabilityAnalytics = []
     const row = db.capabilityConsumptions.find(item => item.id === consumptionId)
     row.status = success ? 'settled' : 'released'; row.responseStatus = Number(responseStatus); row.updatedAt = nowIso()
     db.capabilityAnalytics.push({ id: createId('capability_event'), userId: row.userId, capability: row.capability, eventType: success ? 'capability_completed' : 'capability_released', metadata: { fundingSource: row.fundingSource, credits: row.credits, responseStatus }, createdAt: nowIso() })

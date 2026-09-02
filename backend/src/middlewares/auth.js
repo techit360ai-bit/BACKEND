@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
+import { accountEntitlement } from '../services/tvceService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -58,6 +59,7 @@ export function requireAuth(req, res, next) {
     roles: process.env.NODE_ENV === 'test' ? [...new Set([payload.role, ...persistedRoles].filter(Boolean))] : persistedRoles,
     workspaceId: profile?.workspaceId || `user-${user.id}`,
     activeContext: activeContext || { role: activeRole, workspaceId: null, organizationId: null, resourceType: null, resourceId: null },
+    accountEntitlement: accountEntitlement(user.id),
     // Raw platform JWT, so controllers can forward it to ai-router
     // (which verifies the same JWT_SECRET). See aiRouterClient.js.
     token,
