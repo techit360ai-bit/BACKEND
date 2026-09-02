@@ -128,6 +128,74 @@ export function conversionFunnel(userId, period = 'all') {
   return { period, stages: stages.map(stage => ({ stage, count: count(stage) })), totalEvents: events.length, capabilities: [...new Set(events.map(row => row.capability).filter(Boolean))] }
 }
 
+// Admin-only aggregate view over persisted TVCE and billing records. Monetary
+// values are returned in the provider's stored minor-unit convention and are
+// never inferred from mocked UI data.
+export function adminTvceAnalytics(period = 'all') {
+  const db = readDb()
+  const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
+  const inPeriod = row => new Date(row.createdAt || row.updatedAt || 0).getTime() >= since
+  const payments = collection(db, 'paymentIntents').filter(row => row.status === 'successful' && inPeriod(row))
+  const ledger = collection(db, 'creditLedger').filter(inPeriod)
+  const subscriptions = collection(db, 'subscriptions').filter(row => ['active', 'trialing', 'grace_period'].includes(String(row.status || '').toLowerCase()))
+  const entitlements = collection(db, 'accountEntitlements').filter(row => ['active', 'trialing', 'grace_period'].includes(String(row.status || '').toLowerCase()))
+  const paywalls = collection(db, 'paywallEvents').filter(inPeriod)
+  const webhookEvents = collection(db, 'billingWebhookEvents').filter(inPeriod)
+  const workflows = collection(db, 'workflowSnapshots').filter(inPeriod)
+  const paidUsers = new Set([...payments, ...entitlements].map(row => row.userId).filter(Boolean))
+  const creditBuyers = new Set(ledger.filter(row => ['credit_purchase', 'credits_purchased'].includes(row.type) && number(row.deltaCredits ?? row.credits) > 0).map(row => row.userId).filter(Boolean))
+  const subscriptionUsers = new Set(subscriptions.map(row => row.userId).filter(Boolean))
+  const funnelStages = ['PAYWALL_VIEWED', 'VALUE_EXPLANATION_VIEWED', 'CREDIT_OPTION_SELECTED', 'SUBSCRIPTION_OPTION_SELECTED', 'CHECKOUT_STARTED', 'PAYMENT_SUCCESS', 'WORKFLOW_RESUMED', 'OUTCOME_DELIVERED']
+  const eventCount = type => paywalls.filter(row => row.eventType === type).length
+  const capabilityMap = new Map()
+  for (const row of paywalls) {
+    const key = row.capability || 'unknown'
+    const item = capabilityMap.get(key) || { capability: key, paywallViews: 0, paymentSuccesses: 0, workflowResumes: 0, conversionRate: 0 }
+    if (row.eventType === 'PAYWALL_VIEWED') item.paywallViews += 1
+    if (row.eventType === 'PAYMENT_SUCCESS') item.paymentSuccesses += 1
+    if (row.eventType === 'WORKFLOW_RESUMED') item.workflowResumes += 1
+    capabilityMap.set(key, item)
+  }
+  const byRole = new Map()
+  for (const row of paywalls) {
+    const role = row.role || 'unknown'
+    const item = byRole.get(role) || { role, paywallViews: 0, paymentSuccesses: 0, workflowResumes: 0 }
+    if (row.eventType === 'PAYWALL_VIEWED') item.paywallViews += 1
+    if (row.eventType === 'PAYMENT_SUCCESS') item.paymentSuccesses += 1
+    if (row.eventType === 'WORKFLOW_RESUMED') item.workflowResumes += 1
+    byRole.set(role, item)
+  }
+  const cohortMap = new Map()
+  for (const row of [...payments, ...ledger.filter(item => ['credit_purchase', 'credits_purchased'].includes(item.type))]) {
+    const date = new Date(row.createdAt || 0)
+    const cohort = Number.isNaN(date.getTime()) ? 'unknown' : `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+    const item = cohortMap.get(cohort) || { cohort, paidUsers: new Set(), revenue: 0 }
+    if (row.userId) item.paidUsers.add(row.userId)
+    item.revenue += number(row.amount ?? row.amountMinor ?? row.totalAmount)
+    cohortMap.set(cohort, item)
+  }
+  const revenue = payments.reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const creditRevenue = payments.filter(row => number(row.credits) > 0).reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const subscriptionRevenue = revenue - creditRevenue
+  const completedWorkflows = workflows.filter(row => ['resumed', 'completed', 'outcome_delivered'].includes(row.status)).length
+  const dashboard = {
+    generatedAt: nowIso(), period,
+    source: 'persisted_tvce_events',
+    metrics: {
+      successfulPayments: payments.length, totalRevenue: revenue, creditRevenue, subscriptionRevenue,
+      paidAccounts: paidUsers.size, creditBuyers: creditBuyers.size, activeSubscriptions: subscriptionUsers.size,
+      webhookProcessed: webhookEvents.filter(row => ['processed', 'idempotent'].includes(row.status)).length,
+      webhookFailures: webhookEvents.filter(row => row.status === 'failed').length,
+      workflowResumeRate: workflows.length ? Math.round((completedWorkflows / workflows.length) * 1000) / 10 : 0,
+    },
+    funnel: funnelStages.map(stage => ({ stage, count: eventCount(stage) })),
+    cohorts: [...cohortMap.values()].sort((a, b) => a.cohort.localeCompare(b.cohort)).map(row => ({ cohort: row.cohort, paidUsers: row.paidUsers.size, revenue: row.revenue })),
+    roleCohorts: [...byRole.values()].map(row => ({ ...row, conversionRate: row.paywallViews ? Math.round((row.paymentSuccesses / row.paywallViews) * 1000) / 10 : 0 })),
+    capabilityConversion: [...capabilityMap.values()].map(row => ({ ...row, conversionRate: row.paywallViews ? Math.round((row.paymentSuccesses / row.paywallViews) * 1000) / 10 : 0 })),
+  }
+  return dashboard
+}
+
 export function nextBestAction(userId, input = {}) {
   const db = readDb(); const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')

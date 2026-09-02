@@ -27,13 +27,13 @@ the current Backend and frontend branches.
 | 17. Subscription entitlement | Implemented at webhook boundary | Active, trialing, grace-period, cancellation, and subscription-update events are normalized; invoice and provider-specific billing policy fields remain configurable. |
 | 18. Admin controls | Partial | Capability policies remain admin-configurable; a complete TVCE commercial admin UI is not yet present. |
 | 19. Analytics funnel | Implemented at API boundary | Paywall events are persisted and `GET /api/tvce/analytics/funnel` returns stage counts and capability dimensions. |
-| 20. Conversion metrics | Partial | Core event storage and funnel counts exist; admin cohort/revenue reporting remains. |
+| 20. Conversion metrics | Implemented | TVCE admin analytics now aggregates revenue, paid-account, role/capability cohort, webhook, funnel, and workflow-resume metrics from persisted records. |
 | 21. Ethical monetization | Implemented in contract | The paywall exposes real capability/value metadata and preserves work; no fabricated findings are generated. |
 | 22. UI design system | Implemented | The contextual modal uses existing frontend primitives and wallet routing. |
 | 23. Core journeys | Implemented at service boundary | Free-to-paid evaluation, contextual recommendation, payment fulfillment, workflow preservation, and resume are covered; hosted checkout UI remains provider-specific. |
 | 24. Access matrix | Implemented in backend catalog | TVCE catalog entries are machine-readable rather than documentation-only. |
 | 25. API contracts | Implemented | Entitlements, capability evaluation, paywall evaluation/events, estimates, forecast, next action, workflow save/resume, and fulfillment routes are exposed under `/api/tvce`. |
-| 26. Acceptance criteria | Partial | Core authorization, role isolation, provider webhook idempotency, value paywalls, progress, workspace gates, and resume behavior are covered; hosted checkout UX and admin revenue dashboards remain. |
+| 26. Acceptance criteria | Implemented with provider configuration caveat | Core authorization, role isolation, provider webhook idempotency, value paywalls, progress, workspace gates, resume behavior, and admin TVCE reporting are covered. Provider-hosted checkout still requires merchant credentials and frontend checkout configuration. |
 
 ## Account-Level Purchase Rule
 
