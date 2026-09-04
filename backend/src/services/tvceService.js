@@ -1,0 +1,344 @@
+import { createId, nowIso } from '../utils/api.js'
+import { readDb, updateDb } from '../config/database.js'
+import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
+import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
+
+const configuredDefaults = () => {
+  try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
+}
+export const TVCE_FREE_QUOTAS = Object.freeze({ ...(configuredDefaults().freeQuotas || {}) })
+const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
+const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback
+const text = (value, fallback = '') => typeof value === 'string' ? value.trim() : fallback
+
+export const TVCE_CAPABILITIES = Object.freeze([
+  { id: 'IDEA_DIAGNOSTICS_BASIC', category: 'incubation', description: 'Basic idea diagnosis', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'discover' },
+  { id: 'CUSTOMER_VALIDATION_BASIC', category: 'validation', description: 'Basic customer validation', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'validate' },
+  { id: 'MVP_PLANNING_BASIC', category: 'execution', description: 'Basic MVP planning', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
+  { id: 'GSIS_BASIC', category: 'intelligence', description: 'Basic startup intelligence score', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'understand' },
+  { id: 'STARTUP_HEALTH_BASIC', category: 'intelligence', description: 'Basic startup health', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'IDEA_DIAGNOSTICS_ADVANCED', category: 'incubation', description: 'Advanced idea diagnosis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'understand' },
+  { id: 'CUSTOMER_VALIDATION_ADVANCED', category: 'validation', description: 'Advanced customer validation analysis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'validate' },
+  { id: 'WORKSPACE_COPILOT', category: 'workspace', description: 'Workspace Copilot', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
+  { id: 'ADVANCED_WORKSPACE_AI', category: 'workspace', description: 'Advanced workspace AI', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'build' },
+  { id: 'INVESTOR_PUBLIC_DISCOVERY', category: 'investor', description: 'Public startup discovery and basic profiles', requiredRole: 'investor', authorizationCapability: 'investment.opportunity.view', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'discover' },
+  { id: 'INVESTOR_WATCHLIST', category: 'investor', description: 'Limited startup watchlists', requiredRole: 'investor', authorizationCapability: 'investment.opportunity.view', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'discover' },
+  { id: 'INVESTOR_INTELLIGENCE', category: 'investor', description: 'Investor intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'decide' },
+  { id: 'DUE_DILIGENCE_INTELLIGENCE', category: 'investor', description: 'Due diligence intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'due_diligence' },
+  { id: 'PORTFOLIO_INTELLIGENCE', category: 'investor', description: 'Portfolio intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_PROFILE', category: 'organization', description: 'Organization profile and verification', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
+  { id: 'ORGANIZATION_BASIC_DASHBOARD', category: 'organization', description: 'Basic organization dashboard and visibility', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'understand' },
+  { id: 'ORGANIZATION_PROGRAM_SETUP', category: 'organization', description: 'One basic program or cohort setup', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
+  { id: 'ORGANIZATION_BASIC_COHORT', category: 'organization', description: 'Basic cohort and startup visibility', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_BASIC_REPORTING', category: 'organization', description: 'Basic organization reporting', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_MONITORING', category: 'organization', description: 'Advanced organization monitoring', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'COHORT_INTELLIGENCE', category: 'organization', description: 'Cohort intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'MENTOR_INTELLIGENCE', category: 'organization', description: 'Mentor intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+])
+
+const catalogById = id => TVCE_CAPABILITIES.find(item => item.id === id) || null
+const catalogFor = capability => catalogById(capability) || TVCE_CAPABILITIES.find(item => item.id === capability.replace(/\./g, '_').toUpperCase()) || null
+
+function accountEntitlementFor(db, userId) {
+  const direct = collection(db, 'accountEntitlements').find(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+  const subscription = collection(db, 'subscriptions').find(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+  const purchase = collection(db, 'creditLedger').find(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  return { active: Boolean(direct || subscription || purchase), source: direct?.source || (subscription ? 'subscription' : purchase ? 'credits' : null), status: direct?.status || subscription?.status || (purchase ? 'active' : 'none'), purchasedAt: direct?.createdAt || subscription?.createdAt || purchase?.createdAt || null }
+}
+
+function roleFor(db, userId, inputRole) {
+  const profile = collection(db, 'profiles').find(row => row.id === userId)
+  const context = collection(db, 'activeContexts').find(row => row.userId === userId && row.status === 'active')
+  return text(inputRole || context?.role || profile?.activeRole || profile?.role || 'explorer').toLowerCase().replace('organisation', 'organization')
+}
+
+function valueFor(capability, decision, input) {
+  const catalog = decision?.policy || catalogFor(capability)
+  const outcomes = catalog?.valueStatement ? [catalog.valueStatement] : ['Continue the current workflow with the required capability.']
+  return { title: input.goal || catalog?.description || capability, outcomes, workflowStage: input.workflowStage || catalog?.workflowStage || 'execute' }
+}
+
+function freeUsageFor(db, userId, capability, now = Date.now()) {
+  const monthStart = new Date(now)
+  monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0)
+  const from = monthStart.getTime()
+  const consumptions = collection(db, 'capabilityConsumptions').filter(row => row.userId === userId && row.capability === capability && row.fundingSource === 'platform_subsidy' && new Date(row.createdAt || 0).getTime() >= from && ['reserved', 'settled'].includes(row.status))
+  const analytics = collection(db, 'capabilityAnalytics').filter(row => row.userId === userId && row.capability === capability && row.eventType === 'capability_completed' && new Date(row.createdAt || 0).getTime() >= from)
+  return Math.max(consumptions.length, analytics.length)
+}
+
+function quotaFor(db, capability) {
+  return Number(db.tvceConfig?.freeQuotas?.[capability] ?? configuredDefaults().freeQuotas?.[capability] ?? 0) || 0
+}
+
+function commercialFor(db, capability) {
+  const merged = { ...(configuredDefaults().capabilities?.[capability] || {}), ...(db.tvceConfig?.capabilities?.[capability] || {}) }
+  // Older deployments may retain pricing fields. TVCE never returns or uses
+  // those fields; pricing belongs to billing packages and runtime metering.
+  delete merged.creditCost
+  delete merged.credits
+  delete merged.requiredCredits
+  return merged
+}
+
+export function freeTierUsage(userId) {
+  const db = readDb()
+  return Object.keys(TVCE_FREE_QUOTAS).map(capability => { const quota = quotaFor(db, capability); const used = freeUsageFor(db, userId, capability); return { capability, used, quota, remaining: Math.max(0, quota - used), period: 'calendar_month' } })
+}
+
+export function adminCommercialConfig() {
+  const db = readDb()
+  return {
+    freeQuotas: Object.fromEntries(Object.keys(TVCE_FREE_QUOTAS).map(capability => [capability, quotaFor(db, capability)])),
+    capabilities: capabilityCatalog(),
+    plans: collection(db, 'billingPlans').map(row => ({ ...row })),
+    creditPackages: collection(db, 'creditPackages').map(row => ({ ...row })),
+    providers: {
+      stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
+      paystack: Boolean(process.env.PAYSTACK_SECRET_KEY),
+      flutterwave: Boolean(process.env.FLUTTERWAVE_SECRET_KEY && process.env.FLUTTERWAVE_SECRET_HASH),
+      checkoutRedirects: Boolean(process.env.BILLING_SUCCESS_URL && process.env.BILLING_CANCEL_URL),
+    },
+  }
+}
+
+export function updateAdminCommercialConfig(adminId, input = {}) {
+  return updateDb(db => {
+    if (input.freeQuotas && typeof input.freeQuotas === 'object') {
+      for (const [capability, value] of Object.entries(input.freeQuotas)) {
+        if (!(capability in TVCE_FREE_QUOTAS)) continue
+        const quota = Number(value)
+        if (Number.isFinite(quota) && quota >= 0 && quota <= 100000) { db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.freeQuotas = db.tvceConfig.freeQuotas || {}; db.tvceConfig.freeQuotas[capability] = Math.floor(quota) }
+      }
+    }
+    if (Array.isArray(input.plans)) db.billingPlans = input.plans.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+    if (Array.isArray(input.creditPackages)) db.creditPackages = input.creditPackages.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+    if (input.capabilities && typeof input.capabilities === 'object') {
+      db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.capabilities = db.tvceConfig.capabilities || {}
+      for (const [capability, patch] of Object.entries(input.capabilities)) {
+        if (!TVCE_CAPABILITIES.some(item => item.id === capability) || !patch || typeof patch !== 'object') continue
+        const next = { ...(db.tvceConfig.capabilities[capability] || {}) }
+        for (const field of ['valueStatement', 'blockedMessage']) if (typeof patch[field] === 'string' && patch[field].trim()) next[field] = patch[field].trim().slice(0, 500)
+        db.tvceConfig.capabilities[capability] = next
+      }
+    }
+    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined }, createdAt: nowIso() })
+    return { ok: true, config: adminCommercialConfig() }
+  })
+}
+
+export function capabilityCatalog() {
+  const db = readDb()
+  return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
+}
+
+export function accountEntitlement(userId) { return accountEntitlementFor(readDb(), userId) }
+
+export function evaluateEntitlement(userId, input = {}) {
+  const db = readDb()
+  const capability = text(input.capability || input.operation || '')
+  const catalog = catalogFor(capability)
+  const commercial = commercialFor(db, capability)
+  const effectiveCatalog = catalog ? { ...catalog, ...commercial, freeQuota: commercial.freeQuota ?? (quotaFor(db, catalog.id) || undefined) } : null
+  const role = roleFor(db, userId, input.role)
+  const baseCapability = effectiveCatalog?.authorizationCapability || (effectiveCatalog?.requiredRole === 'investor' ? 'investor.intelligence.view' : effectiveCatalog?.requiredRole === 'organization' ? 'organization.analytics' : null)
+  const decision = baseCapability
+    ? authorizeCapability(userId, baseCapability, { role, organizationId: input.organizationId, workspaceId: input.workspaceId })
+    : effectiveCatalog?.requiredRole === 'founder' && role !== 'founder'
+      ? { allowed: false, code: 'role_required', capability }
+      : effectiveCatalog ? { allowed: true, code: 'allowed', capability, funding: effectiveCatalog.metering === 'runtime' ? 'runtime' : 'none', metering: effectiveCatalog.metering || 'none', policy: effectiveCatalog } : { allowed: false, code: 'unknown_capability', capability }
+  const account = accountEntitlementFor(db, userId)
+  const subscription = subscriptionEntitlement(db, userId)
+  const credits = availableCredits(db, userId)
+  const usageEstimate = Math.max(0, number(input.estimatedCredits ?? input.estimated_credits))
+  const freeQuota = effectiveCatalog?.freeQuota || null
+  const freeUsage = freeQuota && catalog ? freeUsageFor(db, userId, catalog.id) : 0
+  const freeQuotaAvailable = Boolean(effectiveCatalog?.freeAccess && (!freeQuota || freeUsage < freeQuota))
+  const funding = effectiveCatalog?.funding || decision.funding || null
+  const metered = effectiveCatalog?.metering === 'runtime' || Boolean(funding)
+  let code = decision.allowed ? 'allowed' : decision.code
+  if (!decision.allowed) code = decision.code
+  else if (freeQuotaAvailable) code = 'allowed'
+  else if (effectiveCatalog?.freeAccess && freeQuota && !freeQuotaAvailable && !subscription.active && credits <= 0 && usageEstimate === 0) code = 'free_allowance_exhausted'
+  else if (funding === 'subscription' && !subscription.active) code = 'active_subscription_required'
+  else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
+  else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
+  const allowed = code === 'allowed'
+  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'SUBSCRIPTION' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
+}
+
+export function evaluatePaywall(userId, input = {}) {
+  const result = evaluateEntitlement(userId, input)
+  if (result.allowed) return { ...result, paywall: false }
+  const db = readDb()
+  const hits = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === result.capability)
+  const repeated = hits.length >= 2
+  const recommendation = repeated || result.role === 'investor' || result.role === 'organization' ? 'SUBSCRIPTION' : result.recommendedAction
+  return { ...result, paywall: true, recommendation, usageEstimateRequired: result.metering === 'runtime', reason: result.code, nextAction: result.value?.workflowStage ? `Continue ${result.value.workflowStage}` : 'Continue workflow' }
+}
+
+export function recordPaywallEvent(userId, input = {}) {
+  return updateDb(db => {
+    const event = { id: createId('paywall'), userId, capability: text(input.capability), eventType: text(input.eventType || 'PAYWALL_VIEWED'), role: roleFor(db, userId, input.role), metadata: input.metadata || {}, createdAt: nowIso() }
+    collection(db, 'paywallEvents').push(event)
+    return { ok: true, event }
+  })
+}
+
+export function estimateCredits(userId, input = {}) {
+  const items = Array.isArray(input.actions) ? input.actions : [input]
+  const estimate = items.reduce((sum, item) => sum + Math.max(0, number(item.estimatedCredits ?? item.estimated_credits)), 0)
+  const available = availableCredits(readDb(), userId)
+  return { userId, estimatedCredits: estimate, actionCount: items.length, isEstimate: true, source: 'runtime_usage_meter', availableCredits: available, covered: estimate > 0 ? available >= estimate : null, estimateProvided: estimate > 0 }
+}
+
+export function walletForecast(userId) {
+  const db = readDb(); const available = availableCredits(db, userId)
+  const workflows = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
+  const projected = workflows.reduce((sum, row) => sum + number(row.estimatedCredits), 0)
+  return { availableCredits: available, workflows: workflows.map(row => ({ id: row.id, name: row.name, estimatedCredits: number(row.estimatedCredits), status: row.status })), projectedRequirement: projected, shortfall: Math.max(0, projected - available), covered: available >= projected, isEstimate: true }
+}
+
+export function progressMeter(userId) {
+  const db = readDb()
+  const owned = name => collection(db, name).filter(row => row.userId === userId || row.ownerId === userId || row.createdBy === userId)
+  const ideas = owned('ventureIntakes').length + owned('projects').length
+  const validation = owned('validationSessions').length + owned('customerValidationSessions').length + owned('customerResponses').length
+  const execution = owned('workspaces').length + owned('workspaceTasks').filter(row => ['completed', 'done'].includes(row.status)).length
+  const investor = owned('investorIntelligenceSnapshots').length + owned('dealRooms').length
+  const score = (value, denominator) => Math.max(0, Math.min(100, Math.round((value / denominator) * 100)))
+  const meter = { ideaClarity: score(ideas, 2), validation: score(validation, 5), executionReadiness: score(execution, 5), investorReadiness: score(investor, 3) }
+  const weakest = Object.entries(meter).sort((a, b) => a[1] - b[1])[0]
+  return { meter, strongestOpportunity: weakest ? weakest[0] : 'ideaClarity', generatedAt: nowIso() }
+}
+
+export function conversionFunnel(userId, period = 'all') {
+  const db = readDb(); const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
+  const events = collection(db, 'paywallEvents').filter(row => row.userId === userId && new Date(row.createdAt || 0).getTime() >= since)
+  const count = type => events.filter(row => row.eventType === type).length
+  const stages = ['PAYWALL_VIEWED', 'VALUE_EXPLANATION_VIEWED', 'CREDIT_OPTION_SELECTED', 'SUBSCRIPTION_OPTION_SELECTED', 'CHECKOUT_STARTED', 'PAYMENT_SUCCESS', 'WORKFLOW_RESUMED', 'OUTCOME_DELIVERED']
+  return { period, stages: stages.map(stage => ({ stage, count: count(stage) })), totalEvents: events.length, capabilities: [...new Set(events.map(row => row.capability).filter(Boolean))] }
+}
+
+// Admin-only aggregate view over persisted TVCE and billing records. Monetary
+// values are returned in the provider's stored minor-unit convention and are
+// never inferred from mocked UI data.
+export function adminTvceAnalytics(period = 'all', options = {}) {
+  const db = readDb()
+  const days = Number(options.days || (period.endsWith('d') ? period.slice(0, -1) : 0))
+  const since = days > 0 ? Date.now() - days * 86400000 : options.from ? new Date(options.from).getTime() : 0
+  const until = options.to ? new Date(options.to).getTime() : Date.now()
+  const inPeriod = row => { const timestamp = new Date(row.createdAt || row.updatedAt || 0).getTime(); return timestamp >= since && timestamp <= until }
+  const payments = collection(db, 'paymentIntents').filter(row => row.status === 'successful' && inPeriod(row))
+  const ledger = collection(db, 'creditLedger').filter(inPeriod)
+  const subscriptions = collection(db, 'subscriptions').filter(row => ['active', 'trialing', 'grace_period'].includes(String(row.status || '').toLowerCase()))
+  const entitlements = collection(db, 'accountEntitlements').filter(row => ['active', 'trialing', 'grace_period'].includes(String(row.status || '').toLowerCase()))
+  const paywalls = collection(db, 'paywallEvents').filter(inPeriod)
+  const webhookEvents = collection(db, 'billingWebhookEvents').filter(inPeriod)
+  const workflows = collection(db, 'workflowSnapshots').filter(inPeriod)
+  const paidUsers = new Set([...payments, ...entitlements].map(row => row.userId).filter(Boolean))
+  const creditBuyers = new Set(ledger.filter(row => ['credit_purchase', 'credits_purchased'].includes(row.type) && number(row.deltaCredits ?? row.credits) > 0).map(row => row.userId).filter(Boolean))
+  const subscriptionUsers = new Set(subscriptions.map(row => row.userId).filter(Boolean))
+  const funnelStages = ['PAYWALL_VIEWED', 'VALUE_EXPLANATION_VIEWED', 'CREDIT_OPTION_SELECTED', 'SUBSCRIPTION_OPTION_SELECTED', 'CHECKOUT_STARTED', 'PAYMENT_SUCCESS', 'WORKFLOW_RESUMED', 'OUTCOME_DELIVERED']
+  const eventCount = type => paywalls.filter(row => row.eventType === type).length
+  const capabilityMap = new Map()
+  for (const row of paywalls) {
+    const key = row.capability || 'unknown'
+    const item = capabilityMap.get(key) || { capability: key, paywallViews: 0, paymentSuccesses: 0, workflowResumes: 0, conversionRate: 0 }
+    if (row.eventType === 'PAYWALL_VIEWED') item.paywallViews += 1
+    if (row.eventType === 'PAYMENT_SUCCESS') item.paymentSuccesses += 1
+    if (row.eventType === 'WORKFLOW_RESUMED') item.workflowResumes += 1
+    capabilityMap.set(key, item)
+  }
+  const byRole = new Map()
+  for (const row of paywalls) {
+    const role = row.role || 'unknown'
+    const item = byRole.get(role) || { role, paywallViews: 0, paymentSuccesses: 0, workflowResumes: 0 }
+    if (row.eventType === 'PAYWALL_VIEWED') item.paywallViews += 1
+    if (row.eventType === 'PAYMENT_SUCCESS') item.paymentSuccesses += 1
+    if (row.eventType === 'WORKFLOW_RESUMED') item.workflowResumes += 1
+    byRole.set(role, item)
+  }
+  const cohortMap = new Map()
+  for (const row of [...payments, ...ledger.filter(item => ['credit_purchase', 'credits_purchased'].includes(item.type))]) {
+    const date = new Date(row.createdAt || 0)
+    const cohort = Number.isNaN(date.getTime()) ? 'unknown' : `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+    const item = cohortMap.get(cohort) || { cohort, paidUsers: new Set(), revenue: 0 }
+    if (row.userId) item.paidUsers.add(row.userId)
+    item.revenue += number(row.amount ?? row.amountMinor ?? row.totalAmount)
+    cohortMap.set(cohort, item)
+  }
+  const revenue = payments.reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const creditRevenue = payments.filter(row => number(row.credits) > 0).reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const subscriptionRevenue = revenue - creditRevenue
+  const completedWorkflows = workflows.filter(row => ['resumed', 'completed', 'outcome_delivered'].includes(row.status)).length
+  const attributed = new Map()
+  for (const row of payments) { const source = row.utmSource || row.source || row.metadata?.source || 'unknown'; const item = attributed.get(source) || { source, payments: 0, revenue: 0, paidUsers: new Set() }; item.payments += 1; item.revenue += number(row.amount ?? row.amountMinor ?? row.totalAmount); if (row.userId) item.paidUsers.add(row.userId); attributed.set(source, item) }
+  const roleRetention = [...byRole.values()].map(row => ({ role: row.role, paywallViews: row.paywallViews, paymentSuccesses: row.paymentSuccesses, conversionRate: row.conversionRate, workflowResumes: row.workflowResumes }))
+  const dashboard = {
+    generatedAt: nowIso(), period,
+    source: 'persisted_tvce_events',
+    metrics: {
+      successfulPayments: payments.length, totalRevenue: revenue, creditRevenue, subscriptionRevenue,
+      paidAccounts: paidUsers.size, creditBuyers: creditBuyers.size, activeSubscriptions: subscriptionUsers.size,
+      webhookProcessed: webhookEvents.filter(row => ['processed', 'idempotent'].includes(row.status)).length,
+      webhookFailures: webhookEvents.filter(row => row.status === 'failed').length,
+      workflowResumeRate: workflows.length ? Math.round((completedWorkflows / workflows.length) * 1000) / 10 : 0,
+    },
+    funnel: funnelStages.map(stage => ({ stage, count: eventCount(stage) })),
+    cohorts: [...cohortMap.values()].sort((a, b) => a.cohort.localeCompare(b.cohort)).map(row => ({ cohort: row.cohort, paidUsers: row.paidUsers.size, revenue: row.revenue, averageRevenuePerAccount: row.paidUsers.size ? row.revenue / row.paidUsers.size : 0 })),
+    roleCohorts: roleRetention,
+    capabilityConversion: [...capabilityMap.values()].map(row => ({ ...row, conversionRate: row.paywallViews ? Math.round((row.paymentSuccesses / row.paywallViews) * 1000) / 10 : 0 })),
+    attribution: [...attributed.values()].map(row => ({ source: row.source, payments: row.payments, revenue: row.revenue, paidUsers: row.paidUsers.size })),
+    drilldown: { payments: payments.slice(-100), paywalls: paywalls.slice(-100), webhooks: webhookEvents.slice(-100), workflows: workflows.slice(-100) },
+  }
+  return dashboard
+}
+
+export function nextBestAction(userId, input = {}) {
+  const db = readDb(); const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
+  const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
+  const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
+  const access = evaluateEntitlement(userId, { capability: catalog.id, role })
+  return { action: catalog.id, reason: input.reason || `Your next valuable step is ${catalog.description}.`, expectedValue: catalog.valueStatement, access: access.allowed ? 'available' : access.recommendation || access.recommendedAction, metering: catalog.metering || 'none', usageEstimateRequired: catalog.metering === 'runtime', subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION', capability: catalog }
+}
+
+export function saveWorkflow(userId, input = {}) {
+  return updateDb(db => {
+    const existing = collection(db, 'workflowSnapshots').find(row => row.userId === userId && row.clientRequestId === input.clientRequestId)
+    if (existing) return { ok: true, idempotent: true, workflow: existing }
+    const workflow = { id: createId('workflow'), userId, clientRequestId: text(input.clientRequestId || createId('request')), name: text(input.name || input.capability || 'TechIT workflow'), capability: text(input.capability), payload: input.payload || {}, estimatedCredits: number(input.estimatedCredits), status: 'pending', createdAt: nowIso(), updatedAt: nowIso() }
+    collection(db, 'workflowSnapshots').push(workflow); return { ok: true, workflow }
+  })
+}
+
+export function resumeWorkflow(userId, workflowId, input = {}) {
+  return updateDb(db => {
+    const workflow = collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId)
+    if (!workflow) return { ok: false, error: 'workflow_not_found' }
+    workflow.status = input.status || 'resumed'; workflow.resumedAt = nowIso(); workflow.updatedAt = workflow.resumedAt; return { ok: true, workflow }
+  })
+}
+
+export function fulfillPayment(userId, paymentId, input = {}) {
+  return updateDb(db => {
+    const payment = collection(db, 'paymentIntents').find(row => row.id === paymentId && row.userId === userId)
+    if (!payment) return { ok: false, error: 'payment_not_found' }
+    if (payment.status === 'successful') return { ok: true, idempotent: true, payment }
+    if (input.verified !== true) return { ok: false, error: 'payment_verification_required' }
+    const now = nowIso(); payment.status = 'successful'; payment.verifiedAt = now; payment.providerReference = text(input.providerReference) || null
+    const credits = Math.max(0, number(payment.credits))
+    if (credits > 0) collection(db, 'creditLedger').push({ id: createId('credit_purchase'), userId, deltaCredits: credits, credits, type: 'credit_purchase', paymentIntentId: payment.id, idempotencyKey: payment.id, createdAt: now })
+    const planId = text(input.planId || payment.planId)
+    if (planId) {
+      const subscription = collection(db, 'subscriptions').find(row => row.userId === userId && row.planId === planId) || { id: createId('subscription'), userId, planId, createdAt: now }
+      Object.assign(subscription, { planId, status: 'active', currentPeriodStart: now, currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(), updatedAt: now })
+      if (!db.subscriptions.includes(subscription)) db.subscriptions.push(subscription)
+    }
+    const account = collection(db, 'accountEntitlements').find(row => row.userId === userId) || { id: createId('account_entitlement'), userId, createdAt: now }
+    Object.assign(account, { status: 'active', source: credits > 0 ? 'credits' : 'subscription', paymentIntentId: payment.id, updatedAt: now }); if (!db.accountEntitlements.includes(account)) db.accountEntitlements.push(account)
+    const workflowId = text(input.workflowId); const workflow = workflowId ? collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId) : null
+    if (workflow) { workflow.status = 'resumed'; workflow.resumedAt = now; workflow.updatedAt = now }
+    return { ok: true, payment, accountEntitlement: account, workflow: workflow || null }
+  })
+}

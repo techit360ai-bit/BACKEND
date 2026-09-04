@@ -647,16 +647,30 @@ export function createEndorsement(userId, body) {
 export function listWorkspaces(userId) {
   const db = readDb()
   const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active')
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  const collaboratorMemberships = memberships.filter(row => String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  const freeCollaboratorWorkspaceId = !paid ? collaboratorMemberships[0]?.workspaceId || null : null
   const membershipByWorkspace = new Map(memberships.map(row => [row.workspaceId, row]))
   const workspaces = collection(db, 'workspaces')
-    .filter(row => row.ownerId === userId || membershipByWorkspace.has(row.id))
+    .filter(row => row.ownerId === userId || (membershipByWorkspace.has(row.id) && (paid || !collaboratorMemberships.length || row.id === freeCollaboratorWorkspaceId)))
     .sort(byNewest)
     .map(workspace => ({
       ...workspace,
       isOwner: workspace.ownerId === userId,
       accessLevel: workspace.ownerId === userId ? 'owner' : membershipByWorkspace.get(workspace.id)?.accessLevel || 'viewer',
     }))
-  return { workspaces }
+  return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: paid, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, memberships.length - workspaces.filter(row => row.ownerId !== userId).length) } }
+}
+
+function freeCollaboratorWorkspaceAllowed(db, userId, workspaceId) {
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  if (paid) return true
+  const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active' && String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  return !memberships.length || memberships[0].workspaceId === workspaceId
 }
 
 function workspaceAccess(db, workspaceId, userId) {
@@ -800,6 +814,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
     }
     const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (!freeCollaboratorWorkspaceAllowed(db, userId, workspace.id)) return { ok: false, error: 'free_collaborator_workspace_limit', limit: 1 }
     const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
       workspaceId: workspace.id,
       projectId: workspace.projectId || null,
@@ -1726,14 +1741,29 @@ export function walletList(userId, name) {
 }
 
 export function createPaymentIntent(userId, body) {
-  return updateDb(db => ({ paymentIntent: insertOwned(db, 'paymentIntents', userId, {
-    amount: Number(body.amount || 0),
-    currency: body.currency || 'USD',
-    credits: Number(body.credits || 0),
-    status: 'pending',
-    provider: body.provider || null,
-    idemKey: body.idemKey,
-  }, 'pay', 'userId') }))
+  return updateDb(db => {
+    const idemKey = typeof body.idemKey === 'string' && body.idemKey.trim() ? body.idemKey.trim() : null
+    const existing = idemKey && collection(db, 'paymentIntents').find(row => row.userId === userId && row.idemKey === idemKey)
+    if (existing) return { paymentIntent: existing, idempotent: true }
+    const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
+    const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
+    if (packageId && !pack) return { ok: false, error: 'credit_package_not_found' }
+    if (!packageId && !body.planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
+    const amount = pack ? Number(pack.amount ?? pack.price ?? 0) : Number(body.amount || 0)
+    const credits = pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : Number(body.credits || 0)
+    const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
+      packageId: pack?.id || packageId || null,
+      planId: typeof body.planId === 'string' ? body.planId.trim() : null,
+      amount,
+      currency: pack?.currency || body.currency || 'USD',
+      credits,
+      status: 'pending',
+      provider: body.provider || null,
+      idemKey,
+      createdAt: nowIso(),
+    }, 'pay', 'userId')
+    return { paymentIntent }
+  })
 }
 
 export function genericList(userId, name) {

@@ -26,6 +26,8 @@ import supportRoutes from './routes/support.js'
 import techitMomentsRoutes from './routes/techitMoments.js'
 import academyRoutes from './routes/academy.js'
 import codeWorkspaceRoutes from './routes/codeWorkspace.js'
+import tvceRoutes from './routes/tvce.js'
+import billingWebhookRoutes from './routes/billingWebhooks.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
@@ -119,6 +121,8 @@ app.use('/api/support', supportRoutes)
 app.use('/api/moments', techitMomentsRoutes)
 app.use('/api/academy', academyRoutes)
 app.use('/api/code', codeWorkspaceRoutes)
+app.use('/api/tvce', tvceRoutes)
+app.use('/api/billing/webhooks', billingWebhookRoutes)
 app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,

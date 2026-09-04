@@ -16,6 +16,7 @@ import {
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
+import { adminAnalytics as tvceAdminAnalytics, adminConfig as tvceAdminConfig, adminConfigUpdate as tvceAdminConfigUpdate } from '../controllers/tvceController.js'
 
 const router = Router()
 
@@ -42,5 +43,8 @@ router.get('/discovery/analytics', requireAdminAuth, requireAdmin, adminDiscover
 router.get('/intelligence/telemetry', requireAdminAuth, requireAdmin, adminIntelligenceTelemetry)
 router.get('/ai-router/telemetry', requireAdminAuth, requireAdmin, adminAiRouterTelemetry)
 router.post('/investor/comparables', requireAdminAuth, requireAdmin, adminComparableUpsert)
+router.get('/tvce/analytics', requireAdminAuth, requireAdmin, tvceAdminAnalytics)
+router.get('/tvce/config', requireAdminAuth, requireAdmin, tvceAdminConfig)
+router.patch('/tvce/config', requireAdminAuth, requireSuperAdmin, tvceAdminConfigUpdate)
 
 export default router
