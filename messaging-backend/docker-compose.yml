@@ -22,13 +22,14 @@ services:
 
   server:
     build: .
+    env_file:
+      - .env
     environment:
-      PORT: "8080"
+      PORT: "${PORT:-8080}"
       DATABASE_URL: "postgres://postgres:postgres@postgres:5432/techit_msg?sslmode=disable"
       REDIS_URL: "redis://redis:6379"
-      JWT_SECRET: "dev-secret-change-me"
-      ENABLE_DEV_TOKEN: "1"
-      CORS_ORIGINS: "*"
+      DISCOVERY_API_URL: "http://host.docker.internal:3000"
+      ENABLE_DEV_TOKEN: "${ENABLE_DEV_TOKEN:-0}"
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
