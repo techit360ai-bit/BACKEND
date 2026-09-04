@@ -5,9 +5,9 @@
   "main": "src/index.js",
   "scripts": {
     "prestart": "npm run startup:check",
-    "start": "node --import tsx src/index.js",
+    "start": "node --env-file-if-exists=.env --import tsx src/index.js",
     "startup:check": "node --import tsx scripts/check-startup-imports.js",
-    "dev": "node --import tsx --watch src/index.js",
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/index.js",
     "db:migrate": "node --no-warnings scripts/migrate-db.js up",
     "db:migrate:dry-run": "node --no-warnings scripts/migrate-db.js up --dry-run",
     "db:rollback:dry-run": "node --no-warnings scripts/migrate-db.js down --dry-run",
