@@ -18,13 +18,13 @@ describe('production authorization controls', () => {
   })
   it('reserves and settles a deterministic capability exactly once', () => {
     const decision = { allowed: true, capability: 'investor.intelligence.view', requiredCredits: 1, subscription: { active: false, entitlements: {} } }
-    const first = reserveCapabilityConsumption('u1', decision, 'key-1'); expect(first.ok).toBe(true); expect(first.consumption.reservationId).toBeTruthy()
-    const repeat = reserveCapabilityConsumption('u1', decision, 'key-1'); expect(repeat.idempotent).toBe(true)
+    const first = reserveCapabilityConsumption('u1', decision, 'key-1', { estimatedCredits: 1 }); expect(first.ok).toBe(true); expect(first.consumption.reservationId).toBeTruthy()
+    const repeat = reserveCapabilityConsumption('u1', decision, 'key-1', { estimatedCredits: 1 }); expect(repeat.idempotent).toBe(true)
     const settled = settleCapabilityConsumption(first.consumption.id, 200); expect(settled.ok).toBe(true); expect(db.creditLedger).toHaveLength(1)
     const second = settleCapabilityConsumption(first.consumption.id, 200); expect(second.idempotent).toBe(true); expect(db.creditLedger).toHaveLength(1)
   })
   it('releases a failed capability without debiting credits', () => {
     const decision = { allowed: true, capability: 'investor.intelligence.view', requiredCredits: 1, subscription: { active: false, entitlements: {} } }
-    const reserved = reserveCapabilityConsumption('u1', decision, 'key-2'); expect(reserved.ok).toBe(true); expect(settleCapabilityConsumption(reserved.consumption.id, 500).ok).toBe(true); expect(db.creditLedger).toHaveLength(0)
+    const reserved = reserveCapabilityConsumption('u1', decision, 'key-2', { estimatedCredits: 1 }); expect(reserved.ok).toBe(true); expect(settleCapabilityConsumption(reserved.consumption.id, 500).ok).toBe(true); expect(db.creditLedger).toHaveLength(0)
   })
 })

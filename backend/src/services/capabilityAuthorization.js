@@ -22,25 +22,25 @@ const KNOWN_FUNDING = new Set(['subscription', 'credits', 'subscription_or_credi
 export const CAPABILITY_POLICIES = Object.freeze({
   'startup.discovery': { roles: [], assurance: 'CLAIMED' },
   'startup.basic_profile.view': { roles: [], assurance: 'CLAIMED' },
-  'startup.sensitive_profile.view': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'founder.contact': { roles: ['investor', 'organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'founder.direct_message': { roles: ['investor', 'organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'credits', credits: 1 },
+  'startup.sensitive_profile.view': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'founder.contact': { roles: ['investor', 'organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'founder.direct_message': { roles: ['investor', 'organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'credits' },
   'investment.opportunity.view': { roles: ['investor'], assurance: 'PROFILED' },
-  'investment.indication.submit': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 2 },
-  'dealroom.access': { roles: ['investor'], assurance: 'TRUSTED', funding: 'subscription_or_credits', credits: 3 },
-  'investor.intelligence.view': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'investor.mentorship.intelligence': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'investor.portfolio.analytics': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'investor.risk.monitor': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'investor.ai.recommendations': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
+  'investment.indication.submit': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'dealroom.access': { roles: ['investor'], assurance: 'TRUSTED', funding: 'subscription_or_credits' },
+  'investor.intelligence.view': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'investor.mentorship.intelligence': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'investor.portfolio.analytics': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'investor.risk.monitor': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'investor.ai.recommendations': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
   'investor.dealroom.create': { roles: ['investor'], assurance: 'VERIFIED' },
   'investor.dealroom.view': { roles: ['investor', 'founder'], assurance: 'PROFILED' },
   'investor.dealroom.manage': { roles: ['investor', 'founder'], assurance: 'PROFILED' },
   'investor.dealroom.internal': { roles: ['investor'], assurance: 'PROFILED' },
-  'institutional.analytics': { roles: ['investor', 'organization'], assurance: 'INSTITUTIONAL', funding: 'subscription', credits: 0 },
+  'institutional.analytics': { roles: ['investor', 'organization'], assurance: 'INSTITUTIONAL', funding: 'subscription' },
   'organization.profile.manage': { roles: ['organization'], assurance: 'PROFILED' },
-  'organization.recruit': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'subscription_or_credits', credits: 1 },
-  'organization.analytics': { roles: ['organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits', credits: 1 },
+  'organization.recruit': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'subscription_or_credits' },
+  'organization.analytics': { roles: ['organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
   'organization.opportunity.create': { roles: ['organization'], assurance: 'PARTIALLY_VERIFIED' },
   'workspace.copilot': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.file.read': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
@@ -55,7 +55,7 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'workspace.execution.finalize': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.deployment.verify': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.vscode.revoke': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
-  'workspace.advanced_ai': { roles: ['founder', 'collaborator'], assurance: 'PROFILED', funding: 'subscription_or_credits', credits: 5 },
+  'workspace.advanced_ai': { roles: ['founder', 'collaborator'], assurance: 'PROFILED', funding: 'subscription_or_credits' },
   'mentorship.room.create': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.room.manage': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
   'mentorship.application.review': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
@@ -171,8 +171,10 @@ export function authorizeCapability(userId, capability, context = {}) {
   if (rank(currentAssurance) < rank(policy.assurance)) reasons.push('verification_required')
   if (['HIGH', 'RESTRICTED', 'SUSPENDED'].includes(String(risk).toUpperCase())) reasons.push('risk_restricted')
   if (policy.funding === 'subscription' && !subscription.active) reasons.push('active_subscription_required')
-  if (policy.funding === 'credits' && credits < Number(policy.credits || 0)) reasons.push('credits_required')
-  if (policy.funding === 'subscription_or_credits' && !subscription.active && credits < Number(policy.credits || 0)) reasons.push('subscription_or_credits_required')
+  // Funding policies authorize a source, never a quantity. The runtime usage
+  // meter supplies the estimate and settles the actual credits after execution.
+  if (policy.funding === 'credits' && credits <= 0) reasons.push('credits_required')
+  if (policy.funding === 'subscription_or_credits' && !subscription.active && credits <= 0) reasons.push('subscription_or_credits_required')
   if (subscription.active && subscription.entitlements?.[capability] === false) reasons.push('plan_capability_not_included')
   if (policy.mfaRequired && !verifyMfaAssertion(userId, context.mfaAssertion)) reasons.push('mfa_required')
   if (context.organizationId) {
@@ -180,7 +182,7 @@ export function authorizeCapability(userId, capability, context = {}) {
     if (!membership) reasons.push('organization_membership_required')
     if (context.membershipRoles?.length && !context.membershipRoles.includes(membership?.role)) reasons.push('organization_permission_required')
   }
-  return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, requiredCredits: Number(policy.credits || 0), policy }
+  return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, funding: policy.funding || 'none', metering: policy.funding ? 'runtime' : 'none', policy }
 }
 
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
@@ -191,7 +193,9 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
       req.capabilityDecision = decision
       if (options.consume) {
         const key = req.get('idempotency-key') || `${req.user.id}:${capability}:${req.id}`
-        const reservation = reserveCapabilityConsumption(req.user.id, decision, key)
+        const rawEstimate = req.body?.estimatedCredits ?? req.body?.estimated_credits
+        const estimatedCredits = Number(rawEstimate)
+        const reservation = reserveCapabilityConsumption(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
         if (!reservation.ok) return res.status(['insufficient_credits', 'subscription_allowance_exhausted'].includes(reservation.error) ? 402 : 409).json(reservation)
         req.capabilityConsumption = reservation.consumption
         res.on('finish', () => { void settleCapabilityConsumption(reservation.consumption.id, res.statusCode) })

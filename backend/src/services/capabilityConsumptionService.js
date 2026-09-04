@@ -2,12 +2,14 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { reserveUsage, settleUsage } from './usageSettlementService.js'
 
-export function reserveCapabilityConsumption(userId, decision, idempotencyKey) {
+export function reserveCapabilityConsumption(userId, decision, idempotencyKey, options = {}) {
   if (!decision.allowed) return { ok: false, error: 'capability_not_authorized' }
   const existing = (readDb().capabilityConsumptions || []).find(row => row.idempotencyKey === idempotencyKey)
   if (existing) return existing.userId === userId && existing.capability === decision.capability ? { ok: true, idempotent: true, consumption: existing } : { ok: false, error: 'idempotency_key_conflict' }
-  const required = Number(decision.requiredCredits || 0)
-  let fundingSource = decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'platform_subsidy'
+  // TVCE does not assign capability prices. A positive estimate is supplied
+  // by the runtime usage meter when an execution is about to start.
+  const required = Math.max(0, Number(options.estimatedCredits || 0))
+  let fundingSource = decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'entitlement'
   let reservation = null
   if (required > 0) {
     reservation = reserveUsage({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, metadata: { capability: decision.capability } })
@@ -19,7 +21,7 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey) {
   }
   return updateDb(db => {
     if (!Array.isArray(db.capabilityConsumptions)) db.capabilityConsumptions = []
-    const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', createdAt: now, updatedAt: now }
+    const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
     db.capabilityConsumptions.push(consumption); return { ok: true, idempotent: false, consumption }
   })
 }

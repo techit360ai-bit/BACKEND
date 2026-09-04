@@ -3,7 +3,6 @@ import { readDb, updateDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 
-const ROLE_MINIMUM_CREDITS = Object.freeze({ investor: 5, organization: 10 })
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
 }
@@ -13,21 +12,28 @@ const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const text = (value, fallback = '') => typeof value === 'string' ? value.trim() : fallback
 
 export const TVCE_CAPABILITIES = Object.freeze([
-  { id: 'IDEA_DIAGNOSTICS_BASIC', category: 'incubation', description: 'Basic idea diagnosis', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'discover' },
-  { id: 'CUSTOMER_VALIDATION_BASIC', category: 'validation', description: 'Basic customer validation', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'validate' },
-  { id: 'MVP_PLANNING_BASIC', category: 'execution', description: 'Basic MVP planning', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'build' },
-  { id: 'GSIS_BASIC', category: 'intelligence', description: 'Basic startup intelligence score', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'understand' },
-  { id: 'STARTUP_HEALTH_BASIC', category: 'intelligence', description: 'Basic startup health', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'monitor' },
-  { id: 'IDEA_DIAGNOSTICS_ADVANCED', category: 'incubation', description: 'Advanced idea diagnosis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'understand' },
-  { id: 'CUSTOMER_VALIDATION_ADVANCED', category: 'validation', description: 'Advanced customer validation analysis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'validate' },
-  { id: 'WORKSPACE_COPILOT', category: 'workspace', description: 'Workspace Copilot', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, workflowStage: 'build' },
-  { id: 'ADVANCED_WORKSPACE_AI', category: 'workspace', description: 'Advanced workspace AI', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'build' },
-  { id: 'INVESTOR_INTELLIGENCE', category: 'investor', description: 'Investor intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'decide' },
-  { id: 'DUE_DILIGENCE_INTELLIGENCE', category: 'investor', description: 'Due diligence intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'due_diligence' },
-  { id: 'PORTFOLIO_INTELLIGENCE', category: 'investor', description: 'Portfolio intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'monitor' },
-  { id: 'ORGANIZATION_MONITORING', category: 'organization', description: 'Organization monitoring', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'monitor' },
-  { id: 'COHORT_INTELLIGENCE', category: 'organization', description: 'Cohort intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'monitor' },
-  { id: 'MENTOR_INTELLIGENCE', category: 'organization', description: 'Mentor intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, workflowStage: 'monitor' },
+  { id: 'IDEA_DIAGNOSTICS_BASIC', category: 'incubation', description: 'Basic idea diagnosis', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'discover' },
+  { id: 'CUSTOMER_VALIDATION_BASIC', category: 'validation', description: 'Basic customer validation', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'validate' },
+  { id: 'MVP_PLANNING_BASIC', category: 'execution', description: 'Basic MVP planning', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
+  { id: 'GSIS_BASIC', category: 'intelligence', description: 'Basic startup intelligence score', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'understand' },
+  { id: 'STARTUP_HEALTH_BASIC', category: 'intelligence', description: 'Basic startup health', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'IDEA_DIAGNOSTICS_ADVANCED', category: 'incubation', description: 'Advanced idea diagnosis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'understand' },
+  { id: 'CUSTOMER_VALIDATION_ADVANCED', category: 'validation', description: 'Advanced customer validation analysis', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'validate' },
+  { id: 'WORKSPACE_COPILOT', category: 'workspace', description: 'Workspace Copilot', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
+  { id: 'ADVANCED_WORKSPACE_AI', category: 'workspace', description: 'Advanced workspace AI', requiredRole: 'founder', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'build' },
+  { id: 'INVESTOR_PUBLIC_DISCOVERY', category: 'investor', description: 'Public startup discovery and basic profiles', requiredRole: 'investor', authorizationCapability: 'investment.opportunity.view', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'discover' },
+  { id: 'INVESTOR_WATCHLIST', category: 'investor', description: 'Limited startup watchlists', requiredRole: 'investor', authorizationCapability: 'investment.opportunity.view', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'discover' },
+  { id: 'INVESTOR_INTELLIGENCE', category: 'investor', description: 'Investor intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'decide' },
+  { id: 'DUE_DILIGENCE_INTELLIGENCE', category: 'investor', description: 'Due diligence intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'due_diligence' },
+  { id: 'PORTFOLIO_INTELLIGENCE', category: 'investor', description: 'Portfolio intelligence', requiredRole: 'investor', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_PROFILE', category: 'organization', description: 'Organization profile and verification', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
+  { id: 'ORGANIZATION_BASIC_DASHBOARD', category: 'organization', description: 'Basic organization dashboard and visibility', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'understand' },
+  { id: 'ORGANIZATION_PROGRAM_SETUP', category: 'organization', description: 'One basic program or cohort setup', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
+  { id: 'ORGANIZATION_BASIC_COHORT', category: 'organization', description: 'Basic cohort and startup visibility', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_BASIC_REPORTING', category: 'organization', description: 'Basic organization reporting', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_MONITORING', category: 'organization', description: 'Advanced organization monitoring', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'COHORT_INTELLIGENCE', category: 'organization', description: 'Cohort intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'MENTOR_INTELLIGENCE', category: 'organization', description: 'Mentor intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
 ])
 
 const catalogById = id => TVCE_CAPABILITIES.find(item => item.id === id) || null
@@ -66,7 +72,13 @@ function quotaFor(db, capability) {
 }
 
 function commercialFor(db, capability) {
-  return { ...(configuredDefaults().capabilities?.[capability] || {}), ...(db.tvceConfig?.capabilities?.[capability] || {}) }
+  const merged = { ...(configuredDefaults().capabilities?.[capability] || {}), ...(db.tvceConfig?.capabilities?.[capability] || {}) }
+  // Older deployments may retain pricing fields. TVCE never returns or uses
+  // those fields; pricing belongs to billing packages and runtime metering.
+  delete merged.creditCost
+  delete merged.credits
+  delete merged.requiredCredits
+  return merged
 }
 
 export function freeTierUsage(userId) {
@@ -106,7 +118,6 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
       for (const [capability, patch] of Object.entries(input.capabilities)) {
         if (!TVCE_CAPABILITIES.some(item => item.id === capability) || !patch || typeof patch !== 'object') continue
         const next = { ...(db.tvceConfig.capabilities[capability] || {}) }
-        if (patch.creditCost !== undefined && Number.isFinite(Number(patch.creditCost)) && Number(patch.creditCost) >= 0) next.creditCost = Number(patch.creditCost)
         for (const field of ['valueStatement', 'blockedMessage']) if (typeof patch[field] === 'string' && patch[field].trim()) next[field] = patch[field].trim().slice(0, 500)
         db.tvceConfig.capabilities[capability] = next
       }
@@ -118,7 +129,7 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
 
 export function capabilityCatalog() {
   const db = readDb()
-  return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.id] || CAPABILITY_POLICIES[item.id.toLowerCase()] || null }))
+  return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
 }
 
 export function accountEntitlement(userId) { return accountEntitlementFor(readDb(), userId) }
@@ -130,31 +141,30 @@ export function evaluateEntitlement(userId, input = {}) {
   const commercial = commercialFor(db, capability)
   const effectiveCatalog = catalog ? { ...catalog, ...commercial, freeQuota: commercial.freeQuota ?? (quotaFor(db, catalog.id) || undefined) } : null
   const role = roleFor(db, userId, input.role)
-  const baseCapability = effectiveCatalog?.requiredRole === 'investor' ? 'investor.intelligence.view' : effectiveCatalog?.requiredRole === 'organization' ? 'organization.analytics' : null
+  const baseCapability = effectiveCatalog?.authorizationCapability || (effectiveCatalog?.requiredRole === 'investor' ? 'investor.intelligence.view' : effectiveCatalog?.requiredRole === 'organization' ? 'organization.analytics' : null)
   const decision = baseCapability
     ? authorizeCapability(userId, baseCapability, { role, organizationId: input.organizationId, workspaceId: input.workspaceId })
     : effectiveCatalog?.requiredRole === 'founder' && role !== 'founder'
       ? { allowed: false, code: 'role_required', capability }
-      : effectiveCatalog ? { allowed: true, code: 'allowed', capability, requiredCredits: Number(effectiveCatalog.creditCost || 0), policy: effectiveCatalog } : { allowed: false, code: 'unknown_capability', capability }
+      : effectiveCatalog ? { allowed: true, code: 'allowed', capability, funding: effectiveCatalog.metering === 'runtime' ? 'runtime' : 'none', metering: effectiveCatalog.metering || 'none', policy: effectiveCatalog } : { allowed: false, code: 'unknown_capability', capability }
   const account = accountEntitlementFor(db, userId)
   const subscription = subscriptionEntitlement(db, userId)
   const credits = availableCredits(db, userId)
-  const requiredCredits = number(input.creditCost, effectiveCatalog?.creditCost ?? decision.requiredCredits ?? 0)
-  const roleMinimum = ROLE_MINIMUM_CREDITS[role] || 0
-  const rolePaid = role === 'investor' || role === 'organization' ? account.active : true
+  const usageEstimate = Math.max(0, number(input.estimatedCredits ?? input.estimated_credits))
   const freeQuota = effectiveCatalog?.freeQuota || null
-  const freeUsage = freeQuota ? freeUsageFor(db, userId, catalog.id) : 0
+  const freeUsage = freeQuota && catalog ? freeUsageFor(db, userId, catalog.id) : 0
   const freeQuotaAvailable = Boolean(effectiveCatalog?.freeAccess && (!freeQuota || freeUsage < freeQuota))
-  const roleFunding = role === 'investor' || role === 'organization' ? (subscription.active || credits >= roleMinimum) : (subscription.active || credits >= requiredCredits || freeQuotaAvailable)
-  let code = decision.allowed && rolePaid && roleFunding && (requiredCredits === 0 || credits >= requiredCredits || freeQuotaAvailable) ? 'allowed' : decision.code
-  if (!account.active && (role === 'investor' || role === 'organization')) code = 'account_purchase_required'
-  else if (!rolePaid) code = 'account_purchase_required'
-  else if (!decision.allowed) code = decision.code
-  else if (!roleFunding) code = 'role_funding_required'
-  else if (requiredCredits > credits && !subscription.active && !freeQuotaAvailable) code = 'insufficient_credits'
-  if (effectiveCatalog?.freeAccess && freeQuota && !freeQuotaAvailable && !subscription.active && credits < requiredCredits) code = 'free_allowance_exhausted'
+  const funding = effectiveCatalog?.funding || decision.funding || null
+  const metered = effectiveCatalog?.metering === 'runtime' || Boolean(funding)
+  let code = decision.allowed ? 'allowed' : decision.code
+  if (!decision.allowed) code = decision.code
+  else if (freeQuotaAvailable) code = 'allowed'
+  else if (effectiveCatalog?.freeAccess && freeQuota && !freeQuotaAvailable && !subscription.active && credits <= 0 && usageEstimate === 0) code = 'free_allowance_exhausted'
+  else if (funding === 'subscription' && !subscription.active) code = 'active_subscription_required'
+  else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
+  else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
   const allowed = code === 'allowed'
-  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, requiredCredits, minimumRoleCredits: roleMinimum, freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'USE_CREDITS' : (role === 'investor' || role === 'organization' ? 'UPGRADE' : requiredCredits > 0 ? 'USE_CREDITS' : 'UPGRADE'), alternativeAction: subscription.active ? 'UPGRADE' : 'USE_CREDITS', value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
+  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'SUBSCRIPTION' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
 export function evaluatePaywall(userId, input = {}) {
@@ -164,7 +174,7 @@ export function evaluatePaywall(userId, input = {}) {
   const hits = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === result.capability)
   const repeated = hits.length >= 2
   const recommendation = repeated || result.role === 'investor' || result.role === 'organization' ? 'SUBSCRIPTION' : result.recommendedAction
-  return { ...result, paywall: true, recommendation, estimatedAdditionalCredits: Math.max(result.requiredCredits, result.minimumRoleCredits) - result.availableCredits, reason: result.code, nextAction: result.value?.workflowStage ? `Continue ${result.value.workflowStage}` : 'Continue workflow' }
+  return { ...result, paywall: true, recommendation, usageEstimateRequired: result.metering === 'runtime', reason: result.code, nextAction: result.value?.workflowStage ? `Continue ${result.value.workflowStage}` : 'Continue workflow' }
 }
 
 export function recordPaywallEvent(userId, input = {}) {
@@ -177,8 +187,9 @@ export function recordPaywallEvent(userId, input = {}) {
 
 export function estimateCredits(userId, input = {}) {
   const items = Array.isArray(input.actions) ? input.actions : [input]
-  const estimate = items.reduce((sum, item) => sum + number(item.creditCost, catalogFor(item.capability || item.operation)?.creditCost || 0), 0)
-  return { userId, estimatedCredits: estimate, actionCount: items.length, isEstimate: true, availableCredits: availableCredits(readDb(), userId), covered: availableCredits(readDb(), userId) >= estimate }
+  const estimate = items.reduce((sum, item) => sum + Math.max(0, number(item.estimatedCredits ?? item.estimated_credits)), 0)
+  const available = availableCredits(readDb(), userId)
+  return { userId, estimatedCredits: estimate, actionCount: items.length, isEstimate: true, source: 'runtime_usage_meter', availableCredits: available, covered: estimate > 0 ? available >= estimate : null, estimateProvided: estimate > 0 }
 }
 
 export function walletForecast(userId) {
@@ -289,7 +300,7 @@ export function nextBestAction(userId, input = {}) {
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
   const access = evaluateEntitlement(userId, { capability: catalog.id, role })
-  return { action: catalog.id, reason: input.reason || `Your next valuable step is ${catalog.description}.`, expectedValue: catalog.valueStatement, access: access.allowed ? 'available' : access.recommendation || access.recommendedAction, creditCost: catalog.creditCost, subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION', capability: catalog }
+  return { action: catalog.id, reason: input.reason || `Your next valuable step is ${catalog.description}.`, expectedValue: catalog.valueStatement, access: access.allowed ? 'available' : access.recommendation || access.recommendedAction, metering: catalog.metering || 'none', usageEstimateRequired: catalog.metering === 'runtime', subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION', capability: catalog }
 }
 
 export function saveWorkflow(userId, input = {}) {

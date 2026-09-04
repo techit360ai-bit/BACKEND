@@ -4,7 +4,7 @@
 
 TVCE is implemented as a server-authoritative value-conversion layer over the existing identity, multi-role context, wallet, credit ledger, subscription, payment-intent, workspace, and AI execution systems. The canonical implementation is on branch `feat/tvce-value-conversion-complete` (commit `c627b40`), with the frontend companion on the same branch (commit `9da0e4d`).
 
-The completion pass adds explicit free Founder quotas, named capability policies for every code-workspace action, hosted checkout adapters, expanded subscription lifecycle events, payment retry handling, and protected commercial administration. Commercial costs, quotas, and value copy are loaded from `config/tvce-commercial.json`, `TVCE_COMMERCIAL_CONFIG_JSON`, or persisted `tvceConfig` admin overrides; the frontend contains no commercial constants.
+The completion pass adds explicit free Founder quotas, named capability policies for every code-workspace action, hosted checkout adapters, expanded subscription lifecycle events, payment retry handling, and protected commercial administration. TVCE loads access metadata, quotas, and value copy from `config/tvce-commercial.json`, `TVCE_COMMERCIAL_CONFIG_JSON`, or persisted `tvceConfig` admin overrides; it does not load capability prices. Runtime usage estimates and provider telemetry remain owned by the execution and billing services, and the frontend contains no commercial constants.
 
 ## Account and role rule
 

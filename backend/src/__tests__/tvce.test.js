@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readDb, updateDb } from '../config/database.js'
-import { adminTvceAnalytics, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, saveWorkflow, walletForecast } from '../services/tvceService.js'
+import { adminTvceAnalytics, capabilityCatalog, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, saveWorkflow, walletForecast } from '../services/tvceService.js'
 import { codeWorkspaceAccess } from '../services/codeWorkspaceService.js'
 
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
@@ -79,5 +79,18 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(codeWorkspaceAccess(db, 'u1', 'w2', true)).toBeNull()
     db.accountEntitlements.push({ userId: 'u1', status: 'active' })
     expect(codeWorkspaceAccess(db, 'u1', 'w2', true)?.workspace.id).toBe('w2')
+  })
+
+  it('keeps TVCE pricing-free and exposes free investor and organization entry capabilities', () => {
+    db.tvceConfig = { capabilities: { INVESTOR_INTELLIGENCE: { creditCost: 999, credits: 999 } } }
+    const catalog = capabilityCatalog()
+    expect(catalog.every(item => item.creditCost === undefined)).toBe(true)
+    expect(evaluateEntitlement('u1', { capability: 'INVESTOR_PUBLIC_DISCOVERY', role: 'investor' })).toMatchObject({ allowed: true, metering: 'none' })
+    expect(evaluateEntitlement('u1', { capability: 'INVESTOR_WATCHLIST', role: 'investor' })).toMatchObject({ allowed: true, metering: 'none' })
+    expect(evaluateEntitlement('u1', { capability: 'ORGANIZATION_PROFILE', role: 'organization' })).toMatchObject({ allowed: true, metering: 'none' })
+    expect(evaluateEntitlement('u1', { capability: 'ORGANIZATION_BASIC_DASHBOARD', role: 'organization' })).toMatchObject({ allowed: true, metering: 'none' })
+    const paid = evaluateEntitlement('u1', { capability: 'INVESTOR_INTELLIGENCE', role: 'investor' })
+    expect(paid.allowed).toBe(false)
+    expect(['verification_required', 'credits_required', 'subscription_or_credits_required']).toContain(paid.code)
   })
 })
