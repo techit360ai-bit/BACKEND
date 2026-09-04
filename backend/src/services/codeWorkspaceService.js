@@ -18,6 +18,13 @@ export function codeWorkspaceAccess(db, userId, workspaceId, write = false) {
   if (!workspace) return null
   if (workspace.ownerId === userId) return { workspace, level: 'owner' }
   const member = rows(db, 'workspaceMembers').find(row => row.workspaceId === workspaceId && row.userId === userId && row.status === 'active')
+  if (member && String(member.role || '').toLowerCase() === 'collaborator') {
+    const paid = rows(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+      || rows(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+      || rows(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+    const collaboratorMemberships = rows(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active' && String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+    if (!paid && collaboratorMemberships.length > 0 && collaboratorMemberships[0].workspaceId !== workspaceId) return null
+  }
   if (!member || (write && member.accessLevel !== 'contributor')) return null
   return { workspace, level: member.accessLevel || 'viewer' }
 }

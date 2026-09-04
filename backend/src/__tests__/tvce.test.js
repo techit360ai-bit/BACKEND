@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readDb, updateDb } from '../config/database.js'
 import { adminTvceAnalytics, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, saveWorkflow, walletForecast } from '../services/tvceService.js'
+import { codeWorkspaceAccess } from '../services/codeWorkspaceService.js'
 
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
 
@@ -66,5 +67,17 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(exhausted.allowed).toBe(false)
     expect(exhausted.code).toBe('free_allowance_exhausted')
     expect(freeTierUsage('u1')[0].remaining).toBe(0)
+  })
+
+  it('limits a free collaborator to one active workspace while preserving paid multi-workspace access', () => {
+    db.workspaces = [{ id: 'w1', ownerId: 'owner' }, { id: 'w2', ownerId: 'owner2' }]
+    db.workspaceMembers = [
+      { id: 'm1', workspaceId: 'w1', userId: 'u1', role: 'collaborator', accessLevel: 'contributor', status: 'active', joinedAt: '2026-01-01T00:00:00.000Z' },
+      { id: 'm2', workspaceId: 'w2', userId: 'u1', role: 'collaborator', accessLevel: 'contributor', status: 'active', joinedAt: '2026-01-02T00:00:00.000Z' },
+    ]
+    expect(codeWorkspaceAccess(db, 'u1', 'w1', true)?.workspace.id).toBe('w1')
+    expect(codeWorkspaceAccess(db, 'u1', 'w2', true)).toBeNull()
+    db.accountEntitlements.push({ userId: 'u1', status: 'active' })
+    expect(codeWorkspaceAccess(db, 'u1', 'w2', true)?.workspace.id).toBe('w2')
   })
 })

@@ -647,16 +647,30 @@ export function createEndorsement(userId, body) {
 export function listWorkspaces(userId) {
   const db = readDb()
   const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active')
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  const collaboratorMemberships = memberships.filter(row => String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  const freeCollaboratorWorkspaceId = !paid ? collaboratorMemberships[0]?.workspaceId || null : null
   const membershipByWorkspace = new Map(memberships.map(row => [row.workspaceId, row]))
   const workspaces = collection(db, 'workspaces')
-    .filter(row => row.ownerId === userId || membershipByWorkspace.has(row.id))
+    .filter(row => row.ownerId === userId || (membershipByWorkspace.has(row.id) && (paid || !collaboratorMemberships.length || row.id === freeCollaboratorWorkspaceId)))
     .sort(byNewest)
     .map(workspace => ({
       ...workspace,
       isOwner: workspace.ownerId === userId,
       accessLevel: workspace.ownerId === userId ? 'owner' : membershipByWorkspace.get(workspace.id)?.accessLevel || 'viewer',
     }))
-  return { workspaces }
+  return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: paid, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, memberships.length - workspaces.filter(row => row.ownerId !== userId).length) } }
+}
+
+function freeCollaboratorWorkspaceAllowed(db, userId, workspaceId) {
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  if (paid) return true
+  const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active' && String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  return !memberships.length || memberships[0].workspaceId === workspaceId
 }
 
 function workspaceAccess(db, workspaceId, userId) {
@@ -800,6 +814,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
     }
     const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (!freeCollaboratorWorkspaceAllowed(db, userId, workspace.id)) return { ok: false, error: 'free_collaborator_workspace_limit', limit: 1 }
     const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
       workspaceId: workspace.id,
       projectId: workspace.projectId || null,

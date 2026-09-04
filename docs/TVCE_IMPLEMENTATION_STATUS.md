@@ -45,3 +45,12 @@ role-appropriate subscription.
 
 The AI Router remains execution-only. It must receive backend-issued execution
 grants and never make commercial entitlement decisions itself.
+
+## Free Collaborator Workspace Policy
+
+Free Collaborator accounts are limited to one active collaborator workspace. The
+limit is enforced during invitation acceptance, workspace listing, and every
+code-workspace access check. Paid account entitlement permits additional
+workspace memberships but does not bypass membership permissions, role/context,
+organization scope, or data-access controls. See
+`docs/TVCE_FREE_ROLE_ACCESS_PLAN.md` for the policy and resume checklist.
