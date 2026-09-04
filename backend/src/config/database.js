@@ -216,6 +216,7 @@ const INITIAL = {
   paywallEvents: [],
   workflowSnapshots: [],
   billingWebhookEvents: [],
+  tvceConfig: { freeQuotas: {}, capabilities: {} },
   verificationNotificationRuns: [],
   userSessions: [],
   authSecurityEvents: [],

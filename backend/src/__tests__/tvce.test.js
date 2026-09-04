@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readDb, updateDb } from '../config/database.js'
-import { adminTvceAnalytics, evaluateEntitlement, evaluatePaywall, fulfillPayment, saveWorkflow, walletForecast } from '../services/tvceService.js'
+import { adminTvceAnalytics, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, saveWorkflow, walletForecast } from '../services/tvceService.js'
 
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
 
@@ -55,5 +55,16 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(analytics.metrics.totalRevenue).toBe(7900)
     expect(analytics.funnel.find(row => row.stage === 'PAYMENT_SUCCESS').count).toBe(1)
     expect(analytics.capabilityConversion[0].conversionRate).toBe(100)
+  })
+
+  it('provides explicit free founder quotas and blocks only after the quota is consumed', () => {
+    const first = evaluateEntitlement('u1', { capability: 'CUSTOMER_VALIDATION_BASIC', role: 'founder' })
+    expect(first.allowed).toBe(true)
+    expect(first.freeQuota).toBeGreaterThan(0)
+    db.capabilityConsumptions = Array.from({ length: first.freeQuota }, (_, index) => ({ id: `use-${index}`, userId: 'u1', capability: 'CUSTOMER_VALIDATION_BASIC', fundingSource: 'platform_subsidy', status: 'settled', createdAt: new Date().toISOString() }))
+    const exhausted = evaluateEntitlement('u1', { capability: 'CUSTOMER_VALIDATION_BASIC', role: 'founder' })
+    expect(exhausted.allowed).toBe(false)
+    expect(exhausted.code).toBe('free_allowance_exhausted')
+    expect(freeTierUsage('u1')[0].remaining).toBe(0)
   })
 })

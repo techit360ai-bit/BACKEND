@@ -35,14 +35,14 @@ function normalize(provider, payload) {
   if (provider === 'stripe') {
     const object = payload.data?.object || {}
     const metadata = object.metadata || object.subscription_details?.metadata || {}
-    return { eventId: payload.id, type: payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id || object.client_reference_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: object.id, success: ['payment_intent.succeeded', 'checkout.session.completed', 'invoice.paid'].includes(payload.type) }
+    return { eventId: payload.id, type: payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id || object.client_reference_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: object.id, subscriptionId: object.subscription || object.id, status: object.status, amount: object.amount_paid || object.amount_due, currency: object.currency, failureReason: object.last_payment_error?.message, success: ['payment_intent.succeeded', 'checkout.session.completed', 'invoice.paid'].includes(payload.type) }
   }
   if (provider === 'paystack') {
     const data = payload.data || {}; const metadata = data.metadata || {}
-    return { eventId: payload.id || data.id || data.reference, type: payload.event, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id || data.customer?.metadata?.userId, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.reference || String(data.id || ''), success: payload.event === 'charge.success' }
+    return { eventId: payload.id || data.id || data.reference, type: payload.event, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id || data.customer?.metadata?.userId, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.reference || String(data.id || ''), subscriptionId: data.subscription_code || metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: payload.event === 'charge.success' }
   }
   const data = payload.data || payload; const metadata = data.meta || data.metadata || {}
-  return { eventId: payload.id || data.id || data.tx_ref, type: payload.event || payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.tx_ref || String(data.id || ''), success: ['charge.completed', 'payment.completed'].includes(payload.event || payload.type) && String(data.status || '').toLowerCase() === 'successful' }
+  return { eventId: payload.id || data.id || data.tx_ref, type: payload.event || payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.tx_ref || String(data.id || ''), subscriptionId: metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: ['charge.completed', 'payment.completed'].includes(payload.event || payload.type) && String(data.status || '').toLowerCase() === 'successful' }
 }
 
 export async function handleBillingWebhook(providerInput, payload, headers = {}, rawBody = '') {
@@ -53,15 +53,24 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
   if (!event.eventId) return { ok: false, status: 400, error: 'webhook_event_id_required' }
   const prior = (readDb().billingWebhookEvents || []).find(row => row.provider === provider && row.eventId === String(event.eventId))
   if (prior) return { ok: true, idempotent: true, event: prior }
-  if (provider === 'stripe' && ['customer.subscription.updated', 'customer.subscription.deleted'].includes(event.type) && event.userId) {
-    const status = event.type.endsWith('deleted') ? 'cancelled' : String(payload.data?.object?.status || 'active')
+  const lifecycleTypes = new Set(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed', 'charge.refunded', 'charge.dispute.created', 'subscription.create', 'subscription.disable', 'subscription.not_renew'])
+  if (lifecycleTypes.has(event.type) && (event.userId || event.paymentId) && !(event.success && event.paymentId)) {
+    const status = event.type.endsWith('deleted') || event.type === 'subscription.disable' ? 'cancelled'
+      : event.type === 'invoice.payment_failed' ? 'past_due'
+        : event.type === 'charge.refunded' ? 'refunded'
+          : event.type === 'charge.dispute.created' ? 'disputed'
+            : event.type === 'subscription.not_renew' ? 'cancelled'
+              : String(event.status || payload.data?.object?.status || 'active')
+    const userId = event.userId || readDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId
     return updateDb(db => {
       const subscriptions = db.subscriptions || (db.subscriptions = [])
-      const current = subscriptions.find(row => row.userId === event.userId && (row.providerId === event.providerReference || row.planId === event.planId)) || { id: createId('subscription'), userId: event.userId, createdAt: nowIso() }
-      Object.assign(current, { provider: 'stripe', providerId: event.providerReference, planId: event.planId || current.planId || null, status, updatedAt: nowIso() })
+      const current = subscriptions.find(row => row.userId === userId && (row.providerId === event.subscriptionId || row.providerId === event.providerReference || row.planId === event.planId)) || { id: createId('subscription'), userId, createdAt: nowIso() }
+      Object.assign(current, { provider, providerId: event.subscriptionId || event.providerReference, planId: event.planId || current.planId || null, status, amount: event.amount ?? current.amount ?? null, currency: event.currency || current.currency || null, lastFailureReason: event.failureReason || (status === 'past_due' ? 'provider_payment_failed' : current.lastFailureReason || null), updatedAt: nowIso() })
       if (!subscriptions.includes(current)) subscriptions.push(current)
+      const account = (db.accountEntitlements || []).find(row => row.userId === userId)
+      if (account && account.source === 'subscription') account.status = status === 'past_due' ? 'grace_period' : ['cancelled', 'refunded', 'disputed'].includes(status) ? 'inactive' : status
       if (!Array.isArray(db.billingWebhookEvents)) db.billingWebhookEvents = []
-      const row = { id: createId('billing_event'), provider, eventId: String(event.eventId), type: event.type, status: 'processed', userId: event.userId, createdAt: nowIso() }; db.billingWebhookEvents.push(row)
+      const row = { id: createId('billing_event'), provider, eventId: String(event.eventId), type: event.type, status: 'processed', userId: userId || null, paymentIntentId: event.paymentId || null, subscriptionId: event.subscriptionId || null, createdAt: nowIso() }; db.billingWebhookEvents.push(row)
       return { ok: true, event: row, subscription: current }
     })
   }

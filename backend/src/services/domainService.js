@@ -1733,7 +1733,7 @@ export function createPaymentIntent(userId, body) {
     const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
     const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
     if (packageId && !pack) return { ok: false, error: 'credit_package_not_found' }
-    if (!packageId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_required' }
+    if (!packageId && !body.planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
     const amount = pack ? Number(pack.amount ?? pack.price ?? 0) : Number(body.amount || 0)
     const credits = pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : Number(body.credits || 0)
     const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
