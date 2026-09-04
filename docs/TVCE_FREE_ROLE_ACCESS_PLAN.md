@@ -49,9 +49,62 @@ Advanced AI, autonomous execution, deployment, and multi-workspace participation
 5. Add regression tests for multi-role identities, membership order, removed memberships, and paid entitlement.
 6. Monitor denials, upgrades, invitation acceptance, and workspace activity by role.
 
+## Full recommendation coverage
+
+### Founder free-value loop
+
+- Basic idea diagnosis with a configurable monthly allowance.
+- Basic validation sessions with explicit remaining usage.
+- One initial MVP plan plus configurable revision allowances.
+- GSIS refreshes triggered by meaningful new evidence rather than arbitrary page visits.
+- Startup-health checks showing score confidence, evidence used, missing evidence, and the recommended corrective action.
+- Basic workspace and collaboration operations remain permission-controlled rather than credit-metered.
+
+### Collaborator free-value loop
+
+- One active collaborator workspace for a free account.
+- Assigned tasks, comments, reports, milestones, and permitted file operations.
+- A configurable basic Copilot allowance.
+- Contribution evidence, activity history, and credibility progress.
+- Advanced AI, autonomous execution, deployment automation, and additional workspaces require paid account entitlement.
+
+### Workflow-to-TVCE audit
+
+Every Founder and Collaborator workflow must be checked for the correct capability ID, active context, workflow snapshot, idempotency key, usage event, contextual paywall, payment continuation, and outcome event. Backend authorization remains authoritative even when the frontend does not render a gate correctly.
+
+### Evidence quality
+
+GSIS and startup-health responses should return the score, confidence level, evidence sources, missing evidence, and next-best action. Early or incomplete data must be labeled as a baseline or insufficient-evidence state rather than displayed as unjustified precision.
+
+### Collaboration and referral loop
+
+After diagnosis, validation, or MVP planning, Founders should receive a contextual invitation action tied to a real project need. Collaborators should be able to accept the first workspace invitation without payment. Conversion measurement should distinguish invitation sent, invitation accepted, first contribution, retained collaboration, workspace-limit paywall, and paid multi-workspace activation.
+
+### Privacy-safe sharing
+
+Shareable diagnosis, MVP, validation, GSIS, and progress summaries must be generated from an explicit public projection. Private customer responses, founder evidence, organization data, investor notes, internal scores, and restricted documents must never be included by default.
+
+### Other role free boundaries
+
+Investor free access remains limited to profile, public startup discovery, permitted basic intelligence, limited filtering, and watchlists. Organization free access remains limited to profile, basic program setup, limited startup onboarding, basic cohort visibility, and limited reporting. Diligence, portfolio intelligence, cohort intelligence, intervention recommendations, and program analytics remain separately authorized and funded.
+
+### Role-specific onboarding
+
+- Founder: diagnosis, validation, MVP plan, progress result.
+- Collaborator: accept workspace, complete task, submit evidence.
+- Investor: discover startup, save watchlist, view permitted public intelligence.
+- Organization: create program, add startup, view basic cohort.
+
+### Measurement and rollout
+
+Track free workflow completion, time to first value, invitation acceptance, first collaborator contribution, quota exhaustion, workspace-limit denials, credit purchase, subscription conversion, resumed workflow, and 7/30-day retention. Quotas should be changed through TVCE commercial configuration only after observing real cohort behavior.
+
 ## Resume checklist for next context
 
 - Review commits touching `domainService.js`, `codeWorkspaceService.js`, `WorkspaceInvitationPage.tsx`, and `tvceService.js`.
 - Run TVCE and billing tests.
 - Add frontend tests for the one-workspace invitation message if the invitation API mock is expanded.
+- Continue the workflow-to-TVCE audit for Founder and Collaborator screens.
+- Add evidence-confidence fields and public share projections before enabling share links.
+- Add role-specific onboarding completion analytics.
 - Confirm provider/admin branches remain separate and unrelated dirty files are preserved.
