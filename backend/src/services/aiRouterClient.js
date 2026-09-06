@@ -13,6 +13,63 @@ import crypto from 'node:crypto'
 
 const AI_ROUTER_URL = (process.env.AI_ROUTER_URL || 'http://localhost:8000').replace(/\/$/, '')
 const TIMEOUT_MS = Number(process.env.AI_ROUTER_TIMEOUT_MS || '6000') || 6000
+const MAX_IN_FLIGHT = Math.max(1, Number(process.env.AI_ROUTER_MAX_IN_FLIGHT || '64') || 64)
+const MAX_QUEUE = Math.max(0, Number(process.env.AI_ROUTER_MAX_QUEUE || '256') || 256)
+let inFlight = 0
+const waiters = []
+let circuitOpenedUntil = 0
+let consecutiveFailures = 0
+
+async function acquireSlot() {
+  if (inFlight < MAX_IN_FLIGHT) { inFlight += 1; return () => releaseSlot() }
+  if (waiters.length >= MAX_QUEUE) throw new Error('ai_router_capacity_exhausted')
+  await new Promise(resolve => waiters.push(resolve))
+  inFlight += 1
+  return () => releaseSlot()
+}
+
+function releaseSlot() {
+  inFlight = Math.max(0, inFlight - 1)
+  const next = waiters.shift()
+  if (next) next()
+}
+
+async function requestJson(path, { method = 'POST', token, body, headers = {}, timeoutMs = TIMEOUT_MS } = {}) {
+  if (Date.now() < circuitOpenedUntil) return null
+  const release = await acquireSlot()
+  try {
+    let lastResponse = null
+    for (let attempt = 0; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch(`${AI_ROUTER_URL}${path}`, {
+          method,
+          headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+        lastResponse = response
+        if (response.ok) {
+          consecutiveFailures = 0
+          return await response.json()
+        }
+        if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
+        const retryAfter = Number(response.headers.get('retry-after'))
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : 100 * (2 ** attempt)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      } catch (error) {
+        if (attempt === 2) throw error
+        await new Promise(resolve => setTimeout(resolve, 100 * (2 ** attempt)))
+      }
+    }
+    if (lastResponse && [429, 500, 502, 503, 504].includes(lastResponse.status)) {
+      consecutiveFailures += 1
+      if (consecutiveFailures >= 3) circuitOpenedUntil = Date.now() + 10_000
+    }
+    return null
+  } finally {
+    release()
+  }
+}
 
 export async function requestAdminRouterTelemetry() {
   const secret = process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET || ''
@@ -46,23 +103,7 @@ export async function requestAdminRouterTelemetry() {
  */
 export async function computeGsisNarrative(token, componentScores) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/gsis/compute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ component_scores: componentScores, ...componentScores }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    const text = await res.text()
-    return text ? JSON.parse(text) : null
-  } catch {
-    // Network error, timeout, ai-router down, bad JSON — degrade gracefully.
-    return null
-  }
+  try { return await requestJson('/api/v1/gsis/compute', { token, body: { component_scores: componentScores, ...componentScores } }) } catch { return null }
 }
 
 /**
@@ -89,62 +130,22 @@ export function extractRecommendation(payload) {
 
 export async function recordGsisRecommendationOutcome(token, recommendationId, outcome) {
   if (!token || !recommendationId) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v2/gsis/recommendations/${encodeURIComponent(recommendationId)}/outcome`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(outcome),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
+  try { return await requestJson(`/api/v2/gsis/recommendations/${encodeURIComponent(recommendationId)}/outcome`, { token, body: outcome }) } catch { return null }
 }
 
 export async function requestInvestorAdvisory(token, evidence) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/investor/intelligence/advisory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ evidence }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
+  try { return await requestJson('/api/v1/investor/intelligence/advisory', { token, body: { evidence } }) } catch { return null }
 }
 
 export async function requestInvestorEvi(token, projectId, startupData) {
   if (!token || !projectId) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/investor/evi/${encodeURIComponent(projectId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(startupData || {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch { return null }
+  try { return await requestJson(`/api/v1/investor/evi/${encodeURIComponent(projectId)}`, { token, body: startupData || {} }) } catch { return null }
 }
 
 export async function requestOrganizationAdvisory(token, evidence) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/organization/intelligence/advisory`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ evidence }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch { return null }
+  try { return await requestJson('/api/v1/organization/intelligence/advisory', { token, body: { evidence } }) } catch { return null }
 }
 
 /**
@@ -153,63 +154,25 @@ export async function requestOrganizationAdvisory(token, evidence) {
  */
 export async function analyzeVerificationEvidence(token, executionGrant, evidence) {
   if (!token || !executionGrant) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/incubation/evidence/research`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'X-AI-Execution-Grant': executionGrant,
-      },
-      body: JSON.stringify(evidence || {}),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
+  try { return await requestJson('/api/v1/incubation/evidence/research', { token, body: evidence || {}, headers: { 'X-AI-Execution-Grant': executionGrant } }) } catch { return null }
 }
 
 export async function requestSupportIntelligence(token, input = {}) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/support/intelligence`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
-    if (!res.ok) return null
-    return await res.json()
-  } catch { return null }
+  try { return await requestJson('/api/v1/support/intelligence', { token, body: input }) } catch { return null }
 }
 
 export async function requestAcademyEnrichment(token, input = {}) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/modules/enrich`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
-    if (!res.ok) return null
-    return await res.json()
-  } catch { return null }
+  try { return await requestJson('/api/v1/training/modules/enrich', { token, body: input }) } catch { return null }
 }
 
 export async function requestAcademyModuleGeneration(token, input = {}) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/modules/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(input),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
+  try { return await requestJson('/api/v1/training/modules/generate', { token, body: input }) } catch { return null }
 }
 
 export async function requestAcademyExerciseReview(token, input = {}) {
   if (!token) return null
-  try {
-    const res = await fetch(`${AI_ROUTER_URL}/api/v1/training/exercises/review`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(input), signal: AbortSignal.timeout(TIMEOUT_MS) })
-    if (!res.ok) return null
-    return await res.json()
-  } catch { return null }
+  try { return await requestJson('/api/v1/training/exercises/review', { token, body: input }) } catch { return null }
 }
