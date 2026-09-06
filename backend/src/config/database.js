@@ -503,6 +503,9 @@ function updateSqliteDb(mutator) {
 
 export function validateDatabaseConfig() {
   const driver = currentDriver()
+  if (process.env.NODE_ENV === 'production' && !['single-node', 'multi-replica'].includes(process.env.SCALE_PROFILE || 'single-node')) {
+    throw new Error('SCALE_PROFILE must be single-node or multi-replica.')
+  }
   if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.DATABASE_URL) {
     throw new Error('SCALE_PROFILE=multi-replica requires DATABASE_URL; configure the PostgreSQL migration before scaling replicas.')
   }
