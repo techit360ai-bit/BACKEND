@@ -503,6 +503,12 @@ function updateSqliteDb(mutator) {
 
 export function validateDatabaseConfig() {
   const driver = currentDriver()
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.DATABASE_URL) {
+    throw new Error('SCALE_PROFILE=multi-replica requires DATABASE_URL; configure the PostgreSQL migration before scaling replicas.')
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.REDIS_URL) {
+    throw new Error('SCALE_PROFILE=multi-replica requires REDIS_URL for shared rate limits and coordination.')
+  }
   if (!['json', 'sqlite'].includes(driver)) {
     throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite" or "json".`)
   }

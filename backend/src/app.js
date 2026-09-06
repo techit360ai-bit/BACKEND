@@ -31,6 +31,7 @@ import billingWebhookRoutes from './routes/billingWebhooks.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
+import { globalRateLimit } from './middlewares/globalRateLimit.js'
 
 const app = express()
 
@@ -96,6 +97,10 @@ app.use(express.json({
     req.rawBody = buffer.toString('utf8')
   },
 }))
+
+// Shared gateway protection. Route-specific limits remain responsible for
+// credential, OTP, authorization, and other sensitive operations.
+app.use(globalRateLimit())
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)
