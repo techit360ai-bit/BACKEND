@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'crypto'
 import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
+import { createMentorshipMessage as createMentorshipMessagePostgres, createFeedPost as createFeedPostPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const rows = (db, key) => { if (!Array.isArray(db[key])) db[key] = []; return db[key] }
 const clean = value => typeof value === 'string' ? value.trim() : value
@@ -144,6 +145,16 @@ export function createMentorshipMessage(userId, roomId, body = {}) {
   })
 }
 
+export async function createMentorshipMessageAsync(userId, roomId, body = {}) {
+  const result = createMentorshipMessage(userId, roomId, body)
+  if (!result.ok || !contentWriteEnabled()) return result
+  try { await createMentorshipMessagePostgres(result.message); return result } catch (error) {
+    console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'create_mentorship_message', error: error.message }))
+    if (contentWriteFallbackEnabled()) return result
+    return { ok: false, error: 'content_write_temporarily_unavailable' }
+  }
+}
+
 export function createMentorshipResource(userId, roomId, body = {}) {
   return updateDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
@@ -210,6 +221,16 @@ export function publishMentorshipFeed(userId, roomId, body = {}) {
     const post = { id: createId('feed_post'), authorId: userId, content: body.message || share.text, visibility: body.visibility || 'public', metadata: { mentorshipRoomId: roomId, shareKey: 'feed', url: share.url }, createdAt: nowIso(), updatedAt: nowIso() }
     rows(db, 'feedPosts').push(post); return { ok: true, post }
   })
+}
+
+export async function publishMentorshipFeedAsync(userId, roomId, body = {}) {
+  const result = publishMentorshipFeed(userId, roomId, body)
+  if (!result.ok || result.idempotent || !contentWriteEnabled()) return result
+  try { await createFeedPostPostgres(result.post); return result } catch (error) {
+    console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'publish_mentorship_feed', error: error.message }))
+    if (contentWriteFallbackEnabled()) return result
+    return { ok: false, error: 'content_write_temporarily_unavailable' }
+  }
 }
 
 export function broadcastMentorshipOpportunity(userId, roomId, body = {}) {

@@ -7,7 +7,7 @@ const fallback = () => process.env.CONTENT_READ_FALLBACK_SQLITE !== 'false'
 
 function getPool() {
   if (!url()) throw new Error('CONTENT_DATABASE_URL or DATABASE_URL is required for PostgreSQL content reads')
-  pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.CONTENT_READ_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.CONTENT_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.CONTENT_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
+  pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.CONTENT_WRITE_POOL_SIZE || process.env.CONTENT_READ_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.CONTENT_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.CONTENT_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
   return pool
 }
 
@@ -24,6 +24,40 @@ export async function listNotifications(userId) {
   const result = await getPool().query('SELECT * FROM core_notifications WHERE user_id=$1 ORDER BY created_at DESC', [userId])
   return result.rows.map(merged)
 }
+export async function createFile(file) {
+  await getPool().query('INSERT INTO core_files(id,user_id,workspace_id,project_id,status,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [file.id, file.ownerId, file.workspaceId || null, file.projectId || null, file.status || null, JSON.stringify(file), file.createdAt, file.updatedAt])
+  return file
+}
+export async function deleteFile(userId, fileId) {
+  const result = await getPool().query('DELETE FROM core_files WHERE id=$1 AND user_id=$2', [fileId, userId])
+  return result.rowCount > 0
+}
+export async function createNotification(notification) {
+  await getPool().query('INSERT INTO core_notifications(id,user_id,read,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6)', [notification.id, notification.userId, Boolean(notification.read), JSON.stringify(notification), notification.createdAt, notification.updatedAt || notification.createdAt])
+  return notification
+}
+export async function markNotificationRead(userId, id, updatedAt) {
+  const result = await getPool().query("UPDATE core_notifications SET read=true,updated_at=$1,payload=jsonb_set(payload,'{read}','true'::jsonb) WHERE id=$2 AND user_id=$3 RETURNING payload", [updatedAt, id, userId])
+  return result.rows[0]?.payload || null
+}
+export async function markAllNotificationsRead(userId, updatedAt) {
+  const result = await getPool().query("UPDATE core_notifications SET read=true,updated_at=$1,payload=jsonb_set(payload,'{read}','true'::jsonb) WHERE user_id=$2 AND read=false", [updatedAt, userId])
+  return result.rowCount
+}
+export async function deleteNotification(userId, id) {
+  const result = await getPool().query('DELETE FROM core_notifications WHERE id=$1 AND user_id=$2', [id, userId])
+  return result.rowCount > 0
+}
+export async function createMentorshipMessage(message) {
+  await getPool().query('INSERT INTO core_mentorship_messages(id,room_id,user_id,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6)', [message.id, message.roomId, message.senderId, JSON.stringify(message), message.createdAt, message.updatedAt || message.createdAt])
+  return message
+}
+export async function createFeedPost(post) {
+  await getPool().query('INSERT INTO core_feed_posts(id,user_id,workspace_id,project_id,status,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)', [post.id, post.authorId || post.userId, post.workspaceId || null, post.projectId || null, post.status || null, JSON.stringify(post), post.createdAt, post.updatedAt || post.createdAt])
+  return post
+}
 export function contentReadEnabled() { return enabled() }
 export function contentReadFallbackEnabled() { return fallback() }
+export function contentWriteEnabled() { return process.env.CONTENT_WRITE_SOURCE === 'postgres' }
+export function contentWriteFallbackEnabled() { return process.env.CONTENT_WRITE_FALLBACK_SQLITE !== 'false' }
 export async function closeContentRepository() { if (pool) await pool.end(); pool = null }

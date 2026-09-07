@@ -1,6 +1,6 @@
 import { readDb, writeDb } from '../config/database.js'
 import { createId, nowIso, requireBodyString, timeAgo } from '../utils/api.js'
-import { listFiles as listFilesPostgres, contentReadEnabled, contentReadFallbackEnabled } from '../repositories/contentRepository.js'
+import { listFiles as listFilesPostgres, createFile as createFilePostgres, deleteFile as deleteFilePostgres, contentReadEnabled, contentReadFallbackEnabled, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const FILE_TYPES = new Set(['document', 'image', 'code'])
 const ITEM_TYPES = new Set(['folder', 'file'])
@@ -31,7 +31,7 @@ export async function listFiles(req, res) {
   })
 }
 
-export function createFile(req, res) {
+export async function createFile(req, res) {
   const db = readDb()
   const name = requireBodyString(res, req.body.name, 'Name')
   if (!name) return
@@ -53,15 +53,27 @@ export function createFile(req, res) {
   }
   db.files.push(file)
   writeDb(db)
+  if (contentWriteEnabled()) {
+    try { await createFilePostgres(file) } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'create_file', error: error.message }))
+      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
+    }
+  }
   return res.status(201).json(toFile(file))
 }
 
-export function deleteFile(req, res) {
+export async function deleteFile(req, res) {
   const db = readDb()
   const before = db.files.length
   db.files = db.files.filter(f => !(f.id === req.params.id && f.ownerId === req.user.id))
   if (db.files.length === before) return res.status(404).json({ error: 'File not found' })
   writeDb(db)
+  if (contentWriteEnabled()) {
+    try { await deleteFilePostgres(req.user.id, req.params.id) } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'delete_file', error: error.message }))
+      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
+    }
+  }
   return res.json({ ok: true })
 }
 
