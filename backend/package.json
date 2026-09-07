@@ -16,6 +16,7 @@
     "identity:db:migrate": "node scripts/migrate-identity-postgres.js",
     "identity:db:verify": "node scripts/verify-identity-postgres.js",
     "workspace:db:migrate": "node scripts/migrate-workspace-project-postgres.js",
+    "content:db:migrate": "node scripts/migrate-content-postgres.js",
     "investor-deal-room:db:migrate": "node scripts/migrate-investor-deal-room-postgres.js",
     "organization-intelligence:db:migrate": "node scripts/migrate-organization-intelligence-postgres.js",
     "discovery:worker": "node --import tsx scripts/discovery-worker.js",
