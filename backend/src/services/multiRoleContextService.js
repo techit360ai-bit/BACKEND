@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
+import { findIdentityById } from '../repositories/identityRepository.js'
 
 export const SPECIALIZED_ROLES = Object.freeze(['founder', 'collaborator', 'investor', 'organization'])
 export const ROLE_STATUSES = Object.freeze(['pending', 'pending_verification', 'active', 'suspended', 'revoked'])
@@ -208,4 +209,14 @@ export function deactivateRoleAssignment(userId, role) {
 
 export function roleAssignments(userId) {
   return availableContexts(userId)
+}
+
+export async function roleAssignmentsAsync(userId) {
+  if (process.env.IDENTITY_READ_SOURCE !== 'postgres') return roleAssignments(userId)
+  const identity = await findIdentityById(userId)
+  if (!identity) return { contexts: [], activeContext: null, profile: null }
+  const roles = identity.roles || []
+  const activeSpecialized = roles.some(row => SPECIALIZED_ROLES.includes(normalizeRole(row.role)) && row.status === 'active')
+  const contexts = roles.filter(row => ['active', 'pending', 'pending_verification'].includes(row.status)).filter(row => !(activeSpecialized && normalizeRole(row.role) === 'explorer')).map(row => ({ role: normalizeRole(row.role), roleAssignmentId: row.id, status: row.status, assurance: row.assurance || 'CLAIMED', isPrimary: Boolean(row.isPrimary) }))
+  return { contexts, activeContext: identity.activeContext, profile: identity.profile ? { activeRole: normalizeRole(identity.profile.activeRole || identity.activeContext?.role || identity.profile.role || 'explorer') } : null }
 }

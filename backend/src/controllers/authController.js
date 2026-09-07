@@ -9,7 +9,7 @@ import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery
 import { recordActivityInDb } from '../services/discoveryService.js'
 import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
-import { findIdentityByEmail, findIdentityById } from '../repositories/identityRepository.js'
+import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -220,7 +220,18 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
-  const credentials = await issueSessionAsync({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    try {
+      const local = readDb()
+      const roleAssignment = local.userRoles.find(row => row.userId === id)
+      const context = local.activeContexts.find(row => row.userId === id)
+      await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, context)
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_signup_failed', error: error.message }))
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
+    }
+  }
+  const credentials = await issueSessionAsync({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
     token: credentials.accessToken,
@@ -304,12 +315,25 @@ export async function changePassword(req, res) {
   }
 
   const db = readDb()
-  const user = db.users.find(row => row.id === req.user.id)
+  let user
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { user = (await findIdentityById(req.user.id))?.user } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  user ||= db.users.find(row => row.id === req.user.id)
   if (!user || !await bcrypt.compare(currentPassword, user.passwordHash)) {
     return res.status(401).json({ error: 'Current password is incorrect' })
   }
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS)
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    try {
+      const persisted = await updateIdentityPassword(req.user.id, passwordHash)
+      if (!persisted && process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'User not found' })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_password_write_failed', error: error.message }))
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
+    }
+  }
   const updated = updateDb(current => {
     const target = current.users.find(row => row.id === req.user.id)
     if (!target) return false

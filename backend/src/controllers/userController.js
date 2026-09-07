@@ -2,6 +2,7 @@ import { readDb, updateDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
+import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -17,21 +18,43 @@ const UPDATABLE = new Set([
   'commitmentStyle', 'equityPreference', 'minCashFloor', 'vestingComfort',
 ])
 
-export function getMe(req, res) {
+export async function getMe(req, res) {
   const db = readDb()
-  const profile = db.profiles.find(p => p.id === req.user.id)
+  let profile
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { profile = (await findIdentityById(req.user.id))?.profile } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  profile ||= db.profiles.find(p => p.id === req.user.id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   const response = { ...profile }
   if (profile.avatarObjectKey) response.avatarUrl = privateDownloadUrl(profile.avatarObjectKey, 900)
   return res.json(response)
 }
 
-export function updateMe(req, res) {
+export async function updateMe(req, res) {
   const updates = {}
   for (const [key, value] of Object.entries(req.body)) {
     if (UPDATABLE.has(key)) updates[key] = value
   }
 
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    try {
+      const profile = await updateIdentityProfile(req.user.id, updates)
+      if (profile) {
+        updateDb(db => {
+          const idx = db.profiles.findIndex(item => item.id === req.user.id)
+          if (idx === -1) return
+          db.profiles[idx] = { ...db.profiles[idx], ...profile }
+          syncRecommendationProfileInDb(db, req.user.id)
+        })
+        return res.json(profile)
+      }
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'Profile not found' })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_profile_write_failed', error: error.message }))
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
+    }
+  }
   const result = updateDb(db => {
     const idx = db.profiles.findIndex(p => p.id === req.user.id)
     if (idx === -1) return null
@@ -234,12 +257,16 @@ function directoryProfile(profile, db, viewerId) {
   }
 }
 
-export function listUsers(req, res) {
+export async function listUsers(req, res) {
   const requestedRole = String(req.query.role || '').trim().toLowerCase()
   const query = plainText(String(req.query.q || ''), 80).toLowerCase().replace(/^@/, '')
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20) || 20))
   const db = readDb()
-  const users = db.profiles
+  let profiles = db.profiles
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { profiles = await listIdentityProfiles() } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  const users = profiles
     .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
     .filter(profile => {
       if (!query) return true
@@ -253,10 +280,14 @@ export function listUsers(req, res) {
   return res.json({ users })
 }
 
-export function getUserProfile(req, res) {
+export async function getUserProfile(req, res) {
   const db = readDb()
   const id = req.params.id === 'me' ? req.user.id : req.params.id
-  const profile = db.profiles.find(p => p.id === id || p.username === id)
+  let profile
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { profile = (await listIdentityProfiles()).find(p => p.id === id || p.username === id) } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  profile ||= db.profiles.find(p => p.id === id || p.username === id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   return res.json(publicProfile(profile, db, req.user.id))
 }

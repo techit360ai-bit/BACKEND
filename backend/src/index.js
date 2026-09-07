@@ -7,6 +7,7 @@ import { initializeIdentityPostgresProjection } from './services/identityPostgre
 import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
 import { initializeContentPostgresProjection } from './services/contentPostgresProjection.js'
 import { initializeFinancePostgresProjection } from './services/financePostgresProjection.js'
+import { initializePlatformCollectionSchema } from './repositories/platformCollectionRepository.js'
 import { cleanupSessionsAsync } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
@@ -65,6 +66,7 @@ if (process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL) await initial
 if (process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL) await initializeWorkspaceProjectProjection()
 if (process.env.CONTENT_DATABASE_URL || process.env.DATABASE_URL) await initializeContentPostgresProjection()
 if (process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL) await initializeFinancePostgresProjection()
+if (process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env.IDENTITY_DATABASE_URL) await initializePlatformCollectionSchema()
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {

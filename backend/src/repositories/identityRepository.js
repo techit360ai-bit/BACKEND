@@ -52,6 +52,35 @@ async function withRollbackFallback(postgresCall, localCall) {
 export const findIdentityById = userId => withRollbackFallback(() => postgresBundle('u.id', userId), () => localById(userId))
 export const findIdentityByEmail = email => withRollbackFallback(() => postgresBundle('u.email', email), () => localByEmail(email))
 export function identityReadSource() { return postgresReads() ? 'postgres' : 'sqlite' }
+export async function updateIdentityProfile(userId, updates) {
+  const result = await getPool().query('SELECT payload,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,created_at,email FROM core_profiles WHERE id=$1', [userId])
+  const current = result.rows[0]
+  if (!current) return null
+  const payload = { ...(current.payload || {}), ...updates, id: userId, email: current.email }
+  const updatedAt = new Date().toISOString()
+  await getPool().query('UPDATE core_profiles SET first_name=$1,last_name=$2,username=$3,role=$4,workspace_id=$5,is_verified=$6,is_onboarded=$7,payload=$8,updated_at=$9 WHERE id=$10', [payload.firstName || current.first_name || null, payload.lastName || current.last_name || null, payload.username || current.username || null, payload.role || current.role || 'explorer', payload.workspaceId || current.workspace_id || null, payload.isVerified ?? current.is_verified ?? false, payload.isOnboarded ?? current.is_onboarded ?? false, JSON.stringify(payload), updatedAt, userId])
+  return { ...payload, createdAt: current.created_at, updatedAt }
+}
+export async function createIdentityBundle(user, profile, role, context) {
+  const client = await getPool().connect()
+  try {
+    await client.query('BEGIN')
+    await client.query('INSERT INTO core_users(id,email,password_hash,created_at,updated_at) VALUES($1,$2,$3,$4,$5)', [user.id, user.email, user.passwordHash, user.createdAt, user.updatedAt])
+    await client.query('INSERT INTO core_profiles(id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [profile.id, profile.email, profile.firstName || null, profile.lastName || null, profile.username || null, profile.role || 'explorer', profile.workspaceId || null, Boolean(profile.isVerified), Boolean(profile.isOnboarded), JSON.stringify(profile), profile.createdAt, profile.updatedAt])
+    await client.query('INSERT INTO core_user_roles(id,user_id,role,status,active,assurance,is_primary,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)', [role.id, role.userId, role.role, role.status || 'active', role.active !== false, role.assurance || null, Boolean(role.isPrimary), role.createdAt, role.updatedAt])
+    await client.query('INSERT INTO core_active_contexts(id,user_id,role,role_assignment_id,organization_id,workspace_id,resource_type,resource_id,status,started_at,last_active_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)', [context.id, context.userId, context.role, context.roleAssignmentId || null, context.organizationId || null, context.workspaceId || null, context.resourceType || null, context.resourceId || null, context.status || 'active', context.startedAt, context.lastActiveAt, context.updatedAt])
+    await client.query('COMMIT')
+    return { user, profile, role, context }
+  } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() }
+}
+export async function updateIdentityPassword(userId, passwordHash) {
+  const result = await getPool().query('UPDATE core_users SET password_hash=$1,updated_at=$2 WHERE id=$3', [passwordHash, new Date().toISOString(), userId])
+  return result.rowCount > 0
+}
+export async function listIdentityProfiles() {
+  const result = await getPool().query('SELECT id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at FROM core_profiles ORDER BY created_at DESC')
+  return result.rows.map(row => ({ ...(row.payload || {}), id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, username: row.username, role: row.role, workspaceId: row.workspace_id, isVerified: row.is_verified, isOnboarded: row.is_onboarded, createdAt: row.created_at, updatedAt: row.updated_at }))
+}
 export async function findSessionByIdentifier(identifier) {
   if (!identifier) return null
   return withRollbackFallback(
