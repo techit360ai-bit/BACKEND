@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
 import { readDb } from '../config/database.js'
+import { pendingMigrationEvents, markMigrationEvent } from './migrationOutboxService.js'
 
 let pool = null
 let timer = null
@@ -76,17 +77,40 @@ export async function syncIdentityProjection() {
   } finally { client.release() }
 }
 
+export async function syncMigrationOutbox() {
+  if (!pool) return { enabled: false, processed: 0 }
+  const events = pendingMigrationEvents({ limit: Number(process.env.MIGRATION_OUTBOX_BATCH_SIZE || 100) })
+  if (!events.length) return { enabled: true, processed: 0 }
+  const client = await pool.connect()
+  let processed = 0
+  try {
+    await client.query('BEGIN')
+    for (const event of events) {
+      await client.query(`INSERT INTO core_migration_outbox(id,domain,aggregate_type,aggregate_id,operation,version,payload,status,attempts,created_at,processed_at,last_error) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(domain,aggregate_type,aggregate_id,version,operation) DO UPDATE SET payload=EXCLUDED.payload,status=EXCLUDED.status,attempts=EXCLUDED.attempts,processed_at=EXCLUDED.processed_at,last_error=EXCLUDED.last_error`, [event.id, event.domain, event.aggregateType, event.aggregateId, event.operation, event.version, json(event.payload), event.status, Number(event.attempts || 0), date(event.createdAt), event.processedAt || null, event.lastError || null])
+      processed += 1
+    }
+    await client.query('COMMIT')
+    for (const event of events) markMigrationEvent(event.id)
+    return { enabled: true, processed }
+  } catch (error) {
+    await client.query('ROLLBACK')
+    for (const event of events) markMigrationEvent(event.id, { status: 'pending', error: error.message })
+    throw error
+  } finally { client.release() }
+}
+
 export async function initializeIdentityPostgresProjection() {
   if (!connectionUrl()) return { enabled: false }
   pool = new pg.Pool({ connectionString: connectionUrl(), max: Math.max(1, Number(process.env.IDENTITY_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.IDENTITY_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(connectionUrl()) ? { rejectUnauthorized: process.env.IDENTITY_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  const [sessionSql, identitySql] = await Promise.all([
+  const [sessionSql, identitySql, outboxSql] = await Promise.all([
     fs.readFile(new URL('../../migrations/postgres/003_auth_sessions.sql', import.meta.url), 'utf8'),
     fs.readFile(new URL('../../migrations/postgres/009_core_identity_projection.sql', import.meta.url), 'utf8'),
+    fs.readFile(new URL('../../migrations/postgres/010_core_migration_outbox.sql', import.meta.url), 'utf8'),
   ])
-  await pool.query(`${sessionSql}\n${identitySql}`)
+  await pool.query(`${sessionSql}\n${identitySql}\n${outboxSql}`)
   const initial = await syncIdentityProjection()
   const interval = Math.max(5000, Number(process.env.IDENTITY_PROJECTION_INTERVAL_MS || 30000))
-  timer = setInterval(() => syncIdentityProjection().catch(error => console.error(JSON.stringify({ event: 'identity_projection_failed', error: error.message }))), interval)
+  timer = setInterval(() => Promise.all([syncIdentityProjection(), syncMigrationOutbox()]).catch(error => console.error(JSON.stringify({ event: 'identity_projection_failed', error: error.message }))), interval)
   timer.unref?.()
   return { enabled: true, ...initial }
 }

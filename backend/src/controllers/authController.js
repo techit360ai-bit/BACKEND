@@ -8,6 +8,7 @@ import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignment
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
 import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
+import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -210,6 +211,7 @@ export async function signup(req, res) {
     const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
     ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
     ;(db.activeContexts || (db.activeContexts = [])).push({ id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now })
+    recordMigrationEvent(db, { domain: 'identity', aggregateType: 'user', aggregateId: id, operation: 'upsert', payload: { userId: id, email, role: requestedRole }, version: 1 })
     return { status: 201, profile }
   })
 

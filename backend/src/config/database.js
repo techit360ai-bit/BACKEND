@@ -138,6 +138,7 @@ const INITIAL = {
   recommendations: [],
   recommendationReasons: [],
   recommendationEvents: [],
+  migrationOutbox: [],
   recommendationFeedback: [],
   recommendationExposures: [],
   userInterests: [],
