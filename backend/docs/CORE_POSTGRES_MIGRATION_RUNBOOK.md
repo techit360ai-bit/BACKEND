@@ -31,6 +31,19 @@ npm run core:db:migrate
 
 The command exits non-zero when any projection reports a row-count mismatch. It does not switch request authority; SQLite remains authoritative until the async repository cutover is complete.
 
+Identity read cutover is now feature-flagged:
+
+```text
+IDENTITY_READ_SOURCE=postgres
+IDENTITY_READ_FALLBACK_SQLITE=true
+IDENTITY_SHADOW_READS=true
+```
+
+Enable it for a small tenant cohort only after `npm run identity:db:verify` is
+consistent. Set `IDENTITY_READ_FALLBACK_SQLITE=false` only after the shadow
+read observation window and rollback drill succeed. Identity writes remain on
+the existing transaction path until the write repository is migrated.
+
 ## Migration sequence
 
 ### 1. Freeze and inventory
