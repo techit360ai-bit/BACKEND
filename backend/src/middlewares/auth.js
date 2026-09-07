@@ -3,6 +3,7 @@ import { readDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
+import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -15,7 +16,7 @@ if (!JWT_SECRET) {
   )
 }
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const credential = accessTokenFromRequest(req)
   if (!credential) {
     return res.status(401).json({ error: 'No token provided' })
@@ -67,7 +68,12 @@ export function requireAuth(req, res, next) {
     authSource: credential.source,
     user_metadata: {},
   }
-  next()
+  try {
+    await compareIdentityProjection(user.id, user, profile)
+  } catch {
+    return res.status(503).json({ error: 'identity_verification_temporarily_unavailable' })
+  }
+  return next()
 }
 
 export function requireAdminAuth(req, res, next) {

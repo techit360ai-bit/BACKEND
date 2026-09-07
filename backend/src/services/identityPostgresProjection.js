@@ -10,6 +10,24 @@ const json = value => JSON.stringify(value || {})
 
 export function identityProjectionEnabled() { return Boolean(connectionUrl()) }
 
+export async function compareIdentityProjection(userId, localUser, localProfile) {
+  if (!pool || process.env.IDENTITY_SHADOW_READS !== 'true') return { enabled: false, consistent: true }
+  try {
+    const result = await pool.query(`SELECT u.email AS user_email, p.email AS profile_email, p.role AS profile_role FROM core_users u LEFT JOIN core_profiles p ON p.id = u.id WHERE u.id = $1`, [userId])
+    const row = result.rows[0]
+    const consistent = Boolean(row)
+      && row.user_email === localUser?.email
+      && row.profile_email === localProfile?.email
+      && row.profile_role === (localProfile?.role || 'explorer')
+    if (!consistent) console.error(JSON.stringify({ event: 'identity_shadow_read_mismatch', userId: String(userId) }))
+    return { enabled: true, consistent, postgres: row || null }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'identity_shadow_read_failed', userId: String(userId), error: error.message }))
+    if (process.env.IDENTITY_SHADOW_READ_REQUIRED === 'true') throw error
+    return { enabled: true, consistent: false, error: 'shadow_read_failed' }
+  }
+}
+
 export async function syncIdentityProjection() {
   if (!pool) return { enabled: false, users: 0, profiles: 0, roles: 0, contexts: 0 }
   const db = readDb()
