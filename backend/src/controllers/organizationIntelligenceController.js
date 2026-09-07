@@ -1,15 +1,15 @@
-import { createOrganizationAction, createOrganizationCohort, createOrganizationPartner, createOrganizationResource, createReportSchedule, generateOrganizationReport, listOrganizationActions, listOrganizationCohorts, listOrganizationKpis, listOrganizationPartners, listOrganizationResources, listReportSchedules, organizationActivity, organizationAlumniOutcomes, organizationAuditEvents, organizationBriefingEvidence, organizationCohortBenchmarks, organizationMembers, organizationOverview, organizationProgramHealth, organizationPulse, organizationRecommendations, organizationResourceAllocation, organizationRisks, organizationStartupPortfolio, refreshOrganizationIntelligence, saveOrganizationKpi, updateOrganizationAction, updateOrganizationMember, verifyOrganizationAudit } from '../services/organizationIntelligenceService.js'
+import { createOrganizationActionAsync, createOrganizationCohort, createOrganizationPartner, createOrganizationResource, createReportSchedule, generateOrganizationReport, listOrganizationActionsAsync, listOrganizationCollectionAsync, listOrganizationKpisAsync, organizationActivity, organizationAlumniOutcomes, organizationAuditEvents, organizationBriefingEvidence, organizationCohortBenchmarks, organizationMembers, organizationOverview, organizationProgramHealth, organizationPulse, organizationRecommendations, organizationResourceAllocation, organizationRisks, organizationStartupPortfolio, refreshOrganizationIntelligence, saveOrganizationKpiAsync, updateOrganizationActionAsync, updateOrganizationMember, verifyOrganizationAudit } from '../services/organizationIntelligenceService.js'
 import { requestOrganizationAdvisory } from '../services/aiRouterClient.js'
 
 function result(res, value, success = 200) { if (value?.ok === false) return res.status(value.error?.includes('denied') || value.error === 'organization_context_required' ? 403 : value.error?.includes('not_found') ? 404 : 400).json(value); return res.status(success).json(value) }
 export const overview = (req, res) => result(res, organizationOverview(req.user.id, req.query.organizationId))
 export const pulse = (req, res) => result(res, organizationPulse(req.user.id, req.query))
 export const risks = (req, res) => result(res, organizationRisks(req.user.id, req.query))
-export const actions = (req, res) => result(res, listOrganizationActions(req.user.id, req.query))
-export const actionCreate = (req, res) => result(res, createOrganizationAction(req.user.id, req.body), 201)
-export const actionPatch = (req, res) => result(res, updateOrganizationAction(req.user.id, req.params.actionId, req.body))
-export const kpis = (req, res) => result(res, listOrganizationKpis(req.user.id, req.query.organizationId))
-export const kpiSave = (req, res) => result(res, saveOrganizationKpi(req.user.id, req.body), 201)
+export const actions = async (req, res) => result(res, await listOrganizationActionsAsync(req.user.id, req.query))
+export const actionCreate = async (req, res) => result(res, await createOrganizationActionAsync(req.user.id, req.body), 201)
+export const actionPatch = async (req, res) => result(res, await updateOrganizationActionAsync(req.user.id, req.params.actionId, req.body))
+export const kpis = async (req, res) => result(res, await listOrganizationKpisAsync(req.user.id, req.query.organizationId))
+export const kpiSave = async (req, res) => result(res, await saveOrganizationKpiAsync(req.user.id, req.body), 201)
 export const auditVerify = (req, res) => result(res, verifyOrganizationAudit(req.user.id, req.query.organizationId))
 export const briefingEvidence = (req, res) => result(res, organizationBriefingEvidence(req.user.id, req.query.organizationId))
 export async function briefing(req, res) { const evidence = organizationBriefingEvidence(req.user.id, req.body.organizationId); if (evidence.ok === false) return result(res, evidence); const advisory = await requestOrganizationAdvisory(req.user.token, evidence); return res.json({ ok: true, organizationId: evidence.organizationId, evidence, advisory, aiAvailable: Boolean(advisory) }) }
@@ -18,13 +18,13 @@ export const recommendations = (req, res) => result(res, organizationRecommendat
 export const activity = (req, res) => result(res, organizationActivity(req.user.id, req.query))
 export const members = (req, res) => result(res, organizationMembers(req.user.id, req.query.organizationId))
 export const memberPatch = (req, res) => result(res, updateOrganizationMember(req.user.id, req.params.memberId, req.body))
-export const cohorts = (req, res) => result(res, listOrganizationCohorts(req.user.id, req.query.organizationId))
+export const cohorts = async (req, res) => result(res, await listOrganizationCollectionAsync(req.user.id, 'organizationCohorts', req.query.organizationId))
 export const cohortCreate = (req, res) => result(res, createOrganizationCohort(req.user.id, req.body), 201)
-export const partners = (req, res) => result(res, listOrganizationPartners(req.user.id, req.query.organizationId))
+export const partners = async (req, res) => result(res, await listOrganizationCollectionAsync(req.user.id, 'organizationPartners', req.query.organizationId))
 export const partnerCreate = (req, res) => result(res, createOrganizationPartner(req.user.id, req.body), 201)
-export const resources = (req, res) => result(res, listOrganizationResources(req.user.id, req.query.organizationId))
+export const resources = async (req, res) => result(res, await listOrganizationCollectionAsync(req.user.id, 'organizationResources', req.query.organizationId))
 export const resourceCreate = (req, res) => result(res, createOrganizationResource(req.user.id, req.body), 201)
-export const reportSchedules = (req, res) => result(res, listReportSchedules(req.user.id, req.query.organizationId))
+export const reportSchedules = async (req, res) => result(res, await listOrganizationCollectionAsync(req.user.id, 'organizationReportSchedules', req.query.organizationId))
 export const reportScheduleCreate = (req, res) => result(res, createReportSchedule(req.user.id, req.body), 201)
 export const auditEvents = (req, res) => result(res, organizationAuditEvents(req.user.id, req.query))
 export const startups = (req, res) => result(res, organizationStartupPortfolio(req.user.id, req.query))

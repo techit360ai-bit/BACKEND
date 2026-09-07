@@ -16,6 +16,7 @@ import {
   createInvestorCollection,
   createOrganizationProject,
   createPaymentIntent,
+  createPaymentIntentAsync,
   createProject,
   createWorkspaceCollectionItem,
   createWorkspaceInvitation,
@@ -86,7 +87,9 @@ import {
   updateOrganizationProject,
   updateProject,
   walletList,
+  walletListAsync,
   walletSummary,
+  walletSummaryAsync,
   workspaceContext,
   workspaceContextAsync,
 } from '../services/domainService.js'
@@ -531,16 +534,16 @@ export function hackathonPipeline(req, res) {
   return res.json({ hackathonId: req.params.hackathonId, buckets: result.pipeline })
 }
 
-export function walletSummaryGet(req, res) {
-  return res.json(walletSummary(req.user.id))
+export async function walletSummaryGet(req, res) {
+  return res.json(await walletSummaryAsync(req.user.id))
 }
 
-export function walletListGet(req, res) {
-  return res.json({ [req.responseKey]: walletList(req.user.id, req.collectionName) })
+export async function walletListGet(req, res) {
+  return res.json({ [req.responseKey]: await walletListAsync(req.user.id, req.collectionName) })
 }
 
-export function walletPaymentIntent(req, res) {
-  const result = createPaymentIntent(req.user.id, req.body)
+export async function walletPaymentIntent(req, res) {
+  const result = await createPaymentIntentAsync(req.user.id, req.body)
   if (result?.ok === false) return res.status(400).json(result)
   return created(res, result)
 }

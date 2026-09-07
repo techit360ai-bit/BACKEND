@@ -4,6 +4,8 @@ import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
 import { organizationOverview } from './organizationIntelligenceService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
+import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, financeReadEnabled, financeReadFallbackEnabled } from '../repositories/financeRepository.js'
+import { syncFinanceProjection } from './financePostgresProjection.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -1786,10 +1788,14 @@ export function walletSummary(userId) {
   return walletSummaryFor(db, userId)
 }
 
+export async function walletSummaryAsync(userId) { if (!financeReadEnabled()) return walletSummary(userId); try { return await walletSummaryPostgres(userId) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletSummary(userId) } }
+
 export function walletList(userId, name) {
   const db = readDb()
   return listOwned(db, name, userId, 'userId')
 }
+
+export async function walletListAsync(userId, name) { if (!financeReadEnabled()) return walletList(userId, name); try { return await walletCollectionPostgres(userId, name) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletList(userId, name) } }
 
 export function createPaymentIntent(userId, body) {
   return updateDb(db => {
@@ -1815,6 +1821,12 @@ export function createPaymentIntent(userId, body) {
     }, 'pay', 'userId')
     return { paymentIntent }
   })
+}
+
+export async function createPaymentIntentAsync(userId, body) {
+  const result = createPaymentIntent(userId, body)
+  if (!process.env.FINANCE_WRITE_SOURCE || process.env.FINANCE_WRITE_SOURCE !== 'postgres' || result?.ok === false) return result
+  try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'create_payment_intent', error: error.message })); if (process.env.FINANCE_WRITE_FALLBACK_SQLITE !== 'false') return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
 }
 
 export function genericList(userId, name) {

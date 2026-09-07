@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
+import { getDealRoom as getDealRoomPostgres, listDealRooms as listDealRoomsPostgres, syncDealAggregate, investorReadEnabled, investorWriteEnabled, investorFallbackEnabled } from '../repositories/investorDealRoomRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const clean = value => typeof value === 'string' ? value.trim() : value
@@ -57,6 +58,8 @@ export function listDealRooms(userId) {
   return { deals: deals.map(deal => publicDeal(db, deal, userId)) }
 }
 
+export async function listDealRoomsAsync(userId) { if (!investorReadEnabled()) return listDealRooms(userId); try { return await listDealRoomsPostgres(userId) } catch (error) { if (!investorFallbackEnabled('READ')) throw error; return listDealRooms(userId) } }
+
 export function getDealRoom(userId, dealId, { requireNda = true } = {}) {
   const db = readDb(); const deal = room(db, dealId); const member = deal ? participant(db, deal.id, userId) : null
   if (!deal || !member) return { ok: false, error: 'deal_room_not_found' }
@@ -68,6 +71,8 @@ export function getDealRoom(userId, dealId, { requireNda = true } = {}) {
   const ic = internal ? collection(db, 'icReviews').filter(row => row.dealId === deal.id) : []
   return { ok: true, deal: publicDeal(db, deal, userId), checklist: items, questions, notes, ic }
 }
+
+export async function getDealRoomAsync(userId, dealId, options = {}) { if (!investorReadEnabled()) return getDealRoom(userId, dealId, options); try { return await getDealRoomPostgres(userId, dealId) } catch (error) { if (!investorFallbackEnabled('READ')) throw error; return getDealRoom(userId, dealId, options) } }
 
 export function signDealNda(userId, dealId, body = {}) {
   return updateDb(db => {
@@ -130,5 +135,23 @@ export function createIcReview(userId, dealId, body = {}) {
 export function createTermSheet(userId, dealId, body = {}) {
   return updateDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'legal'].includes(member.role) || !ndaActive(db, deal)) return { ok: false, error: 'nda_required' }; const version = { id: createId('term_sheet'), dealId, investorId: userId, version: collection(db, 'termSheetVersions').filter(row => row.dealId === dealId).length + 1, status: 'draft', terms: body.terms && typeof body.terms === 'object' ? body.terms : {}, disclaimer: 'Template only. This is not legal advice and is not a legally executed agreement.', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'termSheetVersions').push(version); audit(db, dealId, userId, 'term_sheet_created', { version: version.version }); return { ok: true, termSheet: version } })
 }
+
+async function persistInvestorResult(result, actorId, dealId) {
+  if (!investorWriteEnabled() || !result?.ok || !dealId) return result
+  try { await syncDealAggregate(actorId, dealId); return result } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_postgres_write_failed', dealId, error: error.message }))
+    if (investorFallbackEnabled('WRITE')) return result
+    return { ok: false, error: 'investor_write_temporarily_unavailable' }
+  }
+}
+export async function createDealRoomAsync(userId, body = {}) { const result = createDealRoom(userId, body); return persistInvestorResult(result, userId, result.deal?.id) }
+export async function signDealNdaAsync(userId, dealId, body = {}) { return persistInvestorResult(signDealNda(userId, dealId, body), userId, dealId) }
+export async function transitionDealAsync(userId, dealId, nextState) { return persistInvestorResult(transitionDeal(userId, dealId, nextState), userId, dealId) }
+export async function updateDiligenceItemAsync(userId, dealId, itemId, body = {}) { return persistInvestorResult(updateDiligenceItem(userId, dealId, itemId, body), userId, dealId) }
+export async function createDealQuestionAsync(userId, dealId, body = {}) { return persistInvestorResult(createDealQuestion(userId, dealId, body), userId, dealId) }
+export async function addDealQuestionMessageAsync(userId, dealId, questionId, body = {}) { return persistInvestorResult(addDealQuestionMessage(userId, dealId, questionId, body), userId, dealId) }
+export async function createInternalNoteAsync(userId, dealId, body = {}) { return persistInvestorResult(createInternalNote(userId, dealId, body), userId, dealId) }
+export async function createIcReviewAsync(userId, dealId, body = {}) { return persistInvestorResult(createIcReview(userId, dealId, body), userId, dealId) }
+export async function createTermSheetAsync(userId, dealId, body = {}) { return persistInvestorResult(createTermSheet(userId, dealId, body), userId, dealId) }
 
 export { DEAL_STATES, CHECKLIST, DEFAULT_FOLDERS }
