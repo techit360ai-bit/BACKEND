@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
-import { accessTokenFromRequest, touchSession } from '../services/sessionService.js'
+import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
 import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
@@ -36,7 +36,7 @@ export async function requireAuth(req, res, next) {
 
   const binding = await validateSessionBindingAsync(payload)
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
-  touchSession(payload.sid)
+  await touchSessionAsync(payload.sid)
 
   const identity = await findIdentityById(payload.sub)
   const user = identity?.user

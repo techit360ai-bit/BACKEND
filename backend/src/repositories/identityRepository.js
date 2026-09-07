@@ -3,7 +3,10 @@ import { readDb } from '../config/database.js'
 
 let pool = null
 const url = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
-const postgresReads = () => process.env.IDENTITY_READ_SOURCE === 'postgres'
+// A PostgreSQL-authoritative write mode must read the same authority. This
+// prevents a newly-created session or identity from disappearing when the
+// explicit read flag has not yet been updated in a deployment.
+const postgresReads = () => process.env.IDENTITY_READ_SOURCE === 'postgres' || process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 
 function localById(userId) {
   const db = readDb(); const user = db.users.find(row => row.id === userId) || null

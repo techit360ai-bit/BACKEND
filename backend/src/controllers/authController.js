@@ -7,7 +7,7 @@ import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
-import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
+import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { findIdentityByEmail, findIdentityById } from '../repositories/identityRepository.js'
 
@@ -220,7 +220,7 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
-  const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
+  const credentials = await issueSessionAsync({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
     token: credentials.accessToken,
@@ -255,7 +255,7 @@ export async function signin(req, res) {
   writeDb(db)
   roleAssignments(user.id)
 
-  const credentials = issueSession(user, profile, req, { rememberMe: req.body.rememberMe !== false })
+  const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.json({
     token: credentials.accessToken,
@@ -276,22 +276,22 @@ export async function session(req, res) {
   return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
 }
 
-export function signout(req, res) {
-  if (req.user.sessionId) revokeSession(req.user.id, req.user.sessionId)
+export async function signout(req, res) {
+  if (req.user.sessionId) await revokeSessionAsync(req.user.id, req.user.sessionId)
   clearSessionCookies(res)
   return res.json({ message: 'Signed out' })
 }
 
-export function refresh(req, res) {
-  const result = rotateSession(refreshTokenFromRequest(req), req)
+export async function refresh(req, res) {
+  const result = await rotateSessionAsync(refreshTokenFromRequest(req), req)
   if (!result.ok) { clearSessionCookies(res); return res.status(401).json({ error: result.error }) }
   if (!mobileClient(req)) setSessionCookies(res, result); return res.json({ token: result.accessToken, ...(mobileClient(req) ? { refreshToken: result.refreshToken } : {}), user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
 }
 
-export function activeSessions(req, res) { return res.json({ sessions: listSessions(req.user.id, req.user.sessionId) }) }
-export function revokeActiveSession(req, res) { const result = revokeSession(req.user.id, req.params.sessionId); return result.ok ? res.json(result) : res.status(404).json(result) }
-export function revokeOtherSessions(req, res) { return res.json(revokeAllSessions(req.user.id, req.user.sessionId)) }
-export function revokeEverySession(req, res) { const result = revokeAllSessions(req.user.id); clearSessionCookies(res); return res.json(result) }
+export async function activeSessions(req, res) { return res.json({ sessions: await listSessionsAsync(req.user.id, req.user.sessionId) }) }
+export async function revokeActiveSession(req, res) { const result = await revokeSessionAsync(req.user.id, req.params.sessionId); return result.ok ? res.json(result) : res.status(404).json(result) }
+export async function revokeOtherSessions(req, res) { return res.json(await revokeAllSessionsAsync(req.user.id, req.user.sessionId)) }
+export async function revokeEverySession(req, res) { const result = await revokeAllSessionsAsync(req.user.id); clearSessionCookies(res); return res.json(result) }
 
 export async function changePassword(req, res) {
   const currentPassword = String(req.body.currentPassword || '')

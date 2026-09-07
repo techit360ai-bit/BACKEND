@@ -7,7 +7,7 @@ import { initializeIdentityPostgresProjection } from './services/identityPostgre
 import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
 import { initializeContentPostgresProjection } from './services/contentPostgresProjection.js'
 import { initializeFinancePostgresProjection } from './services/financePostgresProjection.js'
-import { cleanupSessions } from './services/sessionService.js'
+import { cleanupSessionsAsync } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
 import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
@@ -71,7 +71,7 @@ const reverificationTimer = setInterval(() => {
   try { generateReverificationNotifications() } catch (error) { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) }
 }, reverificationIntervalMs)
 reverificationTimer.unref?.()
-const sessionCleanupTimer = setInterval(() => { try { cleanupSessions() } catch (error) { console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
+const sessionCleanupTimer = setInterval(() => { cleanupSessionsAsync().catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
 sessionCleanupTimer.unref?.()
 const dealRoomMaintenanceTimer = setInterval(() => { try { runDealRoomMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
 dealRoomMaintenanceTimer.unref?.()
