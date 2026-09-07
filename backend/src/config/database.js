@@ -513,6 +513,17 @@ export function validateDatabaseConfig() {
   if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.REDIS_URL) {
     throw new Error('SCALE_PROFILE=multi-replica requires REDIS_URL for shared rate limits and coordination.')
   }
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica') {
+    const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
+    for (const domain of domains) {
+      if (process.env[`${domain}_READ_SOURCE`] !== 'postgres' || process.env[`${domain}_WRITE_SOURCE`] !== 'postgres') {
+        throw new Error(`SCALE_PROFILE=multi-replica requires ${domain}_READ_SOURCE and ${domain}_WRITE_SOURCE to be postgres.`)
+      }
+      if (process.env[`${domain}_READ_FALLBACK_SQLITE`] === 'true' || process.env[`${domain}_WRITE_FALLBACK_SQLITE`] === 'true') {
+        throw new Error(`SCALE_PROFILE=multi-replica requires ${domain} SQLite fallbacks to be disabled after rollback drills.`)
+      }
+    }
+  }
   if (!['json', 'sqlite'].includes(driver)) {
     throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite" or "json".`)
   }

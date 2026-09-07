@@ -44,6 +44,33 @@ consistent. Set `IDENTITY_READ_FALLBACK_SQLITE=false` only after the shadow
 read observation window and rollback drill succeed. Identity writes remain on
 the existing transaction path until the write repository is migrated.
 
+The staged repository flags are:
+
+```text
+IDENTITY_READ_SOURCE=postgres
+IDENTITY_WRITE_SOURCE=postgres
+WORKSPACE_READ_SOURCE=postgres
+CONTENT_READ_SOURCE=postgres
+CONTENT_WRITE_SOURCE=postgres
+INVESTOR_READ_SOURCE=postgres
+INVESTOR_WRITE_SOURCE=postgres
+ORGANIZATION_READ_SOURCE=postgres
+ORGANIZATION_WRITE_SOURCE=postgres
+FINANCE_READ_SOURCE=postgres
+FINANCE_WRITE_SOURCE=postgres
+```
+
+Each domain retains an explicit `*_FALLBACK_SQLITE` switch. Before changing a
+domain fallback to `false`, run and preserve the rollback drill output:
+
+```bash
+npm run core:cutover:rollback-drill
+```
+
+Identity shadow comparisons emit `postgres_cutover_mismatch` events with
+normalized SHA-256 hashes. A non-zero mismatch count blocks promotion of that
+domain's read flag.
+
 ## Migration sequence
 
 ### 1. Freeze and inventory
@@ -114,6 +141,10 @@ Remove the `SCALE_PROFILE=multi-replica` startup restriction only when all of th
 - Two or more backend replicas pass failover and duplicate-request tests.
 - Backfill and shadow-read mismatch rates are zero for the agreed observation window.
 - Finance, wallet, credit, TVCE, billing webhook, and idempotency tests pass under concurrency.
+
+The startup gate enforces these conditions for `SCALE_PROFILE=multi-replica`:
+all migrated domains must set both read and write sources to `postgres`, and
+their SQLite fallbacks must be explicitly disabled after the rollback drill.
 
 ## Recommended implementation order
 

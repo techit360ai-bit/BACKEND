@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { readDb } from '../config/database.js'
+import { recordCutoverComparison } from '../services/postgresCutoverMonitor.js'
 
 let pool = null
 const url = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
@@ -41,7 +42,7 @@ async function postgresBundle(where, value) {
 
 async function withRollbackFallback(postgresCall, localCall) {
   if (!postgresReads()) return localCall()
-  try { return await postgresCall() } catch (error) {
+  try { const primary = await postgresCall(); const shadow = localCall(); recordCutoverComparison('identity', primary?.user?.id || primary?.user?.email || 'missing', primary, shadow); return primary } catch (error) {
     console.error(JSON.stringify({ event: 'identity_postgres_read_failed', error: error.message }))
     if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'true') return localCall()
     throw error

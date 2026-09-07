@@ -19,6 +19,7 @@
     "content:db:migrate": "node scripts/migrate-content-postgres.js",
     "finance:db:migrate": "node scripts/migrate-finance-postgres.js",
     "core:db:migrate": "node scripts/migrate-core-postgres.js",
+    "core:cutover:rollback-drill": "node scripts/cutover-rollback-drill.js",
     "investor-deal-room:db:migrate": "node scripts/migrate-investor-deal-room-postgres.js",
     "organization-intelligence:db:migrate": "node scripts/migrate-organization-intelligence-postgres.js",
     "discovery:worker": "node --import tsx scripts/discovery-worker.js",
