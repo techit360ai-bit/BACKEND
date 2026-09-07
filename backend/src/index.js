@@ -6,6 +6,7 @@ import { initializeTrustPostgresProjection } from './services/trustPostgresProje
 import { initializeIdentityPostgresProjection } from './services/identityPostgresProjection.js'
 import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
 import { initializeContentPostgresProjection } from './services/contentPostgresProjection.js'
+import { initializeFinancePostgresProjection } from './services/financePostgresProjection.js'
 import { cleanupSessions } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
@@ -63,6 +64,7 @@ if (process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL) await initialize
 if (process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL) await initializeIdentityPostgresProjection()
 if (process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL) await initializeWorkspaceProjectProjection()
 if (process.env.CONTENT_DATABASE_URL || process.env.DATABASE_URL) await initializeContentPostgresProjection()
+if (process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL) await initializeFinancePostgresProjection()
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {
