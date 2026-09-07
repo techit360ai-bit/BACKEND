@@ -191,3 +191,31 @@ export async function settleCapabilityConsumptionPostgres(consumptionId, respons
     return { ok: true, consumption: next }
   }, { userId: analytics.userId || null })
 }
+
+export async function saveWorkflowPostgres(userId, input = {}) {
+  return withPlatformTransaction(async client => {
+    const existing = await findByPayload(client, 'workflowSnapshots', 'clientRequestId', input.clientRequestId || '')
+    if (existing && existing.userId === userId) return { ok: true, idempotent: true, workflow: existing }
+    const now = nowIso(); const workflow = { id: createId('workflow'), userId, clientRequestId: input.clientRequestId || createId('request'), name: String(input.name || input.capability || 'TechIT workflow').trim(), capability: String(input.capability || '').trim(), payload: input.payload || {}, estimatedCredits: number(input.estimatedCredits), status: 'pending', createdAt: now, updatedAt: now }
+    await upsertRecord(client, 'workflowSnapshots', workflow, { idempotencyKey: `workflow-create:${userId}:${workflow.clientRequestId}`, operation: 'insert' })
+    return { ok: true, workflow }
+  }, { userId })
+}
+
+export async function resumeWorkflowPostgres(userId, workflowId, input = {}) {
+  return withPlatformTransaction(async client => {
+    const current = await findById(client, 'workflowSnapshots', workflowId, { forUpdate: true })
+    if (!current || current.userId !== userId) return { ok: false, error: 'workflow_not_found' }
+    const now = nowIso(); const workflow = { ...current, status: input.status || 'resumed', resumedAt: now, updatedAt: now }
+    await upsertRecord(client, 'workflowSnapshots', workflow, { idempotencyKey: `workflow-resume:${workflowId}:${now}`, operation: 'update', expectedVersion: current.version })
+    return { ok: true, workflow }
+  }, { userId })
+}
+
+export async function recordPaywallEventPostgres(event) {
+  return withPlatformTransaction(async client => {
+    const row = { id: createId('paywall'), ...event, createdAt: event.createdAt || nowIso() }
+    await upsertRecord(client, 'paywallEvents', row, { idempotencyKey: `paywall:${row.id}`, operation: 'insert' })
+    return { ok: true, event: row }
+  }, { userId: event.userId })
+}

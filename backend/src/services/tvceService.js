@@ -2,7 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
-import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -232,6 +232,14 @@ export function recordPaywallEvent(userId, input = {}) {
   })
 }
 
+export async function recordPaywallEventAsync(userId, input = {}) {
+  if (process.env.FINANCE_WRITE_SOURCE !== 'postgres') return recordPaywallEvent(userId, input)
+  try { return await recordPaywallEventPostgres({ userId, capability: text(input.capability), eventType: text(input.eventType || 'PAYWALL_VIEWED'), role: text(input.role), metadata: input.metadata || {} }) } catch (error) {
+    if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    return recordPaywallEvent(userId, input)
+  }
+}
+
 export function estimateCredits(userId, input = {}) {
   const items = Array.isArray(input.actions) ? input.actions : [input]
   const estimate = items.reduce((sum, item) => sum + Math.max(0, number(item.estimatedCredits ?? item.estimated_credits)), 0)
@@ -359,12 +367,28 @@ export function saveWorkflow(userId, input = {}) {
   })
 }
 
+export async function saveWorkflowAsync(userId, input = {}) {
+  if (process.env.FINANCE_WRITE_SOURCE !== 'postgres') return saveWorkflow(userId, input)
+  try { return await saveWorkflowPostgres(userId, input) } catch (error) {
+    if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    return saveWorkflow(userId, input)
+  }
+}
+
 export function resumeWorkflow(userId, workflowId, input = {}) {
   return updateDb(db => {
     const workflow = collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId)
     if (!workflow) return { ok: false, error: 'workflow_not_found' }
     workflow.status = input.status || 'resumed'; workflow.resumedAt = nowIso(); workflow.updatedAt = workflow.resumedAt; return { ok: true, workflow }
   })
+}
+
+export async function resumeWorkflowAsync(userId, workflowId, input = {}) {
+  if (process.env.FINANCE_WRITE_SOURCE !== 'postgres') return resumeWorkflow(userId, workflowId, input)
+  try { return await resumeWorkflowPostgres(userId, workflowId, input) } catch (error) {
+    if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    return resumeWorkflow(userId, workflowId, input)
+  }
 }
 
 export function fulfillPayment(userId, paymentId, input = {}) {
