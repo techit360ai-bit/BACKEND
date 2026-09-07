@@ -3,6 +3,7 @@ import { validateDatabaseConfig } from './config/database.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
 import { generateReverificationNotifications } from './services/trustVerificationService.js'
 import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
+import { initializeIdentityPostgresProjection } from './services/identityPostgresProjection.js'
 import { cleanupSessions } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
@@ -57,6 +58,7 @@ validateDatabaseConfig()
 validateSecurityConfig()
 if (process.env.DISCOVERY_DATABASE_URL) await initializeDiscoveryInfrastructure()
 if (process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL) await initializeTrustPostgresProjection()
+if (process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL) await initializeIdentityPostgresProjection()
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {
