@@ -1,10 +1,10 @@
 import jwt from 'jsonwebtoken'
 import { readDb } from '../config/database.js'
-import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
+import { accessTokenFromRequest, touchSession } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
 import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
-import { findIdentityById } from '../repositories/identityRepository.js'
+import { findIdentityById, validateSessionBindingAsync } from '../repositories/identityRepository.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -34,7 +34,7 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
 
-  const binding = validateSessionBinding(payload)
+  const binding = await validateSessionBindingAsync(payload)
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
   touchSession(payload.sid)
 

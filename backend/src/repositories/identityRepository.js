@@ -48,4 +48,25 @@ async function withRollbackFallback(postgresCall, localCall) {
 export const findIdentityById = userId => withRollbackFallback(() => postgresBundle('u.id', userId), () => localById(userId))
 export const findIdentityByEmail = email => withRollbackFallback(() => postgresBundle('u.email', email), () => localByEmail(email))
 export function identityReadSource() { return postgresReads() ? 'postgres' : 'sqlite' }
+export async function findSessionByIdentifier(identifier) {
+  if (!identifier) return null
+  return withRollbackFallback(
+    async () => {
+      const result = await getPool().query('SELECT id,user_id,session_identifier,refresh_token_hash,previous_refresh_token_hash,expires_at,revoked_at,last_active_at FROM user_sessions WHERE session_identifier=$1', [identifier])
+      const row = result.rows[0]
+      return row ? { id: row.id, userId: row.user_id, sessionIdentifier: row.session_identifier, refreshTokenHash: row.refresh_token_hash, previousRefreshTokenHash: row.previous_refresh_token_hash, expiresAt: row.expires_at, revokedAt: row.revoked_at, lastActiveAt: row.last_active_at } : null
+    },
+    () => {
+      const db = readDb()
+      return (db.userSessions || []).find(row => row.sessionIdentifier === identifier) || null
+    },
+  )
+}
+
+export async function validateSessionBindingAsync(payload) {
+  if (!payload?.sid) return { valid: true, legacy: true }
+  const row = await findSessionByIdentifier(payload.sid)
+  if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || row.userId !== payload.sub) return { valid: false, error: 'session_invalid' }
+  return { valid: true, session: row }
+}
 export async function closeIdentityRepository() { if (pool) await pool.end(); pool = null }
