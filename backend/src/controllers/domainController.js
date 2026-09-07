@@ -53,15 +53,18 @@ import {
   createOrganizationDemoDayEvent,
   organizationDemoDayAnalytics,
   listProjects,
+  listProjectsAsync,
   listWatchlist,
   listWorkspaceCollection,
   listWorkspaceMembers,
+  listWorkspaceMembersAsync,
   patchWorkspaceCollectionItem,
   acceptWorkspaceInvitation,
   declineWorkspaceInvitation,
   getWorkspaceInvitation,
   removeWorkspaceMember,
   listWorkspaces,
+  listWorkspacesAsync,
   logHackathonCheckIn,
   organizationDashboard,
   promoteIntake,
@@ -85,6 +88,7 @@ import {
   walletList,
   walletSummary,
   workspaceContext,
+  workspaceContextAsync,
 } from '../services/domainService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
 
@@ -105,8 +109,8 @@ function requireTitle(req, res) {
   return title
 }
 
-export function founderProjects(req, res) {
-  return res.json(listProjects(req.user.id))
+export async function founderProjects(req, res) {
+  return res.json(await listProjectsAsync(req.user.id))
 }
 
 export function founderProjectCreate(req, res) {
@@ -136,8 +140,8 @@ export function endorsementCreate(req, res) {
   return created(res, result)
 }
 
-export function workspaces(req, res) {
-  return res.json(listWorkspaces(req.user.id))
+export async function workspaces(req, res) {
+  return res.json(await listWorkspacesAsync(req.user.id))
 }
 
 export function workspaceProvision(req, res) {
@@ -146,8 +150,8 @@ export function workspaceProvision(req, res) {
   return created(res, result)
 }
 
-export function workspaceContextGet(req, res) {
-  const result = workspaceContext(req.user.id, req.params.workspaceId)
+export async function workspaceContextGet(req, res) {
+  const result = await workspaceContextAsync(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
   return res.json(result)
 }
@@ -182,8 +186,8 @@ export function workspaceInvitationDecline(req, res) {
   return res.json(result)
 }
 
-export function workspaceMembersGet(req, res) {
-  const result = listWorkspaceMembers(req.user.id, req.params.workspaceId)
+export async function workspaceMembersGet(req, res) {
+  const result = await listWorkspaceMembersAsync(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
   return res.json(result)
 }

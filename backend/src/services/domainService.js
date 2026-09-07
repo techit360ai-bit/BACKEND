@@ -3,6 +3,7 @@ import { readDb, updateDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
 import { organizationOverview } from './organizationIntelligenceService.js'
+import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -163,6 +164,14 @@ function walletSummaryFor(db, userId) {
 export function listProjects(userId) {
   const db = readDb()
   return { projects: listOwned(db, 'projects', userId) }
+}
+
+export async function listProjectsAsync(userId) {
+  if (!workspaceReadEnabled()) return listProjects(userId)
+  try { return { projects: await listProjectsPostgres(userId) } } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listProjects(userId)
+  }
 }
 
 export function createProject(userId, body) {
@@ -664,6 +673,20 @@ export function listWorkspaces(userId) {
   return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: paid, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, memberships.length - workspaces.filter(row => row.ownerId !== userId).length) } }
 }
 
+export async function listWorkspacesAsync(userId) {
+  if (!workspaceReadEnabled()) return listWorkspaces(userId)
+  try {
+    const rows = await listWorkspacesPostgres(userId)
+    const collaboratorRows = rows.filter(row => row.workspace.ownerId !== userId && String(row.membership?.role || '').toLowerCase() === 'collaborator')
+    const freeCollaboratorWorkspaceId = collaboratorRows.sort((a, b) => new Date(a.membership?.joinedAt || a.membership?.createdAt || 0) - new Date(b.membership?.joinedAt || b.membership?.createdAt || 0))[0]?.workspace.id || null
+    const workspaces = rows.filter(row => row.workspace.ownerId === userId || !collaboratorRows.length || row.workspace.id === freeCollaboratorWorkspaceId).map(row => ({ ...row.workspace, isOwner: row.workspace.ownerId === userId, accessLevel: row.workspace.ownerId === userId ? 'owner' : row.membership?.accessLevel || 'viewer' }))
+    return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: false, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, rows.length - workspaces.length) } }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listWorkspaces(userId)
+  }
+}
+
 function freeCollaboratorWorkspaceAllowed(db, userId, workspaceId) {
   const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
     || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
@@ -891,6 +914,20 @@ export function listWorkspaceMembers(userId, workspaceId) {
   }
 }
 
+export async function listWorkspaceMembersAsync(userId, workspaceId) {
+  if (!workspaceReadEnabled()) return listWorkspaceMembers(userId, workspaceId)
+  try {
+    const workspace = await findWorkspacePostgres(workspaceId)
+    if (!workspace) return null
+    const members = await listMembersPostgres(workspaceId)
+    if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
+    return { members: [{ id: `workspace_owner_${workspace.ownerId}`, workspaceId, userId: workspace.ownerId, name: workspace.ownerId, accessLevel: 'owner', role: 'Workspace owner', status: 'active' }, ...members.map(member => ({ ...member, name: member.name || member.userId, avatarUrl: member.avatarUrl || '' }))] }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listWorkspaceMembers(userId, workspaceId)
+  }
+}
+
 export function removeWorkspaceMember(userId, workspaceId, memberId) {
   return updateDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
@@ -946,6 +983,20 @@ export function workspaceContext(userId, workspaceId) {
     blueprintAvailable: Boolean(analysis?.blueprint || analysis),
     isOwner: access.isOwner,
     accessLevel: access.accessLevel,
+  }
+}
+
+export async function workspaceContextAsync(userId, workspaceId) {
+  if (!workspaceReadEnabled()) return workspaceContext(userId, workspaceId)
+  try {
+    const workspace = await findWorkspacePostgres(workspaceId)
+    if (!workspace) return null
+    const members = workspace.ownerId === userId ? [] : await listMembersPostgres(workspaceId)
+    if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
+    return { workspaceId, projectId: workspace.projectId || null, venture: null, blueprintAvailable: false, isOwner: workspace.ownerId === userId, accessLevel: workspace.ownerId === userId ? 'owner' : 'viewer' }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return workspaceContext(userId, workspaceId)
   }
 }
 
