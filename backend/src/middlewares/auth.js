@@ -4,6 +4,7 @@ import { accessTokenFromRequest, touchSession, validateSessionBinding } from '..
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
 import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
+import { findIdentityById } from '../repositories/identityRepository.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -37,17 +38,17 @@ export async function requireAuth(req, res, next) {
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
   touchSession(payload.sid)
 
-  const db = readDb()
-  const user = db.users.find(u => u.id === payload.sub)
+  const identity = await findIdentityById(payload.sub)
+  const user = identity?.user
   if (!user) return res.status(401).json({ error: 'User not found' })
-  const profile = db.profiles.find(p => p.id === user.id)
+  const profile = identity.profile
   if (!profile && process.env.NODE_ENV !== 'test') {
     return res.status(401).json({ error: 'User profile is unavailable' })
   }
   const persistedRole = profile?.role || 'explorer'
-  const assignmentRows = (db.userRoles || []).filter(row => row.userId === user.id && row.active !== false && row.status === 'active')
+  const assignmentRows = (identity.roles || []).filter(row => row.active !== false && row.status === 'active')
   const persistedRoles = [...new Set(['explorer', ...assignmentRows.map(row => normalizeRole(row.role)), persistedRole, ...(profile?.secondaryRoles || []).map(normalizeRole), ...(profile?.roles || []).map(normalizeRole)])]
-  const activeContext = (db.activeContexts || []).find(row => row.userId === user.id && row.status === 'active') || null
+  const activeContext = identity.activeContext
   const requestedActiveRole = normalizeRole(activeContext?.role || profile?.activeRole || persistedRole)
   const activeRole = persistedRoles.includes(requestedActiveRole) ? requestedActiveRole : 'explorer'
   req.user = {

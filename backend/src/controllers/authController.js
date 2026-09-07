@@ -9,6 +9,7 @@ import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery
 import { recordActivityInDb } from '../services/discoveryService.js'
 import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
+import { findIdentityByEmail, findIdentityById } from '../repositories/identityRepository.js'
 
 const JWT_SECRET = process.env.JWT_SECRET
 if (!JWT_SECRET) {
@@ -237,8 +238,8 @@ export async function signin(req, res) {
     return res.status(400).json({ error: 'Email and password are required' })
   }
 
-  const db = readDb()
-  const user = db.users.find(u => u.email === email)
+  const identity = await findIdentityByEmail(email)
+  const user = identity?.user
   if (!user) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
@@ -248,7 +249,8 @@ export async function signin(req, res) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
 
-  const profile = db.profiles.find(p => p.id === user.id) || null
+  const profile = identity.profile
+  const db = readDb()
   recordActivityInDb(db, user.id, 'login', 'auth')
   writeDb(db)
   roleAssignments(user.id)
@@ -263,9 +265,10 @@ export async function signin(req, res) {
   })
 }
 
-export function session(req, res) {
+export async function session(req, res) {
+  const identity = await findIdentityById(req.user.id)
   const db = readDb()
-  const profile = db.profiles.find(p => p.id === req.user.id) || null
+  const profile = identity?.profile || null
   const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
   writeDb(db)
