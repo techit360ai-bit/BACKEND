@@ -1,4 +1,6 @@
 import pg from 'pg'
+import { readDb } from '../config/database.js'
+import { withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
 
 let pool = null
 const url = () => process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL
@@ -35,6 +37,21 @@ export async function listWorkspaces(userId) {
 export async function listMembers(workspaceId) {
   const result = await getPool().query('SELECT * FROM core_workspace_members WHERE workspace_id=$1 AND status=\'active\' ORDER BY created_at ASC', [workspaceId])
   return result.rows.map(row => ({ ...(row.payload || {}), id: row.id, workspaceId: row.workspace_id, userId: row.user_id, role: row.role, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at }))
+}
+export async function syncWorkspaceProjectAggregate(actorId, workspaceId = null, projectId = null) {
+  if (process.env.WORKSPACE_WRITE_SOURCE !== 'postgres') return { enabled: false }
+  const db = readDb()
+  return withPlatformTransaction(async client => {
+    const sets = {
+      projects: (db.projects || []).filter(row => !projectId || row.id === projectId),
+      workspaces: (db.workspaces || []).filter(row => !workspaceId && !projectId ? row.ownerId === actorId : row.id === workspaceId || row.projectId === projectId),
+      workspaceMembers: (db.workspaceMembers || []).filter(row => !workspaceId || row.workspaceId === workspaceId),
+      workspaceTasks: (db.workspaceTasks || []).filter(row => !workspaceId || row.workspaceId === workspaceId),
+    }
+    let records = 0
+    for (const [collectionName, rows] of Object.entries(sets)) for (const row of rows) { await upsertRecord(client, collectionName, row, { operation: 'replay', idempotencyKey: `workspace-project:${collectionName}:${row.id}:${row.updatedAt || row.createdAt || ''}` }); records += 1 }
+    return { enabled: true, records }
+  }, { userId: actorId })
 }
 
 export async function closeWorkspaceProjectRepository() { if (pool) await pool.end(); pool = null }
