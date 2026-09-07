@@ -1,5 +1,6 @@
 import { readDb, writeDb } from '../config/database.js'
 import { createId, nowIso, requireBodyString, timeAgo } from '../utils/api.js'
+import { listFiles as listFilesPostgres, contentReadEnabled, contentReadFallbackEnabled } from '../repositories/contentRepository.js'
 
 const FILE_TYPES = new Set(['document', 'image', 'code'])
 const ITEM_TYPES = new Set(['folder', 'file'])
@@ -11,13 +12,16 @@ function toFile(item) {
   }
 }
 
-export function listFiles(req, res) {
+export async function listFiles(req, res) {
   const db = readDb()
   const workspaceId = req.query.workspaceId || 'default'
-  const files = db.files
-    .filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
-    .map(toFile)
+  let files
+  if (contentReadEnabled()) {
+    try { files = (await listFilesPostgres(req.user.id, workspaceId)).map(toFile) } catch (error) {
+      if (!contentReadFallbackEnabled()) throw error
+      files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
+    }
+  } else files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
   return res.json({
     files,
     storage: {

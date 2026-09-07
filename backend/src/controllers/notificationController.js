@@ -1,6 +1,7 @@
 import { readDb, writeDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
+import { listNotifications as listNotificationsPostgres, contentReadEnabled, contentReadFallbackEnabled } from '../repositories/contentRepository.js'
 
 const TYPES = new Set(['fire', 'comment', 'collab', 'gsis', 'milestone', 'mention', 'answer'])
 
@@ -20,12 +21,15 @@ function toNotification(n, db) {
   }
 }
 
-export function listNotifications(req, res) {
+export async function listNotifications(req, res) {
   const db = readDb()
-  const notifications = db.notifications
-    .filter(n => n.userId === req.user.id)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .map(n => toNotification(n, db))
+  let notifications
+  if (contentReadEnabled()) {
+    try { notifications = (await listNotificationsPostgres(req.user.id)).map(n => toNotification(n, db)) } catch (error) {
+      if (!contentReadFallbackEnabled()) throw error
+      notifications = db.notifications.filter(n => n.userId === req.user.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(n => toNotification(n, db))
+    }
+  } else notifications = db.notifications.filter(n => n.userId === req.user.id).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(n => toNotification(n, db))
   return res.json({ notifications })
 }
 
