@@ -27,6 +27,17 @@ async function listByUser(client, collection, userId, { forUpdate = false } = {}
   return result.rows.map(row => ({ ...(row.payload || {}), id: row.record_id, version: Number(row.version), createdAt: row.created_at, updatedAt: row.updated_at }))
 }
 
+export async function loadFinanceSnapshotPostgres(userId) {
+  return withPlatformTransaction(async client => {
+    const names = ['profiles', 'userRoles', 'verificationProfiles', 'trustProfiles', 'riskProfiles', 'organizationMemberships', 'walletAccounts', 'creditLedger', 'usageReservations', 'usageEvents', 'subscriptions', 'billingPlans', 'creditPackages', 'accountEntitlements', 'capabilityConsumptions', 'capabilityAnalytics', 'paywallEvents', 'workflowSnapshots', 'paymentIntents', 'billingWebhookEvents']
+    const snapshot = {}
+    for (const name of names) snapshot[name] = ['billingPlans', 'creditPackages'].includes(name) ? (await client.query("SELECT * FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL ORDER BY updated_at DESC", [name])).rows.map(row => ({ ...(row.payload || {}), id: row.record_id, version: Number(row.version) })) : await listByUser(client, name, userId)
+    const config = (await client.query("SELECT payload FROM platform_collection_records WHERE collection_name='tvceConfig' AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1")).rows[0]?.payload
+    snapshot.tvceConfig = config || { freeQuotas: {}, capabilities: {} }
+    return snapshot
+  }, { userId })
+}
+
 async function findById(client, collection, recordId, { forUpdate = false } = {}) {
   const lock = forUpdate ? ' FOR UPDATE' : ''
   const result = await client.query('SELECT * FROM platform_collection_records WHERE collection_name=$1 AND record_id=$2 AND deleted_at IS NULL' + lock, [collection, recordId])

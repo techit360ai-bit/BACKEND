@@ -1,13 +1,13 @@
-import { accountEntitlement, adminCommercialConfig, adminTvceAnalytics, capabilityCatalog, conversionFunnel, estimateCredits, evaluateEntitlement, evaluatePaywall, freeTierUsage, fulfillPaymentAsync, nextBestAction, progressMeter, recordPaywallEvent, resumeWorkflow, saveWorkflow, updateAdminCommercialConfig, walletForecast } from '../services/tvceService.js'
+import { accountEntitlementAsync, adminCommercialConfig, adminTvceAnalytics, capabilityCatalogAsync, conversionFunnel, estimateCredits, evaluateEntitlementAsync, evaluatePaywallAsync, freeTierUsage, fulfillPaymentAsync, nextBestAction, progressMeter, recordPaywallEvent, resumeWorkflow, saveWorkflow, updateAdminCommercialConfig, walletForecast } from '../services/tvceService.js'
 import { createTvceCheckout } from '../services/tvceCheckoutService.js'
 
 const body = req => req.body && typeof req.body === 'object' ? req.body : {}
 const send = (res, result, success = 200) => result?.ok === false ? res.status(result.status || (result.error === 'workflow_not_found' || result.error === 'payment_not_found' ? 404 : 400)).json(result) : res.status(success).json(result)
 
-export function capabilities(_req, res) { return res.json({ capabilities: capabilityCatalog() }) }
-export function entitlements(req, res) { return res.json({ account: accountEntitlement(req.user.id), entitlements: capabilityCatalog().map(capability => evaluateEntitlement(req.user.id, { capability: capability.id })) }) }
-export function evaluate(req, res) { return res.json(evaluateEntitlement(req.user.id, body(req))) }
-export function paywall(req, res) { const result = evaluatePaywall(req.user.id, body(req)); void recordPaywallEvent(req.user.id, { capability: body(req).capability, role: body(req).role, eventType: result.paywall ? 'PAYWALL_VIEWED' : 'CAPABILITY_ALLOWED', metadata: { code: result.code } }); return res.status(result.allowed ? 200 : 402).json(result) }
+export async function capabilities(_req, res) { return res.json({ capabilities: await capabilityCatalogAsync() }) }
+export async function entitlements(req, res) { const capabilities = await capabilityCatalogAsync(); return res.json({ account: await accountEntitlementAsync(req.user.id), entitlements: await Promise.all(capabilities.map(capability => evaluateEntitlementAsync(req.user.id, { capability: capability.id }))) }) }
+export async function evaluate(req, res) { return res.json(await evaluateEntitlementAsync(req.user.id, body(req))) }
+export async function paywall(req, res) { const result = await evaluatePaywallAsync(req.user.id, body(req)); void recordPaywallEvent(req.user.id, { capability: body(req).capability, role: body(req).role, eventType: result.paywall ? 'PAYWALL_VIEWED' : 'CAPABILITY_ALLOWED', metadata: { code: result.code } }); return res.status(result.allowed ? 200 : 402).json(result) }
 export function paywallEvent(req, res) { return send(res, recordPaywallEvent(req.user.id, body(req)), 201) }
 export function creditsEstimate(req, res) { return res.json(estimateCredits(req.user.id, body(req))) }
 export function forecast(req, res) { return res.json(walletForecast(req.user.id)) }

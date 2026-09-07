@@ -2,7 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
-import { fulfillPaymentPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -133,10 +133,20 @@ export function capabilityCatalog() {
   return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
 }
 
+export async function capabilityCatalogAsync() {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return capabilityCatalog()
+  try {
+    const db = await loadFinanceSnapshotPostgres(null)
+    return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
+  } catch (error) {
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return capabilityCatalog()
+  }
+}
+
 export function accountEntitlement(userId) { return accountEntitlementFor(readDb(), userId) }
 
-export function evaluateEntitlement(userId, input = {}) {
-  const db = readDb()
+function evaluateEntitlementFromDb(userId, input = {}, db) {
   const capability = text(input.capability || input.operation || '')
   const catalog = catalogFor(capability)
   const commercial = commercialFor(db, capability)
@@ -144,7 +154,7 @@ export function evaluateEntitlement(userId, input = {}) {
   const role = roleFor(db, userId, input.role)
   const baseCapability = effectiveCatalog?.authorizationCapability || (effectiveCatalog?.requiredRole === 'investor' ? 'investor.intelligence.view' : effectiveCatalog?.requiredRole === 'organization' ? 'organization.analytics' : null)
   const decision = baseCapability
-    ? authorizeCapability(userId, baseCapability, { role, organizationId: input.organizationId, workspaceId: input.workspaceId })
+    ? authorizeCapability(userId, baseCapability, { role, organizationId: input.organizationId, workspaceId: input.workspaceId }, db)
     : effectiveCatalog?.requiredRole === 'founder' && role !== 'founder'
       ? { allowed: false, code: 'role_required', capability }
       : effectiveCatalog ? { allowed: true, code: 'allowed', capability, funding: effectiveCatalog.metering === 'runtime' ? 'runtime' : 'none', metering: effectiveCatalog.metering || 'none', policy: effectiveCatalog } : { allowed: false, code: 'unknown_capability', capability }
@@ -168,6 +178,26 @@ export function evaluateEntitlement(userId, input = {}) {
   return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'SUBSCRIPTION' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
+export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readDb()) }
+
+export async function accountEntitlementAsync(userId) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return accountEntitlement(userId)
+  try { const db = await loadFinanceSnapshotPostgres(userId); return accountEntitlementFor(db, userId) } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation: 'account_entitlement', error: error.message }))
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return accountEntitlement(userId)
+  }
+}
+
+export async function evaluateEntitlementAsync(userId, input = {}) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return evaluateEntitlement(userId, input)
+  try { return evaluateEntitlementFromDb(userId, input, await loadFinanceSnapshotPostgres(userId)) } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation: 'evaluate_entitlement', error: error.message }))
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return evaluateEntitlement(userId, input)
+  }
+}
+
 export function evaluatePaywall(userId, input = {}) {
   const result = evaluateEntitlement(userId, input)
   if (result.allowed) return { ...result, paywall: false }
@@ -176,6 +206,22 @@ export function evaluatePaywall(userId, input = {}) {
   const repeated = hits.length >= 2
   const recommendation = repeated || result.role === 'investor' || result.role === 'organization' ? 'SUBSCRIPTION' : result.recommendedAction
   return { ...result, paywall: true, recommendation, usageEstimateRequired: result.metering === 'runtime', reason: result.code, nextAction: result.value?.workflowStage ? `Continue ${result.value.workflowStage}` : 'Continue workflow' }
+}
+
+export async function evaluatePaywallAsync(userId, input = {}) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return evaluatePaywall(userId, input)
+  const result = await evaluateEntitlementAsync(userId, input)
+  if (result.allowed) return { ...result, paywall: false }
+  try {
+    const db = await loadFinanceSnapshotPostgres(userId)
+    const hits = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === result.capability)
+    const repeated = hits.length >= 2
+    const recommendation = repeated || result.role === 'investor' || result.role === 'organization' ? 'SUBSCRIPTION' : result.recommendedAction
+    return { ...result, paywall: true, recommendation, usageEstimateRequired: result.metering === 'runtime', reason: result.code, nextAction: result.value?.workflowStage ? `Continue ${result.value.workflowStage}` : 'Continue workflow' }
+  } catch (error) {
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return evaluatePaywall(userId, input)
+  }
 }
 
 export function recordPaywallEvent(userId, input = {}) {

@@ -151,8 +151,8 @@ export function auditCapabilityDecision(decision, userId) {
   })
 }
 
-export function authorizeCapability(userId, capability, context = {}) {
-  const db = readDb()
+export function authorizeCapability(userId, capability, context = {}, sourceDb = null) {
+  const db = sourceDb || readDb()
   const policy = capabilityPolicy(capability, db)
   const profile = profileFor(db, userId)
   if (!policy) return { allowed: false, code: 'unknown_capability', capability }
