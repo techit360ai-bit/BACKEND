@@ -14,6 +14,23 @@ Changing `DB_DRIVER` directly is unsafe because PostgreSQL access is asynchronou
 - Service methods use an explicit async repository interface and transactions.
 - SQLite remains a local-development adapter only.
 
+## Current implementation checkpoint
+
+The following projection domains are implemented and can be run together:
+
+- Identity, profiles, roles, active contexts, sessions, and security events.
+- Organizations/workspaces, projects, memberships, and workspace tasks.
+- Feed posts/comments/likes, files, notifications, and mentorship messages.
+- Wallets, credit ledger, usage reservations, subscriptions, payment intents, and billing webhook events.
+
+Run the ordered bootstrap and consistency check with:
+
+```bash
+npm run core:db:migrate
+```
+
+The command exits non-zero when any projection reports a row-count mismatch. It does not switch request authority; SQLite remains authoritative until the async repository cutover is complete.
+
 ## Migration sequence
 
 ### 1. Freeze and inventory
