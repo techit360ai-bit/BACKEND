@@ -1,9 +1,10 @@
 import crypto from 'node:crypto'
 import pg from 'pg'
+import fs from 'node:fs/promises'
 
 let pool = null
 
-const source = () => process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL
+const source = () => process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env.IDENTITY_DATABASE_URL || process.env.WORKSPACE_DATABASE_URL || process.env.CONTENT_DATABASE_URL || process.env.FINANCE_DATABASE_URL
 const poolSize = () => Math.max(1, Number(process.env.PLATFORM_DB_POOL_SIZE || 10))
 const now = () => new Date().toISOString()
 const id = prefix => `${prefix}_${crypto.randomUUID()}`
@@ -24,6 +25,12 @@ function connectionOptions() {
 export function getPlatformPool() {
   pool ||= new pg.Pool(connectionOptions())
   return pool
+}
+
+export async function initializePlatformCollectionSchema() {
+  const sql = await fs.readFile(new URL('../../migrations/postgres/014_platform_collection_records.sql', import.meta.url), 'utf8')
+  await getPlatformPool().query(sql)
+  return { enabled: true }
 }
 
 function normalizeRecord(record = {}) {
