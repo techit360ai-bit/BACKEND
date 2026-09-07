@@ -112,6 +112,23 @@ For each domain:
 7. Disable the SQLite fallback only after the observation window is clean.
 8. Remove all direct synchronous adapter calls for that domain.
 
+### Phase 5 implementation status
+
+The finance request boundary now has PostgreSQL transaction implementations
+for usage reservations, usage settlement, capability consumption,
+payment fulfillment, subscription lifecycle updates, and billing webhook
+idempotency. Select these paths with:
+
+```text
+FINANCE_WRITE_SOURCE=postgres
+FINANCE_WRITE_FALLBACK_SQLITE=true
+```
+
+The fallback must remain enabled until live PostgreSQL concurrency and balance
+invariant checks are clean. The synchronous TVCE entitlement/paywall reads,
+workflow CRUD, and capability policy reads are still pending conversion and
+must not be treated as PostgreSQL-authoritative yet.
+
 ## Acceptance Gates
 
 - `npm run platform:db:inventory` reports zero production-path SQLite calls.

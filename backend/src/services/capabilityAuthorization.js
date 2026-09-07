@@ -1,7 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
-import { reserveCapabilityConsumption, settleCapabilityConsumption } from './capabilityConsumptionService.js'
+import { reserveCapabilityConsumption, settleCapabilityConsumption, reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from './capabilityConsumptionService.js'
 
 export const ASSURANCE_LEVELS = Object.freeze({
   CLAIMED: 0,
@@ -186,7 +186,7 @@ export function authorizeCapability(userId, capability, context = {}) {
 }
 
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
     void auditCapabilityDecision(decision, req.user.id)
     if (decision.allowed) {
@@ -195,10 +195,12 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
         const key = req.get('idempotency-key') || `${req.user.id}:${capability}:${req.id}`
         const rawEstimate = req.body?.estimatedCredits ?? req.body?.estimated_credits
         const estimatedCredits = Number(rawEstimate)
-        const reservation = reserveCapabilityConsumption(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
+        const reservation = process.env.FINANCE_WRITE_SOURCE === 'postgres'
+          ? await reserveCapabilityConsumptionAsync(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
+          : reserveCapabilityConsumption(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
         if (!reservation.ok) return res.status(['insufficient_credits', 'subscription_allowance_exhausted'].includes(reservation.error) ? 402 : 409).json(reservation)
         req.capabilityConsumption = reservation.consumption
-        res.on('finish', () => { void settleCapabilityConsumption(reservation.consumption.id, res.statusCode) })
+        res.on('finish', () => { void (process.env.FINANCE_WRITE_SOURCE === 'postgres' ? settleCapabilityConsumptionAsync(reservation.consumption.id, res.statusCode) : settleCapabilityConsumption(reservation.consumption.id, res.statusCode)) })
       }
       return next()
     }

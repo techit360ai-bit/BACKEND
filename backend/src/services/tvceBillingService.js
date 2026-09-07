@@ -1,7 +1,8 @@
 import crypto from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
-import { fulfillPayment } from './tvceService.js'
+import { fulfillPaymentAsync } from './tvceService.js'
+import { billingEventExistsPostgres, paymentUserPostgres, recordBillingEventPostgres, updateSubscriptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 const supported = new Set(['stripe', 'paystack', 'flutterwave'])
 const signature = (value, expected) => {
@@ -51,7 +52,9 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
   if (!verifySignature(provider, rawBody, headers)) return { ok: false, status: 401, error: 'invalid_webhook_signature' }
   const event = normalize(provider, payload || {})
   if (!event.eventId) return { ok: false, status: 400, error: 'webhook_event_id_required' }
-  const prior = (readDb().billingWebhookEvents || []).find(row => row.provider === provider && row.eventId === String(event.eventId))
+  const prior = financePostgresEnabled()
+    ? (await billingEventExistsPostgres(provider, event.eventId) ? { provider, eventId: String(event.eventId) } : null)
+    : (readDb().billingWebhookEvents || []).find(row => row.provider === provider && row.eventId === String(event.eventId))
   if (prior) return { ok: true, idempotent: true, event: prior }
   const lifecycleTypes = new Set(['customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted', 'invoice.paid', 'invoice.payment_failed', 'charge.refunded', 'charge.dispute.created', 'subscription.create', 'subscription.disable', 'subscription.not_renew'])
   if (lifecycleTypes.has(event.type) && (event.userId || event.paymentId) && !(event.success && event.paymentId)) {
@@ -61,7 +64,12 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
           : event.type === 'charge.dispute.created' ? 'disputed'
             : event.type === 'subscription.not_renew' ? 'cancelled'
               : String(event.status || payload.data?.object?.status || 'active')
-    const userId = event.userId || readDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId
+    const userId = event.userId || (financePostgresEnabled() ? await paymentUserPostgres(event.paymentId) : readDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId)
+    if (financePostgresEnabled() && userId) {
+      const subscription = await updateSubscriptionPostgres({ userId, provider, providerId: event.subscriptionId || event.providerReference, planId: event.planId, status, amount: event.amount, currency: event.currency, failureReason: event.failureReason })
+      const row = await recordBillingEventPostgres({ provider, eventId: event.eventId, type: event.type, status: 'processed', userId, paymentIntentId: event.paymentId || null, subscriptionId: event.subscriptionId || null })
+      return { ok: true, event: row, subscription }
+    }
     return updateDb(db => {
       const subscriptions = db.subscriptions || (db.subscriptions = [])
       const current = subscriptions.find(row => row.userId === userId && (row.providerId === event.subscriptionId || row.providerId === event.providerReference || row.planId === event.planId)) || { id: createId('subscription'), userId, createdAt: nowIso() }
@@ -75,10 +83,18 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
     })
   }
   if (!event.success) {
+    if (financePostgresEnabled()) {
+      const row = await recordBillingEventPostgres({ provider, eventId: event.eventId, type: event.type, status: 'ignored' })
+      return { ok: true, ignored: true, event: row }
+    }
     return updateDb(db => { if (!Array.isArray(db.billingWebhookEvents)) db.billingWebhookEvents = []; const row = { id: createId('billing_event'), provider, eventId: String(event.eventId), type: event.type, status: 'ignored', createdAt: nowIso() }; db.billingWebhookEvents.push(row); return { ok: true, ignored: true, event: row } })
   }
   let result = null
-  if (event.paymentId && event.userId) result = await fulfillPayment(event.userId, event.paymentId, { verified: true, planId: event.planId, providerReference: event.providerReference })
+  if (event.paymentId && event.userId) result = await fulfillPaymentAsync(event.userId, event.paymentId, { verified: true, planId: event.planId, providerReference: event.providerReference })
   if (result?.ok === false) return result
+  if (financePostgresEnabled()) {
+    const row = await recordBillingEventPostgres({ provider, eventId: event.eventId, type: event.type, status: result?.idempotent ? 'idempotent' : 'processed', userId: event.userId || null, paymentIntentId: event.paymentId || null })
+    return { ok: true, event: row, result }
+  }
   return updateDb(db => { if (!Array.isArray(db.billingWebhookEvents)) db.billingWebhookEvents = []; const row = { id: createId('billing_event'), provider, eventId: String(event.eventId), type: event.type, status: result?.idempotent ? 'idempotent' : 'processed', userId: event.userId || null, paymentIntentId: event.paymentId || null, createdAt: nowIso() }; db.billingWebhookEvents.push(row); return { ok: true, event: row, result } })
 }

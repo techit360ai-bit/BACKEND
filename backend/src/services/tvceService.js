@@ -2,6 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
+import { fulfillPaymentPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -341,4 +342,14 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     if (workflow) { workflow.status = 'resumed'; workflow.resumedAt = now; workflow.updatedAt = now }
     return { ok: true, payment, accountEntitlement: account, workflow: workflow || null }
   })
+}
+
+export async function fulfillPaymentAsync(userId, paymentId, input = {}) {
+  if (financePostgresEnabled()) {
+    try { return await fulfillPaymentPostgres(userId, paymentId, input) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_payment_fulfillment_failed', error: error.message }))
+      if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return fulfillPayment(userId, paymentId, input)
 }

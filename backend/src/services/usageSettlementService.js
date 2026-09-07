@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb, updateDb } from '../config/database.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
+import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -182,5 +183,22 @@ async function persistFinanceWrite(result) {
   if (!financeWrites() || !result?.ok) return result
   try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', error: error.message })); if (financeWriteFallback()) return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
 }
-export async function reserveUsageAsync(facts) { return persistFinanceWrite(reserveUsage(facts)) }
-export async function settleUsageAsync(facts) { return persistFinanceWrite(settleUsage(facts)) }
+export async function reserveUsageAsync(facts) {
+  if (financePostgresEnabled()) {
+    try { return await reserveUsagePostgres(facts) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_reservation_failed', error: error.message }))
+      if (!financeWriteFallback()) return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return persistFinanceWrite(reserveUsage(facts))
+}
+
+export async function settleUsageAsync(facts) {
+  if (financePostgresEnabled()) {
+    try { return await settleUsagePostgres(facts) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_settlement_failed', error: error.message }))
+      if (!financeWriteFallback()) return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return persistFinanceWrite(settleUsage(facts))
+}

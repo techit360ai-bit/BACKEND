@@ -1,4 +1,4 @@
-import { accountEntitlement, adminCommercialConfig, adminTvceAnalytics, capabilityCatalog, conversionFunnel, estimateCredits, evaluateEntitlement, evaluatePaywall, freeTierUsage, fulfillPayment, nextBestAction, progressMeter, recordPaywallEvent, resumeWorkflow, saveWorkflow, updateAdminCommercialConfig, walletForecast } from '../services/tvceService.js'
+import { accountEntitlement, adminCommercialConfig, adminTvceAnalytics, capabilityCatalog, conversionFunnel, estimateCredits, evaluateEntitlement, evaluatePaywall, freeTierUsage, fulfillPaymentAsync, nextBestAction, progressMeter, recordPaywallEvent, resumeWorkflow, saveWorkflow, updateAdminCommercialConfig, walletForecast } from '../services/tvceService.js'
 import { createTvceCheckout } from '../services/tvceCheckoutService.js'
 
 const body = req => req.body && typeof req.body === 'object' ? req.body : {}
@@ -20,5 +20,5 @@ export function adminConfig(_req, res) { return res.json(adminCommercialConfig()
 export function adminConfigUpdate(req, res) { return send(res, updateAdminCommercialConfig(req.user.id, body(req))) }
 export function workflowSave(req, res) { return send(res, saveWorkflow(req.user.id, body(req)), 201) }
 export function workflowResume(req, res) { return send(res, resumeWorkflow(req.user.id, req.params.workflowId, body(req))) }
-export function paymentFulfill(req, res) { return send(res, fulfillPayment(req.user.id, req.params.paymentId, body(req))) }
+export async function paymentFulfill(req, res) { return send(res, await fulfillPaymentAsync(req.user.id, req.params.paymentId, body(req))) }
 export async function checkout(req, res) { const result = await createTvceCheckout(req.user.id, body(req)); return send(res, result, 201) }
