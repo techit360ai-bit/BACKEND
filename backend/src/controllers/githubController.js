@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto'
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'test-github-client-id'
@@ -44,10 +44,10 @@ function pruneOauthStates(states = []) {
 
 export function githubAuthorize(req, res) {
   const state = createId('ghstate')
-  const db = readDb()
+  const db = readAuthorityDb()
   db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
   db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso() })
-  writeDb(db)
+  writeAuthorityDb(db)
 
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
@@ -62,7 +62,7 @@ export async function githubCallback(req, res) {
   const { code, state } = req.query
   if (!code || !state) return res.status(400).json({ error: 'Missing code or state' })
 
-  const db = readDb()
+  const db = readAuthorityDb()
   db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
   const stateEntry = db.githubOauthStates.find(s => s.state === state)
   if (!stateEntry) return res.status(400).json({ error: 'Invalid state' })
@@ -70,7 +70,7 @@ export async function githubCallback(req, res) {
   // Consume the state before making the external token exchange. This makes
   // the callback single-use even when two requests race while GitHub is slow.
   db.githubOauthStates = db.githubOauthStates.filter(s => s.state !== state)
-  writeDb(db)
+  writeAuthorityDb(db)
 
   try {
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
@@ -98,7 +98,7 @@ export async function githubCallback(req, res) {
         if (!db.githubConnections) db.githubConnections = []
         db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
         db.githubConnections.push(connection)
-        writeDb(db)
+        writeAuthorityDb(db)
         return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
       }
       return res.status(400).json({ error: tokenData.error_description || 'Token exchange failed' })
@@ -125,7 +125,7 @@ export async function githubCallback(req, res) {
     if (!db.githubConnections) db.githubConnections = []
     db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
     db.githubConnections.push(connection)
-    writeDb(db)
+    writeAuthorityDb(db)
 
     return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
   } catch {
@@ -141,7 +141,7 @@ export async function githubCallback(req, res) {
       if (!db.githubConnections) db.githubConnections = []
       db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
       db.githubConnections.push(connection)
-      writeDb(db)
+      writeAuthorityDb(db)
       return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
     }
     return res.status(500).json({ error: 'GitHub OAuth failed' })
@@ -149,7 +149,7 @@ export async function githubCallback(req, res) {
 }
 
 export function githubStatus(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.json({ connected: false })
@@ -164,7 +164,7 @@ export function githubStatus(req, res) {
 }
 
 export async function githubRepos(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })
@@ -193,7 +193,7 @@ export async function githubRepos(req, res) {
 }
 
 export async function githubCreateRepo(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })

@@ -1,6 +1,6 @@
 import { Resend } from 'resend'
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto'
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { normalizeEmail } from '../utils/authInputs.js'
 import {
   assertEmailAccepted,
@@ -72,7 +72,7 @@ export async function sendOtp(req, res) {
     return res.status(400).json({ error: 'A valid email is required' })
   }
 
-  const db  = readDb()
+  const db  = readAuthorityDb()
   const now = Date.now()
 
   // Purge expired records first
@@ -157,7 +157,7 @@ export async function sendOtp(req, res) {
   // Never persist the six-digit OTP itself. A database read must not be
   // sufficient to complete email verification.
   db.otps.push({ email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
-  writeDb(db)
+  writeAuthorityDb(db)
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })
 }
@@ -170,7 +170,7 @@ export function verifyOtp(req, res) {
     return res.status(400).json({ error: 'Email and code are required' })
   }
 
-  const db  = readDb()
+  const db  = readAuthorityDb()
   db.otps   = cleanExpired(db.otps)
 
   const record = db.otps.find(o => o.email === email)
@@ -182,7 +182,7 @@ export function verifyOtp(req, res) {
 
   if (record.attempts > MAX_ATTEMPTS) {
     db.otps = db.otps.filter(o => o.email !== email)
-    writeDb(db)
+    writeAuthorityDb(db)
     return res.status(400).json({ error: 'Too many attempts. Please request a new code.' })
   }
 
@@ -196,7 +196,7 @@ export function verifyOtp(req, res) {
   const legacyMatches = typeof record.code === 'string'
     && constantTimeEqual(record.code, submittedCode)
   if (!keyedHashMatches && !legacyHashMatches && !legacyMatches) {
-    writeDb(db)
+    writeAuthorityDb(db)
     const left = MAX_ATTEMPTS - record.attempts
     return res.status(400).json({
       error: `Incorrect code. ${left} attempt${left !== 1 ? 's' : ''} remaining.`,
@@ -221,7 +221,7 @@ export function verifyOtp(req, res) {
       createdAt: new Date(now).toISOString(),
     },
   ]
-  writeDb(db)
+  writeAuthorityDb(db)
 
   return res.json({
     verified: true,

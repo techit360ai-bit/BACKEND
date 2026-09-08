@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import crypto from 'node:crypto'
 
@@ -32,7 +32,7 @@ function destinationAccess(db, userId, projectId, repo, write = false) {
 }
 
 export function authorizeCodeDestination(userId, params = {}, options = {}) {
-  const db = readDb(); const projectId = String(params.projectId || ''); const repo = normalizeRepo(params.repo)
+  const db = readAuthorityDb(); const projectId = String(params.projectId || ''); const repo = normalizeRepo(params.repo)
   if (!projectId || !repo) return { allowed: false, status: 400, error: 'projectId and configured repository are required' }
   if (!project(db, projectId)) return { allowed: false, status: 404, error: 'project not found' }
   if (!destinationAccess(db, userId, projectId, repo, options.write === true)) return { allowed: false, status: 403, error: options.write === true ? 'repository write access denied for this project workspace' : 'repository is not an authorized destination for this project workspace' }
@@ -42,7 +42,7 @@ export function authorizeCodeDestination(userId, params = {}, options = {}) {
 export function projectCodeCommit(userId, params = {}, data = {}) {
   const projectId = String(params.projectId || ''); const commitSha = String(data.commitSha || '')
   if (!projectId || !commitSha) return { ok: false, error: 'commit_projection_invalid' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const authorized = destinationAccess(db, userId, projectId, data.repo || params.repo, true); if (!authorized) return { ok: false, error: 'project_destination_access_denied' }
     const workspace = authorized.workspace
     const existing = rows(db, 'contributions').find(row => row.source === 'github' && row.commitSha === commitSha && row.projectId === projectId)
@@ -66,7 +66,7 @@ export function reconcileGithubPush(headers = {}, body = {}, rawBody = '') {
   const payload = typeof body === 'string' ? JSON.parse(body) : body
   const repo = normalizeRepo(payload?.repository?.full_name); const branch = String(payload?.ref || '').replace('refs/heads/', '')
   const commits = Array.isArray(payload?.commits) ? payload.commits.slice(0, 100) : []
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const connectors = rows(db, 'workspaceConnectors').filter(row => isGithubConnector(row) && row.status === 'connected' && (row.resources || []).some(resource => normalizeRepo(resource) === repo))
     let recorded = 0
     for (const connector of connectors) {

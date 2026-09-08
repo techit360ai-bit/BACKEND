@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -45,12 +46,19 @@ const (
 
 // Handle is the http.HandlerFunc for the WS endpoint.
 func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
-	// Query-string tokens are routinely logged by proxies and browser history.
-	// Prefer the Authorization header; retain the query form only for legacy
-	// clients until the coordinated frontend migration is complete.
+	// Query-string tokens are forbidden because proxies and browser history log
+	// them. Clients must use the Authorization header or the HttpOnly auth cookie.
 	token := r.Header.Get("Authorization")
 	token = strings.TrimPrefix(token, "Bearer ")
 	if token == "" {
+		for _, part := range strings.Split(r.Header.Get("Cookie"), ";") {
+			part = strings.TrimSpace(part)
+			if strings.HasPrefix(part, "techit_access=") { token = strings.TrimPrefix(part, "techit_access="); break }
+		}
+	}
+	// Development/test compatibility only. Production and staging must never
+	// accept credentials in URLs because intermediaries log query strings.
+	if token == "" && os.Getenv("ENVIRONMENT") != "production" && os.Getenv("ENVIRONMENT") != "staging" {
 		token = r.URL.Query().Get("token")
 	}
 	claims, err := g.d.Verifier.Verify(token)

@@ -1,5 +1,6 @@
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso, requireBodyString, timeAgo } from '../utils/api.js'
+import { listFiles as listFilesPostgres, createFile as createFilePostgres, deleteFile as deleteFilePostgres, contentReadEnabled, contentReadFallbackEnabled, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const FILE_TYPES = new Set(['document', 'image', 'code'])
 const ITEM_TYPES = new Set(['folder', 'file'])
@@ -11,13 +12,16 @@ function toFile(item) {
   }
 }
 
-export function listFiles(req, res) {
-  const db = readDb()
+export async function listFiles(req, res) {
+  const db = readAuthorityDb()
   const workspaceId = req.query.workspaceId || 'default'
-  const files = db.files
-    .filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
-    .map(toFile)
+  let files
+  if (contentReadEnabled()) {
+    try { files = (await listFilesPostgres(req.user.id, workspaceId)).map(toFile) } catch (error) {
+      if (!contentReadFallbackEnabled()) throw error
+      files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
+    }
+  } else files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
   return res.json({
     files,
     storage: {
@@ -27,8 +31,8 @@ export function listFiles(req, res) {
   })
 }
 
-export function createFile(req, res) {
-  const db = readDb()
+export async function createFile(req, res) {
+  const db = readAuthorityDb()
   const name = requireBodyString(res, req.body.name, 'Name')
   if (!name) return
   const type = ITEM_TYPES.has(req.body.type) ? req.body.type : 'file'
@@ -48,16 +52,28 @@ export function createFile(req, res) {
     updatedAt: now,
   }
   db.files.push(file)
-  writeDb(db)
+  writeAuthorityDb(db)
+  if (contentWriteEnabled()) {
+    try { await createFilePostgres(file) } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'create_file', error: error.message }))
+      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
+    }
+  }
   return res.status(201).json(toFile(file))
 }
 
-export function deleteFile(req, res) {
-  const db = readDb()
+export async function deleteFile(req, res) {
+  const db = readAuthorityDb()
   const before = db.files.length
   db.files = db.files.filter(f => !(f.id === req.params.id && f.ownerId === req.user.id))
   if (db.files.length === before) return res.status(404).json({ error: 'File not found' })
-  writeDb(db)
+  writeAuthorityDb(db)
+  if (contentWriteEnabled()) {
+    try { await deleteFilePostgres(req.user.id, req.params.id) } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'delete_file', error: error.message }))
+      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
+    }
+  }
   return res.json({ ok: true })
 }
 

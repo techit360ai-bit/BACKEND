@@ -1,22 +1,18 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import { signJwt } from '../services/jwtKeyService.js'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
-import { clearSessionCookies, issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, revokeSession, rotateSession, setSessionCookies } from '../services/sessionService.js'
+import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
+import { recordMigrationEvent } from '../services/migrationOutboxService.js'
+import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
+import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
+import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
 
-const JWT_SECRET = process.env.JWT_SECRET
-if (!JWT_SECRET) {
-  throw new Error(
-    'JWT_SECRET environment variable is required. ' +
-    'This secret must match the value used by ai-router and ' +
-    'BACKEND/messaging-backend so platform tokens verify across services.'
-  )
-}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE
@@ -41,7 +37,7 @@ function makeToken(userId, profile = null) {
     role: profile?.role || 'explorer',
     workspaceId: profile?.workspaceId || `user-${userId}`,
   }
-  return jwt.sign(claims, JWT_SECRET, {
+  return signJwt(claims, {
     expiresIn: JWT_EXPIRES_IN,
     ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
     ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
@@ -196,7 +192,7 @@ export async function signup(req, res) {
   const now = new Date().toISOString()
   const requestedRole = normalizeRole(role || 'founder')
   const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role: requestedRole }, now)
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     if (db.users.find(u => u.email === email)) {
       return { status: 409, error: 'Email already in use' }
     }
@@ -210,6 +206,7 @@ export async function signup(req, res) {
     const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
     ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
     ;(db.activeContexts || (db.activeContexts = [])).push({ id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now })
+    recordMigrationEvent(db, { domain: 'identity', aggregateType: 'user', aggregateId: id, operation: 'upsert', payload: { userId: id, email, role: requestedRole }, version: 1 })
     return { status: 201, profile }
   })
 
@@ -217,7 +214,23 @@ export async function signup(req, res) {
     return res.status(result.status).json({ error: result.error })
   }
 
-  const credentials = issueSession({ id, email }, profile, req, { rememberMe: req.body.rememberMe !== false })
+  if (req.body.referralId) {
+    try { activateDistributionReferral(id, req.body.referralId, { activationAction: 'account_created' }) } catch { /* generic attribution is best-effort */ }
+    try { activateMomentReferral(req.body.referralId, id, 'account_created') } catch { /* Moment attribution is best-effort */ }
+  }
+
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    try {
+      const local = readAuthorityDb()
+      const roleAssignment = local.userRoles.find(row => row.userId === id)
+      const context = local.activeContexts.find(row => row.userId === id)
+      await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, context)
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_signup_failed', error: error.message }))
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
+    }
+  }
+  const credentials = await issueSessionAsync({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
     token: credentials.accessToken,
@@ -235,8 +248,8 @@ export async function signin(req, res) {
     return res.status(400).json({ error: 'Email and password are required' })
   }
 
-  const db = readDb()
-  const user = db.users.find(u => u.email === email)
+  const identity = await findIdentityByEmail(email)
+  const user = identity?.user
   if (!user) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
@@ -246,12 +259,13 @@ export async function signin(req, res) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }
 
-  const profile = db.profiles.find(p => p.id === user.id) || null
+  const profile = identity.profile
+  const db = readAuthorityDb()
   recordActivityInDb(db, user.id, 'login', 'auth')
-  writeDb(db)
+  writeAuthorityDb(db)
   roleAssignments(user.id)
 
-  const credentials = issueSession(user, profile, req, { rememberMe: req.body.rememberMe !== false })
+  const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.json({
     token: credentials.accessToken,
@@ -261,32 +275,33 @@ export async function signin(req, res) {
   })
 }
 
-export function session(req, res) {
-  const db = readDb()
-  const profile = db.profiles.find(p => p.id === req.user.id) || null
+export async function session(req, res) {
+  const identity = await findIdentityById(req.user.id)
+  const db = readAuthorityDb()
+  const profile = identity?.profile || null
   const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
-  writeDb(db)
+  writeAuthorityDb(db)
   const assignments = roleAssignments(req.user.id)
   return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
 }
 
-export function signout(req, res) {
-  if (req.user.sessionId) revokeSession(req.user.id, req.user.sessionId)
+export async function signout(req, res) {
+  if (req.user.sessionId) await revokeSessionAsync(req.user.id, req.user.sessionId)
   clearSessionCookies(res)
   return res.json({ message: 'Signed out' })
 }
 
-export function refresh(req, res) {
-  const result = rotateSession(refreshTokenFromRequest(req), req)
+export async function refresh(req, res) {
+  const result = await rotateSessionAsync(refreshTokenFromRequest(req), req)
   if (!result.ok) { clearSessionCookies(res); return res.status(401).json({ error: result.error }) }
   if (!mobileClient(req)) setSessionCookies(res, result); return res.json({ token: result.accessToken, ...(mobileClient(req) ? { refreshToken: result.refreshToken } : {}), user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
 }
 
-export function activeSessions(req, res) { return res.json({ sessions: listSessions(req.user.id, req.user.sessionId) }) }
-export function revokeActiveSession(req, res) { const result = revokeSession(req.user.id, req.params.sessionId); return result.ok ? res.json(result) : res.status(404).json(result) }
-export function revokeOtherSessions(req, res) { return res.json(revokeAllSessions(req.user.id, req.user.sessionId)) }
-export function revokeEverySession(req, res) { const result = revokeAllSessions(req.user.id); clearSessionCookies(res); return res.json(result) }
+export async function activeSessions(req, res) { return res.json({ sessions: await listSessionsAsync(req.user.id, req.user.sessionId) }) }
+export async function revokeActiveSession(req, res) { const result = await revokeSessionAsync(req.user.id, req.params.sessionId); return result.ok ? res.json(result) : res.status(404).json(result) }
+export async function revokeOtherSessions(req, res) { return res.json(await revokeAllSessionsAsync(req.user.id, req.user.sessionId)) }
+export async function revokeEverySession(req, res) { const result = await revokeAllSessionsAsync(req.user.id); clearSessionCookies(res); return res.json(result) }
 
 export async function changePassword(req, res) {
   const currentPassword = String(req.body.currentPassword || '')
@@ -298,14 +313,27 @@ export async function changePassword(req, res) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' })
   }
 
-  const db = readDb()
-  const user = db.users.find(row => row.id === req.user.id)
+  const db = readAuthorityDb()
+  let user
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { user = (await findIdentityById(req.user.id))?.user } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  user ||= db.users.find(row => row.id === req.user.id)
   if (!user || !await bcrypt.compare(currentPassword, user.passwordHash)) {
     return res.status(401).json({ error: 'Current password is incorrect' })
   }
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS)
-  const updated = updateDb(current => {
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    try {
+      const persisted = await updateIdentityPassword(req.user.id, passwordHash)
+      if (!persisted && process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'User not found' })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_password_write_failed', error: error.message }))
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
+    }
+  }
+  const updated = updateAuthorityDb(current => {
     const target = current.users.find(row => row.id === req.user.id)
     if (!target) return false
     target.passwordHash = passwordHash
@@ -325,7 +353,7 @@ export async function forgotPassword(req, res) {
     return res.status(400).json({ error: 'Email is required' })
   }
 
-  const db = readDb()
+  const db = readAuthorityDb()
   const user = db.users.find(u => u.email === email)
   let resetToken = null
   if (user) {
@@ -344,7 +372,7 @@ export async function forgotPassword(req, res) {
         })
       }
     }
-    const persisted = updateDb(current => {
+    const persisted = updateAuthorityDb(current => {
       const freshUser = current.users.find(u => u.id === user.id && u.email === email)
       if (!freshUser) return false
       current.passwordResets = cleanPasswordResets(current.passwordResets)
@@ -382,7 +410,7 @@ export async function resetPassword(req, res) {
 
   const now = new Date().toISOString()
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     db.passwordResets = cleanPasswordResets(db.passwordResets)
 
     const tokenHash = hashToken(token)

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { academyModulesForRole, ACADEMY_CATALOG_VERSION } from './academyCatalog.js'
 
@@ -29,7 +29,7 @@ function authorizedProject(db, userId, role, projectId) {
 }
 
 export function academyProjects(userId, rawRole) {
-  const role = roleName(rawRole); const db = readDb()
+  const role = roleName(rawRole); const db = readAuthorityDb()
   if (!['founder', 'collaborator'].includes(role)) return { ok: true, projects: [] }
   return { ok: true, projects: rows(db, 'projects').filter(project => authorizedProject(db, userId, role, project.id)).map(project => ({ id: project.id, name: nameOf(project), stage: stageOf(project), industry: project.industry || null, updatedAt: project.updatedAt || project.createdAt || null })) }
 }
@@ -86,12 +86,12 @@ function clientModule(module, progress, completedIds, enrichment) {
 }
 
 export function getAcademyCurriculum(userId, rawRole, projectId) {
-  const role = roleName(rawRole); const snapshot = readDb(); const project = authorizedProject(snapshot, userId, role, projectId)
+  const role = roleName(rawRole); const snapshot = readAuthorityDb(); const project = authorizedProject(snapshot, userId, role, projectId)
   if (!project) return { ok: false, status: 403, error: 'project_access_denied' }
   const context = projectContext(snapshot, project, userId, role)
   const adaptationSignals = rows(snapshot, 'academyEvents').filter(row => row.projectId === projectId && row.type === 'adaptation_trigger_received').slice(-10).map(row => row.triggerEvent)
   const selected = selectModules(role, context); const stableContext = { ...context, adaptationSignals }; delete stableContext.updatedAt; const contextHash = digest({ context: stableContext, moduleIds: selected.map(module => module.id), catalogVersion: ACADEMY_CATALOG_VERSION })
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     let curriculum = rows(db, 'academyCurricula').find(row => row.userId === userId && row.role === role && row.projectId === projectId && row.status === 'active')
     if (!curriculum || curriculum.contextHash !== contextHash) {
       if (curriculum) { curriculum.status = 'superseded'; curriculum.supersededAt = nowIso() }
@@ -127,7 +127,7 @@ function moduleIn(db, curriculumId, moduleId) { return rows(db, 'academyModules'
 function completedIds(db, curriculum) { return rows(db, 'academyProgress').filter(row => row.userId === curriculum.userId && row.projectId === curriculum.projectId && row.status === 'complete').map(row => row.moduleId) }
 
 export function startAcademyModule(userId, curriculumId, moduleId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId)
     if (!curriculum || !module || !unlocked(module, completedIds(db, curriculum))) return { ok: false, status: 403, error: 'module_locked_or_denied' }
     let progress = progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion)
@@ -139,7 +139,7 @@ export function startAcademyModule(userId, curriculumId, moduleId) {
 }
 
 export function heartbeatAcademyModule(userId, curriculumId, moduleId, sessionId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const curriculum = authorizeCurriculum(db, userId, curriculumId); const progress = curriculum && progressFor(db, userId, curriculum.projectId, moduleId, moduleIn(db, curriculumId, moduleId)?.contentVersion)
     if (!curriculum || !progress || progress.activeSessionId !== sessionId || progress.status === 'complete') return { ok: false, status: 403, error: 'invalid_learning_session' }
     const now = Date.now(); const prior = new Date(progress.lastHeartbeatAt).getTime(); const elapsed = Number.isFinite(prior) ? Math.max(0, Math.min(90, Math.floor((now - prior) / 1000))) : 0
@@ -149,27 +149,27 @@ export function heartbeatAcademyModule(userId, curriculumId, moduleId, sessionId
 }
 
 export function saveAcademyReflection(userId, curriculumId, moduleId, text) {
-  return updateDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); const value = typeof text === 'string' ? text.trim() : ''; if (!progress || value.length < 20) return { ok: false, status: 400, error: 'reflection_invalid' }; progress.reflection = value.slice(0, 5000); progress.reflectionHash = digest(progress.reflection); progress.reflectionSubmittedAt = nowIso(); return { ok: true } })
+  return updateAuthorityDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); const value = typeof text === 'string' ? text.trim() : ''; if (!progress || value.length < 20) return { ok: false, status: 400, error: 'reflection_invalid' }; progress.reflection = value.slice(0, 5000); progress.reflectionHash = digest(progress.reflection); progress.reflectionSubmittedAt = nowIso(); return { ok: true } })
 }
 
 export function scoreAcademyQuiz(userId, curriculumId, moduleId, answers) {
-  return updateDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); if (!progress || !Array.isArray(answers)) return { ok: false, status: 400, error: 'quiz_invalid' }; const key = assessment(module); const correct = key.filter((question, index) => Number(answers[index]) === question.answer).length; const score = Math.round(correct / key.length * 100); progress.quizScore = score; progress.quizPassed = score >= 70; progress.quizSubmittedAt = nowIso(); rows(db, 'academyAssessments').push({ id: createId('academy_assessment'), userId, projectId: curriculum.projectId, curriculumId, moduleId, score, passed: progress.quizPassed, answersHash: digest(answers), createdAt: nowIso() }); return { ok: true, score, passed: progress.quizPassed } })
+  return updateAuthorityDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); if (!progress || !Array.isArray(answers)) return { ok: false, status: 400, error: 'quiz_invalid' }; const key = assessment(module); const correct = key.filter((question, index) => Number(answers[index]) === question.answer).length; const score = Math.round(correct / key.length * 100); progress.quizScore = score; progress.quizPassed = score >= 70; progress.quizSubmittedAt = nowIso(); rows(db, 'academyAssessments').push({ id: createId('academy_assessment'), userId, projectId: curriculum.projectId, curriculumId, moduleId, score, passed: progress.quizPassed, answersHash: digest(answers), createdAt: nowIso() }); return { ok: true, score, passed: progress.quizPassed } })
 }
 
 export function saveAcademyExercise(userId, curriculumId, moduleId, submission) {
-  return updateDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); const value = typeof submission === 'string' ? submission.trim() : ''; if (!progress || value.length < 40) return { ok: false, status: 400, error: 'exercise_invalid' }; progress.exerciseSubmission = value.slice(0, 10000); progress.exerciseHash = digest(progress.exerciseSubmission); progress.exerciseReviewStatus = 'pending'; progress.exerciseSubmittedAt = nowIso(); return { ok: true, reviewStatus: 'pending', exercise: { projectId: curriculum.projectId, moduleId, title: module.title, objective: module.objective, instructions: module.content.exercise.instructions, submission: progress.exerciseSubmission } } })
+  return updateAuthorityDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); const value = typeof submission === 'string' ? submission.trim() : ''; if (!progress || value.length < 40) return { ok: false, status: 400, error: 'exercise_invalid' }; progress.exerciseSubmission = value.slice(0, 10000); progress.exerciseHash = digest(progress.exerciseSubmission); progress.exerciseReviewStatus = 'pending'; progress.exerciseSubmittedAt = nowIso(); return { ok: true, reviewStatus: 'pending', exercise: { projectId: curriculum.projectId, moduleId, title: module.title, objective: module.objective, instructions: module.content.exercise.instructions, submission: progress.exerciseSubmission } } })
 }
 
 export function applyAcademyExerciseReview(userId, curriculumId, moduleId, review) {
-  return updateDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); if (!progress) return { ok: false, status: 404, error: 'progress_not_found' }; const passed = review?.passed === true && Number(review?.score || 0) >= 70; progress.exerciseReviewStatus = passed ? 'approved' : 'needs_revision'; progress.exerciseReviewScore = Math.max(0, Math.min(100, Number(review?.score || 0))); progress.exerciseReviewFeedback = String(review?.feedback || '').slice(0, 3000); progress.exerciseReviewedAt = nowIso(); return { ok: true, reviewStatus: progress.exerciseReviewStatus, score: progress.exerciseReviewScore, feedback: progress.exerciseReviewFeedback } })
+  return updateAuthorityDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion); if (!progress) return { ok: false, status: 404, error: 'progress_not_found' }; const passed = review?.passed === true && Number(review?.score || 0) >= 70; progress.exerciseReviewStatus = passed ? 'approved' : 'needs_revision'; progress.exerciseReviewScore = Math.max(0, Math.min(100, Number(review?.score || 0))); progress.exerciseReviewFeedback = String(review?.feedback || '').slice(0, 3000); progress.exerciseReviewedAt = nowIso(); return { ok: true, reviewStatus: progress.exerciseReviewStatus, score: progress.exerciseReviewScore, feedback: progress.exerciseReviewFeedback } })
 }
 
 export function applyAcademyEnrichment(userId, curriculumId, enrichment) {
-  return updateDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); if (!curriculum || !Array.isArray(enrichment?.modules)) return { ok: false, status: 400, error: 'enrichment_invalid' }; for (const item of enrichment.modules) { const module = moduleIn(db, curriculumId, item.moduleId); if (!module) continue; module.enrichment = { projectApplication: String(item.projectApplication || '').slice(0, 2000), coachNotes: Array.isArray(item.coachNotes) ? item.coachNotes.slice(0, 5).map(note => String(note).slice(0, 500)) : [], modelUsed: enrichment.modelUsed || null, generatedAt: nowIso(), authoritative: false } } return { ok: true } })
+  return updateAuthorityDb(db => { const curriculum = authorizeCurriculum(db, userId, curriculumId); if (!curriculum || !Array.isArray(enrichment?.modules)) return { ok: false, status: 400, error: 'enrichment_invalid' }; for (const item of enrichment.modules) { const module = moduleIn(db, curriculumId, item.moduleId); if (!module) continue; module.enrichment = { projectApplication: String(item.projectApplication || '').slice(0, 2000), coachNotes: Array.isArray(item.coachNotes) ? item.coachNotes.slice(0, 5).map(note => String(note).slice(0, 500)) : [], modelUsed: enrichment.modelUsed || null, generatedAt: nowIso(), authoritative: false } } return { ok: true } })
 }
 
 export function applyAcademyGeneratedLessons(userId, curriculumId, generated) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const curriculum = authorizeCurriculum(db, userId, curriculumId)
     if (!curriculum || !Array.isArray(generated?.modules)) return { ok: false, status: 400, error: 'generation_invalid' }
     const allowed = new Set(rows(db, 'academyModules').filter(row => row.curriculumId === curriculumId).map(row => row.id))
@@ -195,7 +195,7 @@ export function applyAcademyGeneratedLessons(userId, curriculumId, generated) {
 }
 
 export function completeAcademyModule(userId, curriculumId, moduleId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const curriculum = authorizeCurriculum(db, userId, curriculumId); const module = curriculum && moduleIn(db, curriculumId, moduleId); const progress = module && progressFor(db, userId, curriculum.projectId, moduleId, module.contentVersion)
     if (!curriculum || !module || !progress || !unlocked(module, completedIds(db, curriculum))) return { ok: false, status: 403, error: 'module_denied' }
     const minimum = Math.max(120, Math.round(module.estimatedHours * 600)); const requirements = { engagementSeconds: minimum, quizPassed: true, exerciseReviewStatus: 'approved', reflectionSubmitted: true }
@@ -209,17 +209,17 @@ export function completeAcademyModule(userId, curriculumId, moduleId) {
   })
 }
 
-export function academyBadges(userId) { const db = readDb(); return { ok: true, badges: rows(db, 'academyBadges').filter(row => row.userId === userId) } }
+export function academyBadges(userId) { const db = readAuthorityDb(); return { ok: true, badges: rows(db, 'academyBadges').filter(row => row.userId === userId) } }
 
 const ADAPTATION_EVENTS = new Set(['project_stage_changed', 'customer_validation_completed', 'pivot_recorded', 'mvp_shipped', 'revenue_started', 'investor_interest_recorded', 'task_blocked', 'technical_incident_detected', 'contribution_verified'])
 
 export function triggerAcademyAdaptation(userId, rawRole, projectId, triggerEvent) {
   const role = roleName(rawRole)
   if (!ADAPTATION_EVENTS.has(String(triggerEvent || ''))) return { ok: false, status: 400, error: 'invalid_adaptation_event' }
-  const db = readDb()
+  const db = readAuthorityDb()
   const project = authorizedProject(db, userId, role, projectId)
   if (!project) return { ok: false, status: 403, error: 'project_access_denied' }
-  updateDb(store => {
+  updateAuthorityDb(store => {
     rows(store, 'academyEvents').push({ id: createId('academy_event'), type: 'adaptation_trigger_received', userId, projectId, triggerEvent, metadata: { source: 'academy_adaptation_endpoint' }, createdAt: nowIso() })
     return store
   })

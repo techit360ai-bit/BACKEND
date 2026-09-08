@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -46,13 +46,13 @@ export function appendCodeEvent(db, input) {
 }
 
 export function listProjectFiles(userId, workspaceId, includeDeleted = false) {
-  const db = readDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const db = readAuthorityDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
   const files = rows(db, 'projectFiles').filter(row => row.workspaceId === workspaceId && (includeDeleted || !row.deleted)).sort((a, b) => a.path.localeCompare(b.path)).map(publicFile)
   return { ok: true, workspace: { id: auth.workspace.id, projectId: auth.workspace.projectId, name: auth.workspace.name, accessLevel: auth.level }, files }
 }
 
 export function readProjectFile(userId, workspaceId, pathValue) {
-  const db = readDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); const path = safeCodePath(pathValue)
+  const db = readAuthorityDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); const path = safeCodePath(pathValue)
   if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
   if (!path) return { ok: false, status: 400, error: 'unsafe_file_path' }
   const file = rows(db, 'projectFiles').find(row => row.workspaceId === workspaceId && row.path === path && !row.deleted)
@@ -63,7 +63,7 @@ export function saveProjectFile(userId, workspaceId, body = {}) {
   const path = safeCodePath(body.path); const content = typeof body.content === 'string' ? body.content : null
   if (!path) return { ok: false, status: 400, error: 'unsafe_file_path' }
   if (content === null || Buffer.byteLength(content, 'utf8') > MAX_TEXT_BYTES) return { ok: false, status: 413, error: 'file_content_invalid' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     let file = rows(db, 'projectFiles').find(row => row.workspaceId === workspaceId && row.path === path)
     if (file && body.expectedVersion !== undefined && Number(body.expectedVersion) !== Number(file.version)) return { ok: false, status: 409, error: 'file_version_conflict', current: publicFile(file) }
@@ -80,7 +80,7 @@ export function saveProjectFile(userId, workspaceId, body = {}) {
 export function moveProjectFile(userId, workspaceId, pathValue, body = {}) {
   const path = safeCodePath(pathValue); const nextPath = safeCodePath(body.path)
   if (!path || !nextPath) return { ok: false, status: 400, error: 'unsafe_file_path' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const file = rows(db, 'projectFiles').find(row => row.workspaceId === workspaceId && row.path === path && !row.deleted)
     if (!file) return { ok: false, status: 404, error: 'file_not_found' }
@@ -94,7 +94,7 @@ export function moveProjectFile(userId, workspaceId, pathValue, body = {}) {
 
 export function deleteProjectFile(userId, workspaceId, pathValue, expectedVersion) {
   const path = safeCodePath(pathValue); if (!path) return { ok: false, status: 400, error: 'unsafe_file_path' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const file = rows(db, 'projectFiles').find(row => row.workspaceId === workspaceId && row.path === path && !row.deleted)
     if (!file) return { ok: false, status: 404, error: 'file_not_found' }
@@ -106,13 +106,13 @@ export function deleteProjectFile(userId, workspaceId, pathValue, expectedVersio
 }
 
 export function projectFileHistory(userId, workspaceId, pathValue) {
-  const db = readDb(); if (!codeWorkspaceAccess(db, userId, workspaceId)) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const db = readAuthorityDb(); if (!codeWorkspaceAccess(db, userId, workspaceId)) return { ok: false, status: 403, error: 'workspace_access_denied' }
   const path = safeCodePath(pathValue); if (!path) return { ok: false, status: 400, error: 'unsafe_file_path' }
   return { ok: true, versions: rows(db, 'projectFileVersions').filter(row => row.workspaceId === workspaceId && row.path === path).map(({ content, ...row }) => ({ ...row, sizeBytes: Buffer.byteLength(content, 'utf8') })).reverse() }
 }
 
 export function codeWorkspaceSnapshot(userId, workspaceId) {
-  const db = readDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const db = readAuthorityDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
   const files = rows(db, 'projectFiles').filter(row => row.workspaceId === workspaceId && !row.deleted).map(row => ({ path: row.path, content: row.content, version: row.version, contentHash: row.contentHash, language: row.language }))
   const sync = rows(db, 'codeSyncStates').find(row => row.workspaceId === workspaceId && row.status === 'active') || null
   return { ok: true, workspace: auth.workspace, files, sync, snapshotHash: sha(files.map(row => `${row.path}:${row.contentHash}`).sort().join('|')) }
@@ -127,23 +127,23 @@ export function detectProjectAdapter(userId, workspaceId) {
 }
 
 export function recordRuntimeSession(userId, workspaceId, body = {}) {
-  return updateDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; const status = ['started', 'completed', 'failed', 'cancelled', 'crashed'].includes(body.status) ? body.status : 'started'; const row = { id: createId('runtime'), workspaceId, projectId: auth.workspace.projectId, actorId: userId, executionRunId: body.executionRunId ? String(body.executionRunId) : null, adapter: String(body.adapter || ''), commandType: String(body.commandType || 'dev'), command: String(body.command || '').slice(0, 300), status, exitCode: body.exitCode == null ? null : Number(body.exitCode), durationMs: body.durationMs == null ? null : Number(body.durationMs), outputSummary: String(body.outputSummary || '').slice(0, 3000), createdAt: nowIso() }; rows(db, 'codeRuntimeSessions').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: `runtime_${status}`, runtimeId: row.id, metadata: { commandType: row.commandType, exitCode: row.exitCode, executionRunId: row.executionRunId } }); return { ok: true, session: row } })
+  return updateAuthorityDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; const status = ['started', 'completed', 'failed', 'cancelled', 'crashed'].includes(body.status) ? body.status : 'started'; const row = { id: createId('runtime'), workspaceId, projectId: auth.workspace.projectId, actorId: userId, executionRunId: body.executionRunId ? String(body.executionRunId) : null, adapter: String(body.adapter || ''), commandType: String(body.commandType || 'dev'), command: String(body.command || '').slice(0, 300), status, exitCode: body.exitCode == null ? null : Number(body.exitCode), durationMs: body.durationMs == null ? null : Number(body.durationMs), outputSummary: String(body.outputSummary || '').slice(0, 3000), createdAt: nowIso() }; rows(db, 'codeRuntimeSessions').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: `runtime_${status}`, runtimeId: row.id, metadata: { commandType: row.commandType, exitCode: row.exitCode, executionRunId: row.executionRunId } }); return { ok: true, session: row } })
 }
 
 export function saveSyncState(userId, workspaceId, body = {}) {
-  return updateDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; rows(db, 'codeSyncStates').forEach(row => { if (row.workspaceId === workspaceId && row.provider === String(body.provider || 'github')) row.status = 'superseded' }); const row = { id: createId('sync_state'), workspaceId, projectId: auth.workspace.projectId, provider: String(body.provider || 'github').slice(0, 40), repo: String(body.repo || '').slice(0, 300), branch: String(body.branch || 'main').slice(0, 200), baseHeadSha: String(body.baseHeadSha || '').slice(0, 100), snapshotHash: String(body.snapshotHash || '').slice(0, 100), baseFiles: Array.isArray(body.baseFiles) ? body.baseFiles.slice(0, 500).map(item => ({ path: safeCodePath(item?.path), contentHash: String(item?.contentHash || '').slice(0, 100), content: typeof item?.content === 'string' && Buffer.byteLength(item.content, 'utf8') <= MAX_TEXT_BYTES ? item.content : undefined })).filter(item => item.path) : [], status: 'active', updatedBy: userId, createdAt: nowIso() }; rows(db, 'codeSyncStates').push(row); return { ok: true, sync: row } })
+  return updateAuthorityDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; rows(db, 'codeSyncStates').forEach(row => { if (row.workspaceId === workspaceId && row.provider === String(body.provider || 'github')) row.status = 'superseded' }); const row = { id: createId('sync_state'), workspaceId, projectId: auth.workspace.projectId, provider: String(body.provider || 'github').slice(0, 40), repo: String(body.repo || '').slice(0, 300), branch: String(body.branch || 'main').slice(0, 200), baseHeadSha: String(body.baseHeadSha || '').slice(0, 100), snapshotHash: String(body.snapshotHash || '').slice(0, 100), baseFiles: Array.isArray(body.baseFiles) ? body.baseFiles.slice(0, 500).map(item => ({ path: safeCodePath(item?.path), contentHash: String(item?.contentHash || '').slice(0, 100), content: typeof item?.content === 'string' && Buffer.byteLength(item.content, 'utf8') <= MAX_TEXT_BYTES ? item.content : undefined })).filter(item => item.path) : [], status: 'active', updatedBy: userId, createdAt: nowIso() }; rows(db, 'codeSyncStates').push(row); return { ok: true, sync: row } })
 }
 
 export function createBridgeGrant(userId, workspaceId, body = {}) {
-  return updateDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; const rawToken = crypto.randomBytes(32).toString('base64url'); const row = { id: createId('bridge_grant'), workspaceId, projectId: auth.workspace.projectId, userId, tokenHash: sha(rawToken), permissions: ['files.read', 'files.write', ...(body.allowCommands === true ? ['commands.bounded'] : [])], selectedRoot: String(body.selectedRoot || '').slice(0, 500) || null, status: 'active', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), createdAt: nowIso() }; rows(db, 'codeBridgeGrants').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: 'bridge_grant_created', bridgeGrantId: row.id, metadata: { permissions: row.permissions, expiresAt: row.expiresAt } }); return { ok: true, grant: { ...row, token: rawToken, tokenHash: undefined } } })
+  return updateAuthorityDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; const rawToken = crypto.randomBytes(32).toString('base64url'); const row = { id: createId('bridge_grant'), workspaceId, projectId: auth.workspace.projectId, userId, tokenHash: sha(rawToken), permissions: ['files.read', 'files.write', ...(body.allowCommands === true ? ['commands.bounded'] : [])], selectedRoot: String(body.selectedRoot || '').slice(0, 500) || null, status: 'active', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(), createdAt: nowIso() }; rows(db, 'codeBridgeGrants').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: 'bridge_grant_created', bridgeGrantId: row.id, metadata: { permissions: row.permissions, expiresAt: row.expiresAt } }); return { ok: true, grant: { ...row, token: rawToken, tokenHash: undefined } } })
 }
 
 export function recordDeployment(userId, workspaceId, body = {}) {
-  return updateDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; if (body.confirm !== true) return { ok: false, status: 400, error: 'deployment_confirmation_required' }; const environment = ['preview', 'staging', 'production'].includes(body.environment) ? body.environment : 'preview'; const commitSha = String(body.commitSha || '').slice(0, 100); const buildStatus = String(body.buildStatus || 'unknown'); const testStatus = String(body.testStatus || 'unknown'); const securityStatus = String(body.securityStatus || 'unknown'); if (environment === 'production' && (!commitSha || [buildStatus, testStatus, securityStatus].some(value => value !== 'passed'))) return { ok: false, status: 409, error: 'production_evidence_incomplete' }; const row = { id: createId('code_deployment'), workspaceId, projectId: auth.workspace.projectId, actorId: userId, executionRunId: body.executionRunId ? String(body.executionRunId) : null, environment, destination: String(body.destination || '').slice(0, 200), commitSha, buildStatus, testStatus, securityStatus, status: 'prepared', createdAt: nowIso() }; rows(db, 'codeDeploymentRecords').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: 'deployment_prepared', deploymentId: row.id, metadata: row }); return { ok: true, deployment: row } })
+  return updateAuthorityDb(db => { const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }; if (body.confirm !== true) return { ok: false, status: 400, error: 'deployment_confirmation_required' }; const environment = ['preview', 'staging', 'production'].includes(body.environment) ? body.environment : 'preview'; const commitSha = String(body.commitSha || '').slice(0, 100); const buildStatus = String(body.buildStatus || 'unknown'); const testStatus = String(body.testStatus || 'unknown'); const securityStatus = String(body.securityStatus || 'unknown'); if (environment === 'production' && (!commitSha || [buildStatus, testStatus, securityStatus].some(value => value !== 'passed'))) return { ok: false, status: 409, error: 'production_evidence_incomplete' }; const row = { id: createId('code_deployment'), workspaceId, projectId: auth.workspace.projectId, actorId: userId, executionRunId: body.executionRunId ? String(body.executionRunId) : null, environment, destination: String(body.destination || '').slice(0, 200), commitSha, buildStatus, testStatus, securityStatus, status: 'prepared', createdAt: nowIso() }; rows(db, 'codeDeploymentRecords').push(row); appendCodeEvent(db, { workspaceId, projectId: row.projectId, actorId: userId, type: 'deployment_prepared', deploymentId: row.id, metadata: row }); return { ok: true, deployment: row } })
 }
 
 export function listCodeDestinations(userId, workspaceId) {
-  const db = readDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const db = readAuthorityDb(); const auth = codeWorkspaceAccess(db, userId, workspaceId); if (!auth) return { ok: false, status: 403, error: 'workspace_access_denied' }
   const connectors = rows(db, 'workspaceConnectors').filter(row => row.workspaceId === workspaceId && row.status === 'connected')
   const destinations = connectors.flatMap(row => {
     const provider = String(row.provider || row.sourceConnectorId || row.connectorId || row.id || '').toLowerCase()
@@ -155,7 +155,7 @@ export function listCodeDestinations(userId, workspaceId) {
 }
 
 export function verifyCodeDeployment(userId, workspaceId, deploymentId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const deployment = rows(db, 'codeDeploymentRecords').find(row => row.id === deploymentId && row.workspaceId === workspaceId); if (!deployment) return { ok: false, status: 404, error: 'deployment_not_found' }
     const checks = Array.isArray(body.checks) ? body.checks.slice(0, 100).map(item => ({ name: String(item?.name || '').slice(0, 200), conclusion: ['success', 'failure', 'pending'].includes(item?.conclusion) ? item.conclusion : 'pending' })) : []

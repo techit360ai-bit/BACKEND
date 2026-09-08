@@ -1,6 +1,8 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { syncFinanceProjection } from './financePostgresProjection.js'
+import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -78,7 +80,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
   const credits = Math.max(0, number(estimatedCredits))
   if (!userId || !normalizedRequestId || !taskType || credits <= 0) return { ok: false, error: 'reservation_fields_required' }
   if (!FUNDING_SOURCES.has(fundingSource)) return { ok: false, error: 'invalid_funding_source' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const existing = reservationFor(db, normalizedRequestId)
     if (existing) {
       const sameReservation = existing.userId === userId
@@ -113,7 +115,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
 export function settleUsage(facts) {
   const normalized = validateFacts(facts)
   if (normalized.error) return { ok: false, error: normalized.error }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const payloadHash = hashPayload(normalized)
     const existing = usageFor(db, normalized.requestId)
     if (existing) {
@@ -170,7 +172,33 @@ export function settleUsage(facts) {
 }
 
 export function usageSettlementHealth() {
-  const db = readDb()
+  const db = readAuthorityDb()
   const settled = db.usageEvents.filter(row => row.status === 'completed').sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   return { ok: true, usageEvents: db.usageEvents.length, pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length, lastSettledAt: settled[0]?.updatedAt || null }
+}
+
+const financeWrites = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
+const financeWriteFallback = () => process.env.FINANCE_WRITE_FALLBACK_SQLITE !== 'false'
+async function persistFinanceWrite(result) {
+  if (!financeWrites() || !result?.ok) return result
+  try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', error: error.message })); if (financeWriteFallback()) return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
+}
+export async function reserveUsageAsync(facts) {
+  if (financePostgresEnabled()) {
+    try { return await reserveUsagePostgres(facts) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_reservation_failed', error: error.message }))
+      if (!financeWriteFallback()) return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return persistFinanceWrite(reserveUsage(facts))
+}
+
+export async function settleUsageAsync(facts) {
+  if (financePostgresEnabled()) {
+    try { return await settleUsagePostgres(facts) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_settlement_failed', error: error.message }))
+      if (!financeWriteFallback()) return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return persistFinanceWrite(settleUsage(facts))
 }

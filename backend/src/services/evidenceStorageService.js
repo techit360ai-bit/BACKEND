@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import net from 'node:net'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { safeFetch } from './outboundHttpService.js'
 
 const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
 const maxBytes = () => Math.max(1024, Number(process.env.EVIDENCE_MAX_BYTES || 25 * 1024 * 1024))
@@ -30,11 +31,11 @@ export function createEvidenceUpload(userId, requestId, input = {}) {
   const contentType = String(input.contentType || '').toLowerCase(); const sizeBytes = Number(input.sizeBytes || 0)
   if (!allowedTypes.has(contentType)) return { ok: false, error: 'unsupported_evidence_type' }
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > maxBytes()) return { ok: false, error: 'invalid_evidence_size', maxBytes: maxBytes() }
-  const db = readDb(); const request = (db.verificationRequests || []).find(row => row.id === requestId && row.userId === userId)
+  const db = readAuthorityDb(); const request = (db.verificationRequests || []).find(row => row.id === requestId && row.userId === userId)
   if (!request) return { ok: false, error: 'verification_request_not_found' }
   const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
   const uploadUrl = presign('PUT', objectKey); if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
-  return updateDb(state => { const row = { id: objectId, userId, requestId, objectKey, contentType, sizeBytes, status: 'upload_pending', malwareStatus: 'pending', createdAt: nowIso(), updatedAt: nowIso() }; state.evidenceObjects.push(row); return { ok: true, object: row, uploadUrl, requiredHeaders: { 'Content-Type': contentType } } })
+  return updateAuthorityDb(state => { const row = { id: objectId, userId, requestId, objectKey, contentType, sizeBytes, status: 'upload_pending', malwareStatus: 'pending', createdAt: nowIso(), updatedAt: nowIso() }; state.evidenceObjects.push(row); return { ok: true, object: row, uploadUrl, requiredHeaders: { 'Content-Type': contentType } } })
 }
 async function clamScan(buffer) {
   if (!process.env.CLAMAV_HOST) return process.env.NODE_ENV === 'production' ? { clean: false, error: 'malware_scanner_not_configured' } : { clean: true, engine: 'development_bypass' }
@@ -49,7 +50,7 @@ function matchesDeclaredType(buffer, contentType) {
 async function validatePrivateObject({ objectKey, contentType, expectedSizeBytes }) {
   const downloadUrl = presign('GET', objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   try {
-    const response = await fetch(downloadUrl, { signal: AbortSignal.timeout(20000) })
+    const response = await safeFetch(downloadUrl, { signal: AbortSignal.timeout(20000) }, { schemes: ['https'], allowHosts: new URL(downloadUrl).hostname ? [new URL(downloadUrl).hostname] : [] })
     if (!response.ok) return { ok: false, error: 'evidence_object_unavailable' }
     const buffer = Buffer.from(await response.arrayBuffer())
     if (buffer.length !== expectedSizeBytes || buffer.length > maxBytes()) return { ok: false, error: 'evidence_size_mismatch' }
@@ -78,9 +79,9 @@ export async function finalizePrivateUpload({ objectKey, contentType, expectedSi
 export function privateDownloadUrl(objectKey, expires = 300) { return presign('GET', objectKey, expires) }
 
 export async function finalizeEvidenceUpload(userId, objectId) {
-  const object = (readDb().evidenceObjects || []).find(row => row.id === objectId && row.userId === userId); if (!object) return { ok: false, error: 'evidence_object_not_found' }
+  const object = (readAuthorityDb().evidenceObjects || []).find(row => row.id === objectId && row.userId === userId); if (!object) return { ok: false, error: 'evidence_object_not_found' }
   const downloadUrl = presign('GET', object.objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   const result = await validatePrivateObject({ objectKey: object.objectKey, contentType: object.contentType, expectedSizeBytes: object.sizeBytes })
-  return updateDb(db => { const row = db.evidenceObjects.find(item => item.id === objectId); row.status = result.ok ? 'available' : 'quarantined'; row.malwareStatus = result.ok ? 'clean' : 'infected_or_unavailable'; row.sha256 = result.sha256 || null; row.scan = result.scan || null; row.updatedAt = nowIso(); return result.ok ? { ok: true, object: row } : { ok: false, error: result.error, object: row } })
+  return updateAuthorityDb(db => { const row = db.evidenceObjects.find(item => item.id === objectId); row.status = result.ok ? 'available' : 'quarantined'; row.malwareStatus = result.ok ? 'clean' : 'infected_or_unavailable'; row.sha256 = result.sha256 || null; row.scan = result.scan || null; row.updatedAt = nowIso(); return result.ok ? { ok: true, object: row } : { ok: false, error: result.error, object: row } })
 }
-export function evidenceObject(userId, objectId, admin = false) { const row = (readDb().evidenceObjects || []).find(item => item.id === objectId && (admin || item.userId === userId)); if (!row || row.status !== 'available') return { ok: false, error: 'evidence_object_unavailable' }; return { ok: true, object: row, downloadUrl: presign('GET', row.objectKey, 300) } }
+export function evidenceObject(userId, objectId, admin = false) { const row = (readAuthorityDb().evidenceObjects || []).find(item => item.id === objectId && (admin || item.userId === userId)); if (!row || row.status !== 'available') return { ok: false, error: 'evidence_object_unavailable' }; return { ok: true, object: row, downloadUrl: presign('GET', row.objectKey, 300) } }

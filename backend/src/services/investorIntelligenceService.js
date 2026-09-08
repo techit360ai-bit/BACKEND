@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const asNumber = value => Number.isFinite(Number(value)) ? Number(value) : null
@@ -91,7 +91,7 @@ function buildStartup(db, investorId, projectId) {
 }
 
 function persistSnapshot(investorId, scope, startups) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const timestamp = nowIso()
     rows(db, 'investorIntelligenceSnapshots').push({ id: createId('investor_intel'), investorId, scope, startups, createdAt: timestamp })
     rows(db, 'investorIntelligenceAudits').push({ id: createId('investor_intel_audit'), investorId, action: 'intelligence_viewed', scope, startupIds: startups.map(row => row.startupId), createdAt: timestamp })
@@ -100,14 +100,14 @@ function persistSnapshot(investorId, scope, startups) {
 }
 
 export function investorIntelligenceOverview(investorId) {
-  const db = readDb(); const ids = authorizedProjectIds(db, investorId); const startups = [...ids].map(id => buildStartup(db, investorId, id)).filter(Boolean)
+  const db = readAuthorityDb(); const ids = authorizedProjectIds(db, investorId); const startups = [...ids].map(id => buildStartup(db, investorId, id)).filter(Boolean)
   const overview = { portfolio: { total: startups.length, healthy: startups.filter(row => row.riskLevel === 'low').length, onTrack: startups.filter(row => row.riskLevel === 'moderate').length, highRisk: startups.filter(row => row.riskLevel === 'high').length }, startups, changes: buildChanges(db, investorId, startups), generatedAt: nowIso(), deterministic: true }
   persistSnapshot(investorId, 'overview', startups)
   return overview
 }
 
 export function investorStartupIntelligence(investorId, startupId) {
-  const db = readDb(); if (!authorizedProjectIds(db, investorId).has(startupId)) return null
+  const db = readAuthorityDb(); if (!authorizedProjectIds(db, investorId).has(startupId)) return null
   const startup = buildStartup(db, investorId, startupId); persistSnapshot(investorId, `startup:${startupId}`, [startup]); return { startup, deterministic: true }
 }
 
@@ -157,7 +157,7 @@ export function investorReports(investorId) {
 }
 
 export function investorAdvisoryEvidence(investorId, startupId = null) {
-  const db = readDb(); const ids = authorizedProjectIds(db, investorId); const selected = startupId ? (ids.has(startupId) ? [startupId] : []) : [...ids]
+  const db = readAuthorityDb(); const ids = authorizedProjectIds(db, investorId); const selected = startupId ? (ids.has(startupId) ? [startupId] : []) : [...ids]
   const startups = selected.map(id => buildStartup(db, investorId, id)).filter(Boolean)
   return { scope: startupId ? `startup:${startupId}` : 'portfolio', startups, instructions: 'Explain observed changes and suggest review actions. Do not authorize access, change scores, or make investment decisions.' }
 }

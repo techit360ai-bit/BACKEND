@@ -12,6 +12,8 @@ import {
   adminIntelligenceTelemetry,
   adminComparableUpsert,
   adminAiRouterTelemetry,
+  adminSecurityPosture,
+  adminSecurityEvents,
 } from '../controllers/adminAuthController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
@@ -42,6 +44,8 @@ router.patch('/discovery/config', requireAdminAuth, requireSuperAdmin, adminUpda
 router.get('/discovery/analytics', requireAdminAuth, requireAdmin, adminDiscoveryAnalytics)
 router.get('/intelligence/telemetry', requireAdminAuth, requireAdmin, adminIntelligenceTelemetry)
 router.get('/ai-router/telemetry', requireAdminAuth, requireAdmin, adminAiRouterTelemetry)
+router.get('/security/posture', requireAdminAuth, requireAdmin, adminSecurityPosture)
+router.get('/security/events', requireAdminAuth, requireAdmin, adminSecurityEvents)
 router.post('/investor/comparables', requireAdminAuth, requireAdmin, adminComparableUpsert)
 router.get('/tvce/analytics', requireAdminAuth, requireAdmin, tvceAdminAnalytics)
 router.get('/tvce/config', requireAdminAuth, requireAdmin, tvceAdminConfig)

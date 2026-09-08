@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
 import { deliverSupportNotification, deliverSupportTeamNotification } from './supportNotificationService.js'
@@ -136,12 +136,12 @@ function canAccessCase(row, userId, admin = false) {
 export function createCase(userId, body = {}, role = 'explorer') {
   if (!supportEnabled()) return { ok: false, status: 404, error: 'support_disabled' }
   const category = text(body.category, 40).toLowerCase()
-  const configuredCategories = rows(readDb(), 'supportCategories').filter(row => row.active !== false).map(row => row.key)
+  const configuredCategories = rows(readAuthorityDb(), 'supportCategories').filter(row => row.active !== false).map(row => row.key)
   if (!CATEGORIES.has(category) && !configuredCategories.includes(category)) return { ok: false, status: 400, error: 'invalid_category' }
   const subject = text(body.subject, 180)
   const description = text(body.description, 4000)
   if (!subject || !description) return { ok: false, status: 400, error: 'subject_and_description_required' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const exempt = EXEMPT_CATEGORIES.has(category)
     const recent = rows(db, 'supportCases').find(row => row.userId === userId && row.category === category && !['resolved', 'closed'].includes(row.status) && !exempt)
     if (recent) return { ok: false, status: 409, error: 'existing_case', case: publicCase(recent) }
@@ -172,13 +172,13 @@ export function createCase(userId, body = {}, role = 'explorer') {
 
 export function listCases(userId) {
   if (!supportEnabled()) return { ok: false, status: 404, error: 'support_disabled' }
-  const db = readDb()
+  const db = readAuthorityDb()
   return { ok: true, cases: rows(db, 'supportCases').filter(row => row.userId === userId).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).map(publicCase) }
 }
 
 export function getCase(userId, caseId, admin = false) {
   if (!supportEnabled()) return { ok: false, status: 404, error: 'support_disabled' }
-  const db = readDb()
+  const db = readAuthorityDb()
   const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
   if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }
   const messages = rows(db, 'supportMessages').filter(row => row.caseId === supportCase.id && (admin || !row.isInternal))
@@ -192,7 +192,7 @@ export function getCase(userId, caseId, admin = false) {
 export function addMessage(userId, caseId, body = {}, admin = false) {
   const message = text(body.message, 4000)
   if (!message) return { ok: false, status: 400, error: 'message_required' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
     if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }
     if (['closed'].includes(supportCase.status)) return { ok: false, status: 409, error: 'case_closed' }
@@ -216,7 +216,7 @@ export function addMessage(userId, caseId, body = {}, admin = false) {
 }
 
 export function listAdminCases(filters = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   let cases = rows(db, 'supportCases').slice()
   if (filters.status) cases = cases.filter(row => row.status === filters.status)
   if (filters.priority) cases = cases.filter(row => row.priority === filters.priority)
@@ -233,7 +233,7 @@ export function listAdminCases(filters = {}) {
 }
 
 export function supportDirectory() {
-  const db = readDb()
+  const db = readAuthorityDb()
   return {
     ok: true,
     admins: rows(db, 'adminUsers').filter(row => row.active !== false).map(row => ({ id: row.id, email: row.email, firstName: row.firstName, lastName: row.lastName, role: row.role })),
@@ -242,7 +242,7 @@ export function supportDirectory() {
 }
 
 export function reopenCase(userId, caseId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
     if (!supportCase || supportCase.userId !== userId) return { ok: false, status: 404, error: 'case_not_found' }
     if (supportCase.status !== 'resolved') return { ok: false, status: 409, error: 'case_not_reopenable' }
@@ -253,23 +253,23 @@ export function reopenCase(userId, caseId) {
   })
 }
 
-export function listKnowledgeBase() { const db = readDb(); return { ok: true, articles: rows(db, 'supportKnowledgeBase').filter(row => row.active !== false) } }
-export function saveKnowledgeArticle(adminId, body = {}) { return updateDb(db => { const title = text(body.title, 180); const solution = text(body.solution, 5000); if (!title || !solution) return { ok: false, status: 400, error: 'knowledge_title_and_solution_required' }; const article = { id: body.id || createId('support_kb'), title, problem: text(body.problem, 2000), solution, category: text(body.category, 40) || 'other', escalationConditions: Array.isArray(body.escalationConditions) ? body.escalationConditions.slice(0, 20).map(item => text(item, 240)) : [], active: body.active !== false, updatedBy: adminId, updatedAt: nowIso(), createdAt: body.createdAt || nowIso() }; const existing = rows(db, 'supportKnowledgeBase').find(row => row.id === article.id); if (existing) Object.assign(existing, article); else rows(db, 'supportKnowledgeBase').push(article); event(db, article.id, 'support_knowledge_updated', adminId, { articleId: article.id }); return { ok: true, article } }) }
+export function listKnowledgeBase() { const db = readAuthorityDb(); return { ok: true, articles: rows(db, 'supportKnowledgeBase').filter(row => row.active !== false) } }
+export function saveKnowledgeArticle(adminId, body = {}) { return updateAuthorityDb(db => { const title = text(body.title, 180); const solution = text(body.solution, 5000); if (!title || !solution) return { ok: false, status: 400, error: 'knowledge_title_and_solution_required' }; const article = { id: body.id || createId('support_kb'), title, problem: text(body.problem, 2000), solution, category: text(body.category, 40) || 'other', escalationConditions: Array.isArray(body.escalationConditions) ? body.escalationConditions.slice(0, 20).map(item => text(item, 240)) : [], active: body.active !== false, updatedBy: adminId, updatedAt: nowIso(), createdAt: body.createdAt || nowIso() }; const existing = rows(db, 'supportKnowledgeBase').find(row => row.id === article.id); if (existing) Object.assign(existing, article); else rows(db, 'supportKnowledgeBase').push(article); event(db, article.id, 'support_knowledge_updated', adminId, { articleId: article.id }); return { ok: true, article } }) }
 
-export function saveTemplate(adminId, body = {}) { return updateDb(db => { const name = text(body.name, 120); const content = text(body.content, 4000); if (!name || !content) return { ok: false, status: 400, error: 'template_name_and_content_required' }; const template = { id: body.id || createId('support_template'), name, content, category: text(body.category, 40) || 'other', active: body.active !== false, updatedBy: adminId, updatedAt: nowIso(), createdAt: body.createdAt || nowIso() }; const existing = rows(db, 'supportTemplates').find(row => row.id === template.id); if (existing) Object.assign(existing, template); else rows(db, 'supportTemplates').push(template); event(db, template.id, 'support_template_updated', adminId, { templateId: template.id }); return { ok: true, template } }) }
+export function saveTemplate(adminId, body = {}) { return updateAuthorityDb(db => { const name = text(body.name, 120); const content = text(body.content, 4000); if (!name || !content) return { ok: false, status: 400, error: 'template_name_and_content_required' }; const template = { id: body.id || createId('support_template'), name, content, category: text(body.category, 40) || 'other', active: body.active !== false, updatedBy: adminId, updatedAt: nowIso(), createdAt: body.createdAt || nowIso() }; const existing = rows(db, 'supportTemplates').find(row => row.id === template.id); if (existing) Object.assign(existing, template); else rows(db, 'supportTemplates').push(template); event(db, template.id, 'support_template_updated', adminId, { templateId: template.id }); return { ok: true, template } }) }
 
-export function listTemplates() { const db = readDb(); return { ok: true, templates: rows(db, 'supportTemplates').filter(row => row.active !== false) } }
-export function listKnowledgeBaseAdmin() { const db = readDb(); return { ok: true, articles: rows(db, 'supportKnowledgeBase').filter(row => row.active !== false) } }
+export function listTemplates() { const db = readAuthorityDb(); return { ok: true, templates: rows(db, 'supportTemplates').filter(row => row.active !== false) } }
+export function listKnowledgeBaseAdmin() { const db = readAuthorityDb(); return { ok: true, articles: rows(db, 'supportKnowledgeBase').filter(row => row.active !== false) } }
 
-export function attachMetadata(userId, caseId, body = {}, admin = false) { return updateDb(db => { const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const name = text(body.name, 180); const contentType = text(body.contentType, 120); const sizeBytes = Number(body.sizeBytes); if (!name || !contentType || !Number.isFinite(sizeBytes) || sizeBytes < 0 || sizeBytes > 10 * 1024 * 1024) return { ok: false, status: 400, error: 'invalid_attachment_metadata' }; const item = { id: createId('support_attachment'), caseId: supportCase.id, name: maskSensitive(name), contentType, sizeBytes, objectKey: null, uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_added', userId, { attachmentId: item.id, sizeBytes }); return { ok: true, attachment: item } }) }
+export function attachMetadata(userId, caseId, body = {}, admin = false) { return updateAuthorityDb(db => { const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const name = text(body.name, 180); const contentType = text(body.contentType, 120); const sizeBytes = Number(body.sizeBytes); if (!name || !contentType || !Number.isFinite(sizeBytes) || sizeBytes < 0 || sizeBytes > 10 * 1024 * 1024) return { ok: false, status: 400, error: 'invalid_attachment_metadata' }; const item = { id: createId('support_attachment'), caseId: supportCase.id, name: maskSensitive(name), contentType, sizeBytes, objectKey: null, uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_added', userId, { attachmentId: item.id, sizeBytes }); return { ok: true, attachment: item } }) }
 
-export function initAttachment(userId, caseId, body = {}, admin = false) { const supportCase = readDb().supportCases?.find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const itemId = createId('support_attachment'); const upload = createPrivateUpload({ namespace: 'support', ownerId: supportCase.userId, objectId: itemId, contentType: body.contentType, sizeBytes: body.sizeBytes }); if (!upload.ok) return { ...upload, status: 503 }; return updateDb(db => { const item = { id: itemId, caseId: supportCase.id, name: maskSensitive(text(body.name, 180)), contentType: String(body.contentType || '').toLowerCase(), sizeBytes: Number(body.sizeBytes), objectKey: upload.objectKey, status: 'upload_pending', uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_upload_started', userId, { attachmentId: item.id }); return { ok: true, attachment: item, uploadUrl: upload.uploadUrl, requiredHeaders: upload.requiredHeaders } }) }
-export async function finalizeAttachment(userId, caseId, attachmentId, admin = false) { const db = readDb(); const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); const item = rows(db, 'supportAttachments').find(row => row.id === attachmentId && row.caseId === supportCase?.id); if (!canAccessCase(supportCase, userId, admin) || !item) return { ok: false, status: 404, error: 'attachment_not_found' }; const result = await finalizePrivateUpload({ objectKey: item.objectKey, contentType: item.contentType, expectedSizeBytes: item.sizeBytes }); return updateDb(state => { const current = rows(state, 'supportAttachments').find(row => row.id === attachmentId); current.status = result.ok ? 'available' : 'quarantined'; current.sha256 = result.sha256 || null; current.updatedAt = nowIso(); event(state, supportCase.id, result.ok ? 'support_attachment_available' : 'support_attachment_quarantined', userId, { attachmentId }); return result.ok ? { ok: true, attachment: { ...current, downloadUrl: privateDownloadUrl(current.objectKey, 300) } } : { ok: false, status: 422, error: result.error, attachment: current } }) }
+export function initAttachment(userId, caseId, body = {}, admin = false) { const supportCase = readAuthorityDb().supportCases?.find(row => row.id === caseId || row.caseNumber === caseId); if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }; const itemId = createId('support_attachment'); const upload = createPrivateUpload({ namespace: 'support', ownerId: supportCase.userId, objectId: itemId, contentType: body.contentType, sizeBytes: body.sizeBytes }); if (!upload.ok) return { ...upload, status: 503 }; return updateAuthorityDb(db => { const item = { id: itemId, caseId: supportCase.id, name: maskSensitive(text(body.name, 180)), contentType: String(body.contentType || '').toLowerCase(), sizeBytes: Number(body.sizeBytes), objectKey: upload.objectKey, status: 'upload_pending', uploadedBy: userId, createdAt: nowIso() }; rows(db, 'supportAttachments').push(item); event(db, supportCase.id, 'support_attachment_upload_started', userId, { attachmentId: item.id }); return { ok: true, attachment: item, uploadUrl: upload.uploadUrl, requiredHeaders: upload.requiredHeaders } }) }
+export async function finalizeAttachment(userId, caseId, attachmentId, admin = false) { const db = readAuthorityDb(); const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); const item = rows(db, 'supportAttachments').find(row => row.id === attachmentId && row.caseId === supportCase?.id); if (!canAccessCase(supportCase, userId, admin) || !item) return { ok: false, status: 404, error: 'attachment_not_found' }; const result = await finalizePrivateUpload({ objectKey: item.objectKey, contentType: item.contentType, expectedSizeBytes: item.sizeBytes }); return updateAuthorityDb(state => { const current = rows(state, 'supportAttachments').find(row => row.id === attachmentId); current.status = result.ok ? 'available' : 'quarantined'; current.sha256 = result.sha256 || null; current.updatedAt = nowIso(); event(state, supportCase.id, result.ok ? 'support_attachment_available' : 'support_attachment_quarantined', userId, { attachmentId }); return result.ok ? { ok: true, attachment: { ...current, downloadUrl: privateDownloadUrl(current.objectKey, 300) } } : { ok: false, status: 422, error: result.error, attachment: current } }) }
 
-export function correctiveAction(adminId, caseId, body = {}) { return updateDb(db => { const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }; if (body.confirm !== true || !text(body.reason, 500)) return { ok: false, status: 400, error: 'confirmation_and_reason_required' }; const action = text(body.action, 80); const allowed = new Set(['retry_entitlement_sync', 'recalculate_entitlement', 'reissue_credits', 'trigger_verification_email']); if (!allowed.has(action)) return { ok: false, status: 400, error: 'unsupported_corrective_action' }; const userId = supportCase.userId; const subscription = rows(db, 'subscriptions').find(row => row.userId === userId) || null; let wallet = rows(db, 'walletAccounts').find(row => row.userId === userId) || null; const before = { subscription: subscription ? { ...subscription } : null, wallet: wallet ? { ...wallet } : null }; let status = 'queued'; if (action === 'reissue_credits') { const amount = Number(body.amount); if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) return { ok: false, status: 400, error: 'invalid_credit_amount' }; if (!wallet) { wallet = { id: createId('wallet'), userId, creditBalance: 0, createdAt: nowIso() }; rows(db, 'walletAccounts').push(wallet) } wallet.creditBalance = Number(wallet.creditBalance || 0) + amount; wallet.updatedAt = nowIso(); rows(db, 'creditLedger').push({ id: createId('credit'), userId, amount, type: 'support_adjustment', caseId: supportCase.id, adminId, reason: text(body.reason, 500), createdAt: nowIso() }); status = 'completed' } const after = { subscription: subscription ? { ...subscription } : null, wallet: wallet ? { ...wallet } : null }; const result = { action, status, reason: text(body.reason, 500), caseId: supportCase.id }; rows(db, 'supportAuditLogs').push({ id: createId('support_action'), caseId: supportCase.id, action, actorId: adminId, before, after, result, createdAt: nowIso() }); event(db, supportCase.id, 'support_corrective_action_recorded', adminId, { action, status, before, after }); notify(db, supportCase.userId, `An authorized support action was recorded for ${supportCase.caseNumber}.`, supportCase.id); return { ok: true, result, before, after } }) }
+export function correctiveAction(adminId, caseId, body = {}) { return updateAuthorityDb(db => { const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId); if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }; if (body.confirm !== true || !text(body.reason, 500)) return { ok: false, status: 400, error: 'confirmation_and_reason_required' }; const action = text(body.action, 80); const allowed = new Set(['retry_entitlement_sync', 'recalculate_entitlement', 'reissue_credits', 'trigger_verification_email']); if (!allowed.has(action)) return { ok: false, status: 400, error: 'unsupported_corrective_action' }; const userId = supportCase.userId; const subscription = rows(db, 'subscriptions').find(row => row.userId === userId) || null; let wallet = rows(db, 'walletAccounts').find(row => row.userId === userId) || null; const before = { subscription: subscription ? { ...subscription } : null, wallet: wallet ? { ...wallet } : null }; let status = 'queued'; if (action === 'reissue_credits') { const amount = Number(body.amount); if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) return { ok: false, status: 400, error: 'invalid_credit_amount' }; if (!wallet) { wallet = { id: createId('wallet'), userId, creditBalance: 0, createdAt: nowIso() }; rows(db, 'walletAccounts').push(wallet) } wallet.creditBalance = Number(wallet.creditBalance || 0) + amount; wallet.updatedAt = nowIso(); rows(db, 'creditLedger').push({ id: createId('credit'), userId, amount, type: 'support_adjustment', caseId: supportCase.id, adminId, reason: text(body.reason, 500), createdAt: nowIso() }); status = 'completed' } const after = { subscription: subscription ? { ...subscription } : null, wallet: wallet ? { ...wallet } : null }; const result = { action, status, reason: text(body.reason, 500), caseId: supportCase.id }; rows(db, 'supportAuditLogs').push({ id: createId('support_action'), caseId: supportCase.id, action, actorId: adminId, before, after, result, createdAt: nowIso() }); event(db, supportCase.id, 'support_corrective_action_recorded', adminId, { action, status, before, after }); notify(db, supportCase.userId, `An authorized support action was recorded for ${supportCase.caseNumber}.`, supportCase.id); return { ok: true, result, before, after } }) }
 
 export function updateCase(adminId, caseId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
     if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }
     const previous = { status: supportCase.status, priority: supportCase.priority, assignedAdminId: supportCase.assignedAdminId, assignedTeam: supportCase.assignedTeam, escalationLevel: supportCase.escalationLevel }
@@ -313,7 +313,7 @@ function maskSensitive(value) {
 }
 
 export function acquireCaseLock(adminId, caseId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
     if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }
     const now = Date.now(); const current = supportCase.lock
@@ -326,7 +326,7 @@ export function acquireCaseLock(adminId, caseId) {
 }
 
 export function configureSupport(adminId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (body.sla && typeof body.sla === 'object') {
       for (const priority of PRIORITIES) {
         const value = body.sla[priority]; if (!value) continue
@@ -359,11 +359,11 @@ export function configureSupport(adminId, body = {}) {
 }
 
 export function supportConfiguration() {
-  const db = readDb(); return { ok: true, settings: rows(db, 'supportSettings'), sla: rows(db, 'supportSlaPolicies').filter(row => row.active !== false), categories: rows(db, 'supportCategories'), teams: rows(db, 'supportTeams'), templates: rows(db, 'supportTemplates'), knowledgeBase: rows(db, 'supportKnowledgeBase') }
+  const db = readAuthorityDb(); return { ok: true, settings: rows(db, 'supportSettings'), sla: rows(db, 'supportSlaPolicies').filter(row => row.active !== false), categories: rows(db, 'supportCategories'), teams: rows(db, 'supportTeams'), templates: rows(db, 'supportTemplates'), knowledgeBase: rows(db, 'supportKnowledgeBase') }
 }
 
 export function runMaintenance() {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const now = Date.now(); const changed = []; const resolvedGrace = Number(setting(db, 'resolutionGraceHours', 72)) * 3600000
     for (const row of rows(db, 'supportCases')) {
       if (!['resolved', 'closed'].includes(row.status) && new Date(row.resolutionDueAt).getTime() <= now && row.status !== 'escalated') { row.status = 'escalated'; row.escalationLevel = Math.max(2, Number(row.escalationLevel) || 1); row.escalationStatus = 'sla_breached'; row.updatedAt = nowIso(); event(db, row.id, 'support_case_sla_breached', 'system', { resolutionDueAt: row.resolutionDueAt }); const team = rows(db, 'supportTeams').find(teamRow => teamRow.id === row.assignedTeam || teamRow.name === row.assignedTeam); if (team) notifyTeam(db, row, team, `${row.caseNumber} breached its resolution SLA and was escalated.`, 'sla'); changed.push(row.id) }
@@ -379,7 +379,7 @@ export function runMaintenance() {
 }
 
 export function diagnostics(userId, caseId, admin = false) {
-  const db = readDb(); const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
+  const db = readAuthorityDb(); const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
   if (!canAccessCase(supportCase, userId, admin)) return { ok: false, status: 404, error: 'case_not_found' }
   const profile = rows(db, 'profiles').find(row => row.id === supportCase.userId) || {}
   const user = rows(db, 'users').find(row => row.id === supportCase.userId) || {}
@@ -387,21 +387,21 @@ export function diagnostics(userId, caseId, admin = false) {
 }
 
 export function analytics() {
-  const db = readDb(); const cases = rows(db, 'supportCases'); const feedback = rows(db, 'supportFeedback')
+  const db = readAuthorityDb(); const cases = rows(db, 'supportCases'); const feedback = rows(db, 'supportFeedback')
   const by = key => Object.fromEntries([...new Set(cases.map(row => row[key]))].map(value => [value, cases.filter(row => row[key] === value).length]))
   const responseTimes = cases.filter(row => row.firstRespondedAt).map(row => new Date(row.firstRespondedAt) - new Date(row.createdAt)); const resolutionTimes = cases.filter(row => row.resolvedAt).map(row => new Date(row.resolvedAt) - new Date(row.createdAt)); const averageHours = values => values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length / 36000) / 100 : null
   return { ok: true, analytics: { total: cases.length, byCategory: by('category'), byPriority: by('priority'), byStatus: by('status'), satisfaction: feedback.length ? Math.round(feedback.reduce((sum, row) => sum + row.rating, 0) / feedback.length * 100) / 100 : null, feedbackCount: feedback.length, averageFirstResponseHours: averageHours(responseTimes), averageResolutionHours: averageHours(resolutionTimes), reopenRate: cases.length ? Math.round(cases.filter(row => row.status === 'reopened').length / cases.length * 10000) / 100 : 0, incidents: rows(db, 'supportIncidents'), intelligenceSignals: rows(db, 'supportIntelligenceSignals') } }
 }
 
 export function intelligenceProjection() {
-  const db = readDb(); const cases = rows(db, 'supportCases'); const open = cases.filter(row => !['resolved', 'closed'].includes(row.status)); const topCategory = Object.entries(cases.reduce((acc, row) => { acc[row.category] = (acc[row.category] || 0) + 1; return acc }, {})).sort((a, b) => b[1] - a[1])[0] || null
+  const db = readAuthorityDb(); const cases = rows(db, 'supportCases'); const open = cases.filter(row => !['resolved', 'closed'].includes(row.status)); const topCategory = Object.entries(cases.reduce((acc, row) => { acc[row.category] = (acc[row.category] || 0) + 1; return acc }, {})).sort((a, b) => b[1] - a[1])[0] || null
   return { ok: true, projection: { source: 'CUSTOMER_CARE', sourceClassification: 'PLATFORM_USER_EXPERIENCE_EVIDENCE', generatedAt: nowIso(), openCases: open.length, strongestComplaint: topCategory ? { category: topCategory[0], count: topCategory[1] } : null, incidents: rows(db, 'supportIncidents').filter(row => row.status === 'open'), signals: rows(db, 'supportIntelligenceSignals').slice(-50), recommendedAction: topCategory ? `Investigate recurring ${topCategory[0]} support complaints.` : null } }
 }
 
 export function submitFeedback(userId, caseId, body = {}) {
   const rating = Number(body.rating)
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) return { ok: false, status: 400, error: 'rating_must_be_1_to_5' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const supportCase = rows(db, 'supportCases').find(row => row.id === caseId || row.caseNumber === caseId)
     if (!supportCase || supportCase.userId !== userId) return { ok: false, status: 404, error: 'case_not_found' }
     const existing = rows(db, 'supportFeedback').find(row => row.caseId === supportCase.id)
@@ -414,7 +414,7 @@ export function submitFeedback(userId, caseId, body = {}) {
 }
 
 export function supportOverview() {
-  const db = readDb()
+  const db = readAuthorityDb()
   const cases = rows(db, 'supportCases')
   const now = Date.now()
   return { ok: true, metrics: {

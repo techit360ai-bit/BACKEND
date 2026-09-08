@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 
 const DAY_MS = 86_400_000
@@ -701,12 +701,12 @@ function generateRecommendationsInDb(db, userId, options = {}) {
 }
 
 export function getRecommendations(userId, options = {}) {
-  return updateDb(db => generateRecommendationsInDb(db, userId, options))
+  return updateAuthorityDb(db => generateRecommendationsInDb(db, userId, options))
 }
 
 export function searchDiscovery(userId, query, options = {}) {
   const text = String(query || '').trim().toLowerCase()
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     const profile = syncRecommendationProfileInDb(db, userId)
     if (!profile) return { results: [], meta: { query: text, total: 0, personalized: false } }
@@ -732,7 +732,7 @@ export function searchDiscovery(userId, query, options = {}) {
 }
 
 export function updateRecommendationProfile(userId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = syncRecommendationProfileInDb(db, userId, body)
     if (!profile) return null
     const preferences = rows(db, 'recommendationPreferences')
@@ -810,7 +810,7 @@ export function appendPlatformEventInDb(db, event) {
 export function recordRecommendationEvent(userId, body = {}) {
   const eventType = String(body.eventType || '').toLowerCase()
   if (!eventType) throw new Error('eventType is required')
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = syncRecommendationProfileInDb(db, userId)
     const event = appendPlatformEventInDb(db, { ...body, userId, actorId: userId, eventType })
     if (profile) updateBehaviorSignals(profile, event)
@@ -837,7 +837,7 @@ export function recordRecommendationEvent(userId, body = {}) {
 }
 
 export function recordExposure(userId, recommendationId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const recommendation = rows(db, 'recommendations').find(item => item.id === recommendationId && item.userId === userId)
     if (!recommendation) return null
     const exposure = {
@@ -884,7 +884,7 @@ export function recordExposure(userId, recommendationId, body = {}) {
 export function recordFeedback(userId, recommendationId, body = {}) {
   const type = String(body.type || '').toLowerCase()
   if (!FEEDBACK_TYPES.has(type)) throw new Error('Unsupported feedback type')
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const recommendation = rows(db, 'recommendations').find(item => item.id === recommendationId && item.userId === userId)
     if (!recommendation) return null
     if (type === 'undo') {
@@ -964,7 +964,7 @@ export function recordActivityInDb(db, userId, eventType, surface, occurredAt) {
 }
 
 export function noteUserActivity(userId, eventType, surface) {
-  return updateDb(db => recordActivityInDb(db, userId, eventType, surface))
+  return updateAuthorityDb(db => recordActivityInDb(db, userId, eventType, surface))
 }
 
 function inactivityState(config, hours) {
@@ -1052,7 +1052,7 @@ function returnItemsInDb(db, userId, anchor, limit) {
 }
 
 export function getReturnSummary(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     const profile = syncRecommendationProfileInDb(db, userId)
@@ -1086,7 +1086,7 @@ export function getReturnSummary(userId) {
 }
 
 export function markCatchUpItem(userId, recommendationId, action = 'seen') {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     if (!state?.returnAnchorAt) return null
     const catchUp = rows(db, 'catchUpStates').find(item => item.userId === userId && item.anchor === state.returnAnchorAt)
@@ -1101,7 +1101,7 @@ export function markCatchUpItem(userId, recommendationId, action = 'seen') {
 }
 
 export function completeCatchUp(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     if (!state?.returnAnchorAt) return null
     const anchor = state.returnAnchorAt
@@ -1122,7 +1122,7 @@ export function completeCatchUp(userId) {
 }
 
 export function refreshReturnDigests() {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     let created = 0
     for (const profile of rows(db, 'profiles')) {
@@ -1149,11 +1149,11 @@ export function refreshReturnDigests() {
 }
 
 export function getDiscoveryConfig() {
-  return getConfigInDb(readDb())
+  return getConfigInDb(readAuthorityDb())
 }
 
 export function updateDiscoveryConfig(patch) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const configs = rows(db, 'recommendationConfigs')
     let config = configs.find(item => item.id === 'default')
     const value = deepMerge(getConfigInDb(db), patch || {})
@@ -1169,7 +1169,7 @@ export function updateDiscoveryConfig(patch) {
 }
 
 export function getDiscoveryAnalytics() {
-  const db = readDb()
+  const db = readAuthorityDb()
   const events = rows(db, 'recommendationEvents')
   const exposures = rows(db, 'recommendationExposures')
   const feedback = rows(db, 'recommendationFeedback').filter(item => !item.undoneAt)

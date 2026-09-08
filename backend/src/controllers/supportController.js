@@ -29,18 +29,20 @@ import {
 } from '../services/supportService.js'
 import { requestSupportIntelligence } from '../services/aiRouterClient.js'
 import { reconcileEntitlement } from '../services/supportBillingAdapter.js'
+import { operationalStateEnabled, operationalStateFallbackEnabled, syncOperationalState } from '../repositories/operationalStateRepository.js'
 
 function sendResult(res, value, fallbackStatus = 200) {
   if (!value?.ok) return res.status(value?.status || 400).json({ error: value?.error || 'support_request_failed', ...(value?.case ? { case: value.case } : {}) })
   return res.status(fallbackStatus).json(value)
 }
+async function persisted(req, value) { if (!operationalStateEnabled() || value?.ok === false) return value; try { await syncOperationalState(req.user?.id || null); return value } catch (error) { if (operationalStateFallbackEnabled()) return value; return { ok: false, status: 503, error: 'operational_write_temporarily_unavailable' } } }
 
-export function userCaseCreate(req, res) { return sendResult(res, createCase(req.user.id, req.body, req.user.role), 201) }
+export async function userCaseCreate(req, res) { return sendResult(res, await persisted(req, createCase(req.user.id, req.body, req.user.role)), 201) }
 export function userCaseList(req, res) { return sendResult(res, listCases(req.user.id)) }
 export function userCaseGet(req, res) { return sendResult(res, getCase(req.user.id, req.params.caseId)) }
-export function userCaseMessage(req, res) { return sendResult(res, addMessage(req.user.id, req.params.caseId, req.body, false), 201) }
-export function userCaseFeedback(req, res) { return sendResult(res, submitFeedback(req.user.id, req.params.caseId, req.body), 201) }
-export function userCaseReopen(req, res) { return sendResult(res, reopenCase(req.user.id, req.params.caseId)) }
+export async function userCaseMessage(req, res) { return sendResult(res, await persisted(req, addMessage(req.user.id, req.params.caseId, req.body, false)), 201) }
+export async function userCaseFeedback(req, res) { return sendResult(res, await persisted(req, submitFeedback(req.user.id, req.params.caseId, req.body)), 201) }
+export async function userCaseReopen(req, res) { return sendResult(res, await persisted(req, reopenCase(req.user.id, req.params.caseId))) }
 export function userKnowledge(_req, res) { return sendResult(res, listKnowledgeBase()) }
 export function userCaseAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, false), 201) }
 export function userAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, false), 201) }
@@ -48,11 +50,11 @@ export async function userAttachmentFinalize(req, res) { return sendResult(res, 
 export function adminCaseList(req, res) { return sendResult(res, listAdminCases(req.query)) }
 export function adminDirectory(_req, res) { return sendResult(res, supportDirectory()) }
 export function adminCaseGet(req, res) { return sendResult(res, getCase(req.user.id, req.params.caseId, true)) }
-export function adminCaseMessage(req, res) { return sendResult(res, addMessage(req.user.id, req.params.caseId, req.body, true), 201) }
+export async function adminCaseMessage(req, res) { return sendResult(res, await persisted(req, addMessage(req.user.id, req.params.caseId, req.body, true)), 201) }
 export function adminCaseUpdate(req, res) {
   const needed = req.body.status === 'resolved' ? 'support.resolve' : req.body.status === 'closed' ? 'support.close' : req.body.status === 'escalated' ? 'support.escalate' : req.body.status === 'reopened' ? 'support.reopen' : 'support.assign'
   if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed })
-  return sendResult(res, updateCase(req.user.id, req.params.caseId, req.body))
+  return persisted(req, updateCase(req.user.id, req.params.caseId, req.body)).then(value => sendResult(res, value))
 }
 export function adminOverview(_req, res) { return sendResult(res, supportOverview()) }
 export function adminDiagnostics(req, res) { return sendResult(res, diagnostics(req.user.id, req.params.caseId, true)) }
@@ -64,7 +66,7 @@ export function adminConfig(req, res) {
   if (result.ok && !supportPermissionAllowed(req.user, 'support.manage_templates')) result.templates = []
   return sendResult(res, result)
 }
-export function adminConfigUpdate(req, res) {
+export async function adminConfigUpdate(req, res) {
   const body = req.body || {}
   const required = new Set()
   if (body.sla || body.businessHoursEnabled !== undefined || body.duplicateCooldownHours !== undefined || body.resolutionGraceHours !== undefined || body.incidentThreshold !== undefined) required.add('support.manage_sla')
@@ -72,19 +74,19 @@ export function adminConfigUpdate(req, res) {
   if (body.categories) required.add('support.manage_categories')
   if (body.teams) required.add('support.manage_teams')
   for (const permission of required) if (!supportPermissionAllowed(req.user, permission)) return res.status(403).json({ error: 'Support permission required', permission })
-  return sendResult(res, configureSupport(req.user.id, body))
+  return sendResult(res, await persisted(req, configureSupport(req.user.id, body)))
 }
 export function adminAnalytics(_req, res) { return sendResult(res, analytics()) }
 export function adminIntelligence(_req, res) { return sendResult(res, intelligenceProjection()) }
 export function adminMaintenance(_req, res) { return sendResult(res, runMaintenance()) }
-export function adminKnowledgeSave(req, res) { return sendResult(res, saveKnowledgeArticle(req.user.id, req.body)) }
-export function adminTemplateSave(req, res) { return sendResult(res, saveTemplate(req.user.id, req.body)) }
+export async function adminKnowledgeSave(req, res) { return sendResult(res, await persisted(req, saveKnowledgeArticle(req.user.id, req.body))) }
+export async function adminTemplateSave(req, res) { return sendResult(res, await persisted(req, saveTemplate(req.user.id, req.body))) }
 export function adminKnowledgeList(_req, res) { return sendResult(res, listKnowledgeBaseAdmin()) }
 export function adminTemplateList(_req, res) { return sendResult(res, listTemplates()) }
 export function adminAttachment(req, res) { return sendResult(res, attachMetadata(req.user.id, req.params.caseId, req.body, true), 201) }
 export function adminAttachmentInit(req, res) { return sendResult(res, initAttachment(req.user.id, req.params.caseId, req.body, true), 201) }
 export async function adminAttachmentFinalize(req, res) { return sendResult(res, await finalizeAttachment(req.user.id, req.params.caseId, req.params.attachmentId, true)) }
-export async function adminCorrectiveAction(req, res) { const needed = req.body.action === 'reissue_credits' ? 'support.modify_credits' : req.body.action?.includes('entitlement') ? 'support.modify_billing' : 'support.modify_account'; if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed }); if (req.body.confirm !== true || !String(req.body.reason || '').trim()) return res.status(400).json({ error: 'confirmation_and_reason_required' }); if (['retry_entitlement_sync', 'recalculate_entitlement'].includes(req.body.action)) return sendResult(res, await reconcileEntitlement(req.user.id, req.params.caseId, req.body.reason)); return sendResult(res, correctiveAction(req.user.id, req.params.caseId, req.body), 202) }
+export async function adminCorrectiveAction(req, res) { const needed = req.body.action === 'reissue_credits' ? 'support.modify_credits' : req.body.action?.includes('entitlement') ? 'support.modify_billing' : 'support.modify_account'; if (!supportPermissionAllowed(req.user, needed)) return res.status(403).json({ error: 'Support permission required', permission: needed }); if (req.body.confirm !== true || !String(req.body.reason || '').trim()) return res.status(400).json({ error: 'confirmation_and_reason_required' }); if (['retry_entitlement_sync', 'recalculate_entitlement'].includes(req.body.action)) return sendResult(res, await persisted(req, await reconcileEntitlement(req.user.id, req.params.caseId, req.body.reason))); return sendResult(res, await persisted(req, correctiveAction(req.user.id, req.params.caseId, req.body)), 202) }
 export async function adminAi(req, res) {
   const result = await requestSupportIntelligence(req.user.token, { mode: req.body.mode || 'draft_response', case: req.body.case, messages: req.body.messages, knowledge: req.body.knowledge })
   return result ? res.json({ ok: true, intelligence: result }) : res.status(503).json({ error: 'support_ai_unavailable' })

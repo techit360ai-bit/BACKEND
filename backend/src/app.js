@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import jwt from 'jsonwebtoken'
+import { verifyJwt } from './services/jwtKeyService.js'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
@@ -28,9 +28,13 @@ import academyRoutes from './routes/academy.js'
 import codeWorkspaceRoutes from './routes/codeWorkspace.js'
 import tvceRoutes from './routes/tvce.js'
 import billingWebhookRoutes from './routes/billingWebhooks.js'
+import distributionRoutes from './routes/distribution.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
-import { readDb } from './config/database.js'
+import { readDb as readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
+import { globalRateLimit } from './middlewares/globalRateLimit.js'
+import { postgresAuthority } from './middlewares/postgresAuthority.js'
+import { csrfProtection } from './middlewares/csrf.js'
 
 const app = express()
 
@@ -96,6 +100,16 @@ app.use(express.json({
     req.rawBody = buffer.toString('utf8')
   },
 }))
+app.use(csrfProtection)
+
+// Shared gateway protection. Route-specific limits remain responsible for
+// credential, OTP, authorization, and other sensitive operations.
+app.use(globalRateLimit())
+// When enabled, legacy synchronous services execute against a PostgreSQL
+// snapshot and their mutations are flushed as versioned records. This bridge
+// keeps every request path on the same authority while domain repositories are
+// converted incrementally.
+app.use(postgresAuthority)
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)
@@ -119,6 +133,7 @@ app.use('/api/authorization', authorizationRoutes)
 app.use('/api/trust', trustRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/moments', techitMomentsRoutes)
+app.use('/api/distribution', distributionRoutes)
 app.use('/api/academy', academyRoutes)
 app.use('/api/code', codeWorkspaceRoutes)
 app.use('/api/tvce', tvceRoutes)
@@ -146,16 +161,15 @@ const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
 if (MCP_ENABLED) {
   await mountTechitApi(app, '/api/mcp', {
     resolveActor(req) {
-      if (!JWT_SECRET) return null
+      if (!JWT_SECRET && !process.env.JWT_PUBLIC_KEY) return null
       const auth = req.headers?.authorization
       if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
       try {
-        const claims = jwt.verify(auth.slice(7), JWT_SECRET, {
-          algorithms: ['HS256'],
+        const claims = verifyJwt(auth.slice(7), {
           ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
           ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
         })
-        const db = readDb()
+        const db = readAuthorityDb()
         const profile = db.profiles.find(row => row.id === claims.sub)
         const testMode = process.env.NODE_ENV === 'test'
         if (!profile && !testMode) return null

@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '../../data')
@@ -138,6 +139,7 @@ const INITIAL = {
   recommendations: [],
   recommendationReasons: [],
   recommendationEvents: [],
+  migrationOutbox: [],
   recommendationFeedback: [],
   recommendationExposures: [],
   userInterests: [],
@@ -238,11 +240,20 @@ const INITIAL = {
 let sqliteDb = null
 let sqliteDbPath = null
 let DatabaseSync = null
+const authorityStorage = new AsyncLocalStorage()
+
+export function currentDatabaseAuthority() {
+  return authorityStorage.getStore() || null
+}
+
+export function runDatabaseAuthority(snapshot, callback) {
+  return authorityStorage.run({ snapshot, dirty: false }, callback)
+}
 
 function currentDriver() {
   const configured = process.env.DB_DRIVER?.trim().toLowerCase()
   if (configured) return configured
-  return process.env.NODE_ENV === 'production' ? 'sqlite' : 'json'
+  return process.env.NODE_ENV === 'production' ? 'postgres' : 'json'
 }
 
 function jsonDbPath() {
@@ -473,7 +484,7 @@ function writeSqliteCollections(db, data, { transaction = true } = {}) {
 
 function assertSyncMutation(result) {
   if (result && typeof result.then === 'function') {
-    throw new Error('updateDb mutator must be synchronous')
+    throw new Error('updateAuthorityDb mutator must be synchronous')
   }
 }
 
@@ -503,32 +514,73 @@ function updateSqliteDb(mutator) {
 
 export function validateDatabaseConfig() {
   const driver = currentDriver()
-  if (!['json', 'sqlite'].includes(driver)) {
-    throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite" or "json".`)
+  if (process.env.NODE_ENV === 'production' && !['single-node', 'multi-replica'].includes(process.env.SCALE_PROFILE || 'single-node')) {
+    throw new Error('SCALE_PROFILE must be single-node or multi-replica.')
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.DATABASE_URL) {
+    throw new Error('SCALE_PROFILE=multi-replica requires DATABASE_URL; configure the PostgreSQL migration before scaling replicas.')
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica' && !process.env.REDIS_URL) {
+    throw new Error('SCALE_PROFILE=multi-replica requires REDIS_URL for shared rate limits and coordination.')
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica') {
+    if (process.env.PLATFORM_REQUEST_AUTHORITY !== 'postgres' || process.env.PLATFORM_AUTHORITY_FALLBACK_SQLITE === 'true') {
+      throw new Error('SCALE_PROFILE=multi-replica requires PLATFORM_REQUEST_AUTHORITY=postgres with SQLite fallback disabled.')
+    }
+    const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
+    for (const domain of domains) {
+      if (process.env[`${domain}_READ_SOURCE`] !== 'postgres' || process.env[`${domain}_WRITE_SOURCE`] !== 'postgres') {
+        throw new Error(`SCALE_PROFILE=multi-replica requires ${domain}_READ_SOURCE and ${domain}_WRITE_SOURCE to be postgres.`)
+      }
+      if (process.env[`${domain}_READ_FALLBACK_SQLITE`] === 'true' || process.env[`${domain}_WRITE_FALLBACK_SQLITE`] === 'true') {
+        throw new Error(`SCALE_PROFILE=multi-replica requires ${domain} SQLite fallbacks to be disabled after rollback drills.`)
+      }
+    }
+  }
+  if (!['json', 'sqlite', 'postgres'].includes(driver)) {
+    throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite", "postgres", or "json".`)
   }
   if (process.env.NODE_ENV === 'production' && driver === 'json') {
-    throw new Error('DB_DRIVER=json is not allowed in production. Use DB_DRIVER=sqlite.')
+    throw new Error('DB_DRIVER=json is not allowed in production. Use DB_DRIVER=postgres.')
+  }
+  if (process.env.NODE_ENV === 'production' && driver === 'postgres' && !process.env.PLATFORM_DATABASE_URL && !process.env.DATABASE_URL) {
+    throw new Error('PLATFORM_DATABASE_URL or DATABASE_URL is required in production for DB_DRIVER=postgres.')
   }
   if (process.env.NODE_ENV === 'production' && driver === 'sqlite' && !process.env.SQLITE_DB_PATH) {
-    throw new Error('SQLITE_DB_PATH is required in production and must point at a persistent volume.')
+    throw new Error('SQLITE_DB_PATH is required when explicitly using SQLite in production; set DB_DRIVER=postgres for the migrated platform.')
   }
   if (driver === 'sqlite') {
     migrateSqlite({ dbPath: sqlitePath(), dryRun: false })
   }
 }
 
-export function readDb() {
+export function readAuthorityDb() {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) return authority.snapshot
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
 }
 
-export function writeDb(data) {
+export function writeAuthorityDb(data) {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   if (currentDriver() === 'sqlite') writeSqliteDb(data)
   else writeJsonDb(data)
 }
 
-export function updateDb(mutator) {
+export function updateAuthorityDb(mutator) {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) { const result = mutator(authority.snapshot); authority.dirty = true; return result }
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
+
+// Legacy names remain as adapter aliases for tests and one-time migration
+// tooling. Application services use the authority-prefixed API above.
+export const readDb = (...args) => readAuthorityDb(...args)
+export const writeDb = (...args) => writeAuthorityDb(...args)
+export const updateDb = (...args) => updateAuthorityDb(...args)
 
 export function closeDbForTests() {
   if (sqliteDb) sqliteDb.close()

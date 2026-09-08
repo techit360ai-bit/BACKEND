@@ -1,21 +1,16 @@
-import jwt from 'jsonwebtoken'
-import { readDb } from '../config/database.js'
-import { accessTokenFromRequest, touchSession, validateSessionBinding } from '../services/sessionService.js'
+import { verifyJwt } from '../services/jwtKeyService.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
+import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
+import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
+import { findIdentityById, validateSessionBindingAsync } from '../repositories/identityRepository.js'
+import { verifyMfaAssertion } from '../services/mfaService.js'
 
-const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE
-if (!JWT_SECRET) {
-  throw new Error(
-    'JWT_SECRET environment variable is required. ' +
-    'This secret must match the value used by ai-router and ' +
-    'BACKEND/messaging-backend so platform tokens verify across services.'
-  )
-}
 
-export function requireAuth(req, res, next) {
+export async function requireAuth(req, res, next) {
   const credential = accessTokenFromRequest(req)
   if (!credential) {
     return res.status(401).json({ error: 'No token provided' })
@@ -23,8 +18,7 @@ export function requireAuth(req, res, next) {
   const token = credential.token
   let payload
   try {
-    payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256'],
+    payload = verifyJwt(token, {
       ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
       ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
     })
@@ -32,21 +26,21 @@ export function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
 
-  const binding = validateSessionBinding(payload)
+  const binding = await validateSessionBindingAsync(payload)
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
-  touchSession(payload.sid)
+  await touchSessionAsync(payload.sid)
 
-  const db = readDb()
-  const user = db.users.find(u => u.id === payload.sub)
+  const identity = await findIdentityById(payload.sub)
+  const user = identity?.user
   if (!user) return res.status(401).json({ error: 'User not found' })
-  const profile = db.profiles.find(p => p.id === user.id)
+  const profile = identity.profile
   if (!profile && process.env.NODE_ENV !== 'test') {
     return res.status(401).json({ error: 'User profile is unavailable' })
   }
   const persistedRole = profile?.role || 'explorer'
-  const assignmentRows = (db.userRoles || []).filter(row => row.userId === user.id && row.active !== false && row.status === 'active')
+  const assignmentRows = (identity.roles || []).filter(row => row.active !== false && row.status === 'active')
   const persistedRoles = [...new Set(['explorer', ...assignmentRows.map(row => normalizeRole(row.role)), persistedRole, ...(profile?.secondaryRoles || []).map(normalizeRole), ...(profile?.roles || []).map(normalizeRole)])]
-  const activeContext = (db.activeContexts || []).find(row => row.userId === user.id && row.status === 'active') || null
+  const activeContext = identity.activeContext
   const requestedActiveRole = normalizeRole(activeContext?.role || profile?.activeRole || persistedRole)
   const activeRole = persistedRoles.includes(requestedActiveRole) ? requestedActiveRole : 'explorer'
   req.user = {
@@ -67,7 +61,12 @@ export function requireAuth(req, res, next) {
     authSource: credential.source,
     user_metadata: {},
   }
-  next()
+  try {
+    await compareIdentityProjection(user.id, user, profile)
+  } catch {
+    return res.status(503).json({ error: 'identity_verification_temporarily_unavailable' })
+  }
+  return next()
 }
 
 export function requireAdminAuth(req, res, next) {
@@ -76,17 +75,19 @@ export function requireAdminAuth(req, res, next) {
   const token = authHeader.slice(7)
   let payload
   try {
-    payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256'],
+    payload = verifyJwt(token, {
       ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
       ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
     })
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
-  const db = readDb()
+  const db = readAuthorityDb()
   const admin = (db.adminUsers || []).find(row => row.id === payload.sub && row.active !== false)
   if (!admin) return res.status(401).json({ error: 'Admin not found or inactive' })
+  if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_ADMIN_MFA === 'true') {
+    if (!verifyMfaAssertion(admin.id, req.get('x-mfa-assertion'))) return res.status(403).json({ error: 'mfa_required' })
+  }
   req.user = { id: admin.id, email: admin.email, role: admin.role, permissions: admin.permissions || [], token }
   return next()
 }

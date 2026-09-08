@@ -1,7 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
-import { reserveCapabilityConsumption, settleCapabilityConsumption } from './capabilityConsumptionService.js'
+import { reserveCapabilityConsumption, settleCapabilityConsumption, reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from './capabilityConsumptionService.js'
 
 export const ASSURANCE_LEVELS = Object.freeze({
   CLAIMED: 0,
@@ -26,7 +26,7 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'founder.contact': { roles: ['investor', 'organization'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
   'founder.direct_message': { roles: ['investor', 'organization'], assurance: 'PARTIALLY_VERIFIED', funding: 'credits' },
   'investment.opportunity.view': { roles: ['investor'], assurance: 'PROFILED' },
-  'investment.indication.submit': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
+  'investment.indication.submit': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits', mfaRequired: true },
   'dealroom.access': { roles: ['investor'], assurance: 'TRUSTED', funding: 'subscription_or_credits' },
   'investor.intelligence.view': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
   'investor.mentorship.intelligence': { roles: ['investor'], assurance: 'VERIFIED', funding: 'subscription_or_credits' },
@@ -53,7 +53,7 @@ export const CAPABILITY_POLICIES = Object.freeze({
   'workspace.destinations.view': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.sync': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.execution.finalize': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
-  'workspace.deployment.verify': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
+  'workspace.deployment.verify': { roles: ['founder', 'collaborator'], assurance: 'PROFILED', mfaRequired: true },
   'workspace.vscode.revoke': { roles: ['founder', 'collaborator'], assurance: 'PROFILED' },
   'workspace.advanced_ai': { roles: ['founder', 'collaborator'], assurance: 'PROFILED', funding: 'subscription_or_credits' },
   'mentorship.room.create': { roles: ['investor', 'founder', 'organization'], assurance: 'PROFILED' },
@@ -119,10 +119,10 @@ export function ensureTrustProfile(db, userId, role = null) {
 // Read-only trust projection used by the authorization controller. Keep this
 // separate from ensureTrustProfile so GET requests do not mutate persistence.
 export function trustProfileFor(userId, role = null) {
-  return derivedTrustProfile(readDb(), userId, role)
+  return derivedTrustProfile(readAuthorityDb(), userId, role)
 }
 
-export function capabilityPolicy(capability, db = readDb()) {
+export function capabilityPolicy(capability, db = readAuthorityDb()) {
   const stored = collection(db, 'capabilityPolicies').find(row => row.capability === capability && row.active !== false)
   return stored ? { ...CAPABILITY_POLICIES[capability], ...stored.policy } : CAPABILITY_POLICIES[capability] || null
 }
@@ -133,7 +133,7 @@ export function updateCapabilityPolicy(adminId, capability, patch = {}) {
   if (patch.assurance && !(String(patch.assurance).toUpperCase() in ASSURANCE_LEVELS)) return { ok: false, error: 'invalid_assurance' }
   if (!KNOWN_FUNDING.has(patch.funding)) return { ok: false, error: 'invalid_funding' }
   if (patch.credits !== undefined && (!Number.isFinite(Number(patch.credits)) || Number(patch.credits) < 0 || Number(patch.credits) > 100000)) return { ok: false, error: 'invalid_credits' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const policies = collection(db, 'capabilityPolicies')
     let row = policies.find(item => item.capability === capability)
     if (!row) { row = { id: createId('cap_policy'), capability, policy: {}, active: true, createdAt: nowIso() }; policies.push(row) }
@@ -145,14 +145,14 @@ export function updateCapabilityPolicy(adminId, capability, patch = {}) {
 }
 
 export function auditCapabilityDecision(decision, userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     collection(db, 'authorizationAuditLogs').push({ id: createId('authorization_audit'), userId, capability: decision.capability, allowed: decision.allowed, code: decision.code, activeRole: decision.activeRole || null, assurance: decision.assurance || null, riskState: decision.riskState || null, policyVersion: 'capability-v1', createdAt: nowIso() })
     return decision
   })
 }
 
-export function authorizeCapability(userId, capability, context = {}) {
-  const db = readDb()
+export function authorizeCapability(userId, capability, context = {}, sourceDb = null) {
+  const db = sourceDb || readAuthorityDb()
   const policy = capabilityPolicy(capability, db)
   const profile = profileFor(db, userId)
   if (!policy) return { allowed: false, code: 'unknown_capability', capability }
@@ -186,7 +186,7 @@ export function authorizeCapability(userId, capability, context = {}) {
 }
 
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
     void auditCapabilityDecision(decision, req.user.id)
     if (decision.allowed) {
@@ -195,10 +195,12 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
         const key = req.get('idempotency-key') || `${req.user.id}:${capability}:${req.id}`
         const rawEstimate = req.body?.estimatedCredits ?? req.body?.estimated_credits
         const estimatedCredits = Number(rawEstimate)
-        const reservation = reserveCapabilityConsumption(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
+        const reservation = process.env.FINANCE_WRITE_SOURCE === 'postgres'
+          ? await reserveCapabilityConsumptionAsync(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
+          : reserveCapabilityConsumption(req.user.id, decision, key, { estimatedCredits: Number.isFinite(estimatedCredits) && estimatedCredits > 0 ? estimatedCredits : 0 })
         if (!reservation.ok) return res.status(['insufficient_credits', 'subscription_allowance_exhausted'].includes(reservation.error) ? 402 : 409).json(reservation)
         req.capabilityConsumption = reservation.consumption
-        res.on('finish', () => { void settleCapabilityConsumption(reservation.consumption.id, res.statusCode) })
+        res.on('finish', () => { void (process.env.FINANCE_WRITE_SOURCE === 'postgres' ? settleCapabilityConsumptionAsync(reservation.consumption.id, res.statusCode) : settleCapabilityConsumption(reservation.consumption.id, res.statusCode)) })
       }
       return next()
     }
@@ -208,7 +210,7 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
 
 export function switchActiveRole(userId, role) {
   const normalized = normalizeRole(role)
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = profileFor(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
@@ -223,7 +225,7 @@ export function switchActiveRole(userId, role) {
 export function roleActivation(userId, role, profilePatch = {}) {
   const normalized = normalizeRole(role)
   if (!['founder', 'collaborator', 'investor', 'organization', 'explorer'].includes(normalized)) return { ok: false, error: 'role_unavailable' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = profileFor(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)
