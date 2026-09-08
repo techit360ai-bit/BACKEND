@@ -524,6 +524,9 @@ export function validateDatabaseConfig() {
     throw new Error('SCALE_PROFILE=multi-replica requires REDIS_URL for shared rate limits and coordination.')
   }
   if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica') {
+    if (process.env.PLATFORM_REQUEST_AUTHORITY !== 'postgres' || process.env.PLATFORM_AUTHORITY_FALLBACK_SQLITE === 'true') {
+      throw new Error('SCALE_PROFILE=multi-replica requires PLATFORM_REQUEST_AUTHORITY=postgres with SQLite fallback disabled.')
+    }
     const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
     for (const domain of domains) {
       if (process.env[`${domain}_READ_SOURCE`] !== 'postgres' || process.env[`${domain}_WRITE_SOURCE`] !== 'postgres') {

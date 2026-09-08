@@ -143,6 +143,19 @@ must not be treated as PostgreSQL-authoritative yet.
 - Only after all gates pass may `DB_DRIVER=postgres` and
   `SCALE_PROFILE=multi-replica` become production defaults.
 
+The incremental authority bridge is enabled with:
+
+```text
+PLATFORM_REQUEST_AUTHORITY=postgres
+PLATFORM_AUTHORITY_FALLBACK_SQLITE=true
+```
+
+It executes legacy synchronous request services against a PostgreSQL snapshot
+and flushes versioned mutations before the response is sent. This is a
+transactional compatibility bridge, not a substitute for removing the legacy
+calls: the inventory must still reach zero before SQLite is removed from the
+runtime.
+
 ## Rollback
 
 Disable the affected `*_READ_SOURCE` flag, keep PostgreSQL dual-write/replay
