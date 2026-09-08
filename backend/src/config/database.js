@@ -253,7 +253,7 @@ export function runDatabaseAuthority(snapshot, callback) {
 function currentDriver() {
   const configured = process.env.DB_DRIVER?.trim().toLowerCase()
   if (configured) return configured
-  return process.env.NODE_ENV === 'production' ? 'sqlite' : 'json'
+  return process.env.NODE_ENV === 'production' ? 'postgres' : 'json'
 }
 
 function jsonDbPath() {
