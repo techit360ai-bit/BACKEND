@@ -32,6 +32,7 @@ import { authorizeCodeDestination, projectCodeCommit } from './services/codeExec
 import { readDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
+import { postgresAuthority } from './middlewares/postgresAuthority.js'
 
 const app = express()
 
@@ -101,6 +102,11 @@ app.use(express.json({
 // Shared gateway protection. Route-specific limits remain responsible for
 // credential, OTP, authorization, and other sensitive operations.
 app.use(globalRateLimit())
+// When enabled, legacy synchronous services execute against a PostgreSQL
+// snapshot and their mutations are flushed as versioned records. This bridge
+// keeps every request path on the same authority while domain repositories are
+// converted incrementally.
+app.use(postgresAuthority)
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)

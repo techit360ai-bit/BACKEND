@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, '../../data')
@@ -239,6 +240,15 @@ const INITIAL = {
 let sqliteDb = null
 let sqliteDbPath = null
 let DatabaseSync = null
+const authorityStorage = new AsyncLocalStorage()
+
+export function currentDatabaseAuthority() {
+  return authorityStorage.getStore() || null
+}
+
+export function runDatabaseAuthority(snapshot, callback) {
+  return authorityStorage.run({ snapshot, dirty: false }, callback)
+}
 
 function currentDriver() {
   const configured = process.env.DB_DRIVER?.trim().toLowerCase()
@@ -539,15 +549,21 @@ export function validateDatabaseConfig() {
 }
 
 export function readDb() {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) return authority.snapshot
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
 }
 
 export function writeDb(data) {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
   if (currentDriver() === 'sqlite') writeSqliteDb(data)
   else writeJsonDb(data)
 }
 
 export function updateDb(mutator) {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) { const result = mutator(authority.snapshot); authority.dirty = true; return result }
   return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
 
