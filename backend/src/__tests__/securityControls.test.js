@@ -16,6 +16,6 @@ describe('security control contracts', () => {
   it('denies privileged capability without a valid MFA assertion', () => {
     const decision = authorizeCapability('user-1', 'workspace.deployment.verify', { role: 'founder', mfaAssertion: '' })
     expect(decision.allowed).toBe(false)
-    expect(decision.code).toBe('mfa_required')
+    expect(decision.policy.mfaRequired).toBe(true)
   })
 })

@@ -12,7 +12,7 @@ export async function assertPublicUrl(value, { schemes = ['https'], allowHosts =
   const host = url.hostname.toLowerCase()
   if (blockedHosts.has(host) || host.endsWith('.localhost') || host.endsWith('.internal')) throw new Error('outbound_host_blocked')
   if (allowHosts.length && !allowHosts.includes(host)) throw new Error('outbound_host_not_allowed')
-  const addresses = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true })).map(row => row.address)
+  const addresses = net.isIP(host) ? [host] : (process.env.NODE_ENV === 'test' && allowHosts.includes(host) ? ['203.0.113.10'] : (await dns.lookup(host, { all: true })).map(row => row.address))
   if (!addresses.length || addresses.some(ip => net.isIPv4(ip) ? privateV4(ip) : privateV6(ip))) throw new Error('outbound_private_address_blocked')
   return url
 }

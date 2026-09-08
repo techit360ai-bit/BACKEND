@@ -10,6 +10,8 @@ import { recordActivityInDb } from '../services/discoveryService.js'
 import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
+import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
+import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -210,6 +212,11 @@ export async function signup(req, res) {
 
   if (result.status !== 201) {
     return res.status(result.status).json({ error: result.error })
+  }
+
+  if (req.body.referralId) {
+    try { activateDistributionReferral(id, req.body.referralId, { activationAction: 'account_created' }) } catch { /* generic attribution is best-effort */ }
+    try { activateMomentReferral(req.body.referralId, id, 'account_created') } catch { /* Moment attribution is best-effort */ }
   }
 
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {

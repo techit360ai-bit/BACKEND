@@ -1,4 +1,4 @@
-import { generateMoments, listMoments, nextMomentPrompt, dismissMoment, getMoment, recordShare, getPublicMoment, recordVisit, analytics } from '../services/techitMomentsService.js'
+import { generateMoments, listMoments, nextMomentPrompt, dismissMoment, getMoment, recordShare, getPublicMoment, recordVisit, analytics, activateReferral } from '../services/techitMomentsService.js'
 import { intelligenceStateEnabled, intelligenceStateFallbackEnabled, syncIntelligenceState } from '../repositories/intelligenceStateRepository.js'
 
 function send(res, value, fallback = 200) { return res.status(value?.status || fallback).json(value?.ok === false ? { error: value.error } : value) }
@@ -11,4 +11,5 @@ export function momentGet(req, res) { return send(res, getMoment(req.user.id, re
 export async function momentShare(req, res) { return send(res, await persisted(req, recordShare(req.user.id, req.params.momentId, String(req.body?.channel || 'copy'))), 201) }
 export function publicMomentGet(req, res) { return send(res, getPublicMoment(req.params.slug)) }
 export function publicMomentVisit(req, res) { return send(res, recordVisit(req.params.slug, req.body?.ref, req.body?.source)) }
+export function momentReferralActivate(req, res) { return send(res, activateReferral(req.params.referralId, req.user.id, req.body?.action || 'account_created')) }
 export function momentsAnalytics(req, res) { return send(res, analytics(req.user.id)) }
