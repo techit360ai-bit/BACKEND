@@ -1,11 +1,11 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { reserveUsage, settleUsage } from './usageSettlementService.js'
 import { createCapabilityConsumptionPostgres, findCapabilityConsumptionPostgres, settleCapabilityConsumptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 export function reserveCapabilityConsumption(userId, decision, idempotencyKey, options = {}) {
   if (!decision.allowed) return { ok: false, error: 'capability_not_authorized' }
-  const existing = (readDb().capabilityConsumptions || []).find(row => row.idempotencyKey === idempotencyKey)
+  const existing = (readAuthorityDb().capabilityConsumptions || []).find(row => row.idempotencyKey === idempotencyKey)
   if (existing) return existing.userId === userId && existing.capability === decision.capability ? { ok: true, idempotent: true, consumption: existing } : { ok: false, error: 'idempotency_key_conflict' }
   // TVCE does not assign capability prices. A positive estimate is supplied
   // by the runtime usage meter when an execution is about to start.
@@ -20,7 +20,7 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey, o
     }
     if (!reservation.ok) return reservation
   }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (!Array.isArray(db.capabilityConsumptions)) db.capabilityConsumptions = []
     const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
     db.capabilityConsumptions.push(consumption); return { ok: true, idempotent: false, consumption }
@@ -28,7 +28,7 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey, o
 }
 
 export function settleCapabilityConsumption(consumptionId, responseStatus) {
-  const snapshot = (readDb().capabilityConsumptions || []).find(item => item.id === consumptionId)
+  const snapshot = (readAuthorityDb().capabilityConsumptions || []).find(item => item.id === consumptionId)
   if (!snapshot) return { ok: false, error: 'consumption_not_found' }
   if (snapshot.status !== 'reserved') return { ok: true, idempotent: true, consumption: snapshot }
   const success = Number(responseStatus) >= 200 && Number(responseStatus) < 400
@@ -36,7 +36,7 @@ export function settleCapabilityConsumption(consumptionId, responseStatus) {
     const settlement = settleUsage({ requestId: snapshot.idempotencyKey, reservationId: snapshot.reservationId, userId: snapshot.userId, workspaceId: null, taskType: `capability:${snapshot.capability}`, status: success ? 'completed' : 'cancelled', provider: 'backend', model: 'deterministic', metadata: { capability: snapshot.capability } })
     if (!settlement.ok) return settlement
   }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (!Array.isArray(db.capabilityAnalytics)) db.capabilityAnalytics = []
     const row = db.capabilityConsumptions.find(item => item.id === consumptionId)
     row.status = success ? 'settled' : 'released'; row.responseStatus = Number(responseStatus); row.updatedAt = nowIso()

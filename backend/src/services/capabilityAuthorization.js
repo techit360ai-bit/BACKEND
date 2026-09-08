@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
 import { reserveCapabilityConsumption, settleCapabilityConsumption, reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from './capabilityConsumptionService.js'
 
@@ -119,10 +119,10 @@ export function ensureTrustProfile(db, userId, role = null) {
 // Read-only trust projection used by the authorization controller. Keep this
 // separate from ensureTrustProfile so GET requests do not mutate persistence.
 export function trustProfileFor(userId, role = null) {
-  return derivedTrustProfile(readDb(), userId, role)
+  return derivedTrustProfile(readAuthorityDb(), userId, role)
 }
 
-export function capabilityPolicy(capability, db = readDb()) {
+export function capabilityPolicy(capability, db = readAuthorityDb()) {
   const stored = collection(db, 'capabilityPolicies').find(row => row.capability === capability && row.active !== false)
   return stored ? { ...CAPABILITY_POLICIES[capability], ...stored.policy } : CAPABILITY_POLICIES[capability] || null
 }
@@ -133,7 +133,7 @@ export function updateCapabilityPolicy(adminId, capability, patch = {}) {
   if (patch.assurance && !(String(patch.assurance).toUpperCase() in ASSURANCE_LEVELS)) return { ok: false, error: 'invalid_assurance' }
   if (!KNOWN_FUNDING.has(patch.funding)) return { ok: false, error: 'invalid_funding' }
   if (patch.credits !== undefined && (!Number.isFinite(Number(patch.credits)) || Number(patch.credits) < 0 || Number(patch.credits) > 100000)) return { ok: false, error: 'invalid_credits' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const policies = collection(db, 'capabilityPolicies')
     let row = policies.find(item => item.capability === capability)
     if (!row) { row = { id: createId('cap_policy'), capability, policy: {}, active: true, createdAt: nowIso() }; policies.push(row) }
@@ -145,14 +145,14 @@ export function updateCapabilityPolicy(adminId, capability, patch = {}) {
 }
 
 export function auditCapabilityDecision(decision, userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     collection(db, 'authorizationAuditLogs').push({ id: createId('authorization_audit'), userId, capability: decision.capability, allowed: decision.allowed, code: decision.code, activeRole: decision.activeRole || null, assurance: decision.assurance || null, riskState: decision.riskState || null, policyVersion: 'capability-v1', createdAt: nowIso() })
     return decision
   })
 }
 
 export function authorizeCapability(userId, capability, context = {}, sourceDb = null) {
-  const db = sourceDb || readDb()
+  const db = sourceDb || readAuthorityDb()
   const policy = capabilityPolicy(capability, db)
   const profile = profileFor(db, userId)
   if (!policy) return { allowed: false, code: 'unknown_capability', capability }
@@ -210,7 +210,7 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
 
 export function switchActiveRole(userId, role) {
   const normalized = normalizeRole(role)
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = profileFor(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
@@ -225,7 +225,7 @@ export function switchActiveRole(userId, role) {
 export function roleActivation(userId, role, profilePatch = {}) {
   const normalized = normalizeRole(role)
   if (!['founder', 'collaborator', 'investor', 'organization', 'explorer'].includes(normalized)) return { ok: false, error: 'role_unavailable' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = profileFor(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)

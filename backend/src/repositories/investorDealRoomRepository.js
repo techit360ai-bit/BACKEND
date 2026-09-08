@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 
 let pool = null
 const url = () => process.env.INVESTOR_DATABASE_URL || process.env.DATABASE_URL
@@ -16,7 +16,7 @@ export async function getDealRoom(userId, dealId) { return scoped(userId, async 
 
 export async function syncDealAggregate(actorId, dealId) {
   if (!writeEnabled()) return { enabled: false }
-  const db = readDb(); const deal = (db.dealRooms || []).find(row => row.id === dealId); if (!deal) return { enabled: true, missing: true }
+  const db = readAuthorityDb(); const deal = (db.dealRooms || []).find(row => row.id === dealId); if (!deal) return { enabled: true, missing: true }
   return scoped(actorId, async client => {
     await client.query(`INSERT INTO investor_deal_rooms(id,project_id,investor_id,founder_id,state,nda_template_id,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,status=EXCLUDED.status,updated_at=EXCLUDED.updated_at`, [deal.id, deal.projectId, deal.investorId, deal.founderId || null, deal.state, deal.ndaTemplateId || null, deal.status || 'active', deal.createdAt, deal.updatedAt])
     for (const row of (db.dealRoomParticipants || []).filter(x => x.dealId === dealId)) await client.query(`INSERT INTO investor_deal_participants(id,deal_id,user_id,role,status,added_by,created_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(deal_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status`, [row.id, dealId, row.userId, row.role, row.status || 'active', row.addedBy || null, row.createdAt])

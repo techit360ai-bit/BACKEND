@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { pendingMigrationEvents, markMigrationEvent } from './migrationOutboxService.js'
 
 let pool = null
@@ -31,7 +31,7 @@ export async function compareIdentityProjection(userId, localUser, localProfile)
 
 export async function syncIdentityProjection() {
   if (!pool) return { enabled: false, users: 0, profiles: 0, roles: 0, contexts: 0 }
-  const db = readDb()
+  const db = readAuthorityDb()
   const client = await pool.connect()
   try {
     await client.query('BEGIN')

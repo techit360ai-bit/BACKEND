@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import { createId, nowIso, userName } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createMentorshipMessage as createMentorshipMessagePostgres, createFeedPost as createFeedPostPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const rows = (db, key) => { if (!Array.isArray(db[key])) db[key] = []; return db[key] }
@@ -34,13 +34,13 @@ function buildSharePayload(room) {
 }
 
 export function listMentorshipRooms(userId, { mine = false, status = 'published' } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const rooms = rows(db, 'mentorshipRooms').filter(room => (mine ? owner(room, userId) : room.status === status || room.mentorId === userId)).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
   return { rooms: rooms.map(publicRoom) }
 }
 
 export function getMentorshipRoom(userId, roomId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId && (item.status === 'published' || owner(item, userId)))
   if (!room) return null
   const mentees = rows(db, 'mentorshipMentees').filter(item => item.roomId === roomId && item.status !== 'removed')
@@ -54,7 +54,7 @@ export function createMentorshipRoom(userId, body = {}) {
   if (!name || !description) return { ok: false, error: 'name_and_description_required' }
   if (!Number.isInteger(capacity) || capacity < 1 || capacity > 500) return { ok: false, error: 'invalid_capacity' }
   const now = nowIso()
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = { id: createId('mentor_room'), mentorId: userId, name, description, expertise: splitList(body.expertise), capacity, paymentModel: clean(body.paymentModel) || 'free', pricing: body.pricing && typeof body.pricing === 'object' ? body.pricing : {}, requiredSkills: splitList(body.requiredSkills), applicationQuestions: splitList(body.applicationQuestions), advancedHub: Boolean(body.advancedHub), status: body.publish === false ? 'draft' : 'published', createdAt: now, updatedAt: now }
     rows(db, 'mentorshipRooms').push(room)
     return { ok: true, room: publicRoom(room) }
@@ -62,7 +62,7 @@ export function createMentorshipRoom(userId, body = {}) {
 }
 
 export function updateMentorshipRoom(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     for (const field of ['name', 'description', 'paymentModel', 'status']) if (body[field] !== undefined) room[field] = clean(body[field])
@@ -75,7 +75,7 @@ export function updateMentorshipRoom(userId, roomId, body = {}) {
 }
 
 export function applyToMentorshipRoom(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId && item.status === 'published')
     if (!room) return { ok: false, error: 'room_not_found' }
     if (room.mentorId === userId) return { ok: false, error: 'mentor_cannot_apply' }
@@ -91,7 +91,7 @@ export function applyToMentorshipRoom(userId, roomId, body = {}) {
 }
 
 export function listMentorshipApplications(userId, { roomId, status } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const ownedRooms = new Set(rows(db, 'mentorshipRooms').filter(room => owner(room, userId)).map(room => room.id))
   const applications = rows(db, 'mentorshipApplications').filter(item => ownedRooms.has(item.roomId) && (!roomId || item.roomId === roomId) && (!status || item.status === status))
   const profiles = rows(db, 'profiles')
@@ -99,7 +99,7 @@ export function listMentorshipApplications(userId, { roomId, status } = {}) {
 }
 
 export function reviewMentorshipApplication(userId, applicationId, decision) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const application = rows(db, 'mentorshipApplications').find(item => item.id === applicationId)
     const room = rows(db, 'mentorshipRooms').find(item => item.id === application?.roomId)
     if (!application || !owner(room, userId)) return { ok: false, error: 'application_not_found' }
@@ -114,7 +114,7 @@ export function reviewMentorshipApplication(userId, applicationId, decision) {
 }
 
 export function createMentorshipTask(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     const task = { id: createId('mentor_task'), roomId, title: clean(body.title), description: clean(body.description) || '', assignedTo: clean(body.assignedTo) || null, dueDate: clean(body.dueDate) || null, priority: ['low', 'medium', 'high'].includes(body.priority) ? body.priority : 'medium', status: 'pending', createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }
@@ -124,7 +124,7 @@ export function createMentorshipTask(userId, roomId, body = {}) {
 }
 
 export function updateMentorshipTask(userId, taskId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const task = rows(db, 'mentorshipTasks').find(item => item.id === taskId)
     const room = rows(db, 'mentorshipRooms').find(item => item.id === task?.roomId)
     const mentee = rows(db, 'mentorshipMentees').find(item => item.roomId === task?.roomId && item.userId === userId && item.status === 'active')
@@ -135,7 +135,7 @@ export function updateMentorshipTask(userId, taskId, body = {}) {
 }
 
 export function createMentorshipMessage(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     const member = rows(db, 'mentorshipMentees').some(item => item.roomId === roomId && item.userId === userId && item.status === 'active')
     if (!owner(room, userId) && !member) return { ok: false, error: 'room_access_required' }
@@ -156,7 +156,7 @@ export async function createMentorshipMessageAsync(userId, roomId, body = {}) {
 }
 
 export function createMentorshipResource(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     const title = clean(body.title); const url = clean(body.url)
@@ -169,7 +169,7 @@ export function createMentorshipResource(userId, roomId, body = {}) {
 }
 
 export function createMentorshipInvite(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     const token = randomBytes(32).toString('base64url')
@@ -180,7 +180,7 @@ export function createMentorshipInvite(userId, roomId, body = {}) {
 }
 
 export function resolveMentorshipInvite(userId, token) {
-  const db = readDb(); const invite = rows(db, 'mentorshipInvitations').find(item => item.tokenHash === hashToken(token))
+  const db = readAuthorityDb(); const invite = rows(db, 'mentorshipInvitations').find(item => item.tokenHash === hashToken(token))
   if (!invite || invite.revokedAt || new Date(invite.expiresAt).getTime() <= Date.now() || (invite.maxUses > 0 && invite.uses >= invite.maxUses)) return { ok: false, error: 'invite_invalid_or_expired' }
   const room = rows(db, 'mentorshipRooms').find(item => item.id === invite.roomId && item.status === 'published')
   if (!room) return { ok: false, error: 'room_not_found' }
@@ -188,7 +188,7 @@ export function resolveMentorshipInvite(userId, token) {
 }
 
 export function acceptMentorshipInvite(userId, token, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const invite = rows(db, 'mentorshipInvitations').find(item => item.tokenHash === hashToken(token))
     if (!invite || invite.revokedAt || new Date(invite.expiresAt).getTime() <= Date.now() || (invite.maxUses > 0 && invite.uses >= invite.maxUses)) {
       return { ok: false, error: 'invite_invalid_or_expired' }
@@ -209,10 +209,10 @@ export function acceptMentorshipInvite(userId, token, body = {}) {
   })
 }
 
-export function revokeMentorshipInvite(userId, inviteId) { return updateDb(db => { const invite = rows(db, 'mentorshipInvitations').find(item => item.id === inviteId && item.createdBy === userId); if (!invite) return { ok: false, error: 'invite_not_found' }; invite.revokedAt = nowIso(); return { ok: true } }) }
+export function revokeMentorshipInvite(userId, inviteId) { return updateAuthorityDb(db => { const invite = rows(db, 'mentorshipInvitations').find(item => item.id === inviteId && item.createdBy === userId); if (!invite) return { ok: false, error: 'invite_not_found' }; invite.revokedAt = nowIso(); return { ok: true } }) }
 
 export function publishMentorshipFeed(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     const existing = rows(db, 'feedPosts').find(post => post.authorId === userId && post.metadata?.mentorshipRoomId === roomId && post.metadata?.shareKey === 'feed')
@@ -234,7 +234,7 @@ export async function publishMentorshipFeedAsync(userId, roomId, body = {}) {
 }
 
 export function broadcastMentorshipOpportunity(userId, roomId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const room = rows(db, 'mentorshipRooms').find(item => item.id === roomId)
     if (!owner(room, userId)) return { ok: false, error: 'room_not_found' }
     const existing = rows(db, 'opportunities').find(item => item.createdBy === userId && item.sourceRoomId === roomId && item.type === 'mentorship')
@@ -245,7 +245,7 @@ export function broadcastMentorshipOpportunity(userId, roomId, body = {}) {
 }
 
 export function mentorshipAnalytics(userId, roomId) {
-  const db = readDb(); const rooms = rows(db, 'mentorshipRooms').filter(room => owner(room, userId) && (!roomId || room.id === roomId)); const ids = new Set(rooms.map(r => r.id)); const applications = rows(db, 'mentorshipApplications').filter(a => ids.has(a.roomId)); const mentees = rows(db, 'mentorshipMentees').filter(m => ids.has(m.roomId)); const tasks = rows(db, 'mentorshipTasks').filter(t => ids.has(t.roomId)); return { totalRooms: rooms.length, totalApplications: applications.length, pendingApplications: applications.filter(a => a.status === 'pending').length, activeMentees: mentees.filter(m => m.status === 'active').length, completedMentees: mentees.filter(m => m.status === 'completed').length, totalTasks: tasks.length, completedTasks: tasks.filter(t => t.status === 'completed').length }
+  const db = readAuthorityDb(); const rooms = rows(db, 'mentorshipRooms').filter(room => owner(room, userId) && (!roomId || room.id === roomId)); const ids = new Set(rooms.map(r => r.id)); const applications = rows(db, 'mentorshipApplications').filter(a => ids.has(a.roomId)); const mentees = rows(db, 'mentorshipMentees').filter(m => ids.has(m.roomId)); const tasks = rows(db, 'mentorshipTasks').filter(t => ids.has(t.roomId)); return { totalRooms: rooms.length, totalApplications: applications.length, pendingApplications: applications.filter(a => a.status === 'pending').length, activeMentees: mentees.filter(m => m.status === 'active').length, completedMentees: mentees.filter(m => m.status === 'completed').length, totalTasks: tasks.length, completedTasks: tasks.filter(t => t.status === 'completed').length }
 }
 
 export { buildSharePayload }

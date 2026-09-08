@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { getDealRoom as getDealRoomPostgres, listDealRooms as listDealRoomsPostgres, syncDealAggregate, investorReadEnabled, investorWriteEnabled, investorFallbackEnabled } from '../repositories/investorDealRoomRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -36,7 +36,7 @@ function publicDeal(db, deal, userId) {
 export function createDealRoom(investorId, body = {}) {
   const projectId = clean(body.projectId)
   if (!projectId) return { ok: false, error: 'project_id_required' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (!investorRelationship(db, investorId, projectId)) return { ok: false, error: 'investor_relationship_required' }
     const existing = collection(db, 'dealRooms').find(row => row.projectId === projectId && row.investorId === investorId && !['passed', 'withdrawn', 'expired'].includes(row.state))
     if (existing) return { ok: true, deal: publicDeal(db, existing, investorId), idempotent: true }
@@ -54,14 +54,14 @@ export function createDealRoom(investorId, body = {}) {
 }
 
 export function listDealRooms(userId) {
-  const db = readDb(); const deals = collection(db, 'dealRooms').filter(deal => deal.investorId === userId || Boolean(participant(db, deal.id, userId)))
+  const db = readAuthorityDb(); const deals = collection(db, 'dealRooms').filter(deal => deal.investorId === userId || Boolean(participant(db, deal.id, userId)))
   return { deals: deals.map(deal => publicDeal(db, deal, userId)) }
 }
 
 export async function listDealRoomsAsync(userId) { if (!investorReadEnabled()) return listDealRooms(userId); try { return await listDealRoomsPostgres(userId) } catch (error) { if (!investorFallbackEnabled('READ')) throw error; return listDealRooms(userId) } }
 
 export function getDealRoom(userId, dealId, { requireNda = true } = {}) {
-  const db = readDb(); const deal = room(db, dealId); const member = deal ? participant(db, deal.id, userId) : null
+  const db = readAuthorityDb(); const deal = room(db, dealId); const member = deal ? participant(db, deal.id, userId) : null
   if (!deal || !member) return { ok: false, error: 'deal_room_not_found' }
   if (requireNda && deal.investorId === userId && !ndaActive(db, deal)) return { ok: false, error: 'nda_required' }
   const items = collection(db, 'diligenceItems').filter(row => row.dealId === deal.id)
@@ -75,7 +75,7 @@ export function getDealRoom(userId, dealId, { requireNda = true } = {}) {
 export async function getDealRoomAsync(userId, dealId, options = {}) { if (!investorReadEnabled()) return getDealRoom(userId, dealId, options); try { return await getDealRoomPostgres(userId, dealId) } catch (error) { if (!investorFallbackEnabled('READ')) throw error; return getDealRoom(userId, dealId, options) } }
 
 export function signDealNda(userId, dealId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const deal = room(db, dealId); if (!deal || deal.investorId !== userId) return { ok: false, error: 'deal_room_not_found' }
     const template = collection(db, 'ndaTemplates').find(row => row.id === deal.ndaTemplateId && row.active !== false); if (!template) return { ok: false, error: 'nda_template_unavailable' }
     const timestamp = nowIso(); const signature = { id: createId('nda_signature'), dealId, userId, templateVersion: template.version, signatureHash: hash(`${dealId}:${userId}:${template.version}:${timestamp}`), accepted: body.accepted === true, signedAt: body.accepted === true ? timestamp : null, ipAddress: body.ipAddress || null, userAgent: body.userAgent || null, createdAt: timestamp }
@@ -87,7 +87,7 @@ export function signDealNda(userId, dealId, body = {}) {
 }
 
 export function transitionDeal(userId, dealId, nextState) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const deal = room(db, dealId); const member = deal && participant(db, deal.id, userId); if (!deal || !member || member.role !== 'owner') return { ok: false, error: 'deal_room_not_found' }
     if (!DEAL_STATES.includes(nextState) || !(TRANSITIONS[deal.state] || []).includes(nextState)) return { ok: false, error: 'invalid_deal_transition', from: deal.state, to: nextState }
     if (['diligence_open', 'diligence_complete', 'ic_review', 'term_sheet', 'negotiation', 'closing', 'closed'].includes(nextState) && !ndaActive(db, deal)) return { ok: false, error: 'nda_required' }
@@ -101,7 +101,7 @@ export function transitionDeal(userId, dealId, nextState) {
 }
 
 export function updateDiligenceItem(userId, dealId, itemId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); const item = collection(db, 'diligenceItems').find(row => row.id === itemId && row.dealId === dealId)
     if (!deal || !member || !item) return { ok: false, error: 'diligence_item_not_found' }
     if (!['owner', 'reviewer', 'diligence_owner'].includes(member.role) && userId !== item.ownerId) return { ok: false, error: 'diligence_permission_required' }
@@ -111,7 +111,7 @@ export function updateDiligenceItem(userId, dealId, itemId, body = {}) {
 }
 
 export function createDealQuestion(userId, dealId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || (INTERNAL_ROLES.has(member.role) && !ndaActive(db, deal))) return { ok: false, error: INTERNAL_ROLES.has(member?.role) ? 'nda_required' : 'deal_room_not_found' }
     const content = clean(body.content); if (!content) return { ok: false, error: 'content_required' }; const visibility = body.visibility === 'investor_internal' && INTERNAL_ROLES.has(member.role) ? 'investor_internal' : 'participants'
     const question = { id: createId('deal_question'), dealId, authorId: userId, checklistItemId: body.checklistItemId || null, documentId: body.documentId || null, assignedTo: body.assignedTo || null, visibility, status: 'open', content, createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'dealQuestions').push(question); audit(db, dealId, userId, 'question_created', { questionId: question.id, visibility }); return { ok: true, question }
@@ -119,21 +119,21 @@ export function createDealQuestion(userId, dealId, body = {}) {
 }
 
 export function addDealQuestionMessage(userId, dealId, questionId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); const question = collection(db, 'dealQuestions').find(row => row.id === questionId && row.dealId === dealId); if (!deal || !member || !question) return { ok: false, error: 'question_not_found' }; if (question.visibility === 'investor_internal' && !INTERNAL_ROLES.has(member.role)) return { ok: false, error: 'internal_question' }; const content = clean(body.content); if (!content) return { ok: false, error: 'content_required' }; const message = { id: createId('deal_message'), questionId, dealId, authorId: userId, content, createdAt: nowIso() }; collection(db, 'dealQuestionMessages').push(message); question.status = body.status && ['open', 'answered', 'needs_clarification', 'resolved'].includes(body.status) ? body.status : 'answered'; question.updatedAt = nowIso(); audit(db, dealId, userId, 'question_answered', { questionId }); return { ok: true, message, question }
   })
 }
 
 export function createInternalNote(userId, dealId, body = {}) {
-  return updateDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'reviewer', 'ic_member'].includes(member.role)) return { ok: false, error: 'internal_permission_required' }; const note = { id: createId('investor_note'), dealId, investorId: userId, content: clean(body.content) || '', rating: body.rating || 'none', createdAt: nowIso(), updatedAt: nowIso() }; if (!note.content) return { ok: false, error: 'content_required' }; collection(db, 'investorInternalNotes').push(note); audit(db, dealId, userId, 'internal_note_created', { noteId: note.id }); return { ok: true, note } })
+  return updateAuthorityDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'reviewer', 'ic_member'].includes(member.role)) return { ok: false, error: 'internal_permission_required' }; const note = { id: createId('investor_note'), dealId, investorId: userId, content: clean(body.content) || '', rating: body.rating || 'none', createdAt: nowIso(), updatedAt: nowIso() }; if (!note.content) return { ok: false, error: 'content_required' }; collection(db, 'investorInternalNotes').push(note); audit(db, dealId, userId, 'internal_note_created', { noteId: note.id }); return { ok: true, note } })
 }
 
 export function createIcReview(userId, dealId, body = {}) {
-  return updateDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'ic_member'].includes(member.role)) return { ok: false, error: 'ic_permission_required' }; const review = { id: createId('ic_review'), dealId, investorId: userId, thesis: clean(body.thesis) || '', risks: clean(body.risks) || '', mitigants: clean(body.mitigants) || '', recommendation: ['proceed', 'hold', 'pass'].includes(body.recommendation) ? body.recommendation : 'hold', proposedCheck: clean(body.proposedCheck) || '', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'icReviews').push(review); audit(db, dealId, userId, 'ic_review_created', { reviewId: review.id, recommendation: review.recommendation }); return { ok: true, review } })
+  return updateAuthorityDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'ic_member'].includes(member.role)) return { ok: false, error: 'ic_permission_required' }; const review = { id: createId('ic_review'), dealId, investorId: userId, thesis: clean(body.thesis) || '', risks: clean(body.risks) || '', mitigants: clean(body.mitigants) || '', recommendation: ['proceed', 'hold', 'pass'].includes(body.recommendation) ? body.recommendation : 'hold', proposedCheck: clean(body.proposedCheck) || '', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'icReviews').push(review); audit(db, dealId, userId, 'ic_review_created', { reviewId: review.id, recommendation: review.recommendation }); return { ok: true, review } })
 }
 
 export function createTermSheet(userId, dealId, body = {}) {
-  return updateDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'legal'].includes(member.role) || !ndaActive(db, deal)) return { ok: false, error: 'nda_required' }; const version = { id: createId('term_sheet'), dealId, investorId: userId, version: collection(db, 'termSheetVersions').filter(row => row.dealId === dealId).length + 1, status: 'draft', terms: body.terms && typeof body.terms === 'object' ? body.terms : {}, disclaimer: 'Template only. This is not legal advice and is not a legally executed agreement.', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'termSheetVersions').push(version); audit(db, dealId, userId, 'term_sheet_created', { version: version.version }); return { ok: true, termSheet: version } })
+  return updateAuthorityDb(db => { const deal = room(db, dealId); const member = deal && participant(db, dealId, userId); if (!deal || !member || !['owner', 'legal'].includes(member.role) || !ndaActive(db, deal)) return { ok: false, error: 'nda_required' }; const version = { id: createId('term_sheet'), dealId, investorId: userId, version: collection(db, 'termSheetVersions').filter(row => row.dealId === dealId).length + 1, status: 'draft', terms: body.terms && typeof body.terms === 'object' ? body.terms : {}, disclaimer: 'Template only. This is not legal advice and is not a legally executed agreement.', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'termSheetVersions').push(version); audit(db, dealId, userId, 'term_sheet_created', { version: version.version }); return { ok: true, termSheet: version } })
 }
 
 async function persistInvestorResult(result, actorId, dealId) {

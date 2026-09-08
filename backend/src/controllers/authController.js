@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
@@ -198,7 +198,7 @@ export async function signup(req, res) {
   const now = new Date().toISOString()
   const requestedRole = normalizeRole(role || 'founder')
   const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role: requestedRole }, now)
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     if (db.users.find(u => u.email === email)) {
       return { status: 409, error: 'Email already in use' }
     }
@@ -222,7 +222,7 @@ export async function signup(req, res) {
 
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
     try {
-      const local = readDb()
+      const local = readAuthorityDb()
       const roleAssignment = local.userRoles.find(row => row.userId === id)
       const context = local.activeContexts.find(row => row.userId === id)
       await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, context)
@@ -261,9 +261,9 @@ export async function signin(req, res) {
   }
 
   const profile = identity.profile
-  const db = readDb()
+  const db = readAuthorityDb()
   recordActivityInDb(db, user.id, 'login', 'auth')
-  writeDb(db)
+  writeAuthorityDb(db)
   roleAssignments(user.id)
 
   const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
@@ -278,11 +278,11 @@ export async function signin(req, res) {
 
 export async function session(req, res) {
   const identity = await findIdentityById(req.user.id)
-  const db = readDb()
+  const db = readAuthorityDb()
   const profile = identity?.profile || null
   const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
-  writeDb(db)
+  writeAuthorityDb(db)
   const assignments = roleAssignments(req.user.id)
   return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
 }
@@ -314,7 +314,7 @@ export async function changePassword(req, res) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' })
   }
 
-  const db = readDb()
+  const db = readAuthorityDb()
   let user
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { user = (await findIdentityById(req.user.id))?.user } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
@@ -334,7 +334,7 @@ export async function changePassword(req, res) {
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
     }
   }
-  const updated = updateDb(current => {
+  const updated = updateAuthorityDb(current => {
     const target = current.users.find(row => row.id === req.user.id)
     if (!target) return false
     target.passwordHash = passwordHash
@@ -354,7 +354,7 @@ export async function forgotPassword(req, res) {
     return res.status(400).json({ error: 'Email is required' })
   }
 
-  const db = readDb()
+  const db = readAuthorityDb()
   const user = db.users.find(u => u.email === email)
   let resetToken = null
   if (user) {
@@ -373,7 +373,7 @@ export async function forgotPassword(req, res) {
         })
       }
     }
-    const persisted = updateDb(current => {
+    const persisted = updateAuthorityDb(current => {
       const freshUser = current.users.find(u => u.id === user.id && u.email === email)
       if (!freshUser) return false
       current.passwordResets = cleanPasswordResets(current.passwordResets)
@@ -411,7 +411,7 @@ export async function resetPassword(req, res) {
 
   const now = new Date().toISOString()
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     db.passwordResets = cleanPasswordResets(db.passwordResets)
 
     const tokenHash = hashToken(token)

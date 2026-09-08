@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 
 let pool = null; let timer = null
 const url = () => process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL
@@ -9,7 +9,7 @@ const timestamp = value => value || new Date().toISOString()
 
 export async function syncTrustProjection() {
   if (!pool) return { enabled: false }
-  const db = readDb(); const client = await pool.connect()
+  const db = readAuthorityDb(); const client = await pool.connect()
   try {
     await client.query('BEGIN')
     for (const row of db.userRoles || []) await client.query(`INSERT INTO trust_user_roles(id,user_id,role,status,assurance,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,role) DO UPDATE SET status=EXCLUDED.status,assurance=EXCLUDED.assurance,updated_at=EXCLUDED.updated_at`, [row.id, row.userId, row.role, row.status || 'active', row.assurance || 'CLAIMED', timestamp(row.createdAt), timestamp(row.updatedAt)])

@@ -1,4 +1,4 @@
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, listRecords } from './platformCollectionRepository.js'
 
 const collections = ['projectFiles', 'projectFileVersions', 'codeChangeEvents', 'codeRuntimeSessions', 'codeSyncStates', 'codeBridgeGrants', 'codeBridgeSessions', 'codeDeploymentRecords', 'codeDeploymentVerifications', 'codeExecutionRuns', 'codeExecutionStepEvents', 'codeReviewDecisions']
@@ -7,7 +7,7 @@ const fallback = () => process.env.WORKSPACE_CODE_FALLBACK_SQLITE !== 'false'
 
 export async function syncWorkspaceCode(workspaceId, userId = null) {
   if (!enabled()) return { enabled: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   return withPlatformTransaction(async client => {
     let records = 0
     for (const collectionName of collections) {

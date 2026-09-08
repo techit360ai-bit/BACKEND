@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
@@ -19,7 +19,7 @@ const UPDATABLE = new Set([
 ])
 
 export async function getMe(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   let profile
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { profile = (await findIdentityById(req.user.id))?.profile } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
@@ -41,7 +41,7 @@ export async function updateMe(req, res) {
     try {
       const profile = await updateIdentityProfile(req.user.id, updates)
       if (profile) {
-        updateDb(db => {
+        updateAuthorityDb(db => {
           const idx = db.profiles.findIndex(item => item.id === req.user.id)
           if (idx === -1) return
           db.profiles[idx] = { ...db.profiles[idx], ...profile }
@@ -55,7 +55,7 @@ export async function updateMe(req, res) {
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
     }
   }
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     const idx = db.profiles.findIndex(p => p.id === req.user.id)
     if (idx === -1) return null
     db.profiles[idx] = { ...db.profiles[idx], ...updates, updatedAt: new Date().toISOString() }
@@ -82,7 +82,7 @@ export async function avatarFinalize(req, res) {
   if (!objectKey.startsWith(`profile-avatars/${req.user.id}/`)) return res.status(403).json({ error: 'avatar_object_forbidden' })
   const scan = await finalizePrivateUpload({ objectKey, contentType, expectedSizeBytes: sizeBytes })
   if (!scan.ok) return res.status(400).json({ error: scan.error || 'avatar_scan_failed' })
-  const profile = updateDb(db => {
+  const profile = updateAuthorityDb(db => {
     const row = db.profiles.find(item => item.id === req.user.id)
     if (!row) return null
     row.avatarObjectKey = objectKey
@@ -97,7 +97,7 @@ export async function avatarFinalize(req, res) {
 }
 
 export function avatarRemove(req, res) {
-  const profile = updateDb(db => {
+  const profile = updateAuthorityDb(db => {
     const row = db.profiles.find(item => item.id === req.user.id)
     if (!row) return null
     row.avatarObjectKey = null; row.avatarUrl = null; row.avatarContentType = null; row.avatarSizeBytes = 0; row.updatedAt = nowIso()
@@ -261,7 +261,7 @@ export async function listUsers(req, res) {
   const requestedRole = String(req.query.role || '').trim().toLowerCase()
   const query = plainText(String(req.query.q || ''), 80).toLowerCase().replace(/^@/, '')
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20) || 20))
-  const db = readDb()
+  const db = readAuthorityDb()
   let profiles = db.profiles
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { profiles = await listIdentityProfiles() } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
@@ -281,7 +281,7 @@ export async function listUsers(req, res) {
 }
 
 export async function getUserProfile(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const id = req.params.id === 'me' ? req.user.id : req.params.id
   let profile
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
@@ -338,7 +338,7 @@ export function connectUser(req, res) {
   const normalized = normalizeInvitation(req.body?.invitation)
   if (normalized.error) return res.status(400).json({ error: normalized.error })
   const invitation = normalized.invitation
-  const result = updateDb(db => {
+  const result = updateAuthorityDb(db => {
     const target = db.profiles.find(p => p.id === req.params.id || p.username === req.params.id)
     const actor = db.profiles.find(p => p.id === req.user.id)
     if (!target) return { status: 404, error: 'Profile not found' }

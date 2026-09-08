@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
 
 let pool = null
@@ -40,7 +40,7 @@ export async function listMembers(workspaceId) {
 }
 export async function syncWorkspaceProjectAggregate(actorId, workspaceId = null, projectId = null) {
   if (process.env.WORKSPACE_WRITE_SOURCE !== 'postgres') return { enabled: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   return withPlatformTransaction(async client => {
     const sets = {
       projects: (db.projects || []).filter(row => !projectId || row.id === projectId),

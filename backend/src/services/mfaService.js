@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const issuer = encodeURIComponent(process.env.MFA_ISSUER || 'TechIT Network')
@@ -33,7 +33,7 @@ function decrypt(value) {
 
 export function beginMfaEnrollment(userId, email) {
   const secret = base32(crypto.randomBytes(20))
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const rows = db.mfaProfiles || (db.mfaProfiles = []); let row = rows.find(item => item.userId === userId)
     const next = { id: row?.id || createId('mfa'), userId, encryptedSecret: encrypt(secret), enabled: false, createdAt: row?.createdAt || nowIso(), updatedAt: nowIso() }
     if (row) Object.assign(row, next); else { row = next; rows.push(row) }
@@ -41,7 +41,7 @@ export function beginMfaEnrollment(userId, email) {
   })
 }
 export function verifyMfa(userId, code, enable = false) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = (db.mfaProfiles || []).find(row => row.userId === userId)
     if (!profile) return { ok: false, error: 'mfa_not_enrolled' }
     const normalizedCode = String(code || '').replace(/\D/g, '')
@@ -57,4 +57,4 @@ export function verifyMfaAssertion(userId, assertion) {
   if (!assertion) return false
   try { const claims = jwt.verify(assertion, process.env.MFA_ASSERTION_SECRET || process.env.JWT_SECRET, { algorithms: ['HS256'] }); return claims.sub === userId && claims.purpose === 'mfa' } catch { return false }
 }
-export function mfaStatus(userId) { const profile = (readDb().mfaProfiles || []).find(row => row.userId === userId); return { enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null } }
+export function mfaStatus(userId) { const profile = (readAuthorityDb().mfaProfiles || []).find(row => row.userId === userId); return { enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null } }

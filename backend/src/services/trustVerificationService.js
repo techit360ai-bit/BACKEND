@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import crypto from 'node:crypto'
 import { ensureTrustProfile } from './capabilityAuthorization.js'
 import { issueExecutionGrant } from './usageGrantService.js'
@@ -42,7 +42,7 @@ function calculateAssurance(evidence, profile, role) {
 }
 
 export function getVerificationProfile(userId, role) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const target = roleName(role)
   const profile = collections(db, 'verificationProfiles').find(row => row.userId === userId && (!target || roleName(row.role) === target))
   const evidence = collections(db, 'verificationEvidence').filter(row => row.userId === userId && (!target || roleName(row.role) === target))
@@ -53,7 +53,7 @@ export function getVerificationProfile(userId, role) {
 export function requestVerification(userId, body = {}) {
   const role = roleName(body.role)
   if (!['investor', 'organization'].includes(role)) return { ok: false, error: 'verification_role_unsupported' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = userProfile(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     const existing = collections(db, 'verificationRequests').find(row => row.userId === userId && row.role === role && ['pending', 'in_review'].includes(row.status))
@@ -73,7 +73,7 @@ export function requestVerification(userId, body = {}) {
 export function submitEvidence(userId, requestId, body = {}) {
   const method = String(body.method || '').toLowerCase()
   if (!METHOD_STRENGTH[method]) return { ok: false, error: 'unsupported_verification_method' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const request = collections(db, 'verificationRequests').find(row => row.id === requestId && row.userId === userId)
     if (!request) return { ok: false, error: 'verification_request_not_found' }
     const evidence = { id: createId('verification_evidence'), requestId, userId, role: request.role, method, strength: METHOD_STRENGTH[method], status: 'submitted', source: body.source || null, metadata: body.metadata && typeof body.metadata === 'object' ? body.metadata : {}, submittedAt: nowIso() }
@@ -92,20 +92,20 @@ export function submitEvidence(userId, requestId, body = {}) {
 }
 
 export async function analyzeEvidence(userId, token, requestId, body = {}) {
-  const db = readDb(); const request = collections(db, 'verificationRequests').find(row => row.id === requestId && row.userId === userId)
+  const db = readAuthorityDb(); const request = collections(db, 'verificationRequests').find(row => row.id === requestId && row.userId === userId)
   if (!request) return { ok: false, error: 'verification_request_not_found' }
   const requestKey = `verification-analysis-${requestId}-${String(body.evidenceId || createId('evidence')).slice(-32)}`
   const grant = issueExecutionGrant({ userId, requestId: requestKey, taskType: 'evidence_research', estimatedCredits: 1, fundingSource: body.fundingSource || 'payg', maxInputTokens: 4000, maxOutputTokens: 1500 })
   if (!grant.ok) return grant
   const advisory = await analyzeVerificationEvidence(token, grant.grant.token, { role: request.role, claim: request.claimType, source: body.source, metadata: body.metadata, evidence_text: body.evidenceText })
   if (!advisory) return { ok: false, error: 'ai_advisory_unavailable' }
-  return updateDb(state => { const evidence = (state.verificationEvidence || []).find(row => row.id === body.evidenceId && row.userId === userId); if (evidence) { evidence.aiAdvisory = advisory; evidence.updatedAt = nowIso() }; return { ok: true, advisory, authorizationAuthority: false } })
+  return updateAuthorityDb(state => { const evidence = (state.verificationEvidence || []).find(row => row.id === body.evidenceId && row.userId === userId); if (evidence) { evidence.aiAdvisory = advisory; evidence.updatedAt = nowIso() }; return { ok: true, advisory, authorizationAuthority: false } })
 }
 
 export function reviewVerification(adminId, requestId, body = {}) {
   const decision = String(body.decision || '').toLowerCase()
   if (!['approve', 'reject', 'request_evidence', 'escalate'].includes(decision)) return { ok: false, error: 'invalid_review_decision' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const request = collections(db, 'verificationRequests').find(row => row.id === requestId)
     if (!request) return { ok: false, error: 'verification_request_not_found' }
     const old = collections(db, 'verificationProfiles').find(row => row.userId === request.userId && row.role === request.role) || { id: createId('verification_profile'), userId: request.userId, role: request.role, createdAt: nowIso() }
@@ -122,7 +122,7 @@ export function reviewVerification(adminId, requestId, body = {}) {
 }
 
 export function createOrganization(userId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const name = String(body.name || body.orgName || '').trim()
     if (!name) return { ok: false, error: 'organization_name_required' }
     const domain = normalizedDomain(body.website || body.domain || body.workEmail)
@@ -138,7 +138,7 @@ export function createOrganization(userId, body = {}) {
 }
 
 export function claimOrganization(userId, organizationId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const organization = collections(db, 'organizations').find(row => row.id === organizationId)
     if (!organization) return { ok: false, error: 'organization_not_found' }
     const domain = normalizedDomain(body.domain || body.website || body.workEmail)
@@ -153,12 +153,12 @@ export function claimOrganization(userId, organizationId, body = {}) {
 }
 
 export function organizationMemberships(userId, organizationId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return collections(db, 'organizationMemberships').filter(row => row.userId === userId && (!organizationId || row.organizationId === organizationId))
 }
 
 export function addOrganizationMember(actorId, organizationId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const organization = collections(db, 'organizations').find(row => row.id === organizationId)
     const actor = collections(db, 'organizationMemberships').find(row => row.organizationId === organizationId && row.userId === actorId && row.status === 'active' && ['owner', 'admin'].includes(row.role))
     const target = collections(db, 'users').find(row => row.id === body.userId)
@@ -177,7 +177,7 @@ export function updateRiskState(adminId, userId, state, note = '') {
   const allowed = new Set(['LOW', 'NORMAL', 'ELEVATED', 'HIGH', 'RESTRICTED'])
   const normalized = String(state || '').toUpperCase()
   if (!allowed.has(normalized)) return { ok: false, error: 'invalid_risk_state' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const rows = collections(db, 'riskProfiles')
     const existing = rows.find(row => row.userId === userId)
     const previousState = existing?.state || 'NORMAL'
@@ -190,7 +190,7 @@ export function updateRiskState(adminId, userId, state, note = '') {
 }
 
 export function generateReverificationNotifications(at = new Date()) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const now = at.getTime(); const windows = [30, 14, 7, 1]; let created = 0
     for (const profile of collections(db, 'verificationProfiles')) {
       if (!profile.expiresAt) continue
@@ -207,7 +207,7 @@ export function generateReverificationNotifications(at = new Date()) {
 }
 
 export function verificationAnalytics() {
-  const db = readDb(); const events = collections(db, 'capabilityAnalytics'); const decisions = collections(db, 'authorizationAuditLogs')
+  const db = readAuthorityDb(); const events = collections(db, 'capabilityAnalytics'); const decisions = collections(db, 'authorizationAuditLogs')
   const byCapability = {}
   for (const event of events) { const row = byCapability[event.capability] ||= { allowed: 0, denied: 0, completed: 0, released: 0 }; if (event.eventType === 'capability_allowed') row.allowed++; if (event.eventType === 'capability_denied') row.denied++; if (event.eventType === 'capability_completed') row.completed++; if (event.eventType === 'capability_released') row.released++ }
   return { generatedAt: nowIso(), requests: collections(db, 'verificationRequests').length, pendingReviews: collections(db, 'verificationRequests').filter(row => ['pending', 'in_review'].includes(row.status)).length, evidence: collections(db, 'verificationEvidence').length, decisions: decisions.length, byCapability }

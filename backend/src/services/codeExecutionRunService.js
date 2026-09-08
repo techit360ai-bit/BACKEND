@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { appendCodeEvent, codeWorkspaceAccess, safeCodePath } from './codeWorkspaceService.js'
 
@@ -60,7 +60,7 @@ function runView(db, run) {
 export function createCodeExecutionRun(userId, workspaceId, body = {}) {
   const requirement = String(body.requirement || '').trim()
   if (!requirement) return { ok: false, status: 400, error: 'requirement_required' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const currentFiles = rows(db, 'projectFiles').filter(row => row.workspaceId === workspaceId && !row.deleted)
     const requestedPaths = Array.isArray(body.allowedPaths) ? body.allowedPaths : currentFiles.map(row => row.path)
@@ -83,7 +83,7 @@ export function createCodeExecutionRun(userId, workspaceId, body = {}) {
 }
 
 export function getCodeExecutionRun(userId, workspaceId, runId) {
-  const db = readDb(); if (!codeWorkspaceAccess(db, userId, workspaceId)) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const db = readAuthorityDb(); if (!codeWorkspaceAccess(db, userId, workspaceId)) return { ok: false, status: 403, error: 'workspace_access_denied' }
   const run = rows(db, 'codeExecutionRuns').find(row => row.id === runId && row.workspaceId === workspaceId)
   return run ? { ok: true, run: runView(db, run) } : { ok: false, status: 404, error: 'execution_run_not_found' }
 }
@@ -92,7 +92,7 @@ export function recordCodeExecutionStage(userId, workspaceId, runId, body = {}) 
   const stage = String(body.stage || '')
   const status = String(body.status || '')
   if (!STAGES.includes(stage) || !['started', 'completed', 'failed', 'skipped'].includes(status)) return { ok: false, status: 400, error: 'execution_stage_invalid' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const run = rows(db, 'codeExecutionRuns').find(row => row.id === runId && row.workspaceId === workspaceId); if (!run) return { ok: false, status: 404, error: 'execution_run_not_found' }
     const previous = latestSteps(db, runId).find(row => row.stage === stage)
@@ -142,7 +142,7 @@ export function recordCodeExecutionStage(userId, workspaceId, runId, body = {}) 
 export function recordCodeReviewDecision(userId, workspaceId, runId, body = {}) {
   const path = safeCodePath(body.path); const decision = String(body.decision || '')
   if (!path || !['accepted', 'rejected'].includes(decision) || !/^[a-f0-9]{64}$/i.test(String(body.contentHash || ''))) return { ok: false, status: 400, error: 'review_decision_invalid' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const run = rows(db, 'codeExecutionRuns').find(row => row.id === runId && row.workspaceId === workspaceId); if (!run) return { ok: false, status: 404, error: 'execution_run_not_found' }
     if (!run.proposedChanges.some(change => change.path === path && change.contentHash === body.contentHash)) return { ok: false, status: 409, error: 'review_content_not_proposed' }
@@ -157,7 +157,7 @@ export function recordCodeReviewDecision(userId, workspaceId, runId, body = {}) 
 }
 
 export function finalizeCodeExecutionRun(userId, workspaceId, runId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const run = rows(db, 'codeExecutionRuns').find(row => row.id === runId && row.workspaceId === workspaceId); if (!run) return { ok: false, status: 404, error: 'execution_run_not_found' }
     const steps = latestSteps(db, runId)
@@ -171,7 +171,7 @@ export function finalizeCodeExecutionRun(userId, workspaceId, runId) {
 
 export function applyCodeExecutionRun(userId, workspaceId, runId, body = {}) {
   const changes = Array.isArray(body.changes) ? body.changes.slice(0, 100) : []
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const run = rows(db, 'codeExecutionRuns').find(row => row.id === runId && row.workspaceId === workspaceId); if (!run) return { ok: false, status: 404, error: 'execution_run_not_found' }
     if (run.status !== 'ready_to_apply') return { ok: false, status: 409, error: 'execution_run_not_ready' }

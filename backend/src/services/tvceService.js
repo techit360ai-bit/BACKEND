@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
@@ -83,12 +83,12 @@ function commercialFor(db, capability) {
 }
 
 export function freeTierUsage(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return Object.keys(TVCE_FREE_QUOTAS).map(capability => { const quota = quotaFor(db, capability); const used = freeUsageFor(db, userId, capability); return { capability, used, quota, remaining: Math.max(0, quota - used), period: 'calendar_month' } })
 }
 
 export function adminCommercialConfig() {
-  const db = readDb()
+  const db = readAuthorityDb()
   return {
     freeQuotas: Object.fromEntries(Object.keys(TVCE_FREE_QUOTAS).map(capability => [capability, quotaFor(db, capability)])),
     capabilities: capabilityCatalog(),
@@ -104,7 +104,7 @@ export function adminCommercialConfig() {
 }
 
 export function updateAdminCommercialConfig(adminId, input = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (input.freeQuotas && typeof input.freeQuotas === 'object') {
       for (const [capability, value] of Object.entries(input.freeQuotas)) {
         if (!(capability in TVCE_FREE_QUOTAS)) continue
@@ -129,7 +129,7 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
 }
 
 export function capabilityCatalog() {
-  const db = readDb()
+  const db = readAuthorityDb()
   return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
 }
 
@@ -144,7 +144,7 @@ export async function capabilityCatalogAsync() {
   }
 }
 
-export function accountEntitlement(userId) { return accountEntitlementFor(readDb(), userId) }
+export function accountEntitlement(userId) { return accountEntitlementFor(readAuthorityDb(), userId) }
 
 function evaluateEntitlementFromDb(userId, input = {}, db) {
   const capability = text(input.capability || input.operation || '')
@@ -178,7 +178,7 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
   return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'SUBSCRIPTION' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
-export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readDb()) }
+export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readAuthorityDb()) }
 
 export async function accountEntitlementAsync(userId) {
   if (process.env.FINANCE_READ_SOURCE !== 'postgres') return accountEntitlement(userId)
@@ -201,7 +201,7 @@ export async function evaluateEntitlementAsync(userId, input = {}) {
 export function evaluatePaywall(userId, input = {}) {
   const result = evaluateEntitlement(userId, input)
   if (result.allowed) return { ...result, paywall: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   const hits = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === result.capability)
   const repeated = hits.length >= 2
   const recommendation = repeated || result.role === 'investor' || result.role === 'organization' ? 'SUBSCRIPTION' : result.recommendedAction
@@ -225,7 +225,7 @@ export async function evaluatePaywallAsync(userId, input = {}) {
 }
 
 export function recordPaywallEvent(userId, input = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const event = { id: createId('paywall'), userId, capability: text(input.capability), eventType: text(input.eventType || 'PAYWALL_VIEWED'), role: roleFor(db, userId, input.role), metadata: input.metadata || {}, createdAt: nowIso() }
     collection(db, 'paywallEvents').push(event)
     return { ok: true, event }
@@ -243,19 +243,19 @@ export async function recordPaywallEventAsync(userId, input = {}) {
 export function estimateCredits(userId, input = {}) {
   const items = Array.isArray(input.actions) ? input.actions : [input]
   const estimate = items.reduce((sum, item) => sum + Math.max(0, number(item.estimatedCredits ?? item.estimated_credits)), 0)
-  const available = availableCredits(readDb(), userId)
+  const available = availableCredits(readAuthorityDb(), userId)
   return { userId, estimatedCredits: estimate, actionCount: items.length, isEstimate: true, source: 'runtime_usage_meter', availableCredits: available, covered: estimate > 0 ? available >= estimate : null, estimateProvided: estimate > 0 }
 }
 
 export function walletForecast(userId) {
-  const db = readDb(); const available = availableCredits(db, userId)
+  const db = readAuthorityDb(); const available = availableCredits(db, userId)
   const workflows = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
   const projected = workflows.reduce((sum, row) => sum + number(row.estimatedCredits), 0)
   return { availableCredits: available, workflows: workflows.map(row => ({ id: row.id, name: row.name, estimatedCredits: number(row.estimatedCredits), status: row.status })), projectedRequirement: projected, shortfall: Math.max(0, projected - available), covered: available >= projected, isEstimate: true }
 }
 
 export function progressMeter(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const owned = name => collection(db, name).filter(row => row.userId === userId || row.ownerId === userId || row.createdBy === userId)
   const ideas = owned('ventureIntakes').length + owned('projects').length
   const validation = owned('validationSessions').length + owned('customerValidationSessions').length + owned('customerResponses').length
@@ -268,7 +268,7 @@ export function progressMeter(userId) {
 }
 
 export function conversionFunnel(userId, period = 'all') {
-  const db = readDb(); const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
+  const db = readAuthorityDb(); const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
   const events = collection(db, 'paywallEvents').filter(row => row.userId === userId && new Date(row.createdAt || 0).getTime() >= since)
   const count = type => events.filter(row => row.eventType === type).length
   const stages = ['PAYWALL_VIEWED', 'VALUE_EXPLANATION_VIEWED', 'CREDIT_OPTION_SELECTED', 'SUBSCRIPTION_OPTION_SELECTED', 'CHECKOUT_STARTED', 'PAYMENT_SUCCESS', 'WORKFLOW_RESUMED', 'OUTCOME_DELIVERED']
@@ -279,7 +279,7 @@ export function conversionFunnel(userId, period = 'all') {
 // values are returned in the provider's stored minor-unit convention and are
 // never inferred from mocked UI data.
 export function adminTvceAnalytics(period = 'all', options = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const days = Number(options.days || (period.endsWith('d') ? period.slice(0, -1) : 0))
   const since = days > 0 ? Date.now() - days * 86400000 : options.from ? new Date(options.from).getTime() : 0
   const until = options.to ? new Date(options.to).getTime() : Date.now()
@@ -351,7 +351,7 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
 }
 
 export function nextBestAction(userId, input = {}) {
-  const db = readDb(); const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
+  const db = readAuthorityDb(); const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
   const access = evaluateEntitlement(userId, { capability: catalog.id, role })
@@ -359,7 +359,7 @@ export function nextBestAction(userId, input = {}) {
 }
 
 export function saveWorkflow(userId, input = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const existing = collection(db, 'workflowSnapshots').find(row => row.userId === userId && row.clientRequestId === input.clientRequestId)
     if (existing) return { ok: true, idempotent: true, workflow: existing }
     const workflow = { id: createId('workflow'), userId, clientRequestId: text(input.clientRequestId || createId('request')), name: text(input.name || input.capability || 'TechIT workflow'), capability: text(input.capability), payload: input.payload || {}, estimatedCredits: number(input.estimatedCredits), status: 'pending', createdAt: nowIso(), updatedAt: nowIso() }
@@ -376,7 +376,7 @@ export async function saveWorkflowAsync(userId, input = {}) {
 }
 
 export function resumeWorkflow(userId, workflowId, input = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const workflow = collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId)
     if (!workflow) return { ok: false, error: 'workflow_not_found' }
     workflow.status = input.status || 'resumed'; workflow.resumedAt = nowIso(); workflow.updatedAt = workflow.resumedAt; return { ok: true, workflow }
@@ -392,7 +392,7 @@ export async function resumeWorkflowAsync(userId, workflowId, input = {}) {
 }
 
 export function fulfillPayment(userId, paymentId, input = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const payment = collection(db, 'paymentIntents').find(row => row.id === paymentId && row.userId === userId)
     if (!payment) return { ok: false, error: 'payment_not_found' }
     if (payment.status === 'successful') return { ok: true, idempotent: true, payment }

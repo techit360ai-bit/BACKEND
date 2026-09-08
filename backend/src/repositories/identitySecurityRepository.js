@@ -1,4 +1,4 @@
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, listRecords } from './platformCollectionRepository.js'
 
 const collections = ['userRoles', 'roleProfiles', 'activeContexts', 'trustProfiles', 'verificationProfiles', 'verificationRequests', 'verificationEvidence', 'riskProfiles', 'mfaProfiles', 'organizationMemberships']
@@ -7,7 +7,7 @@ const fallback = () => process.env.IDENTITY_SECURITY_FALLBACK_SQLITE !== 'false'
 
 export async function syncIdentitySecurity(userId) {
   if (!enabled()) return { enabled: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   return withPlatformTransaction(async client => {
     let records = 0
     for (const collectionName of collections) {

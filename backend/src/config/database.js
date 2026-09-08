@@ -484,7 +484,7 @@ function writeSqliteCollections(db, data, { transaction = true } = {}) {
 
 function assertSyncMutation(result) {
   if (result && typeof result.then === 'function') {
-    throw new Error('updateDb mutator must be synchronous')
+    throw new Error('updateAuthorityDb mutator must be synchronous')
   }
 }
 
@@ -554,14 +554,14 @@ export function validateDatabaseConfig() {
   }
 }
 
-export function readDb() {
+export function readAuthorityDb() {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) return authority.snapshot
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
 }
 
-export function writeDb(data) {
+export function writeAuthorityDb(data) {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
@@ -569,12 +569,18 @@ export function writeDb(data) {
   else writeJsonDb(data)
 }
 
-export function updateDb(mutator) {
+export function updateAuthorityDb(mutator) {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) { const result = mutator(authority.snapshot); authority.dirty = true; return result }
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
+
+// Legacy names remain as adapter aliases for tests and one-time migration
+// tooling. Application services use the authority-prefixed API above.
+export const readDb = (...args) => readAuthorityDb(...args)
+export const writeDb = (...args) => writeAuthorityDb(...args)
+export const updateDb = (...args) => updateAuthorityDb(...args)
 
 export function closeDbForTests() {
   if (sqliteDb) sqliteDb.close()

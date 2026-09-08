@@ -1,4 +1,4 @@
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, listRecords } from './platformCollectionRepository.js'
 
 const collections = [
@@ -14,7 +14,7 @@ const fallback = () => process.env.INTELLIGENCE_FALLBACK_SQLITE !== 'false'
 
 export async function syncIntelligenceState(userId) {
   if (!enabled()) return { enabled: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   return withPlatformTransaction(async client => {
     let records = 0
     for (const collectionName of collections) for (const row of (db[collectionName] || []).filter(item => item.userId === userId || item.ownerId === userId || item.actorId === userId || item.createdBy === userId)) { await upsertRecord(client, collectionName, row, { operation: 'replay', idempotencyKey: `intelligence:${collectionName}:${row.id}:${row.updatedAt || row.createdAt || ''}` }); records += 1 }

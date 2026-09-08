@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 
 export function recordMigrationEvent(db, { domain, aggregateType, aggregateId, operation, payload = {}, version = 1 }) {
   if (!db.migrationOutbox) db.migrationOutbox = []
@@ -9,11 +9,11 @@ export function recordMigrationEvent(db, { domain, aggregateType, aggregateId, o
 }
 
 export function pendingMigrationEvents({ domain, limit = 100 } = {}) {
-  return (readDb().migrationOutbox || []).filter(event => event.status === 'pending' && (!domain || event.domain === domain)).slice(0, Math.max(1, Number(limit) || 100))
+  return (readAuthorityDb().migrationOutbox || []).filter(event => event.status === 'pending' && (!domain || event.domain === domain)).slice(0, Math.max(1, Number(limit) || 100))
 }
 
 export function markMigrationEvent(eventId, { status = 'processed', error = null } = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const event = (db.migrationOutbox || []).find(row => row.id === eventId)
     if (!event) return false
     event.status = status
@@ -25,5 +25,5 @@ export function markMigrationEvent(eventId, { status = 'processed', error = null
 }
 
 export function outboxStats() {
-  return (readDb().migrationOutbox || []).reduce((result, event) => { result[event.status] = Number(result[event.status] || 0) + 1; return result }, {})
+  return (readAuthorityDb().migrationOutbox || []).reduce((result, event) => { result[event.status] = Number(result[event.status] || 0) + 1; return result }, {})
 }

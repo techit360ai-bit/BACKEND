@@ -29,7 +29,7 @@ import codeWorkspaceRoutes from './routes/codeWorkspace.js'
 import tvceRoutes from './routes/tvce.js'
 import billingWebhookRoutes from './routes/billingWebhooks.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
-import { readDb } from './config/database.js'
+import { readDb as readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import { postgresAuthority } from './middlewares/postgresAuthority.js'
@@ -166,7 +166,7 @@ if (MCP_ENABLED) {
           ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
           ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
         })
-        const db = readDb()
+        const db = readAuthorityDb()
         const profile = db.profiles.find(row => row.id === claims.sub)
         const testMode = process.env.NODE_ENV === 'test'
         if (!profile && !testMode) return null

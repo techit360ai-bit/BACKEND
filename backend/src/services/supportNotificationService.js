@@ -1,12 +1,12 @@
 import { Resend } from 'resend'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { configuredFromEmail, assertEmailAccepted } from '../utils/emailDelivery.js'
 
 let resendClient
 function resend() { if (resendClient) return resendClient; if (!process.env.RESEND_API_KEY) return null; resendClient = new Resend(process.env.RESEND_API_KEY); return resendClient }
 
 export async function deliverSupportNotification({ userId, subject, message, caseNumber, eventType }) {
-  const db = readDb(); const user = (db.users || []).find(row => row.id === userId); if (!user) return { ok: false, error: 'user_not_found' }
+  const db = readAuthorityDb(); const user = (db.users || []).find(row => row.id === userId); if (!user) return { ok: false, error: 'user_not_found' }
   const deliveries = []
   const client = resend()
   if (client && user.email) {

@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
 
 export const SPECIALIZED_ROLES = Object.freeze(['founder', 'collaborator', 'investor', 'organization'])
@@ -92,7 +92,7 @@ function presentableContexts(rows) {
 }
 
 export function availableContexts(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const { roles } = synchronizeLegacyRoles(db, userId)
     const contexts = presentableContexts(roles)
     const profile = profileFor(db, userId)
@@ -115,11 +115,11 @@ export function availableContexts(userId) {
 }
 
 export function getActiveContext(userId) {
-  let db = readDb()
+  let db = readAuthorityDb()
   let context = contextFor(db, userId)
   if (!context && profileFor(db, userId)) {
     availableContexts(userId)
-    db = readDb()
+    db = readAuthorityDb()
     context = contextFor(db, userId)
   }
   const profile = profileFor(db, userId)
@@ -130,7 +130,7 @@ export function getActiveContext(userId) {
 export function switchContext(userId, input = {}) {
   const requestedRole = normalizeRole(input.role)
   if (!['explorer', ...SPECIALIZED_ROLES].includes(requestedRole)) return { ok: false, error: 'role_unavailable' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const { roles, profile } = synchronizeLegacyRoles(db, userId)
     const assignment = roles.find(row => normalizeRole(row.role) === requestedRole && row.status === 'active')
     if (!assignment) return { ok: false, error: 'role_not_activated' }
@@ -155,7 +155,7 @@ function availableContextsFromDb(db, userId) {
 export function touchContext(userId, input = {}) {
   const current = getActiveContext(userId)
   if (!current.id) return switchContext(userId, { role: input.role || current.role || 'explorer', ...input })
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const context = contextFor(db, userId)
     if (!context) return { ok: false, error: 'active_context_not_found' }
     context.lastActiveAt = nowIso(); context.updatedAt = context.lastActiveAt
@@ -166,7 +166,7 @@ export function touchContext(userId, input = {}) {
 export function activateRoleAssignment(userId, role, profilePatch = {}) {
   const normalized = normalizeRole(role)
   if (!['explorer', ...SPECIALIZED_ROLES].includes(normalized)) return { ok: false, error: 'role_unavailable' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = profileFor(db, userId)
     if (!profile) return { ok: false, error: 'profile_not_found' }
     ensureBaseExplorer(db, userId)
@@ -186,7 +186,7 @@ export function activateRoleAssignment(userId, role, profilePatch = {}) {
 export function deactivateRoleAssignment(userId, role) {
   const normalized = normalizeRole(role)
   if (normalized === 'explorer') return { ok: false, error: 'base_explorer_cannot_be_deactivated' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const record = roleRows(db, userId).find(row => normalizeRole(row.role) === normalized)
     if (!record) return { ok: false, error: 'role_not_activated' }
     const previousStatus = record.status || 'active'

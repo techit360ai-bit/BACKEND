@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
@@ -91,7 +91,7 @@ export function requireAdminAuth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
-  const db = readDb()
+  const db = readAuthorityDb()
   const admin = (db.adminUsers || []).find(row => row.id === payload.sub && row.active !== false)
   if (!admin) return res.status(401).json({ error: 'Admin not found or inactive' })
   req.user = { id: admin.id, email: admin.email, role: admin.role, permissions: admin.permissions || [], token }

@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import { readDb, writeDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
@@ -52,7 +52,7 @@ function ensureSuperAdmin(db) {
       lastLoginAt: null,
       active: true,
     })
-    writeDb(db)
+    writeAuthorityDb(db)
   }
 }
 
@@ -61,7 +61,7 @@ export function adminLogin(req, res) {
   const password = String(req.body.password || '')
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
 
-  const db = readDb()
+  const db = readAuthorityDb()
   try {
     ensureSuperAdmin(db)
   } catch {
@@ -75,7 +75,7 @@ export function adminLogin(req, res) {
   if (!valid) return res.status(401).json({ error: 'Invalid credentials' })
 
   admin.lastLoginAt = nowIso()
-  writeDb(db)
+  writeAuthorityDb(db)
 
   const token = makeAdminToken(admin.id, admin.role)
   return res.json({
@@ -92,7 +92,7 @@ export function adminLogin(req, res) {
 }
 
 export function adminMe(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const admin = (db.adminUsers || []).find(u => u.id === req.user.id)
   if (!admin) return res.status(404).json({ error: 'Admin not found' })
   return res.json({
@@ -107,7 +107,7 @@ export function adminMe(req, res) {
 }
 
 export function adminIntelligenceTelemetry(_req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const count = name => Array.isArray(db[name]) ? db[name].length : 0
   const telemetry = migrationTelemetrySnapshot()
   const platform = {
@@ -142,7 +142,7 @@ export function adminIntelligenceTelemetry(_req, res) {
     organizationOverdueActions: (db.organizationActions || []).filter(row => row.dueDate && new Date(row.dueDate).getTime() < Date.now() && !['completed', 'dismissed'].includes(row.status)).length,
     generatedAt: new Date().toISOString(),
   }
-  updateDb(current => {
+  updateAuthorityDb(current => {
     if (!Array.isArray(current.adminTelemetrySnapshots)) current.adminTelemetrySnapshots = []
     current.adminTelemetrySnapshots.push({ id: createId('admin_telemetry'), ...platform })
     if (current.adminTelemetrySnapshots.length > 1000) current.adminTelemetrySnapshots.splice(0, current.adminTelemetrySnapshots.length - 1000)
@@ -158,7 +158,7 @@ export async function adminAiRouterTelemetry(_req, res) {
 export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
 export function adminList(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const admins = (db.adminUsers || []).map(u => ({
     id: u.id,
     email: u.email,
@@ -187,7 +187,7 @@ export function adminCreate(req, res) {
     return res.status(400).json({ error: `Password must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters` })
   }
 
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.adminUsers) db.adminUsers = []
 
   if (db.adminUsers.some(u => u.email === email)) {
@@ -209,7 +209,7 @@ export function adminCreate(req, res) {
     active: true,
   }
   db.adminUsers.push(admin)
-  writeDb(db)
+  writeAuthorityDb(db)
 
   return res.status(201).json({
     admin: {
@@ -224,7 +224,7 @@ export function adminCreate(req, res) {
 }
 
 export function adminUpdate(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.adminUsers) return res.status(404).json({ error: 'Admin not found' })
 
   const admin = db.adminUsers.find(u => u.id === req.params.id)
@@ -243,7 +243,7 @@ export function adminUpdate(req, res) {
     admin.passwordHash = bcrypt.hashSync(password, SALT_ROUNDS)
   }
   admin.updatedAt = nowIso()
-  writeDb(db)
+  writeAuthorityDb(db)
 
   return res.json({
     admin: {
@@ -259,12 +259,12 @@ export function adminUpdate(req, res) {
 }
 
 export function adminDelete(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.adminUsers) return res.status(404).json({ error: 'Admin not found' })
   const before = db.adminUsers.length
   db.adminUsers = db.adminUsers.filter(u => u.id !== req.params.id)
   if (db.adminUsers.length === before) return res.status(404).json({ error: 'Admin not found' })
-  writeDb(db)
+  writeAuthorityDb(db)
   return res.json({ ok: true })
 }
 

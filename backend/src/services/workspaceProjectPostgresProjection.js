@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 
 let pool = null
 let timer = null
@@ -10,7 +10,7 @@ const json = value => JSON.stringify(value || {})
 
 export async function syncWorkspaceProjectProjection() {
   if (!pool) return { enabled: false }
-  const db = readDb()
+  const db = readAuthorityDb()
   const client = await pool.connect()
   try {
     await client.query('BEGIN')

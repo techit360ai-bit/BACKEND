@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 import { recordCutoverComparison } from '../services/postgresCutoverMonitor.js'
 
 let pool = null
@@ -10,13 +10,13 @@ const url = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
 const postgresReads = () => process.env.IDENTITY_READ_SOURCE === 'postgres' || process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 
 function localById(userId) {
-  const db = readDb(); const user = db.users.find(row => row.id === userId) || null
+  const db = readAuthorityDb(); const user = db.users.find(row => row.id === userId) || null
   if (!user) return null
   return { user, profile: db.profiles.find(row => row.id === userId) || null, roles: (db.userRoles || []).filter(row => row.userId === userId), activeContext: (db.activeContexts || []).find(row => row.userId === userId && row.status === 'active') || null }
 }
 
 function localByEmail(email) {
-  const db = readDb(); const user = db.users.find(row => row.email === email) || null
+  const db = readAuthorityDb(); const user = db.users.find(row => row.email === email) || null
   return user ? localById(user.id) : null
 }
 
@@ -90,7 +90,7 @@ export async function findSessionByIdentifier(identifier) {
       return row ? { id: row.id, userId: row.user_id, sessionIdentifier: row.session_identifier, refreshTokenHash: row.refresh_token_hash, previousRefreshTokenHash: row.previous_refresh_token_hash, expiresAt: row.expires_at, revokedAt: row.revoked_at, lastActiveAt: row.last_active_at } : null
     },
     () => {
-      const db = readDb()
+      const db = readAuthorityDb()
       return (db.userSessions || []).find(row => row.sessionIdentifier === identifier) || null
     },
   )

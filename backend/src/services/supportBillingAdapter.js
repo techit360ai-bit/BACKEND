@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 async function verifyProvider(payment) {
@@ -13,11 +13,11 @@ async function verifyProvider(payment) {
 }
 
 export async function reconcileEntitlement(adminId, caseId, reason) {
-  const db = readDb(); const supportCase = (db.supportCases || []).find(row => row.id === caseId || row.caseNumber === caseId); if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }
+  const db = readAuthorityDb(); const supportCase = (db.supportCases || []).find(row => row.id === caseId || row.caseNumber === caseId); if (!supportCase) return { ok: false, status: 404, error: 'case_not_found' }
   const payment = (db.paymentIntents || []).filter(row => row.userId === supportCase.userId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]
   if (!payment) return { ok: false, status: 409, error: 'payment_not_found' }
   const verification = await verifyProvider(payment); if (!verification.ok) return { ok: false, status: 409, error: verification.error, verification }
-  return updateDb(state => {
+  return updateAuthorityDb(state => {
     const currentPayment = state.paymentIntents.find(row => row.id === payment.id); const subscription = state.subscriptions.find(row => row.userId === supportCase.userId) || { id: createId('subscription'), userId: supportCase.userId, createdAt: nowIso() }; const before = { payment: { ...currentPayment }, subscription: { ...subscription } }
     currentPayment.status = 'successful'; currentPayment.verifiedAt = nowIso(); subscription.status = 'active'; subscription.updatedAt = nowIso(); if (!state.subscriptions.some(row => row.id === subscription.id)) state.subscriptions.push(subscription)
     const after = { payment: { ...currentPayment }, subscription: { ...subscription } }; (state.supportAuditLogs || (state.supportAuditLogs = [])).push({ id: createId('support_action'), caseId: supportCase.id, action: 'recalculate_entitlement', actorId: adminId, before, after, metadata: { reason, provider: verification.provider }, createdAt: nowIso() })

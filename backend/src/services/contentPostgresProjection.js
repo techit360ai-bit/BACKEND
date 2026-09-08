@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { readDb } from '../config/database.js'
+import { readDb as readAuthorityDb } from '../config/database.js'
 
 let pool = null
 let timer = null
@@ -20,7 +20,7 @@ async function upsert(client, table, row, columns) {
 
 export async function syncContentProjection() {
   if (!pool) return { enabled: false }
-  const db = readDb(); const client = await pool.connect()
+  const db = readAuthorityDb(); const client = await pool.connect()
   const sets = {
     core_feed_posts: db.feedPosts || [], core_feed_comments: db.feedComments || [], core_feed_likes: db.feedLikes || [],
     core_files: db.files || [], core_notifications: db.notifications || [], core_mentorship_messages: db.mentorshipMessages || [],

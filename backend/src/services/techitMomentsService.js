@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 
 const SHARE_CHANNELS = new Set(['copy', 'native', 'linkedin', 'x', 'whatsapp', 'instagram', 'telegram', 'facebook'])
@@ -94,9 +94,9 @@ function toPublic(moment) {
 }
 
 export function generateMoments(userId, role) {
-  const db = readDb(); const normalizedRole = normalizeRole(role); const generated = candidates(db, userId, normalizedRole)
+  const db = readAuthorityDb(); const normalizedRole = normalizeRole(role); const generated = candidates(db, userId, normalizedRole)
   const profile = profileFor(db, userId)
-  const result = updateDb(state => {
+  const result = updateAuthorityDb(state => {
     const collection = rows(state, 'techitMoments'); const output = []
     for (const candidate of generated) {
       const existing = collection.find(row => row.userId === userId && row.role === normalizedRole && row.kind === candidate.kind && row.sourceKey === candidate.scopeKey)
@@ -114,12 +114,12 @@ export function generateMoments(userId, role) {
 
 export function listMoments(userId, role) {
   generateMoments(userId, role)
-  const db = readDb(); return { ok: true, moments: rows(db, 'techitMoments').filter(row => row.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toPublic) }
+  const db = readAuthorityDb(); return { ok: true, moments: rows(db, 'techitMoments').filter(row => row.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(toPublic) }
 }
 
 export function nextMomentPrompt(userId, role) {
   generateMoments(userId, role)
-  const db = readDb()
+  const db = readAuthorityDb()
   const moment = rows(db, 'techitMoments')
     .filter(row => row.userId === userId && row.status === 'pending')
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))[0]
@@ -127,7 +127,7 @@ export function nextMomentPrompt(userId, role) {
 }
 
 export function dismissMoment(userId, momentId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
     if (!moment || moment.status !== 'pending') return { ok: false, status: 404, error: 'moment_not_found' }
     const createdAt = nowIso()
@@ -138,7 +138,7 @@ export function dismissMoment(userId, momentId) {
 }
 
 export function getMoment(userId, momentId) {
-  const db = readDb(); const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
+  const db = readAuthorityDb(); const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
   return moment ? { ok: true, moment: toPublic(moment) } : { ok: false, status: 404, error: 'moment_not_found' }
 }
 
@@ -154,7 +154,7 @@ function shareUrl(channel, url, text, ref) {
 
 export function recordShare(userId, momentId, channel) {
   if (!SHARE_CHANNELS.has(channel)) return { ok: false, status: 400, error: 'unsupported_share_channel' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
     if (!moment) return { ok: false, status: 404, error: 'moment_not_found' }
     const shareId = createId('moment_share'); const text = `${moment.title} — ${moment.subtitle} Built and shared on TechIT Network.`
@@ -165,12 +165,12 @@ export function recordShare(userId, momentId, channel) {
 }
 
 export function getPublicMoment(slug) {
-  const db = readDb(); const moment = rows(db, 'techitMoments').find(row => row.publicSlug === slug && row.status === 'published')
+  const db = readAuthorityDb(); const moment = rows(db, 'techitMoments').find(row => row.publicSlug === slug && row.status === 'published')
   return moment ? { ok: true, moment: toPublic(moment) } : { ok: false, status: 404, error: 'moment_not_found' }
 }
 
 export function recordVisit(slug, referralId, source) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const moment = rows(db, 'techitMoments').find(row => row.publicSlug === slug && row.status === 'published'); if (!moment) return { ok: false, status: 404, error: 'moment_not_found' }
     const share = referralId ? rows(db, 'techitMomentShares').find(row => row.id === referralId && row.momentId === moment.id) : null
     const referral = { id: createId('moment_referral'), momentId: moment.id, shareId: share?.id || null, source: typeof source === 'string' && source.length < 40 ? source : 'direct', createdAt: nowIso() }
@@ -180,7 +180,7 @@ export function recordVisit(slug, referralId, source) {
 }
 
 export function analytics(userId) {
-  const db = readDb(); const moments = rows(db, 'techitMoments').filter(row => row.userId === userId); const ids = new Set(moments.map(row => row.id)); const shares = rows(db, 'techitMomentShares').filter(row => ids.has(row.momentId)); const referrals = rows(db, 'techitMomentReferrals').filter(row => ids.has(row.momentId))
+  const db = readAuthorityDb(); const moments = rows(db, 'techitMoments').filter(row => row.userId === userId); const ids = new Set(moments.map(row => row.id)); const shares = rows(db, 'techitMomentShares').filter(row => ids.has(row.momentId)); const referrals = rows(db, 'techitMomentReferrals').filter(row => ids.has(row.momentId))
   return { ok: true, totals: { moments: moments.length, shares: shares.length, referrals: referrals.length }, byChannel: Object.fromEntries([...new Set(shares.map(row => row.channel))].map(channel => [channel, shares.filter(row => row.channel === channel).length])) }
 }
 

@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../../config/database.js'
 import {
   computeCis,
   computeComplianceScore,
@@ -93,7 +93,7 @@ export function calculateEvidence(input = {}) {
 }
 
 export function getDeterministicIntelligenceSnapshot(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const profile = Array.isArray(db.profiles) ? db.profiles.find(item => item.id === userId) : null
   const recommendationProfile = Array.isArray(db.recommendationProfiles) ? db.recommendationProfiles.find(item => item.userId === userId) : null
   const activity = Array.isArray(db.userActivityStates) ? db.userActivityStates.find(item => item.userId === userId) : null
@@ -106,7 +106,7 @@ export function getDeterministicIntelligenceSnapshot(userId) {
 }
 
 export function persistIntelligenceEvent(userId, event) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     if (!Array.isArray(db.recommendationEvents)) db.recommendationEvents = []
     const record = { ...event, userId, createdAt: event.createdAt || new Date().toISOString() }
     db.recommendationEvents.push(record)

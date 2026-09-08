@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
 import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 
@@ -80,7 +80,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
   const credits = Math.max(0, number(estimatedCredits))
   if (!userId || !normalizedRequestId || !taskType || credits <= 0) return { ok: false, error: 'reservation_fields_required' }
   if (!FUNDING_SOURCES.has(fundingSource)) return { ok: false, error: 'invalid_funding_source' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const existing = reservationFor(db, normalizedRequestId)
     if (existing) {
       const sameReservation = existing.userId === userId
@@ -115,7 +115,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
 export function settleUsage(facts) {
   const normalized = validateFacts(facts)
   if (normalized.error) return { ok: false, error: normalized.error }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const payloadHash = hashPayload(normalized)
     const existing = usageFor(db, normalized.requestId)
     if (existing) {
@@ -172,7 +172,7 @@ export function settleUsage(facts) {
 }
 
 export function usageSettlementHealth() {
-  const db = readDb()
+  const db = readAuthorityDb()
   const settled = db.usageEvents.filter(row => row.status === 'completed').sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   return { ok: true, usageEvents: db.usageEvents.length, pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length, lastSettledAt: settled[0]?.updatedAt || null }
 }

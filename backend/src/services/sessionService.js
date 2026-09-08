@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import jwt from 'jsonwebtoken'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
 import * as identitySessionRepository from '../repositories/identitySessionRepository.js'
 
@@ -20,7 +20,7 @@ function sessionFromDb(db, identifier) { return (db.userSessions || []).find(row
 const postgresWrites = () => process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 const writeFallbackEnabled = () => process.env.IDENTITY_WRITE_FALLBACK_SQLITE !== 'false'
 function contextClaims(userId, profile) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const context = (db.activeContexts || []).find(row => row.userId === userId && row.status === 'active')
   return {
     active_role: context?.role || profile?.activeRole || profile?.role || 'explorer',
@@ -31,7 +31,7 @@ function contextClaims(userId, profile) {
   }
 }
 function identityClaims(userId, profile) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const subscription = (db.subscriptions || []).find(row => row.userId === userId && ['active', 'trialing'].includes(String(row.status || '').toLowerCase()))
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim()
   return {
@@ -52,7 +52,7 @@ export function issueSession(user, profile, req, { rememberMe = true } = {}) {
   const sessionIdentifier = randomToken(); const refreshToken = randomToken(); const now = Date.now(); const parts = userAgentParts(req.get('user-agent'))
   const session = { id: createId('session'), userId: user.id, sessionIdentifier, refreshTokenHash: hashToken(refreshToken), deviceIdentifier: String(req.get('x-device-id') || '').slice(0, 160) || null, deviceName: String(req.get('x-device-name') || '').slice(0, 120) || null, platform: parts.platform, browser: parts.browser, ipAddress: req.ip || null, userAgent: String(req.get('user-agent') || '').slice(0, 500), createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), expiresAt: new Date(now + (rememberMe ? SESSION_TTL_SECONDS : 86400) * 1000).toISOString(), lastRefreshedAt: new Date(now).toISOString(), revokedAt: null, rememberMe, rotationCounter: 0 }
   const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
-  if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateDb(db => { (db.userSessions || (db.userSessions = [])).push(session); event(db, { userId: user.id, sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: session.userAgent, metadata: { rememberMe, browser: parts.browser, platform: parts.platform } }) })
+  if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateAuthorityDb(db => { (db.userSessions || (db.userSessions = [])).push(session); event(db, { userId: user.id, sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: session.userAgent, metadata: { rememberMe, browser: parts.browser, platform: parts.platform } }) })
   return { accessToken, refreshToken, session }
 }
 
@@ -64,7 +64,7 @@ export async function issueSessionAsync(user, profile, req, options = {}) {
     // The sync helper already persisted SQLite. Remove that local write from the
     // authoritative path after PostgreSQL confirms the session.
     await identitySessionRepository.createSession(credentials.session, securityEvent)
-    if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateDb(db => {
+    if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateAuthorityDb(db => {
       db.userSessions = (db.userSessions || []).filter(row => row.id !== credentials.session.id)
       db.authSecurityEvents = (db.authSecurityEvents || []).filter(row => row.id !== securityEvent.id)
     })
@@ -83,7 +83,7 @@ export function refreshTokenFromRequest(req) { const match = String(req.headers.
 
 export function rotateSession(refreshToken, req) {
   if (!refreshToken) return { ok: false, error: 'refresh_token_missing' }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const reused = (db.userSessions || []).find(item => item.previousRefreshTokenHash === hashToken(refreshToken))
     if (reused) { reused.revokedAt = nowIso(); event(db, { userId: reused.userId, sessionIdentifier: reused.sessionIdentifier, eventType: 'refresh_token_reuse_detected', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: {} }); return { ok: false, error: 'refresh_token_reuse_detected' } }
     const row = (db.userSessions || []).find(item => item.refreshTokenHash === hashToken(refreshToken))
@@ -131,21 +131,21 @@ export async function rotateSessionAsync(refreshToken, req) {
 
 export function validateSessionBinding(payload) {
   if (!payload?.sid) return { valid: true, legacy: true }
-  const db = readDb(); const row = sessionFromDb(db, payload.sid); if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || row.userId !== payload.sub) return { valid: false, error: 'session_invalid' }
+  const db = readAuthorityDb(); const row = sessionFromDb(db, payload.sid); if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || row.userId !== payload.sub) return { valid: false, error: 'session_invalid' }
   return { valid: true, session: row }
 }
-export function touchSession(identifier) { if (!identifier) return; const db = readDb(); const row = sessionFromDb(db, identifier); if (!row || Date.now() - new Date(row.lastActiveAt).getTime() < 5 * 60 * 1000) return; updateDb(state => { const current = sessionFromDb(state, identifier); if (current && !current.revokedAt) current.lastActiveAt = nowIso() }) }
+export function touchSession(identifier) { if (!identifier) return; const db = readAuthorityDb(); const row = sessionFromDb(db, identifier); if (!row || Date.now() - new Date(row.lastActiveAt).getTime() < 5 * 60 * 1000) return; updateAuthorityDb(state => { const current = sessionFromDb(state, identifier); if (current && !current.revokedAt) current.lastActiveAt = nowIso() }) }
 export async function touchSessionAsync(identifier) {
   if (!identifier) return
   if (!postgresWrites()) return touchSession(identifier)
   try { return await identitySessionRepository.touch(identifier, nowIso()) } catch (error) { if (!writeFallbackEnabled()) throw error; touchSession(identifier) }
 }
-export function revokeSession(userId, identifier) { return updateDb(db => { const row = (db.userSessions || []).find(item => item.userId === userId && (item.sessionIdentifier === identifier || item.id === identifier)); if (!row) return { ok: false, error: 'session_not_found' }; row.revokedAt = nowIso(); event(db, { userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_revoked', metadata: { scope: 'single' } }); return { ok: true } }) }
+export function revokeSession(userId, identifier) { return updateAuthorityDb(db => { const row = (db.userSessions || []).find(item => item.userId === userId && (item.sessionIdentifier === identifier || item.id === identifier)); if (!row) return { ok: false, error: 'session_not_found' }; row.revokedAt = nowIso(); event(db, { userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_revoked', metadata: { scope: 'single' } }); return { ok: true } }) }
 export async function revokeSessionAsync(userId, identifier) { if (!postgresWrites()) return revokeSession(userId, identifier); try { return await identitySessionRepository.revokeByIdentifier(userId, identifier, { id: createId('auth_event'), userId, eventType: 'session_revoked', metadata: { scope: 'single' } }) } catch (error) { if (!writeFallbackEnabled()) throw error; return revokeSession(userId, identifier) } }
-export function revokeAllSessions(userId, exceptIdentifier = null) { return updateDb(db => { let count = 0; for (const row of db.userSessions || []) if (row.userId === userId && row.sessionIdentifier !== exceptIdentifier && !row.revokedAt) { row.revokedAt = nowIso(); count++ }; event(db, { userId, eventType: 'global_logout', metadata: { revokedCount: count } }); return { ok: true, revokedCount: count } }) }
+export function revokeAllSessions(userId, exceptIdentifier = null) { return updateAuthorityDb(db => { let count = 0; for (const row of db.userSessions || []) if (row.userId === userId && row.sessionIdentifier !== exceptIdentifier && !row.revokedAt) { row.revokedAt = nowIso(); count++ }; event(db, { userId, eventType: 'global_logout', metadata: { revokedCount: count } }); return { ok: true, revokedCount: count } }) }
 export async function revokeAllSessionsAsync(userId, exceptIdentifier = null) { if (!postgresWrites()) return revokeAllSessions(userId, exceptIdentifier); try { return await identitySessionRepository.revokeAll(userId, exceptIdentifier, { id: createId('auth_event'), userId, eventType: 'global_logout', metadata: {} }) } catch (error) { if (!writeFallbackEnabled()) throw error; return revokeAllSessions(userId, exceptIdentifier) } }
-export function listSessions(userId, currentIdentifier) { const db = readDb(); return (db.userSessions || []).filter(row => row.userId === userId && !row.revokedAt && new Date(row.expiresAt).getTime() > Date.now()).map(row => ({ id: row.id, sessionIdentifier: row.sessionIdentifier, deviceName: row.deviceName, platform: row.platform, browser: row.browser, ipAddress: row.ipAddress, createdAt: row.createdAt, lastActiveAt: row.lastActiveAt, expiresAt: row.expiresAt, current: row.sessionIdentifier === currentIdentifier })) }
+export function listSessions(userId, currentIdentifier) { const db = readAuthorityDb(); return (db.userSessions || []).filter(row => row.userId === userId && !row.revokedAt && new Date(row.expiresAt).getTime() > Date.now()).map(row => ({ id: row.id, sessionIdentifier: row.sessionIdentifier, deviceName: row.deviceName, platform: row.platform, browser: row.browser, ipAddress: row.ipAddress, createdAt: row.createdAt, lastActiveAt: row.lastActiveAt, expiresAt: row.expiresAt, current: row.sessionIdentifier === currentIdentifier })) }
 export async function listSessionsAsync(userId, currentIdentifier) { if (!postgresWrites()) return listSessions(userId, currentIdentifier); try { return await identitySessionRepository.listActive(userId, currentIdentifier) } catch (error) { if (!writeFallbackEnabled()) throw error; return listSessions(userId, currentIdentifier) } }
-export function cleanupSessions() { return updateDb(db => { const cutoff = Date.now() - 90 * 86400000; const sessions = db.userSessions || []; const before = sessions.length; db.userSessions = sessions.filter(row => !row.revokedAt || new Date(row.revokedAt).getTime() > cutoff || new Date(row.expiresAt).getTime() > cutoff); db.authSecurityEvents = (db.authSecurityEvents || []).filter(row => new Date(row.createdAt).getTime() > cutoff); return { removed: before - db.userSessions.length } }) }
+export function cleanupSessions() { return updateAuthorityDb(db => { const cutoff = Date.now() - 90 * 86400000; const sessions = db.userSessions || []; const before = sessions.length; db.userSessions = sessions.filter(row => !row.revokedAt || new Date(row.revokedAt).getTime() > cutoff || new Date(row.expiresAt).getTime() > cutoff); db.authSecurityEvents = (db.authSecurityEvents || []).filter(row => new Date(row.createdAt).getTime() > cutoff); return { removed: before - db.userSessions.length } }) }
 export async function cleanupSessionsAsync() { if (!postgresWrites()) return cleanupSessions(); try { return await identitySessionRepository.cleanup(new Date(Date.now() - 90 * 86400000).toISOString()) } catch (error) { if (!writeFallbackEnabled()) throw error; return cleanupSessions() } }
 export { ACCESS_TTL_SECONDS, browserRequest }
