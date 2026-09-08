@@ -7,7 +7,10 @@ const source = process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL
 if (!source) throw new Error('PLATFORM_DATABASE_URL or DATABASE_URL is required')
 const runId = `backfill_${crypto.randomUUID()}`
 const startedAt = new Date().toISOString()
+const configuredDriver = process.env.DB_DRIVER
+if (configuredDriver === 'postgres') process.env.DB_DRIVER = process.env.LEGACY_DB_DRIVER || 'sqlite'
 const db = readDb()
+if (configuredDriver === 'postgres') process.env.DB_DRIVER = configuredDriver
 const client = await getPlatformPool().connect()
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
 let recordCount = 0

@@ -3,7 +3,10 @@ import { readDb } from '../src/config/database.js'
 import { getPlatformPool } from '../src/repositories/platformCollectionRepository.js'
 
 if (!process.env.PLATFORM_DATABASE_URL && !process.env.DATABASE_URL) throw new Error('PLATFORM_DATABASE_URL or DATABASE_URL is required')
+const configuredDriver = process.env.DB_DRIVER
+if (configuredDriver === 'postgres') process.env.DB_DRIVER = process.env.LEGACY_DB_DRIVER || 'sqlite'
 const db = readDb()
+if (configuredDriver === 'postgres') process.env.DB_DRIVER = configuredDriver
 const pool = getPlatformPool()
 const result = await pool.query('SELECT collection_name,count(*)::int AS count FROM platform_collection_records WHERE deleted_at IS NULL GROUP BY collection_name')
 const actual = Object.fromEntries(result.rows.map(row => [row.collection_name, Number(row.count)]))
