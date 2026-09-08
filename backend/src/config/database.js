@@ -537,14 +537,17 @@ export function validateDatabaseConfig() {
       }
     }
   }
-  if (!['json', 'sqlite'].includes(driver)) {
-    throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite" or "json".`)
+  if (!['json', 'sqlite', 'postgres'].includes(driver)) {
+    throw new Error(`Unsupported DB_DRIVER "${driver}". Use "sqlite", "postgres", or "json".`)
   }
   if (process.env.NODE_ENV === 'production' && driver === 'json') {
-    throw new Error('DB_DRIVER=json is not allowed in production. Use DB_DRIVER=sqlite.')
+    throw new Error('DB_DRIVER=json is not allowed in production. Use DB_DRIVER=postgres.')
+  }
+  if (process.env.NODE_ENV === 'production' && driver === 'postgres' && !process.env.PLATFORM_DATABASE_URL && !process.env.DATABASE_URL) {
+    throw new Error('PLATFORM_DATABASE_URL or DATABASE_URL is required in production for DB_DRIVER=postgres.')
   }
   if (process.env.NODE_ENV === 'production' && driver === 'sqlite' && !process.env.SQLITE_DB_PATH) {
-    throw new Error('SQLITE_DB_PATH is required in production and must point at a persistent volume.')
+    throw new Error('SQLITE_DB_PATH is required when explicitly using SQLite in production; set DB_DRIVER=postgres for the migrated platform.')
   }
   if (driver === 'sqlite') {
     migrateSqlite({ dbPath: sqlitePath(), dryRun: false })
@@ -554,12 +557,14 @@ export function validateDatabaseConfig() {
 export function readDb() {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) return authority.snapshot
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
 }
 
 export function writeDb(data) {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   if (currentDriver() === 'sqlite') writeSqliteDb(data)
   else writeJsonDb(data)
 }
@@ -567,6 +572,7 @@ export function writeDb(data) {
 export function updateDb(mutator) {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) { const result = mutator(authority.snapshot); authority.dirty = true; return result }
+  if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
 

@@ -12,8 +12,13 @@ import { cleanupSessionsAsync } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
 import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
+import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
 
 const PORT = process.env.PORT || 3000
+const runMaintenance = async (callback, actorId = null) => {
+  if (process.env.DB_DRIVER === 'postgres' || process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres') return runWithPlatformDatabase(() => callback(), { userId: actorId })
+  return callback()
+}
 
 function validateSecurityConfig() {
   if (process.env.NODE_ENV !== 'production') return
@@ -70,16 +75,16 @@ if (process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {
-  try { generateReverificationNotifications() } catch (error) { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) }
+  runMaintenance(() => generateReverificationNotifications()).catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
 }, reverificationIntervalMs)
 reverificationTimer.unref?.()
-const sessionCleanupTimer = setInterval(() => { cleanupSessionsAsync().catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
+const sessionCleanupTimer = setInterval(() => { runMaintenance(() => cleanupSessionsAsync()).catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
 sessionCleanupTimer.unref?.()
-const dealRoomMaintenanceTimer = setInterval(() => { try { runDealRoomMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
+const dealRoomMaintenanceTimer = setInterval(() => { runMaintenance(() => runDealRoomMaintenance()).catch(error => console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
 dealRoomMaintenanceTimer.unref?.()
-const organizationIntelligenceTimer = setInterval(() => { try { runOrganizationIntelligenceMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message })) } }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
+const organizationIntelligenceTimer = setInterval(() => { runMaintenance(() => runOrganizationIntelligenceMaintenance()).catch(error => console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
 organizationIntelligenceTimer.unref?.()
-const supportMaintenanceTimer = setInterval(() => { try { runSupportMaintenance() } catch (error) { console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message })) } }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
+const supportMaintenanceTimer = setInterval(() => { runMaintenance(() => runSupportMaintenance()).catch(error => console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message }))) }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
 supportMaintenanceTimer.unref?.()
 
 app.listen(PORT, () => {
