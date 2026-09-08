@@ -1,21 +1,14 @@
-import jwt from 'jsonwebtoken'
+import { verifyJwt } from '../services/jwtKeyService.js'
 import { readDb as readAuthorityDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlement } from '../services/tvceService.js'
 import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
 import { findIdentityById, validateSessionBindingAsync } from '../repositories/identityRepository.js'
+import { verifyMfaAssertion } from '../services/mfaService.js'
 
-const JWT_SECRET = process.env.JWT_SECRET
 const JWT_ISSUER = process.env.JWT_ISSUER
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE
-if (!JWT_SECRET) {
-  throw new Error(
-    'JWT_SECRET environment variable is required. ' +
-    'This secret must match the value used by ai-router and ' +
-    'BACKEND/messaging-backend so platform tokens verify across services.'
-  )
-}
 
 export async function requireAuth(req, res, next) {
   const credential = accessTokenFromRequest(req)
@@ -25,8 +18,7 @@ export async function requireAuth(req, res, next) {
   const token = credential.token
   let payload
   try {
-    payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256'],
+    payload = verifyJwt(token, {
       ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
       ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
     })
@@ -83,8 +75,7 @@ export function requireAdminAuth(req, res, next) {
   const token = authHeader.slice(7)
   let payload
   try {
-    payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256'],
+    payload = verifyJwt(token, {
       ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
       ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
     })
@@ -94,6 +85,9 @@ export function requireAdminAuth(req, res, next) {
   const db = readAuthorityDb()
   const admin = (db.adminUsers || []).find(row => row.id === payload.sub && row.active !== false)
   if (!admin) return res.status(401).json({ error: 'Admin not found or inactive' })
+  if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_ADMIN_MFA === 'true') {
+    if (!verifyMfaAssertion(admin.id, req.get('x-mfa-assertion'))) return res.status(403).json({ error: 'mfa_required' })
+  }
   req.user = { id: admin.id, email: admin.email, role: admin.role, permissions: admin.permissions || [], token }
   return next()
 }

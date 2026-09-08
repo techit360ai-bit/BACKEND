@@ -140,9 +140,9 @@ export async function persistDiscoveryBatch(result) {
     for (const recommendation of result.recommendations || []) {
       const entity = recommendation.entity || {}
       const body = [entity.title, entity.subtitle, entity.description, ...(entity.skills || []), ...(entity.industries || [])].filter(Boolean).join(' ')
-      await client.query(`INSERT INTO discovery_entities(entity_type,entity_id,creator_id,title,body,tags,embedding,trust_score,gsis_score,payload,created_at,updated_at)
-        VALUES($1,$2,$3,$4,$5,$6,$7::vector,$8,$9,$10,$11,$12) ON CONFLICT(entity_type,entity_id) DO UPDATE SET creator_id=excluded.creator_id,title=excluded.title,body=excluded.body,tags=excluded.tags,embedding=excluded.embedding,trust_score=excluded.trust_score,gsis_score=excluded.gsis_score,payload=excluded.payload,updated_at=excluded.updated_at`,
-      [recommendation.entityType, recommendation.entityId, entity.creatorId || null, entity.title || 'Untitled', body, [...new Set([...(entity.skills || []), ...(entity.industries || [])])], vectorLiteral(deterministicEmbedding(body)), Number(entity.trustScore || 0), Number(entity.gsis || 0), entity, entity.createdAt || null, entity.updatedAt || new Date().toISOString()])
+      await client.query(`INSERT INTO discovery_entities(entity_type,entity_id,creator_id,owner_id,organization_id,workspace_id,visibility,classification,title,body,tags,embedding,trust_score,gsis_score,payload,created_at,updated_at)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::vector,$13,$14,$15,$16,$17) ON CONFLICT(entity_type,entity_id) DO UPDATE SET creator_id=excluded.creator_id,owner_id=excluded.owner_id,organization_id=excluded.organization_id,workspace_id=excluded.workspace_id,visibility=excluded.visibility,classification=excluded.classification,title=excluded.title,body=excluded.body,tags=excluded.tags,embedding=excluded.embedding,trust_score=excluded.trust_score,gsis_score=excluded.gsis_score,payload=excluded.payload,updated_at=excluded.updated_at`,
+      [recommendation.entityType, recommendation.entityId, entity.creatorId || null, entity.ownerId || entity.creatorId || null, entity.organizationId || null, entity.workspaceId || null, entity.visibility || 'public', entity.classification || 'PUBLIC', entity.title || 'Untitled', body, [...new Set([...(entity.skills || []), ...(entity.industries || [])])], vectorLiteral(deterministicEmbedding(body)), Number(entity.trustScore || 0), Number(entity.gsis || 0), entity, entity.createdAt || null, entity.updatedAt || new Date().toISOString()])
       await client.query(`INSERT INTO discovery_recommendations(recommendation_id,user_id,surface,entity_type,entity_id,score,rank,reason_type,reason_text,features,payload,config_version,generated_at,expires_at)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(recommendation_id) DO UPDATE SET score=excluded.score,rank=excluded.rank,reason_type=excluded.reason_type,reason_text=excluded.reason_text,features=excluded.features,payload=excluded.payload,config_version=excluded.config_version,generated_at=excluded.generated_at,expires_at=excluded.expires_at`,
       [recommendation.id, recommendation.userId, recommendation.surface, recommendation.entityType, recommendation.entityId, recommendation.score, recommendation.rank || 0, recommendation.reasonType, recommendation.reasonText, recommendation.features || {}, recommendation, recommendation.configVersion, recommendation.generatedAt, recommendation.expiresAt])
@@ -161,13 +161,20 @@ export async function semanticEntitySearch(query, options = {}) {
   const db = getPool()
   if (!db || !String(query || '').trim()) return []
   const limit = Math.max(1, Math.min(100, Number(options.limit || 30)))
-  const values = [vectorLiteral(deterministicEmbedding(query)), `%${String(query).trim()}%`, limit]
+  const actorId = String(options.userId || options.ownerId || '').trim()
+  if (!actorId) return []
+  const values = [vectorLiteral(deterministicEmbedding(query)), `%${String(query).trim()}%`, limit, actorId]
   let typeClause = ''
-  if (options.type) { values.push(options.type); typeClause = 'AND entity_type = $4' }
+  if (options.type) { values.push(options.type); typeClause = `AND entity_type = $${values.length}` }
+  const scope = [`(owner_id = $4 OR visibility = 'public')`]
+  if (options.organizationId) { values.push(String(options.organizationId)); scope.push(`(organization_id IS NULL OR organization_id = $${values.length})`) }
+  if (options.workspaceId) { values.push(String(options.workspaceId)); scope.push(`(workspace_id IS NULL OR workspace_id = $${values.length})`) }
+  const classifications = Array.isArray(options.classifications) && options.classifications.length ? options.classifications.map(String) : ['PUBLIC', 'INTERNAL']
+  values.push(classifications); scope.push(`classification = ANY($${values.length})`)
   const result = await db.query(`SELECT entity_type, entity_id, payload,
       1 - (embedding <=> $1::vector) AS semantic_score,
       CASE WHEN title ILIKE $2 OR body ILIKE $2 THEN 1 ELSE 0 END AS lexical_match
-    FROM discovery_entities WHERE embedding IS NOT NULL ${typeClause}
+    FROM discovery_entities WHERE embedding IS NOT NULL AND ${scope.join(' AND ')} ${typeClause}
     ORDER BY lexical_match DESC, semantic_score DESC LIMIT $3`, values)
   return result.rows.map(row => ({ ...row.payload, entityId: row.entity_id, type: row.entity_type, semanticScore: Number(row.semantic_score || 0), lexicalMatch: Boolean(row.lexical_match) }))
 }

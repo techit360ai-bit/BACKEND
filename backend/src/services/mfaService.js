@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import jwt from 'jsonwebtoken'
+import { signJwt, verifyJwt } from './jwtKeyService.js'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 
@@ -49,12 +49,12 @@ export function verifyMfa(userId, code, enable = false) {
     let valid = false; for (const skew of [-30000, 0, 30000]) valid ||= crypto.timingSafeEqual(Buffer.from(totp(decrypt(profile.encryptedSecret), Date.now() + skew)), Buffer.from(normalizedCode))
     if (!valid) return { ok: false, error: 'invalid_mfa_code' }
     if (enable) { profile.enabled = true; profile.verifiedAt = nowIso(); profile.updatedAt = nowIso() }
-    const token = jwt.sign({ sub: userId, purpose: 'mfa', amr: ['pwd', 'otp'] }, process.env.MFA_ASSERTION_SECRET || process.env.JWT_SECRET, { algorithm: 'HS256', expiresIn: '10m' })
+    const token = signJwt({ sub: userId, purpose: 'mfa', amr: ['pwd', 'otp'] }, { expiresIn: '10m' })
     return { ok: true, enabled: profile.enabled, assertion: token, expiresIn: 600 }
   })
 }
 export function verifyMfaAssertion(userId, assertion) {
   if (!assertion) return false
-  try { const claims = jwt.verify(assertion, process.env.MFA_ASSERTION_SECRET || process.env.JWT_SECRET, { algorithms: ['HS256'] }); return claims.sub === userId && claims.purpose === 'mfa' } catch { return false }
+  try { const claims = verifyJwt(assertion); return claims.sub === userId && claims.purpose === 'mfa' } catch { return false }
 }
 export function mfaStatus(userId) { const profile = (readAuthorityDb().mfaProfiles || []).find(row => row.userId === userId); return { enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null } }

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import jwt from 'jsonwebtoken'
+import { signJwt } from './jwtKeyService.js'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
@@ -7,6 +7,7 @@ import * as identitySessionRepository from '../repositories/identitySessionRepos
 
 const ACCESS_COOKIE = 'techit_access'
 const REFRESH_COOKIE = 'techit_refresh'
+const CSRF_COOKIE = 'techit_csrf'
 const ACCESS_TTL_SECONDS = Math.max(300, Number(process.env.AUTH_ACCESS_TTL_SECONDS || 900))
 const REFRESH_TTL_SECONDS = Math.max(3600, Number(process.env.AUTH_REFRESH_TTL_SECONDS || 30 * 86400))
 const SESSION_TTL_SECONDS = Math.max(3600, Number(process.env.AUTH_SESSION_TTL_SECONDS || 30 * 86400))
@@ -51,7 +52,7 @@ export function mobileClient(req) { return String(req.get('x-techit-client') || 
 export function issueSession(user, profile, req, { rememberMe = true } = {}) {
   const sessionIdentifier = randomToken(); const refreshToken = randomToken(); const now = Date.now(); const parts = userAgentParts(req.get('user-agent'))
   const session = { id: createId('session'), userId: user.id, sessionIdentifier, refreshTokenHash: hashToken(refreshToken), deviceIdentifier: String(req.get('x-device-id') || '').slice(0, 160) || null, deviceName: String(req.get('x-device-name') || '').slice(0, 120) || null, platform: parts.platform, browser: parts.browser, ipAddress: req.ip || null, userAgent: String(req.get('user-agent') || '').slice(0, 500), createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), expiresAt: new Date(now + (rememberMe ? SESSION_TTL_SECONDS : 86400) * 1000).toISOString(), lastRefreshedAt: new Date(now).toISOString(), revokedAt: null, rememberMe, rotationCounter: 0 }
-  const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+  const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
   if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateAuthorityDb(db => { (db.userSessions || (db.userSessions = [])).push(session); event(db, { userId: user.id, sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: session.userAgent, metadata: { rememberMe, browser: parts.browser, platform: parts.platform } }) })
   return { accessToken, refreshToken, session }
 }
@@ -76,8 +77,8 @@ export async function issueSessionAsync(user, profile, req, options = {}) {
   }
 }
 
-export function setSessionCookies(res, credentials) { res.cookie(ACCESS_COOKIE, credentials.accessToken, cookieOptions(ACCESS_TTL_SECONDS)); res.cookie(REFRESH_COOKIE, credentials.refreshToken, cookieOptions(credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400)) }
-export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options) }
+export function setSessionCookies(res, credentials) { res.cookie(ACCESS_COOKIE, credentials.accessToken, cookieOptions(ACCESS_TTL_SECONDS)); res.cookie(REFRESH_COOKIE, credentials.refreshToken, cookieOptions(credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400)); res.cookie(CSRF_COOKIE, randomToken(), { secure: process.env.NODE_ENV === 'production', sameSite: process.env.AUTH_COOKIE_SAMESITE || 'lax', path: '/', maxAge: (credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400) * 1000 }) }
+export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options); res.clearCookie(CSRF_COOKIE, options) }
 export function accessTokenFromRequest(req) { const header = req.headers.authorization; if (header?.startsWith('Bearer ')) return { token: header.slice(7), source: 'bearer' }; const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${ACCESS_COOKIE}=`)); return match ? { token: decodeURIComponent(match.slice(ACCESS_COOKIE.length + 1)), source: 'cookie' } : null }
 export function refreshTokenFromRequest(req) { const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${REFRESH_COOKIE}=`)); return match ? decodeURIComponent(match.slice(REFRESH_COOKIE.length + 1)) : String(req.body?.refreshToken || '') || null }
 
@@ -90,7 +91,7 @@ export function rotateSession(refreshToken, req) {
     if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now()) { if (row) { row.revokedAt = nowIso(); event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'refresh_token_rejected', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { reason: row.revokedAt ? 'revoked' : 'expired' } }) }; return { ok: false, error: 'refresh_token_invalid' } }
     const user = db.users.find(item => item.id === row.userId); const profile = db.profiles.find(item => item.id === row.userId); if (!user) return { ok: false, error: 'user_not_found' }
     const nextRefresh = randomToken(); const now = nowIso(); row.previousRefreshTokenHash = row.refreshTokenHash; row.refreshTokenHash = hashToken(nextRefresh); row.rotationCounter = Number(row.rotationCounter || 0) + 1; row.lastRefreshedAt = now; row.lastActiveAt = now
-    const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+    const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
     event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_refreshed', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { rotationCounter: row.rotationCounter } })
     return { ok: true, accessToken, refreshToken: nextRefresh, session: row, user, profile }
   })
@@ -120,7 +121,7 @@ export async function rotateSessionAsync(refreshToken, req) {
     const securityEvent = { id: createId('auth_event'), userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_refreshed', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { rotationCounter: nextSession.rotationCounter }, createdAt: now }
     const persisted = await identitySessionRepository.rotateSession(row.id, tokenHash, nextSession, securityEvent)
     if (!persisted) return { ok: false, error: 'refresh_token_invalid' }
-    const accessToken = jwt.sign({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, process.env.JWT_SECRET, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+    const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
     return { ok: true, accessToken, refreshToken: nextRefresh, session: persisted, user, profile }
   } catch (error) {
     console.error(JSON.stringify({ event: 'identity_postgres_session_write_failed', operation: 'rotate', error: error.message }))

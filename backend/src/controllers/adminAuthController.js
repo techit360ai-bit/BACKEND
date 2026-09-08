@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import { signJwt } from '../services/jwtKeyService.js'
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
@@ -8,8 +8,8 @@ import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTe
 import { upsertComparable } from '../services/investorDealRoomCompletionService.js'
 import { requestAdminRouterTelemetry } from '../services/aiRouterClient.js'
 import { securityPostureSnapshot } from '../services/securityPostureService.js'
+import { listSecurityEvents } from '../services/securityEventService.js'
 
-const JWT_SECRET = process.env.JWT_SECRET
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE
@@ -20,9 +20,8 @@ const INITIAL_SUPER_ADMIN_PASSWORD = process.env.ADMIN_SUPER_PASSWORD
 const ADMIN_PASSWORD_MIN_LENGTH = 14
 
 function makeAdminToken(userId, role) {
-  return jwt.sign(
+  return signJwt(
     { sub: userId, role, workspaceId: `admin-${userId}` },
-    JWT_SECRET,
     {
       expiresIn: JWT_EXPIRES_IN,
       ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
@@ -157,6 +156,7 @@ export async function adminAiRouterTelemetry(_req, res) {
   return res.json({ source: 'ai-router', telemetry: result.telemetry, generatedAt: new Date().toISOString() })
 }
 export function adminSecurityPosture(_req, res) { return res.json(securityPostureSnapshot()) }
+export function adminSecurityEvents(req, res) { return res.json({ events: listSecurityEvents(req.query.limit) }) }
 export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
 export function adminList(req, res) {

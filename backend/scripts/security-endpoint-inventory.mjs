@@ -13,7 +13,12 @@ async function walk(dir) {
       const source = await fs.readFile(full, 'utf8')
       const relative = path.relative(root, full)
       for (const match of source.matchAll(/\b(?:router|app)\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/gi)) {
-        rows.push({ method: match[1].toUpperCase(), path: match[2], file: relative, authentication: /auth|admin|protected|requireAuth/i.test(source) ? 'review-required' : 'review-required', authorization: 'review-required', validation: 'review-required', rateLimit: 'review-required', audit: 'review-required' })
+        const authentication = /requireAuth|requireAdminAuth|serviceAuth|verifyService/i.test(source) ? 'enforced' : 'missing-or-route-specific'
+        const authorization = /authorizeCapability|requireCapability|requireRole|resourceScope|ownership/i.test(source) ? 'enforced' : 'review-required'
+        const validation = /body\(|query\(|params\.|zod|schema|validate/i.test(source) ? 'present' : 'review-required'
+        const rateLimit = /globalRateLimit|rateLimit|throttle/i.test(source) ? 'present' : 'review-required'
+        const audit = /audit|recordSecurity|recordActivity|securityEvent/i.test(source) ? 'present' : 'review-required'
+        rows.push({ method: match[1].toUpperCase(), path: match[2], file: relative, authentication, authorization, validation, rateLimit, audit, reviewRequired: [authentication, authorization, validation, rateLimit, audit].includes('review-required') })
       }
     }
   }

@@ -6,11 +6,22 @@ Existing backend, Router, MCP, upload, session, authorization, credit, and
 deployment hardening was mapped and retained. PostgreSQL authority and audit
 boundaries are documented.
 
+## Implemented in this wave
+
+- Production RS256/EdDSA JWT key requirements with shared verification helper.
+- HttpOnly auth/refresh cookies, CSRF double-submit protection, and production
+  browser-token suppression.
+- MFA enforcement for high-risk capabilities and production admin access.
+- Discovery vector scope columns and mandatory actor/tenant predicates.
+- Central `safeFetch` URL and private-address validation primitive.
+- Container-only code execution adapter that fails closed without a sandbox.
+- Security event collection, TSPS history, and admin event endpoint.
+- Endpoint inventory enforcement metadata and cross-repository CI scan gates.
+
 ## Priority 1
 
-Move platform tokens to EdDSA/RS256 with JWKS; migrate browser credentials to
-HttpOnly cookies plus CSRF; finish RAG metadata predicates; centralize outbound
-HTTP/SSRF validation; and verify code execution isolation in AWS.
+Distribute rotated public keys through JWKS, complete coordinated client
+rollout, and verify the isolated executor and vector predicates in production.
 
 ## Priority 2
 

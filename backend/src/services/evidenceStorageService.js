@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import net from 'node:net'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { safeFetch } from './outboundHttpService.js'
 
 const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
 const maxBytes = () => Math.max(1024, Number(process.env.EVIDENCE_MAX_BYTES || 25 * 1024 * 1024))
@@ -49,7 +50,7 @@ function matchesDeclaredType(buffer, contentType) {
 async function validatePrivateObject({ objectKey, contentType, expectedSizeBytes }) {
   const downloadUrl = presign('GET', objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   try {
-    const response = await fetch(downloadUrl, { signal: AbortSignal.timeout(20000) })
+    const response = await safeFetch(downloadUrl, { signal: AbortSignal.timeout(20000) }, { schemes: ['https'], allowHosts: new URL(downloadUrl).hostname ? [new URL(downloadUrl).hostname] : [] })
     if (!response.ok) return { ok: false, error: 'evidence_object_unavailable' }
     const buffer = Buffer.from(await response.arrayBuffer())
     if (buffer.length !== expectedSizeBytes || buffer.length > maxBytes()) return { ok: false, error: 'evidence_size_mismatch' }

@@ -108,7 +108,7 @@ export async function recordActivity(req, res) {
 export async function search(req, res) {
   const query = String(req.query.q || '')
   const local = searchDiscovery(req.user.id, query, { type: req.query.type, limit: req.query.limit, personalized: req.query.personalized })
-  const semantic = await semanticEntitySearch(query, { type: req.query.type, limit: req.query.limit }).catch(() => [])
+  const semantic = await semanticEntitySearch(query, { type: req.query.type, limit: req.query.limit, userId: req.user.id, organizationId: req.user.activeContext?.organizationId, workspaceId: req.user.activeContext?.workspaceId }).catch(() => [])
   const semanticScores = new Map(semantic.map(item => [`${item.type}:${item.entityId}`, item.semanticScore]))
   local.results = local.results.map(item => ({ ...item, semanticScore: semanticScores.get(`${item.type}:${item.entityId}`) || 0 }))
     .sort((a, b) => (b.score + b.semanticScore * 0.15) - (a.score + a.semanticScore * 0.15))

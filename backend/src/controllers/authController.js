@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import jwt from 'jsonwebtoken'
+import { signJwt } from '../services/jwtKeyService.js'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
@@ -11,14 +11,6 @@ import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
 
-const JWT_SECRET = process.env.JWT_SECRET
-if (!JWT_SECRET) {
-  throw new Error(
-    'JWT_SECRET environment variable is required. ' +
-    'This secret must match the value used by ai-router and ' +
-    'BACKEND/messaging-backend so platform tokens verify across services.'
-  )
-}
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
 const JWT_AUDIENCE = process.env.JWT_AUDIENCE
@@ -43,7 +35,7 @@ function makeToken(userId, profile = null) {
     role: profile?.role || 'explorer',
     workspaceId: profile?.workspaceId || `user-${userId}`,
   }
-  return jwt.sign(claims, JWT_SECRET, {
+  return signJwt(claims, {
     expiresIn: JWT_EXPIRES_IN,
     ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
     ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),

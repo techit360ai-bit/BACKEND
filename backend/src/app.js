@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import jwt from 'jsonwebtoken'
+import { verifyJwt } from './services/jwtKeyService.js'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
@@ -33,6 +33,7 @@ import { readDb as readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import { postgresAuthority } from './middlewares/postgresAuthority.js'
+import { csrfProtection } from './middlewares/csrf.js'
 
 const app = express()
 
@@ -98,6 +99,7 @@ app.use(express.json({
     req.rawBody = buffer.toString('utf8')
   },
 }))
+app.use(csrfProtection)
 
 // Shared gateway protection. Route-specific limits remain responsible for
 // credential, OTP, authorization, and other sensitive operations.
@@ -157,12 +159,11 @@ const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
 if (MCP_ENABLED) {
   await mountTechitApi(app, '/api/mcp', {
     resolveActor(req) {
-      if (!JWT_SECRET) return null
+      if (!JWT_SECRET && !process.env.JWT_PUBLIC_KEY) return null
       const auth = req.headers?.authorization
       if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
       try {
-        const claims = jwt.verify(auth.slice(7), JWT_SECRET, {
-          algorithms: ['HS256'],
+        const claims = verifyJwt(auth.slice(7), {
           ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
           ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
         })

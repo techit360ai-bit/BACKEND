@@ -9,7 +9,7 @@ async function verifyProvider(payment) {
   else if (provider === 'flutterwave' && process.env.FLUTTERWAVE_SECRET_KEY) { url = `https://api.flutterwave.com/v3/transactions/${encodeURIComponent(reference)}/verify`; headers.Authorization = `Bearer ${process.env.FLUTTERWAVE_SECRET_KEY}` }
   else if (provider === 'stripe' && process.env.STRIPE_SECRET_KEY) { url = `https://api.stripe.com/v1/payment_intents/${encodeURIComponent(reference)}`; headers.Authorization = `Bearer ${process.env.STRIPE_SECRET_KEY}` }
   else return { ok: false, error: 'billing_provider_not_configured', provider }
-  try { const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) }); if (!response.ok) return { ok: false, error: 'billing_provider_rejected', status: response.status, provider }; const data = await response.json(); const status = provider === 'paystack' ? data?.data?.status : provider === 'flutterwave' ? data?.data?.status : data?.status; return { ok: ['success', 'successful', 'succeeded'].includes(String(status).toLowerCase()), provider, providerStatus: status } } catch { return { ok: false, error: 'billing_provider_unavailable', provider } }
+  try { const host = new URL(url).hostname; const response = await safeFetch(url, { headers, signal: AbortSignal.timeout(10000) }, { schemes: ['https'], allowHosts: [host] }); if (!response.ok) return { ok: false, error: 'billing_provider_rejected', status: response.status, provider }; const data = await response.json(); const status = provider === 'paystack' ? data?.data?.status : provider === 'flutterwave' ? data?.data?.status : data?.status; return { ok: ['success', 'successful', 'succeeded'].includes(String(status).toLowerCase()), provider, providerStatus: status } } catch { return { ok: false, error: 'billing_provider_unavailable', provider } }
 }
 
 export async function reconcileEntitlement(adminId, caseId, reason) {
@@ -24,3 +24,4 @@ export async function reconcileEntitlement(adminId, caseId, reason) {
     return { ok: true, result: { status: 'completed', provider: verification.provider }, before, after }
   })
 }
+import { safeFetch } from './outboundHttpService.js'
