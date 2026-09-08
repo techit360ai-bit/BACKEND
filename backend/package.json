@@ -24,6 +24,8 @@
     "platform:db:inventory": "node scripts/inventory-sqlite-authority.js",
     "platform:db:backfill": "node scripts/backfill-platform-postgres.js",
     "platform:db:verify": "node scripts/verify-platform-postgres.js",
+    "security:policy": "node scripts/security-policy-check.mjs",
+    "security:endpoint-inventory": "node scripts/security-endpoint-inventory.mjs",
     "investor-deal-room:db:migrate": "node scripts/migrate-investor-deal-room-postgres.js",
     "organization-intelligence:db:migrate": "node scripts/migrate-organization-intelligence-postgres.js",
     "discovery:worker": "node --import tsx scripts/discovery-worker.js",
