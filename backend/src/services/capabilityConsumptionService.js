@@ -10,10 +10,10 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey, o
   // TVCE does not assign capability prices. A positive estimate is supplied
   // by the runtime usage meter when an execution is about to start.
   const required = Math.max(0, Number(options.estimatedCredits || 0))
-  let fundingSource = decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'entitlement'
+  let fundingSource = decision.funding === 'organization' ? 'organization' : decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'entitlement'
   let reservation = null
   if (required > 0) {
-    reservation = reserveUsage({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, metadata: { capability: decision.capability } })
+    reservation = reserveUsage({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, organizationId: decision.organizationId || null, budgetId: decision.budgetId || null, programId: decision.programId || null, hackathonId: decision.hackathonId || null, metadata: { capability: decision.capability } })
     if (!reservation.ok && fundingSource === 'subscription') {
       fundingSource = 'payg'
       reservation = reserveUsage({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, metadata: { capability: decision.capability } })
@@ -22,7 +22,7 @@ export function reserveCapabilityConsumption(userId, decision, idempotencyKey, o
   }
   return updateAuthorityDb(db => {
     if (!Array.isArray(db.capabilityConsumptions)) db.capabilityConsumptions = []
-    const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
+    const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, organizationId: decision.organizationId || null, budgetId: decision.budgetId || null, programId: decision.programId || null, hackathonId: decision.hackathonId || null, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
     db.capabilityConsumptions.push(consumption); return { ok: true, idempotent: false, consumption }
   })
 }
@@ -33,7 +33,7 @@ export function settleCapabilityConsumption(consumptionId, responseStatus) {
   if (snapshot.status !== 'reserved') return { ok: true, idempotent: true, consumption: snapshot }
   const success = Number(responseStatus) >= 200 && Number(responseStatus) < 400
   if (snapshot.reservationId) {
-    const settlement = settleUsage({ requestId: snapshot.idempotencyKey, reservationId: snapshot.reservationId, userId: snapshot.userId, workspaceId: null, taskType: `capability:${snapshot.capability}`, status: success ? 'completed' : 'cancelled', provider: 'backend', model: 'deterministic', metadata: { capability: snapshot.capability } })
+    const settlement = settleUsage({ requestId: snapshot.idempotencyKey, reservationId: snapshot.reservationId, userId: snapshot.userId, workspaceId: null, taskType: `capability:${snapshot.capability}`, status: success ? 'completed' : 'cancelled', provider: 'backend', model: 'deterministic', fundingSource: snapshot.fundingSource, metadata: { capability: snapshot.capability, organizationId: snapshot.organizationId || null } })
     if (!settlement.ok) return settlement
   }
   return updateAuthorityDb(db => {
@@ -51,17 +51,17 @@ export async function reserveCapabilityConsumptionAsync(userId, decision, idempo
   const existing = await findCapabilityConsumptionPostgres(idempotencyKey)
   if (existing) return existing.userId === userId && existing.capability === decision.capability ? { ok: true, idempotent: true, consumption: existing } : { ok: false, error: 'idempotency_key_conflict' }
   const required = Math.max(0, Number(options.estimatedCredits || 0))
-  let fundingSource = decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'entitlement'
+  let fundingSource = decision.funding === 'organization' ? 'organization' : decision.subscription?.active && decision.subscription?.entitlements?.[decision.capability] !== false ? 'subscription' : required > 0 ? 'payg' : 'entitlement'
   let reservation = null
   if (required > 0) {
-    reservation = await (await import('./usageSettlementService.js')).reserveUsageAsync({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, metadata: { capability: decision.capability } })
+    reservation = await (await import('./usageSettlementService.js')).reserveUsageAsync({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, organizationId: decision.organizationId || null, budgetId: decision.budgetId || null, programId: decision.programId || null, hackathonId: decision.hackathonId || null, metadata: { capability: decision.capability } })
     if (!reservation.ok && fundingSource === 'subscription') {
       fundingSource = 'payg'
       reservation = await (await import('./usageSettlementService.js')).reserveUsageAsync({ userId, requestId: idempotencyKey, taskType: `capability:${decision.capability}`, estimatedCredits: required, fundingSource, metadata: { capability: decision.capability } })
     }
     if (!reservation.ok) return reservation
   }
-  const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
+  const now = nowIso(); const consumption = { id: createId('capability_use'), idempotencyKey, userId, capability: decision.capability, fundingSource, organizationId: decision.organizationId || null, budgetId: decision.budgetId || null, programId: decision.programId || null, hackathonId: decision.hackathonId || null, credits: required, reservationId: reservation?.reservation?.reservationId || null, status: 'reserved', metering: required > 0 ? 'runtime' : 'none', createdAt: now, updatedAt: now }
   return createCapabilityConsumptionPostgres(consumption)
 }
 
@@ -72,7 +72,7 @@ export async function settleCapabilityConsumptionAsync(consumptionId, responseSt
   if (snapshot.status !== 'reserved') return { ok: true, idempotent: true, consumption: snapshot }
   const success = Number(responseStatus) >= 200 && Number(responseStatus) < 400
   if (snapshot.reservationId) {
-    const settlement = await (await import('./usageSettlementService.js')).settleUsageAsync({ requestId: snapshot.idempotencyKey, reservationId: snapshot.reservationId, userId: snapshot.userId, workspaceId: null, taskType: `capability:${snapshot.capability}`, status: success ? 'completed' : 'cancelled', provider: 'backend', model: 'deterministic', metadata: { capability: snapshot.capability } })
+    const settlement = await (await import('./usageSettlementService.js')).settleUsageAsync({ requestId: snapshot.idempotencyKey, reservationId: snapshot.reservationId, userId: snapshot.userId, workspaceId: null, taskType: `capability:${snapshot.capability}`, status: success ? 'completed' : 'cancelled', provider: 'backend', model: 'deterministic', fundingSource: snapshot.fundingSource, metadata: { capability: snapshot.capability, organizationId: snapshot.organizationId || null } })
     if (!settlement.ok) return settlement
   }
   return settleCapabilityConsumptionPostgres(consumptionId, responseStatus, { success, userId: snapshot.userId })

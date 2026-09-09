@@ -418,7 +418,12 @@ export function hackathonRegistrations(req, res) {
 }
 
 export function hackathonCreate(req, res) {
-  return created(res, createHackathon(req.user.id, req.body))
+  const result = createHackathon(req.user.id, req.body)
+  if (result?.ok === false) {
+    const status = result.error?.includes('permission') || result.error?.includes('denied') ? 403 : result.error?.includes('required') ? 400 : result.error?.includes('limit') ? 409 : 402
+    return res.status(status).json(result)
+  }
+  return created(res, result)
 }
 
 export function hackathonGet(req, res) {

@@ -3,6 +3,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
 import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { reserveOrganizationBudget, settleOrganizationBudget } from './organizationBudgetService.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -29,7 +30,7 @@ function reservationFor(db, reservationId) {
   return db.usageReservations.find(row => row.id === reservationId || row.reservationId === reservationId) || null
 }
 
-const FUNDING_SOURCES = new Set(['subscription', 'payg', 'platform_subsidy'])
+const FUNDING_SOURCES = new Set(['subscription', 'payg', 'platform_subsidy', 'organization'])
 
 function usageFor(db, requestId) {
   return db.usageEvents.find(row => row.requestId === requestId) || null
@@ -75,11 +76,15 @@ function validateFacts(facts) {
   }
 }
 
-export function reserveUsage({ userId, workspaceId = null, requestId, taskType, estimatedCredits, grantId = null, fundingSource = 'payg', metadata = {} }) {
+export function reserveUsage({ userId, workspaceId = null, requestId, taskType, estimatedCredits, grantId = null, fundingSource = 'payg', organizationId = null, budgetId = null, programId = null, hackathonId = null, metadata = {} }) {
   const normalizedRequestId = text(requestId)
   const credits = Math.max(0, number(estimatedCredits))
   if (!userId || !normalizedRequestId || !taskType || credits <= 0) return { ok: false, error: 'reservation_fields_required' }
   if (!FUNDING_SOURCES.has(fundingSource)) return { ok: false, error: 'invalid_funding_source' }
+  if (fundingSource === 'organization') {
+    const organizationReservation = reserveOrganizationBudget({ organizationId, budgetId, programId, hackathonId, requestId: normalizedRequestId, credits, metadata })
+    if (!organizationReservation.ok) return organizationReservation
+  }
   return updateAuthorityDb(db => {
     const existing = reservationFor(db, normalizedRequestId)
     if (existing) {
@@ -105,7 +110,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
       id: createId('usage_reservation'), reservationId: normalizedRequestId, requestId: normalizedRequestId,
       userId, workspaceId, taskType, estimatedCredits: credits, reservedCredits: credits,
       settledCredits: 0, releasedCredits: 0, fundingSource: requestedFunding, grantId, status: 'reserved',
-      metadata, createdAt: now, updatedAt: now,
+      metadata: { ...metadata, ...(organizationId ? { organizationId, budgetId, programId, hackathonId } : {}) }, createdAt: now, updatedAt: now,
     }
     db.usageReservations.push(reservation)
     return { ok: true, idempotent: false, reservation }
@@ -156,13 +161,17 @@ export function settleUsage(facts) {
       metadata: normalized.metadata, createdAt: now, updatedAt: now,
     }
     db.usageEvents.push(usageEvent)
+    if (reservation?.fundingSource === 'organization') {
+      const organizationSettlement = settleOrganizationBudget({ requestId: normalized.requestId, status: normalized.status, actualCredits })
+      if (!organizationSettlement.ok) return organizationSettlement
+    }
     if (reservation) {
       reservation.settledCredits = actualCredits
       reservation.releasedCredits = Math.max(0, reservedCredits - actualCredits)
       reservation.status = normalized.status === 'completed' ? 'settled' : 'refunded'
       reservation.updatedAt = now
     }
-    if (actualCredits > 0) db.creditLedger.push({
+    if (actualCredits > 0 && reservation?.fundingSource !== 'organization') db.creditLedger.push({
       id: createId('usage_debit'), userId: normalized.userId, workspaceId: normalized.workspaceId,
       requestId: normalized.requestId, deltaCredits: -actualCredits, credits: -actualCredits,
       type: 'usage_settlement', createdAt: now,
@@ -184,6 +193,7 @@ async function persistFinanceWrite(result) {
   try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', error: error.message })); if (financeWriteFallback()) return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
 }
 export async function reserveUsageAsync(facts) {
+  if (facts.fundingSource === 'organization') return persistFinanceWrite(reserveUsage(facts))
   if (financePostgresEnabled()) {
     try { return await reserveUsagePostgres(facts) } catch (error) {
       console.error(JSON.stringify({ event: 'finance_postgres_reservation_failed', error: error.message }))
@@ -194,6 +204,7 @@ export async function reserveUsageAsync(facts) {
 }
 
 export async function settleUsageAsync(facts) {
+  if (facts.fundingSource === 'organization' || facts.metadata?.organizationId) return persistFinanceWrite(settleUsage(facts))
   if (financePostgresEnabled()) {
     try { return await settleUsagePostgres(facts) } catch (error) {
       console.error(JSON.stringify({ event: 'finance_postgres_settlement_failed', error: error.message }))

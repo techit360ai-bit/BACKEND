@@ -128,6 +128,9 @@ export function createOrganization(userId, body = {}) {
     const domain = normalizedDomain(body.website || body.domain || body.workEmail)
     const existingDomain = domain && collections(db, 'organizationDomains').find(row => row.domain === domain && row.status !== 'revoked')
     if (existingDomain) return { ok: false, error: 'organization_domain_already_claimed', organizationId: existingDomain.organizationId }
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    const duplicate = collections(db, 'organizations').find(row => row.status !== 'revoked' && String(row.name || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() === normalizedName && (!body.country || !row.country || String(row.country).toLowerCase() === String(body.country).toLowerCase()))
+    if (duplicate) return { ok: false, error: 'organization_duplicate_detected', organizationId: duplicate.id }
     const now = nowIso()
     const org = { id: createId('organization'), name, website: body.website || '', country: body.country || '', type: body.type || body.orgType || 'other', status: 'claimed', createdBy: userId, createdAt: now, updatedAt: now }
     collections(db, 'organizations').push(org)
