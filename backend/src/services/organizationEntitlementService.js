@@ -14,12 +14,14 @@ export const ORGANIZATION_CAPABILITIES = Object.freeze({
   COHORT_INTELLIGENCE: { access: 'funded' },
   MENTOR_INTELLIGENCE: { access: 'funded' },
   ORGANIZATION_HACKATHON_ADVANCED: { access: 'funded' },
+  ORGANIZATION_MANAGED_HACKATHON: { access: 'subscription' },
   ORGANIZATION_PROGRAM_ANALYTICS: { access: 'funded' },
   ORGANIZATION_INTERVENTIONS: { access: 'funded' },
   ORGANIZATION_REPORT_EXPORT: { access: 'funded' },
   ORGANIZATION_SPONSOR_MANAGEMENT: { access: 'subscription' },
   ORGANIZATION_INTEGRATIONS: { access: 'subscription' },
   ORGANIZATION_WHITE_LABEL: { access: 'subscription' },
+  ORGANIZATION_SUPPORT_WORKFLOW: { access: 'subscription' },
 })
 
 export const COMMUNITY_HOST_LIMITS = Object.freeze({
@@ -126,6 +128,9 @@ export function saveOrganizationEntitlement(adminId, input = {}) {
       expiresAt: input.expiresAt ?? row.expiresAt ?? null,
       capabilities: { ...(row.capabilities || {}), ...(input.capabilities || {}) },
       limits: { ...COMMUNITY_HOST_LIMITS, ...(row.limits || {}), ...(input.limits || {}) },
+      paymentIntentId: input.paymentIntentId || row.paymentIntentId || null,
+      providerReference: input.providerReference || row.providerReference || null,
+      createdBy: input.createdBy || row.createdBy || adminId,
       updatedAt: nowIso(),
     })
     if (!entitlements.includes(row)) entitlements.push(row)
@@ -133,4 +138,3 @@ export function saveOrganizationEntitlement(adminId, input = {}) {
     return { ok: true, entitlement: organizationEntitlement(organizationId, db) }
   })
 }
-

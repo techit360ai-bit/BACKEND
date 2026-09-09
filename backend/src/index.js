@@ -13,6 +13,7 @@ import { runDealRoomMaintenance } from './services/investorDealRoomCompletionSer
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
 import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
 import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
+import { initializeOrganizationCommercialProjection } from './repositories/organizationOperationsRepository.js'
 
 const PORT = process.env.PORT || 3000
 const runMaintenance = async (callback, actorId = null) => {
@@ -72,6 +73,7 @@ if (process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL) await initia
 if (process.env.CONTENT_DATABASE_URL || process.env.DATABASE_URL) await initializeContentPostgresProjection()
 if (process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL) await initializeFinancePostgresProjection()
 if (process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env.IDENTITY_DATABASE_URL) await initializePlatformCollectionSchema()
+if (process.env.ORGANIZATION_DATABASE_URL || process.env.DATABASE_URL) await initializeOrganizationCommercialProjection()
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {

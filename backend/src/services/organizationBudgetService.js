@@ -59,9 +59,8 @@ export function createOrganizationBudget(adminId, input = {}) {
   if (!organizationId || balance <= 0) return { ok: false, error: 'organization_budget_fields_required' }
   return updateAuthorityDb(db => {
     const now = nowIso()
-    const budget = { id: input.id || createId('org_budget'), organizationId, programId: input.programId || null, hackathonId: input.hackathonId || null, source: input.source || 'admin_grant', status: input.status || 'active', balance, reservedBalance: 0, expiresAt: input.expiresAt || null, createdBy: adminId, createdAt: now, updatedAt: now }
+    const budget = { id: input.id || createId('org_budget'), organizationId, programId: input.programId || null, hackathonId: input.hackathonId || null, source: input.source || 'admin_grant', status: input.status || 'active', balance, reservedBalance: 0, currency: input.currency || 'credits', expiresAt: input.expiresAt || null, paymentIntentId: input.paymentIntentId || null, providerReference: input.providerReference || null, createdBy: adminId, createdAt: now, updatedAt: now }
     collection(db, 'organizationBudgets').push(budget)
     return { ok: true, budget }
   })
 }
-

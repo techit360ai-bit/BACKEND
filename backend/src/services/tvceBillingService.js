@@ -3,6 +3,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { fulfillPaymentAsync } from './tvceService.js'
 import { billingEventExistsPostgres, paymentUserPostgres, recordBillingEventPostgres, updateSubscriptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { applyOrganizationPayment, applyOrganizationPaymentLifecycle } from './organizationBillingService.js'
 
 const supported = new Set(['stripe', 'paystack', 'flutterwave'])
 const signature = (value, expected) => {
@@ -36,14 +37,14 @@ function normalize(provider, payload) {
   if (provider === 'stripe') {
     const object = payload.data?.object || {}
     const metadata = object.metadata || object.subscription_details?.metadata || {}
-    return { eventId: payload.id, type: payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id || object.client_reference_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: object.id, subscriptionId: object.subscription || object.id, status: object.status, amount: object.amount_paid || object.amount_due, currency: object.currency, failureReason: object.last_payment_error?.message, success: ['payment_intent.succeeded', 'checkout.session.completed', 'invoice.paid'].includes(payload.type) }
+    return { eventId: payload.id, type: payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id || object.client_reference_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, organizationId: metadata.organizationId || metadata.organization_id, purchaseType: metadata.purchaseType || metadata.purchase_type, credits: Number(metadata.credits || 0), providerReference: object.id, subscriptionId: object.subscription || object.id, status: object.status, amount: object.amount_paid || object.amount_due, currency: object.currency, failureReason: object.last_payment_error?.message, success: ['payment_intent.succeeded', 'checkout.session.completed', 'invoice.paid'].includes(payload.type) }
   }
   if (provider === 'paystack') {
     const data = payload.data || {}; const metadata = data.metadata || {}
-    return { eventId: payload.id || data.id || data.reference, type: payload.event, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id || data.customer?.metadata?.userId, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.reference || String(data.id || ''), subscriptionId: data.subscription_code || metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: payload.event === 'charge.success' }
+    return { eventId: payload.id || data.id || data.reference, type: payload.event, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id || data.customer?.metadata?.userId, planId: metadata.planId || metadata.plan_id, organizationId: metadata.organizationId || metadata.organization_id, purchaseType: metadata.purchaseType || metadata.purchase_type, credits: Number(metadata.credits || 0), providerReference: data.reference || String(data.id || ''), subscriptionId: data.subscription_code || metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: payload.event === 'charge.success' }
   }
   const data = payload.data || payload; const metadata = data.meta || data.metadata || {}
-  return { eventId: payload.id || data.id || data.tx_ref, type: payload.event || payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, credits: Number(metadata.credits || 0), providerReference: data.tx_ref || String(data.id || ''), subscriptionId: metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: ['charge.completed', 'payment.completed'].includes(payload.event || payload.type) && String(data.status || '').toLowerCase() === 'successful' }
+  return { eventId: payload.id || data.id || data.tx_ref, type: payload.event || payload.type, paymentId: metadata.paymentIntentId || metadata.payment_id, userId: metadata.userId || metadata.user_id, planId: metadata.planId || metadata.plan_id, organizationId: metadata.organizationId || metadata.organization_id, purchaseType: metadata.purchaseType || metadata.purchase_type, credits: Number(metadata.credits || 0), providerReference: data.tx_ref || String(data.id || ''), subscriptionId: metadata.subscriptionId, status: data.status, amount: data.amount, currency: data.currency, success: ['charge.completed', 'payment.completed'].includes(payload.event || payload.type) && String(data.status || '').toLowerCase() === 'successful' }
 }
 
 export async function handleBillingWebhook(providerInput, payload, headers = {}, rawBody = '') {
@@ -65,6 +66,8 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
             : event.type === 'subscription.not_renew' ? 'cancelled'
               : String(event.status || payload.data?.object?.status || 'active')
     const userId = event.userId || (financePostgresEnabled() ? await paymentUserPostgres(event.paymentId) : readAuthorityDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId)
+    const organizationLifecycle = await applyOrganizationPaymentLifecycle({ paymentId: event.paymentId, providerReference: event.providerReference, status })
+    if (organizationLifecycle?.ok === false) return organizationLifecycle
     if (financePostgresEnabled() && userId) {
       const subscription = await updateSubscriptionPostgres({ userId, provider, providerId: event.subscriptionId || event.providerReference, planId: event.planId, status, amount: event.amount, currency: event.currency, failureReason: event.failureReason })
       const row = await recordBillingEventPostgres({ provider, eventId: event.eventId, type: event.type, status: 'processed', userId, paymentIntentId: event.paymentId || null, subscriptionId: event.subscriptionId || null })
@@ -92,6 +95,10 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
   let result = null
   if (event.paymentId && event.userId) result = await fulfillPaymentAsync(event.userId, event.paymentId, { verified: true, planId: event.planId, providerReference: event.providerReference })
   if (result?.ok === false) return result
+  if (event.paymentId && event.userId) {
+    const organizationPayment = await applyOrganizationPayment({ userId: event.userId, paymentId: event.paymentId, provider, providerReference: event.providerReference, planId: event.planId })
+    if (organizationPayment?.ok === false) return organizationPayment
+  }
   if (financePostgresEnabled()) {
     const row = await recordBillingEventPostgres({ provider, eventId: event.eventId, type: event.type, status: result?.idempotent ? 'idempotent' : 'processed', userId: event.userId || null, paymentIntentId: event.paymentId || null })
     return { ok: true, event: row, result }

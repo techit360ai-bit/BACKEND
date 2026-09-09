@@ -154,6 +154,7 @@ export function createCase(userId, body = {}, role = 'explorer') {
     const row = {
       id: createId('support_case'), caseNumber: caseNumber(db), userId, userRole: role,
       category, subcategory: text(body.subcategory, 80) || null, subject, description,
+      organizationId: text(body.organizationId, 120) || null, programId: text(body.programId, 120) || null, hackathonId: text(body.hackathonId, 120) || null,
       priority, severity: text(body.severity, 40) || priority, status: 'received',
       assignedAdminId: null, assignedTeam: null, escalationStatus: 'none',
       firstResponseDueAt: sla.firstResponseDueAt,

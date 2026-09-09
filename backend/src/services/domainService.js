@@ -1320,13 +1320,16 @@ export function createHackathon(userId, body) {
     if (!context.ok) return context
     const entitlement = evaluateOrganizationEntitlement(organizationId, 'ORGANIZATION_HACKATHON_BASIC', { consume: true })
     if (!entitlement.allowed) return entitlement
+    if (entitlement.entitlement?.isDefault && body.approvalStatus !== 'approved') body = { ...body, approvalStatus: 'pending_approval' }
   }
-  return updateAuthorityDb(db => ({ hackathon: insertOwned(db, 'hackathons', userId, {
+  return updateAuthorityDb(db => {
+    const hackathon = insertOwned(db, 'hackathons', userId, {
     ...(organizationId ? { organizationId, entitlementScope: 'organization' } : {}),
     name: body.name || body.title || 'Untitled hackathon',
     title: body.title || body.name || 'Untitled hackathon',
     theme: body.theme || '',
     status: body.status || 'draft',
+    approvalStatus: body.approvalStatus || (organizationId ? 'pending_approval' : 'not_required'),
     visibility: body.visibility || 'private',
     organizer: cleanObject(body.organizer),
     organizerName: body.organizerName || '',
@@ -1346,7 +1349,21 @@ export function createHackathon(userId, body) {
     judgingDimensions: Array.isArray(body.judgingDimensions) ? body.judgingDimensions : [],
     mentorPool: Number(body.mentorPool || 0),
     hackathonStatus: body.hackathonStatus || body.status || 'upcoming',
-  }, 'hack') }))
+    }, 'hack')
+    if (organizationId && hackathon.approvalStatus === 'pending_approval') collection(db, 'organizationAbuseReviews').push({ id: createId('org_abuse'), organizationId, userId, hackathonId: hackathon.id, signalType: 'free_event_approval', score: 20, status: 'open', evidence: { plan: 'community_host', eventName: hackathon.name }, createdAt: nowIso(), updatedAt: nowIso() })
+    return { hackathon }
+  })
+}
+
+export function approveOrganizationHackathon(adminId, hackathonId, decision = 'approved', reason = '') {
+  return updateAuthorityDb(db => {
+    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && row.organizationId)
+    if (!hackathon) return { ok: false, error: 'organization_hackathon_not_found' }
+    if (!['approved', 'rejected'].includes(decision)) return { ok: false, error: 'invalid_hackathon_approval' }
+    hackathon.approvalStatus = decision; hackathon.approvedBy = adminId; hackathon.approvedAt = nowIso(); hackathon.approvalReason = String(reason || '').slice(0, 500); hackathon.updatedAt = nowIso()
+    if (decision === 'rejected') hackathon.status = 'rejected'
+    return { ok: true, hackathon }
+  })
 }
 
 export function getHackathon(userId, hackathonId) {
@@ -1359,6 +1376,7 @@ export function registerHackathon(userId, hackathonId, body) {
   return updateAuthorityDb(db => {
     const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && hackathonVisible(db, row, userId))
     if (!hackathon) return null
+    if (hackathon.organizationId && hackathon.approvalStatus !== 'approved') return { ok: false, error: 'organization_hackathon_approval_required' }
     const existing = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.leaderId === userId)
     if (existing) return { ok: true, team: existing, registration: hackathonRegistration(db, existing, userId) }
     const team = insertOwned(db, 'hackathonTeams', userId, {
@@ -1825,14 +1843,30 @@ export function createPaymentIntent(userId, body) {
     const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
     const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
     if (packageId && !pack) return { ok: false, error: 'credit_package_not_found' }
-    if (!packageId && !body.planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
-    const amount = pack ? Number(pack.amount ?? pack.price ?? 0) : Number(body.amount || 0)
-    const credits = pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : Number(body.credits || 0)
+    const planId = typeof body.planId === 'string' ? body.planId.trim() : ''
+    const plan = planId ? collection(db, 'billingPlans').find(row => (row.id === planId || row.slug === planId) && row.active !== false) : null
+    const sponsorApplicationId = typeof body.sponsorApplicationId === 'string' ? body.sponsorApplicationId.trim() : ''
+    const sponsorApplication = sponsorApplicationId ? collection(db, 'sponsorshipApplications').find(row => row.id === sponsorApplicationId && row.status === 'approved') : null
+    const sponsorPackage = sponsorApplication ? collection(db, 'organizationSponsorshipPackages').find(row => row.id === sponsorApplication.packageId && row.organizationId === sponsorApplication.organizationId && row.status === 'active') : null
+    if (sponsorApplicationId && (!sponsorApplication || !sponsorPackage)) return { ok: false, error: 'approved_sponsorship_application_required' }
+    if (planId && !plan && process.env.NODE_ENV === 'production') return { ok: false, error: 'billing_plan_not_found' }
+    if (!packageId && !planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
+    const amount = sponsorPackage ? Number(sponsorPackage.amount || 0) : pack ? Number(pack.amount ?? pack.price ?? 0) : plan ? Number(plan.amount ?? plan.price ?? 0) : Number(body.amount || 0)
+    const credits = sponsorPackage ? Number(sponsorPackage.creditGrant || sponsorPackage.credits || 0) : pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : plan ? Number(plan.includedCredits ?? plan.credits ?? 0) : Number(body.credits || 0)
     const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
       packageId: pack?.id || packageId || null,
-      planId: typeof body.planId === 'string' ? body.planId.trim() : null,
+      planId: plan?.id || planId || null,
+      organizationId: sponsorApplication?.organizationId || (typeof body.organizationId === 'string' ? body.organizationId.trim() : null),
+      purchaseType: sponsorApplication ? 'sponsor_grant' : typeof body.purchaseType === 'string' ? body.purchaseType.trim() : null,
+      programId: typeof body.programId === 'string' ? body.programId.trim() : null,
+      hackathonId: typeof body.hackathonId === 'string' ? body.hackathonId.trim() : null,
+      budgetId: typeof body.budgetId === 'string' ? body.budgetId.trim() : null,
+      sponsorApplicationId: sponsorApplicationId || null,
+      organizationCapabilities: plan?.organizationCapabilities || plan?.capabilities || null,
+      organizationLimits: plan?.organizationLimits || plan?.limits || null,
+      organizationExpiresAt: plan?.durationDays ? new Date(Date.now() + Number(plan.durationDays) * 86400000).toISOString() : null,
       amount,
-      currency: pack?.currency || body.currency || 'USD',
+      currency: sponsorPackage?.currency || pack?.currency || plan?.currency || body.currency || 'USD',
       credits,
       status: 'pending',
       provider: body.provider || null,

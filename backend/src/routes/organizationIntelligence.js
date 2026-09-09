@@ -1,9 +1,11 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, hackathonOutcomeReport, hackathonTeamConvert, kpiSave, kpis, memberPatch, members, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, sponsorApplicationCreate, sponsorPackageCreate, sponsorPackages, startups } from '../controllers/organizationIntelligenceController.js'
+import { organizationCommercialRateLimit, requireOrganizationCapability } from '../middlewares/organizationCommercial.js'
+import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, hackathonOutcomeReport, hackathonTeamConvert, institutionalSettingsSave, kpiSave, kpis, managedHackathonCreate, memberPatch, members, organizationSupportCreate, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, sponsorApplicationCreate, sponsorApplicationReview, sponsorBenefitFulfill, sponsorConsent, sponsorPackageCreate, sponsorPackages, sponsorTransactionCreate, startups } from '../controllers/organizationIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
+router.use(organizationCommercialRateLimit)
 router.get('/overview', overview)
 router.get('/pulse', pulse)
 router.get('/risks', risks)
@@ -35,9 +37,27 @@ router.post('/reports/generate', reportGenerate)
 router.get('/resource-allocation', resourceAllocation)
 router.get('/alumni', alumniOutcomes)
 router.get('/cohort-benchmarks', cohortBenchmarks)
-router.get('/sponsors/packages', sponsorPackages)
-router.post('/sponsors/packages', sponsorPackageCreate)
-router.post('/sponsors/applications', sponsorApplicationCreate)
+router.get('/sponsors/packages', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorPackages)
+router.post('/sponsors/packages', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorPackageCreate)
+router.post('/sponsors/applications', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorApplicationCreate)
+router.patch('/sponsors/applications/:applicationId', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorApplicationReview)
+router.post('/sponsors/transactions', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorTransactionCreate)
+router.post('/sponsors/benefits/:benefitId/fulfill', requireOrganizationCapability('ORGANIZATION_SPONSOR_MANAGEMENT'), sponsorBenefitFulfill)
+router.post('/sponsors/consent', sponsorConsent)
+router.post('/managed-hackathons', requireOrganizationCapability('ORGANIZATION_MANAGED_HACKATHON'), managedHackathonCreate)
+router.patch('/institutional-settings', institutionalSettingsSave)
+router.post('/support', requireOrganizationCapability('ORGANIZATION_SUPPORT_WORKFLOW'), organizationSupportCreate)
 router.get('/hackathons/:hackathonId/outcome', hackathonOutcomeReport)
 router.post('/hackathons/:hackathonId/teams/:teamId/convert', hackathonTeamConvert)
+router.get('/advanced/risks', requireOrganizationCapability('ORGANIZATION_MONITORING'), risks)
+router.get('/advanced/actions', requireOrganizationCapability('ORGANIZATION_INTERVENTIONS'), actions)
+router.post('/advanced/actions', requireOrganizationCapability('ORGANIZATION_INTERVENTIONS', { consume: true }), actionCreate)
+router.post('/advanced/briefing', requireOrganizationCapability('ORGANIZATION_PROGRAM_ANALYTICS', { consume: true }), briefing)
+router.post('/advanced/refresh', requireOrganizationCapability('ORGANIZATION_MONITORING', { consume: true }), refresh)
+router.get('/advanced/recommendations', requireOrganizationCapability('ORGANIZATION_INTERVENTIONS'), recommendations)
+router.get('/advanced/programs/:programId/health', requireOrganizationCapability('ORGANIZATION_PROGRAM_ANALYTICS'), programHealth)
+router.post('/advanced/reports/generate', requireOrganizationCapability('ORGANIZATION_REPORT_EXPORT', { consume: true }), reportGenerate)
+router.get('/advanced/resource-allocation', requireOrganizationCapability('ORGANIZATION_PROGRAM_ANALYTICS'), resourceAllocation)
+router.get('/advanced/alumni', requireOrganizationCapability('ORGANIZATION_PROGRAM_ANALYTICS'), alumniOutcomes)
+router.get('/advanced/cohort-benchmarks', requireOrganizationCapability('ORGANIZATION_PROGRAM_ANALYTICS'), cohortBenchmarks)
 export default router
