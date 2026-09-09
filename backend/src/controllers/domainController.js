@@ -93,6 +93,7 @@ import {
   workspaceContext,
   workspaceContextAsync,
 } from '../services/domainService.js'
+import { attachHackathonProject, getHackathonProjectEntry } from '../services/workspaceCapabilityService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 
@@ -159,6 +160,18 @@ export async function workspaceContextGet(req, res) {
   const result = await workspaceContextAsync(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
   return res.json(result)
+}
+
+export function hackathonProjectEntryCreate(req, res) {
+  const result = attachHackathonProject(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export function hackathonProjectEntryGet(req, res) {
+  const entry = getHackathonProjectEntry(req.user.id, req.params.hackathonId, req.params.teamId)
+  if (!entry) return notFound(res, 'Hackathon project entry not found')
+  return res.json({ entry })
 }
 
 export async function workspaceInvitationCreate(req, res) {

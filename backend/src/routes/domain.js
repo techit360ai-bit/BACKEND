@@ -41,6 +41,8 @@ import {
   hackathonTeamPatch,
   hackathonVelocity,
   hackathonWorkspace,
+  hackathonProjectEntryCreate,
+  hackathonProjectEntryGet,
   hackathonReport,
   hackathonFinal,
   intakeCreate,
@@ -210,6 +212,8 @@ router.patch('/hackathons/:hackathonId/teams/:teamId', hackathonTeamPatch)
 router.post('/hackathons/:hackathonId/teams/:teamId/final', hackathonFinal)
 router.get('/hackathons/:hackathonId/teams/:teamId/status', hackathonTeamStatus)
 router.post('/hackathons/:hackathonId/teams/:teamId/workspace', hackathonWorkspace)
+router.post('/hackathons/:hackathonId/teams/:teamId/project-entry', requireCapability('workspace.hackathon.attach'), hackathonProjectEntryCreate)
+router.get('/hackathons/:hackathonId/teams/:teamId/project-entry', hackathonProjectEntryGet)
 router.post('/hackathons/:hackathonId/teams/:teamId/report', hackathonReport)
 router.get('/hackathons/:hackathonId', hackathonGet)
 

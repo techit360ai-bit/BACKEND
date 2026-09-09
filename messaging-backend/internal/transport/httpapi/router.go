@@ -63,6 +63,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/conversations", handleListConversations(d))
 			r.Get("/conversations/{id}/messages", handleHistory(d))
 			r.Post("/conversations/{id}/messages", handleRESTSend(d))
+			r.Patch("/conversations/{id}/messages/{messageId}", handleEditMessage(d))
+			r.Delete("/conversations/{id}/messages/{messageId}", handleDeleteMessage(d))
 			r.Post("/conversations/{id}/read", handleMarkRead(d))
 			r.Post("/conversations/{id}/request/accept", handleMessageRequestStatus(d, "active"))
 			r.Post("/conversations/{id}/request/decline", handleMessageRequestStatus(d, "declined"))

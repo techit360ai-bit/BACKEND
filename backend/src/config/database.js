@@ -248,6 +248,14 @@ const INITIAL = {
   academyAssessments: [],
   academyEvents: [],
   academyBadges: [],
+  workspaceBuildProfiles: [],
+  workspaceCostEstimates: [],
+  workspaceLifecycleEvents: [],
+  workspacePreviewContexts: [],
+  userModelConnections: [],
+  workspaceModelBindings: [],
+  modelUsageEvents: [],
+  hackathonProjectEntries: [],
 }
 
 let sqliteDb = null

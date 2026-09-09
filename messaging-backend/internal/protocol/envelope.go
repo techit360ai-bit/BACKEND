@@ -29,6 +29,8 @@ const (
 const (
 	TypeMessageAck      = "message.ack"
 	TypeMessageNew      = "message.new"
+	TypeMessageUpdated  = "message.updated"
+	TypeMessageDeleted  = "message.deleted"
 	TypeReceiptUpdate   = "receipt.update"
 	TypeTypingIndicator = "typing.indicator"
 	TypePresenceChanged = "presence.changed"

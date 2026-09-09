@@ -77,6 +77,17 @@ type Message struct {
 	Body           string
 	Mentions       []Mention
 	CreatedAt      time.Time
+	EditedAt       *time.Time
+	EditVersion    int
+	DeletedAt      *time.Time
+	DeletedBy      string
+}
+
+// MessageMutationStore is implemented by stores that support audited edits and
+// soft deletion. It is optional so legacy adapters remain readable during rollout.
+type MessageMutationStore interface {
+	EditMessage(ctx context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (Message, error)
+	DeleteMessage(ctx context.Context, messageID, actorID string, expectedVersion int, now time.Time) (Message, error)
 }
 
 // ReceiptState enumerates per-recipient DM delivery states.

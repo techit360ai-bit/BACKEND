@@ -233,12 +233,35 @@ func handleHistory(d Deps) http.HandlerFunc {
 		for _, m := range msgs {
 			out = append(out, map[string]any{
 				"id": m.ID, "convId": m.ConversationID, "senderId": m.SenderID,
-				"type": m.Type, "body": m.Body, "mentions": m.Mentions, "ts": m.CreatedAt,
+				"type": m.Type, "body": func() string { if m.DeletedAt != nil { return "This message was deleted" }; return m.Body }(), "mentions": m.Mentions, "ts": m.CreatedAt, "editedAt": m.EditedAt, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"messages": out})
 	}
 }
+
+func handleEditMessage(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct { Body string `json:"body"`; ExpectedVersion int `json:"expectedVersion"` }
+		if json.NewDecoder(r.Body).Decode(&body) != nil || strings.TrimSpace(body.Body) == "" { writeErr(w, http.StatusBadRequest, "body required"); return }
+		belongs, err := d.Messages.BelongsToConversation(r.Context(), chi.URLParam(r, "messageId"), chi.URLParam(r, "id")); if err != nil || !belongs { writeErr(w, http.StatusNotFound, "message not found"); return }
+		m, err := d.Messaging.EditMessage(r.Context(), currentUser(r), chi.URLParam(r, "messageId"), strings.TrimSpace(body.Body), body.ExpectedVersion)
+		if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }
+		writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "convId": m.ConversationID, "body": m.Body, "editedAt": m.EditedAt, "editVersion": m.EditVersion})
+	}
+}
+
+func handleDeleteMessage(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct { ExpectedVersion int `json:"expectedVersion"` }; _ = json.NewDecoder(r.Body).Decode(&body)
+		belongs, err := d.Messages.BelongsToConversation(r.Context(), chi.URLParam(r, "messageId"), chi.URLParam(r, "id")); if err != nil || !belongs { writeErr(w, http.StatusNotFound, "message not found"); return }
+		m, err := d.Messaging.DeleteMessage(r.Context(), currentUser(r), chi.URLParam(r, "messageId"), body.ExpectedVersion)
+		if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }
+		writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "convId": m.ConversationID, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion})
+	}
+}
+
+func mutationStatus(err error) int { if errors.Is(err, store.ErrNotFound) { return http.StatusNotFound }; if strings.Contains(err.Error(), "forbidden") { return http.StatusForbidden }; if strings.Contains(err.Error(), "conflict") { return http.StatusConflict }; if strings.Contains(err.Error(), "window") { return http.StatusForbidden }; if errors.Is(err, messaging.ErrMutationUnsupported) { return http.StatusNotImplemented }; return http.StatusBadRequest }
 
 func handleRESTSend(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

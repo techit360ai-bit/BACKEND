@@ -106,6 +106,24 @@ export async function computeGsisNarrative(token, componentScores) {
   try { return await requestJson('/api/v1/gsis/compute', { token, body: { component_scores: componentScores, ...componentScores } }) } catch { return null }
 }
 
+// Workspace callers can attach an explicit provider funding policy. The router
+// remains responsible for provider execution; this metadata prevents a BYOK
+// request from being silently billed to TechIT when a personal connection fails.
+export async function requestWorkspaceAI(token, input, routing = {}) {
+  if (!token) return null
+  try {
+    return await requestJson('/api/v1/workspace/execute', { token, body: {
+      ...input,
+      workspace_id: routing.workspaceId,
+      provider_mode: routing.providerMode || 'platform',
+      connection_id: routing.connectionId || undefined,
+      model_id: routing.modelId || undefined,
+      operation: routing.operation || 'chat',
+      privacy_policy_version: routing.privacyPolicyVersion || 'workspace-byok-v1',
+    } })
+  } catch { return null }
+}
+
 /**
  * Best-effort extraction of a human-readable recommendation string from the
  * (LLM-driven, variable-shape) ai-router response. Returns null if none found.

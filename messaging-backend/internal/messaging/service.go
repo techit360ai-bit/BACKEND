@@ -23,6 +23,7 @@ var ErrNotParticipant = errors.New("not a participant")
 var ErrMessageNotInConversation = errors.New("message not in conversation")
 var ErrMessageRequestPending = errors.New("message request is pending")
 var ErrMessageRequestDeclined = errors.New("message request was declined")
+var ErrMutationUnsupported = errors.New("message mutation unsupported")
 
 // Service handles DM messaging.
 type Service struct {
@@ -182,6 +183,24 @@ func (s *Service) MarkRead(ctx context.Context, readerID string, p protocol.Read
 		}
 	}
 	return nil
+}
+
+func (s *Service) EditMessage(ctx context.Context, actorID, messageID, body string, expectedVersion int) (store.Message, error) {
+	mutator, ok := s.msgs.(store.MessageMutationStore); if !ok { return store.Message{}, ErrMutationUnsupported }
+	m, err := mutator.EditMessage(ctx, messageID, actorID, body, expectedVersion, s.now().UTC()); if err != nil { return store.Message{}, err }
+	s.broadcastMutation(ctx, m, protocol.TypeMessageUpdated); return m, nil
+}
+
+func (s *Service) DeleteMessage(ctx context.Context, actorID, messageID string, expectedVersion int) (store.Message, error) {
+	mutator, ok := s.msgs.(store.MessageMutationStore); if !ok { return store.Message{}, ErrMutationUnsupported }
+	m, err := mutator.DeleteMessage(ctx, messageID, actorID, expectedVersion, s.now().UTC()); if err != nil { return store.Message{}, err }
+	s.broadcastMutation(ctx, m, protocol.TypeMessageDeleted); return m, nil
+}
+
+func (s *Service) broadcastMutation(ctx context.Context, m store.Message, typ string) {
+	if m.ConversationID == "" { return }; parts, err := s.convos.Participants(ctx, m.ConversationID); if err != nil { return }
+	data := map[string]any{"id": m.ID, "convId": m.ConversationID, "senderId": m.SenderID, "body": m.Body, "type": m.Type, "ts": m.CreatedAt, "editedAt": m.EditedAt, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion}
+	for _, userID := range parts { _, _ = s.router.RouteToUser(ctx, userID, mustEnvelope(typ, data)) }
 }
 
 func mustEnvelope(t string, data map[string]any) protocol.Envelope {
