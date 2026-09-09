@@ -2,7 +2,8 @@ import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
-import { organizationOverview } from './organizationIntelligenceService.js'
+import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
+import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
 import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, financeReadEnabled, financeReadFallbackEnabled } from '../repositories/financeRepository.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
@@ -13,6 +14,14 @@ function isRecordVisible(record, userId) {
   if (!record || typeof record !== 'object') return false
   if (record.visibility === 'public' || record.public === true) return true
   return OWNER_FIELDS.some(field => record[field] === userId)
+}
+
+function organizationMember(db, userId, organizationId) {
+  return collection(db, 'organizationMemberships').some(row => row.organizationId === organizationId && row.userId === userId && row.status === 'active')
+}
+
+function hackathonVisible(db, hackathon, userId) {
+  return isRecordVisible(hackathon, userId) || Boolean(hackathon?.organizationId && organizationMember(db, userId, hackathon.organizationId))
 }
 
 function owned(record, userId, field = 'ownerId') {
@@ -1298,14 +1307,22 @@ export function listHackathons(userId, { ownedOnly = false } = {}) {
   const db = readAuthorityDb()
   return {
     hackathons: collection(db, 'hackathons')
-      .filter(row => ownedOnly ? row.ownerId === userId : isRecordVisible(row, userId))
+      .filter(row => ownedOnly ? row.ownerId === userId || (row.organizationId && organizationMember(db, userId, row.organizationId)) : hackathonVisible(db, row, userId))
       .sort(byNewest)
       .map(row => hackathonWithCounts(db, row)),
   }
 }
 
 export function createHackathon(userId, body) {
+  const organizationId = typeof body?.organizationId === 'string' ? body.organizationId.trim() : ''
+  if (organizationId) {
+    const context = requireOrganizationPermission(userId, 'programs', organizationId)
+    if (!context.ok) return context
+    const entitlement = evaluateOrganizationEntitlement(organizationId, 'ORGANIZATION_HACKATHON_BASIC', { consume: true })
+    if (!entitlement.allowed) return entitlement
+  }
   return updateAuthorityDb(db => ({ hackathon: insertOwned(db, 'hackathons', userId, {
+    ...(organizationId ? { organizationId, entitlementScope: 'organization' } : {}),
     name: body.name || body.title || 'Untitled hackathon',
     title: body.title || body.name || 'Untitled hackathon',
     theme: body.theme || '',
@@ -1334,18 +1351,19 @@ export function createHackathon(userId, body) {
 
 export function getHackathon(userId, hackathonId) {
   const db = readAuthorityDb()
-  const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
+  const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && hackathonVisible(db, row, userId))
   return hackathon ? hackathonWithCounts(db, hackathon) : null
 }
 
 export function registerHackathon(userId, hackathonId, body) {
   return updateAuthorityDb(db => {
-    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
+    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && hackathonVisible(db, row, userId))
     if (!hackathon) return null
     const existing = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.leaderId === userId)
     if (existing) return { ok: true, team: existing, registration: hackathonRegistration(db, existing, userId) }
     const team = insertOwned(db, 'hackathonTeams', userId, {
       hackathonId,
+      ...(hackathon.organizationId ? { organizationId: hackathon.organizationId, ownerOrganizationId: hackathon.organizationId } : {}),
       name: body.name || body.teamName || 'Untitled team',
       isSolo: !Array.isArray(body.members) || body.members.length <= 1,
       status: 'registered',
@@ -1358,6 +1376,7 @@ export function registerHackathon(userId, hackathonId, body) {
       collection(db, 'hackathonMembers').push({
         id: createId('member'),
         hackathonId,
+        ...(hackathon.organizationId ? { organizationId: hackathon.organizationId, ownerOrganizationId: hackathon.organizationId } : {}),
         teamId: team.id,
         userId: member.userId || member.collaboratorId || null,
         name: member.name || '',
@@ -1716,6 +1735,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
     const project = insertOwned(db, 'projects', userId, {
       title: body.projectTitle || team.name,
       stage: 'idea',
+      ...(team.organizationId ? { organizationId: team.organizationId, ownerOrganizationId: team.organizationId } : {}),
       origin: { kind: 'hackathon', hackathonId, teamId },
     }, 'project')
     const workspace = insertOwned(db, 'workspaces', userId, {
@@ -1724,7 +1744,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
       status: 'active',
       seededFromAnalysis: false,
     }, 'workspace')
-    const binding = insertOwned(db, 'hackathonTeamWorkspaces', userId, { hackathonId, teamId, projectId: project.id, workspaceId: workspace.id }, 'teamws', 'ownerId')
+    const binding = insertOwned(db, 'hackathonTeamWorkspaces', userId, { hackathonId, teamId, projectId: project.id, workspaceId: workspace.id, ...(team.organizationId ? { organizationId: team.organizationId, ownerOrganizationId: team.organizationId } : {}) }, 'teamws', 'ownerId')
     team.hasWorkspace = true
     team.projectId = project.id
     team.workspaceId = workspace.id

@@ -3,6 +3,7 @@ import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../con
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -32,9 +33,17 @@ export const TVCE_CAPABILITIES = Object.freeze([
   { id: 'ORGANIZATION_PROGRAM_SETUP', category: 'organization', description: 'One basic program or cohort setup', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
   { id: 'ORGANIZATION_BASIC_COHORT', category: 'organization', description: 'Basic cohort and startup visibility', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
   { id: 'ORGANIZATION_BASIC_REPORTING', category: 'organization', description: 'Basic organization reporting', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_HACKATHON_BASIC', category: 'organization', description: 'Basic organization-owned hackathon hosting', requiredRole: 'organization', authorizationCapability: 'organization.profile.manage', freeAccess: true, subscriptionAccess: true, creditAccess: false, metering: 'none', workflowStage: 'setup' },
   { id: 'ORGANIZATION_MONITORING', category: 'organization', description: 'Advanced organization monitoring', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
   { id: 'COHORT_INTELLIGENCE', category: 'organization', description: 'Cohort intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
   { id: 'MENTOR_INTELLIGENCE', category: 'organization', description: 'Mentor intelligence', requiredRole: 'organization', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_HACKATHON_ADVANCED', category: 'organization', description: 'Advanced judging and AI evaluation for hackathons', requiredRole: 'organization', authorizationCapability: 'organization.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_PROGRAM_ANALYTICS', category: 'organization', description: 'Program-level analytics and outcomes', requiredRole: 'organization', authorizationCapability: 'organization.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_INTERVENTIONS', category: 'organization', description: 'Evidence-based intervention recommendations', requiredRole: 'organization', authorizationCapability: 'organization.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_REPORT_EXPORT', category: 'organization', description: 'Exportable program and impact reports', requiredRole: 'organization', authorizationCapability: 'organization.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: true, funding: 'subscription_or_credits', metering: 'runtime', workflowStage: 'monitor' },
+  { id: 'ORGANIZATION_SPONSOR_MANAGEMENT', category: 'organization', description: 'Sponsor packages, benefits, and event reporting', requiredRole: 'organization', authorizationCapability: 'institutional.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: false, funding: 'subscription', metering: 'none', workflowStage: 'setup' },
+  { id: 'ORGANIZATION_INTEGRATIONS', category: 'organization', description: 'Organization API and integrations', requiredRole: 'organization', authorizationCapability: 'institutional.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: false, funding: 'subscription', metering: 'none', workflowStage: 'execute' },
+  { id: 'ORGANIZATION_WHITE_LABEL', category: 'organization', description: 'Institutional branding and white-label delivery', requiredRole: 'organization', authorizationCapability: 'institutional.analytics', freeAccess: false, subscriptionAccess: true, creditAccess: false, funding: 'subscription', metering: 'none', workflowStage: 'setup' },
 ])
 
 const catalogById = id => TVCE_CAPABILITIES.find(item => item.id === id) || null
@@ -158,6 +167,9 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
     : effectiveCatalog?.requiredRole === 'founder' && role !== 'founder'
       ? { allowed: false, code: 'role_required', capability }
       : effectiveCatalog ? { allowed: true, code: 'allowed', capability, funding: effectiveCatalog.metering === 'runtime' ? 'runtime' : 'none', metering: effectiveCatalog.metering || 'none', policy: effectiveCatalog } : { allowed: false, code: 'unknown_capability', capability }
+  const organizationDecision = effectiveCatalog?.category === 'organization' && input.organizationId
+    ? evaluateOrganizationEntitlement(input.organizationId, catalog?.id || capability, { db, consume: Boolean(input.consume) })
+    : null
   const account = accountEntitlementFor(db, userId)
   const subscription = subscriptionEntitlement(db, userId)
   const credits = availableCredits(db, userId)
@@ -167,15 +179,20 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
   const freeQuotaAvailable = Boolean(effectiveCatalog?.freeAccess && (!freeQuota || freeUsage < freeQuota))
   const funding = effectiveCatalog?.funding || decision.funding || null
   const metered = effectiveCatalog?.metering === 'runtime' || Boolean(funding)
-  let code = decision.allowed ? 'allowed' : decision.code
-  if (!decision.allowed) code = decision.code
-  else if (freeQuotaAvailable) code = 'allowed'
-  else if (effectiveCatalog?.freeAccess && freeQuota && !freeQuotaAvailable && !subscription.active && credits <= 0 && usageEstimate === 0) code = 'free_allowance_exhausted'
-  else if (funding === 'subscription' && !subscription.active) code = 'active_subscription_required'
-  else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
-  else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
+  const fundingDenied = new Set(['active_subscription_required', 'credits_required', 'subscription_or_credits_required', 'plan_capability_not_included'])
+  const organizationFundingOverride = Boolean(organizationDecision?.allowed && !decision.allowed && fundingDenied.has(decision.code))
+  let code = organizationDecision && !organizationDecision.allowed && fundingDenied.has(decision.code)
+    ? organizationDecision.code
+    : organizationFundingOverride ? 'allowed' : decision.allowed ? 'allowed' : decision.code
+  if (!organizationFundingOverride && !(organizationDecision && !organizationDecision.allowed && fundingDenied.has(decision.code))) {
+    if (freeQuotaAvailable) code = 'allowed'
+    else if (effectiveCatalog?.freeAccess && freeQuota && !freeQuotaAvailable && !subscription.active && credits <= 0 && usageEstimate === 0) code = 'free_allowance_exhausted'
+    else if (funding === 'subscription' && !subscription.active) code = 'active_subscription_required'
+    else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
+    else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
+  }
   const allowed = code === 'allowed'
-  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, recommendedAction: subscription.active ? 'SUBSCRIPTION' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
+  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: organizationFundingOverride ? 'organization' : funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, organizationEntitlement: organizationDecision?.entitlement || null, organizationDecision, recommendedAction: subscription.active ? 'SUBSCRIPTION' : organizationDecision?.code === 'organization_funding_required' ? 'ORGANIZATION_PROGRAM_PASS' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
 export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readAuthorityDb()) }

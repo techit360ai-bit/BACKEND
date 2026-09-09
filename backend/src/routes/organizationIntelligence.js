@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, kpiSave, kpis, memberPatch, members, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, startups } from '../controllers/organizationIntelligenceController.js'
+import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, hackathonOutcomeReport, hackathonTeamConvert, kpiSave, kpis, memberPatch, members, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, sponsorApplicationCreate, sponsorPackageCreate, sponsorPackages, startups } from '../controllers/organizationIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -35,4 +35,9 @@ router.post('/reports/generate', reportGenerate)
 router.get('/resource-allocation', resourceAllocation)
 router.get('/alumni', alumniOutcomes)
 router.get('/cohort-benchmarks', cohortBenchmarks)
+router.get('/sponsors/packages', sponsorPackages)
+router.post('/sponsors/packages', sponsorPackageCreate)
+router.post('/sponsors/applications', sponsorApplicationCreate)
+router.get('/hackathons/:hackathonId/outcome', hackathonOutcomeReport)
+router.post('/hackathons/:hackathonId/teams/:teamId/convert', hackathonTeamConvert)
 export default router

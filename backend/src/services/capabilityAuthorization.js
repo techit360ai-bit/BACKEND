@@ -182,7 +182,7 @@ export function authorizeCapability(userId, capability, context = {}, sourceDb =
     if (!membership) reasons.push('organization_membership_required')
     if (context.membershipRoles?.length && !context.membershipRoles.includes(membership?.role)) reasons.push('organization_permission_required')
   }
-  return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, funding: policy.funding || 'none', metering: policy.funding ? 'runtime' : 'none', policy }
+  return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, organizationId: context.organizationId || null, funding: policy.funding || 'none', metering: policy.funding ? 'runtime' : 'none', policy }
 }
 
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {

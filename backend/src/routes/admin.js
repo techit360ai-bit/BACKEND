@@ -18,7 +18,7 @@ import {
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
-import { adminAnalytics as tvceAdminAnalytics, adminConfig as tvceAdminConfig, adminConfigUpdate as tvceAdminConfigUpdate } from '../controllers/tvceController.js'
+import { adminAnalytics as tvceAdminAnalytics, adminConfig as tvceAdminConfig, adminConfigUpdate as tvceAdminConfigUpdate, adminOrganizationEntitlement as tvceAdminOrganizationEntitlement, adminOrganizationBudget as tvceAdminOrganizationBudget } from '../controllers/tvceController.js'
 
 const router = Router()
 
@@ -50,5 +50,7 @@ router.post('/investor/comparables', requireAdminAuth, requireAdmin, adminCompar
 router.get('/tvce/analytics', requireAdminAuth, requireAdmin, tvceAdminAnalytics)
 router.get('/tvce/config', requireAdminAuth, requireAdmin, tvceAdminConfig)
 router.patch('/tvce/config', requireAdminAuth, requireSuperAdmin, tvceAdminConfigUpdate)
+router.post('/tvce/organization-entitlements', requireAdminAuth, requireSuperAdmin, tvceAdminOrganizationEntitlement)
+router.post('/tvce/organization-budgets', requireAdminAuth, requireSuperAdmin, tvceAdminOrganizationBudget)
 
 export default router
