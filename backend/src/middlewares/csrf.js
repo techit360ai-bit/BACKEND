@@ -7,6 +7,10 @@ const parseCookies = header => Object.fromEntries(String(header || '').split(';'
 export function csrfProtection(req, res, next) {
   if (process.env.NODE_ENV === 'test' && process.env.ENFORCE_CSRF_IN_TEST !== 'true') return next()
   if (!unsafe.has(req.method) || !req.headers.cookie) return next()
+  // A bearer token is explicitly supplied by the caller and is not exposed to
+  // cross-site form requests. Require the double-submit token only for the
+  // cookie-only browser transport, where CSRF protection is necessary.
+  if (String(req.get('authorization') || '').startsWith('Bearer ')) return next()
   const cookies = parseCookies(req.headers.cookie)
   const access = cookies.techit_access
   if (!access) return next()
