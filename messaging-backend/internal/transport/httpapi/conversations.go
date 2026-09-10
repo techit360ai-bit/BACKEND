@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/discovery"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/messaging"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
 )
