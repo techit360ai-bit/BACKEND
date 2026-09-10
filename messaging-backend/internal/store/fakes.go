@@ -435,6 +435,17 @@ func (s *FakeChannelStore) SetReadCursor(_ context.Context, channelID, userID, m
 	return nil
 }
 
+func (s *FakeChannelStore) EditMessage(_ context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (Message, error) {
+	s.mu.Lock(); defer s.mu.Unlock()
+	for channelID, messages := range s.byChan { for i := range messages { m := &messages[i]; if m.ID != messageID { continue }; if m.SenderID != actorID { return Message{}, errors.New("message edit forbidden") }; if m.DeletedAt != nil { return Message{}, errors.New("message deleted") }; if now.Sub(m.CreatedAt) > 15*time.Minute { return Message{}, errors.New("message edit window expired") }; if m.EditVersion != expectedVersion { return Message{}, errors.New("message version conflict") }; m.Body = body; m.EditedAt = &now; m.EditVersion++; s.byChan[channelID] = messages; return *m, nil } }
+	return Message{}, ErrNotFound
+}
+func (s *FakeChannelStore) DeleteMessage(_ context.Context, messageID, actorID string, expectedVersion int, now time.Time) (Message, error) {
+	s.mu.Lock(); defer s.mu.Unlock()
+	for channelID, messages := range s.byChan { for i := range messages { m := &messages[i]; if m.ID != messageID { continue }; if m.SenderID != actorID { return Message{}, errors.New("message delete forbidden") }; if m.DeletedAt != nil { return *m, nil }; if now.Sub(m.CreatedAt) > 15*time.Minute { return Message{}, errors.New("message delete window expired") }; if m.EditVersion != expectedVersion { return Message{}, errors.New("message version conflict") }; m.DeletedAt = &now; m.DeletedBy = actorID; m.EditVersion++; s.byChan[channelID] = messages; return *m, nil } }
+	return Message{}, ErrNotFound
+}
+
 // FakePostStore is an in-memory PostStore.
 type FakePostStore struct {
 	mu                sync.Mutex
@@ -564,6 +575,9 @@ func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) (
 			continue
 		}
 		post := s.posts[id]
+		if post.DeletedAt != nil {
+			continue
+		}
 		if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) {
 			continue
 		}
@@ -601,6 +615,9 @@ func (s *FakePostStore) ListPostsByZone(_ context.Context, viewerRole, zone, bef
 			continue
 		}
 		p := s.posts[id]
+		if p.DeletedAt != nil {
+			continue
+		}
 		if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) {
 			continue
 		}
@@ -653,6 +670,19 @@ func (s *FakePostStore) PostExists(_ context.Context, postID string) (bool, erro
 	defer s.mu.Unlock()
 	_, ok := s.posts[postID]
 	return ok, nil
+}
+
+func (s *FakePostStore) EditPost(_ context.Context, postID, actorID, body string, expectedVersion int, now time.Time) (Post, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); p, ok := s.posts[postID]; if !ok { return Post{}, ErrNotFound }; if p.AuthorID != actorID { return Post{}, errors.New("post edit forbidden") }; if p.DeletedAt != nil { return Post{}, errors.New("post deleted") }; if now.Sub(p.CreatedAt) > 15*time.Minute { return Post{}, errors.New("post edit window expired") }; if p.EditVersion != expectedVersion { return Post{}, errors.New("post version conflict") }; p.Body = body; p.EditedAt = &now; p.EditVersion++; s.posts[postID] = p; return p, nil
+}
+func (s *FakePostStore) DeletePost(_ context.Context, postID, actorID string, expectedVersion int, now time.Time) (Post, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); p, ok := s.posts[postID]; if !ok { return Post{}, ErrNotFound }; if p.AuthorID != actorID { return Post{}, errors.New("post delete forbidden") }; if p.DeletedAt != nil { return p, nil }; if p.EditVersion != expectedVersion { return Post{}, errors.New("post version conflict") }; p.DeletedAt = &now; p.DeletedBy = actorID; p.EditVersion++; s.posts[postID] = p; return p, nil
+}
+func (s *FakePostStore) EditComment(_ context.Context, commentID, actorID, body string, expectedVersion int, now time.Time) (Comment, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); for postID, comments := range s.comments { for i := range comments { c := &comments[i]; if c.ID != commentID { continue }; if c.AuthorID != actorID { return Comment{}, errors.New("comment edit forbidden") }; if c.DeletedAt != nil { return Comment{}, errors.New("comment deleted") }; if now.Sub(c.CreatedAt) > 15*time.Minute { return Comment{}, errors.New("comment edit window expired") }; if c.EditVersion != expectedVersion { return Comment{}, errors.New("comment version conflict") }; c.Body = body; c.EditedAt = &now; c.EditVersion++; s.comments[postID] = comments; return *c, nil } }; return Comment{}, ErrNotFound
+}
+func (s *FakePostStore) DeleteComment(_ context.Context, commentID, actorID string, expectedVersion int, now time.Time) (Comment, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); for postID, comments := range s.comments { for i := range comments { c := &comments[i]; if c.ID != commentID { continue }; if c.AuthorID != actorID { return Comment{}, errors.New("comment delete forbidden") }; if c.DeletedAt != nil { return *c, nil }; if c.EditVersion != expectedVersion { return Comment{}, errors.New("comment version conflict") }; c.DeletedAt = &now; c.DeletedBy = actorID; c.EditVersion++; s.comments[postID] = comments; return *c, nil } }; return Comment{}, ErrNotFound
 }
 
 var (

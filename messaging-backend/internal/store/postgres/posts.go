@@ -2,17 +2,23 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
 )
 
 type PostStore struct{ pool *pgxpool.Pool }
+
+func feedBodyHash(value string) string { return fmt.Sprintf("%x", sha256.Sum256([]byte(value))) }
 
 func (s *PostStore) CreatePost(ctx context.Context, p store.Post) error {
 	aud := p.Audience
@@ -43,10 +49,10 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, author_id, author_role, audience, kind, body, mentions, created_at, expires_at, content_fingerprint, moderation_status, abuse_score FROM posts`
+	q := `SELECT id, author_id, author_role, audience, kind, body, mentions, created_at, expires_at, content_fingerprint, moderation_status, abuse_score, edited_at, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM posts`
 	// Expired opportunities/posts are never eligible for discovery. Posts with
 	// no expiry remain valid indefinitely.
-	conds := []string{"(expires_at IS NULL OR expires_at > now())", "moderation_status <> 'blocked'", "abuse_score < 5"}
+	conds := []string{"deleted_at IS NULL", "(expires_at IS NULL OR expires_at > now())", "moderation_status <> 'blocked'", "abuse_score < 5"}
 	args := []any{}
 	n := 0
 	if zone == "tribe" {
@@ -72,13 +78,49 @@ func (s *PostStore) queryPosts(ctx context.Context, viewerRole, zone, before str
 	for rows.Next() {
 		var p store.Post
 		var mentions []byte
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &mentions, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore); err != nil {
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &mentions, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore, &p.EditedAt, &p.EditVersion, &p.DeletedAt, &p.DeletedBy); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(mentions, &p.Mentions)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func (s *PostStore) EditPost(ctx context.Context, postID, actorID, body string, expectedVersion int, now time.Time) (store.Post, error) {
+	tx, err := s.pool.Begin(ctx); if err != nil { return store.Post{}, err }; defer tx.Rollback(ctx)
+	var p store.Post; var mentions []byte; var deleted *time.Time; var version int
+	err = tx.QueryRow(ctx, `SELECT id, author_id, author_role, audience, kind, body, mentions, created_at, expires_at, content_fingerprint, moderation_status, abuse_score, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM posts WHERE id=$1 FOR UPDATE`, postID).Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &mentions, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore, &version, &deleted, &p.DeletedBy)
+	if errors.Is(err, pgx.ErrNoRows) { return store.Post{}, store.ErrNotFound }; if err != nil { return store.Post{}, err }; if p.AuthorID != actorID { return store.Post{}, errors.New("post edit forbidden") }; if deleted != nil { return store.Post{}, errors.New("post deleted") }; if now.Sub(p.CreatedAt) > 15*time.Minute { return store.Post{}, errors.New("post edit window expired") }; if version != expectedVersion { return store.Post{}, errors.New("post version conflict") }
+	if _, err = tx.Exec(ctx, `UPDATE posts SET body=$2, edited_at=$3, edit_version=edit_version+1 WHERE id=$1`, postID, body, now); err != nil { return store.Post{}, err }; if _, err = tx.Exec(ctx, `INSERT INTO feed_mutation_audit (id,entity_type,entity_id,actor_id,action,previous_hash,new_hash) VALUES ($1,'post',$2,$3,'edit',$4,$5)`, uuid.New(), postID, actorID, feedBodyHash(p.Body), feedBodyHash(body)); err != nil { return store.Post{}, err }
+	_ = json.Unmarshal(mentions, &p.Mentions); p.Body = body; p.EditedAt = &now; p.EditVersion = version + 1; return p, tx.Commit(ctx)
+}
+
+func (s *PostStore) DeletePost(ctx context.Context, postID, actorID string, expectedVersion int, now time.Time) (store.Post, error) {
+	tx, err := s.pool.Begin(ctx); if err != nil { return store.Post{}, err }; defer tx.Rollback(ctx)
+	var p store.Post; var deleted *time.Time; var version int
+	err = tx.QueryRow(ctx, `SELECT id, author_id, author_role, audience, kind, body, created_at, expires_at, content_fingerprint, moderation_status, abuse_score, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM posts WHERE id=$1 FOR UPDATE`, postID).Scan(&p.ID, &p.AuthorID, &p.AuthorRole, &p.Audience, &p.Kind, &p.Body, &p.CreatedAt, &p.ExpiresAt, &p.ContentFingerprint, &p.ModerationStatus, &p.AbuseScore, &version, &deleted, &p.DeletedBy)
+	if errors.Is(err, pgx.ErrNoRows) { return store.Post{}, store.ErrNotFound }; if err != nil { return store.Post{}, err }; if p.AuthorID != actorID { return store.Post{}, errors.New("post delete forbidden") }; if deleted != nil { return p, nil }; if version != expectedVersion { return store.Post{}, errors.New("post version conflict") }
+	if _, err = tx.Exec(ctx, `UPDATE posts SET deleted_at=$2, deleted_by=$3, edit_version=edit_version+1 WHERE id=$1`, postID, now, actorID); err != nil { return store.Post{}, err }; if _, err = tx.Exec(ctx, `INSERT INTO feed_mutation_audit (id,entity_type,entity_id,actor_id,action,previous_hash) VALUES ($1,'post',$2,$3,'delete',$4)`, uuid.New(), postID, actorID, feedBodyHash(p.Body)); err != nil { return store.Post{}, err }
+	p.DeletedAt = &now; p.DeletedBy = actorID; p.EditVersion = version + 1; return p, tx.Commit(ctx)
+}
+
+func (s *PostStore) EditComment(ctx context.Context, commentID, actorID, body string, expectedVersion int, now time.Time) (store.Comment, error) {
+	tx, err := s.pool.Begin(ctx); if err != nil { return store.Comment{}, err }; defer tx.Rollback(ctx)
+	var c store.Comment; var deleted *time.Time; var version int; var mentions []byte
+	err = tx.QueryRow(ctx, `SELECT id, post_id, author_id, body, mentions, created_at, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM post_comments WHERE id=$1 FOR UPDATE`, commentID).Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &mentions, &c.CreatedAt, &version, &deleted, &c.DeletedBy)
+	if errors.Is(err, pgx.ErrNoRows) { return store.Comment{}, store.ErrNotFound }; if err != nil { return store.Comment{}, err }; if c.AuthorID != actorID { return store.Comment{}, errors.New("comment edit forbidden") }; if deleted != nil { return store.Comment{}, errors.New("comment deleted") }; if now.Sub(c.CreatedAt) > 15*time.Minute { return store.Comment{}, errors.New("comment edit window expired") }; if version != expectedVersion { return store.Comment{}, errors.New("comment version conflict") }
+	if _, err = tx.Exec(ctx, `UPDATE post_comments SET body=$2, edited_at=$3, edit_version=edit_version+1 WHERE id=$1`, commentID, body, now); err != nil { return store.Comment{}, err }; if _, err = tx.Exec(ctx, `INSERT INTO feed_mutation_audit (id,entity_type,entity_id,actor_id,action,previous_hash,new_hash) VALUES ($1,'comment',$2,$3,'edit',$4,$5)`, uuid.New(), commentID, actorID, feedBodyHash(c.Body), feedBodyHash(body)); err != nil { return store.Comment{}, err }
+	_ = json.Unmarshal(mentions, &c.Mentions); c.Body = body; c.EditedAt = &now; c.EditVersion = version + 1; return c, tx.Commit(ctx)
+}
+
+func (s *PostStore) DeleteComment(ctx context.Context, commentID, actorID string, expectedVersion int, now time.Time) (store.Comment, error) {
+	tx, err := s.pool.Begin(ctx); if err != nil { return store.Comment{}, err }; defer tx.Rollback(ctx)
+	var c store.Comment; var deleted *time.Time; var version int
+	err = tx.QueryRow(ctx, `SELECT id, post_id, author_id, body, created_at, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM post_comments WHERE id=$1 FOR UPDATE`, commentID).Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &c.CreatedAt, &version, &deleted, &c.DeletedBy)
+	if errors.Is(err, pgx.ErrNoRows) { return store.Comment{}, store.ErrNotFound }; if err != nil { return store.Comment{}, err }; if c.AuthorID != actorID { return store.Comment{}, errors.New("comment delete forbidden") }; if deleted != nil { return c, nil }; if version != expectedVersion { return store.Comment{}, errors.New("comment version conflict") }
+	if _, err = tx.Exec(ctx, `UPDATE post_comments SET deleted_at=$2, deleted_by=$3, edit_version=edit_version+1 WHERE id=$1`, commentID, now, actorID); err != nil { return store.Comment{}, err }; if _, err = tx.Exec(ctx, `INSERT INTO feed_mutation_audit (id,entity_type,entity_id,actor_id,action,previous_hash) VALUES ($1,'comment',$2,$3,'delete',$4)`, uuid.New(), commentID, actorID, feedBodyHash(c.Body)); err != nil { return store.Comment{}, err }
+	c.DeletedAt = &now; c.DeletedBy = actorID; c.EditVersion = version + 1; return c, tx.Commit(ctx)
 }
 
 func (s *PostStore) Like(ctx context.Context, postID, userID string) error {
@@ -105,7 +147,7 @@ func (s *PostStore) AddComment(ctx context.Context, c store.Comment) error {
 }
 
 func (s *PostStore) ListComments(ctx context.Context, postID string) ([]store.Comment, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id, post_id, author_id, body, mentions, created_at FROM post_comments WHERE post_id=$1 ORDER BY id`, postID)
+	rows, err := s.pool.Query(ctx, `SELECT id, post_id, author_id, body, mentions, created_at, edited_at, edit_version, deleted_at, COALESCE(deleted_by::text,'') FROM post_comments WHERE post_id=$1 ORDER BY id`, postID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +156,7 @@ func (s *PostStore) ListComments(ctx context.Context, postID string) ([]store.Co
 	for rows.Next() {
 		var c store.Comment
 		var mentions []byte
-		if err := rows.Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &mentions, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.PostID, &c.AuthorID, &c.Body, &mentions, &c.CreatedAt, &c.EditedAt, &c.EditVersion, &c.DeletedAt, &c.DeletedBy); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(mentions, &c.Mentions)

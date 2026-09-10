@@ -77,6 +77,17 @@ type Message struct {
 	Body           string
 	Mentions       []Mention
 	CreatedAt      time.Time
+	EditedAt       *time.Time
+	EditVersion    int
+	DeletedAt      *time.Time
+	DeletedBy      string
+}
+
+// MessageMutationStore is implemented by stores that support audited edits and
+// soft deletion. It is optional so legacy adapters remain readable during rollout.
+type MessageMutationStore interface {
+	EditMessage(ctx context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (Message, error)
+	DeleteMessage(ctx context.Context, messageID, actorID string, expectedVersion int, now time.Time) (Message, error)
 }
 
 // ReceiptState enumerates per-recipient DM delivery states.
@@ -141,6 +152,10 @@ type Post struct {
 	RecommendationReason string
 	MatchedSignals       []string
 	RankingVersion       string
+	EditedAt             *time.Time
+	EditVersion          int
+	DeletedAt            *time.Time
+	DeletedBy            string
 }
 
 // Comment is a comment on a Post.
@@ -151,6 +166,10 @@ type Comment struct {
 	Body      string
 	Mentions  []Mention
 	CreatedAt time.Time
+	EditedAt  *time.Time
+	EditVersion int
+	DeletedAt *time.Time
+	DeletedBy string
 }
 
 // UserStore upserts and reads users.
@@ -217,6 +236,8 @@ type ChannelStore interface {
 	ExistsByClientMsgID(ctx context.Context, channelID, senderID, clientMsgID string) (string, bool, error)
 	// SetReadCursor advances last_read_msg_id for a member.
 	SetReadCursor(ctx context.Context, channelID, userID, msgID string) error
+	EditMessage(ctx context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (Message, error)
+	DeleteMessage(ctx context.Context, messageID, actorID string, expectedVersion int, now time.Time) (Message, error)
 }
 
 // PostStore manages feed posts, likes, and comments.
@@ -254,6 +275,10 @@ type PostStore interface {
 	UpsertDiscoveryProfile(ctx context.Context, profile DiscoveryProfile) error
 	RankingMetrics(ctx context.Context) ([]RankingMetrics, error)
 	PostInteractionCount(ctx context.Context, userID, postID string) (int, error)
+	EditPost(ctx context.Context, postID, actorID, body string, expectedVersion int, now time.Time) (Post, error)
+	DeletePost(ctx context.Context, postID, actorID string, expectedVersion int, now time.Time) (Post, error)
+	EditComment(ctx context.Context, commentID, actorID, body string, expectedVersion int, now time.Time) (Comment, error)
+	DeleteComment(ctx context.Context, commentID, actorID string, expectedVersion int, now time.Time) (Comment, error)
 }
 
 type FeedEvent struct {

@@ -15,6 +15,7 @@ import (
 
 // ErrNotMember is returned when a user is not a member of the channel.
 var ErrNotMember = errors.New("not a channel member")
+var ErrMutationUnsupported = errors.New("channel mutation unsupported")
 
 // Service handles channel messaging.
 type Service struct {
@@ -113,6 +114,24 @@ func (s *Service) RelayTyping(ctx context.Context, fromUser, channelID string, i
 		}
 	}
 	return nil
+}
+
+func (s *Service) EditMessage(ctx context.Context, actorID, messageID, body string, expectedVersion int) (store.Message, error) {
+	memberStore, ok := s.chans.(interface { EditMessage(context.Context, string, string, string, int, time.Time) (store.Message, error) }); if !ok { return store.Message{}, ErrMutationUnsupported }
+	m, err := memberStore.EditMessage(ctx, messageID, actorID, body, expectedVersion, s.now().UTC()); if err != nil { return store.Message{}, err }
+	s.broadcastMutation(ctx, m, protocol.TypeMessageUpdated); return m, nil
+}
+
+func (s *Service) DeleteMessage(ctx context.Context, actorID, messageID string, expectedVersion int) (store.Message, error) {
+	memberStore, ok := s.chans.(interface { DeleteMessage(context.Context, string, string, int, time.Time) (store.Message, error) }); if !ok { return store.Message{}, ErrMutationUnsupported }
+	m, err := memberStore.DeleteMessage(ctx, messageID, actorID, expectedVersion, s.now().UTC()); if err != nil { return store.Message{}, err }
+	s.broadcastMutation(ctx, m, protocol.TypeMessageDeleted); return m, nil
+}
+
+func (s *Service) broadcastMutation(ctx context.Context, m store.Message, typ string) {
+	if m.ChannelID == "" { return }; members, err := s.chans.Members(ctx, m.ChannelID); if err != nil { return }
+	data := map[string]any{"id": m.ID, "channelId": m.ChannelID, "senderId": m.SenderID, "body": m.Body, "type": m.Type, "ts": m.CreatedAt, "editedAt": m.EditedAt, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion}
+	for _, userID := range members { _, _ = s.router.RouteToUser(ctx, userID, mustEnvelope(typ, data)) }
 }
 
 func mustEnvelope(t string, data map[string]any) protocol.Envelope {
