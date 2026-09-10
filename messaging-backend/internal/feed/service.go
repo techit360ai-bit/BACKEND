@@ -27,6 +27,7 @@ var ErrInvalidKind = errors.New("invalid post kind for role")
 // ErrDuplicatePost is returned when an author submits the same normalized
 // content more than once.
 var ErrDuplicatePost = errors.New("duplicate post")
+var ErrMutationUnsupported = errors.New("feed mutation unsupported")
 
 // Service handles feed posts.
 type Service struct {
@@ -375,6 +376,26 @@ func (s *Service) ListPosts(ctx context.Context, before string, limit int) ([]st
 // ListComments returns a post's comments.
 func (s *Service) ListComments(ctx context.Context, postID string) ([]store.Comment, error) {
 	return s.posts.ListComments(ctx, postID)
+}
+
+func (s *Service) EditPost(ctx context.Context, actorID, postID, body string, expectedVersion int, audience []string) (store.Post, error) {
+	p, err := s.posts.EditPost(ctx, postID, actorID, strings.TrimSpace(body), expectedVersion, s.now().UTC()); if err != nil { return store.Post{}, err }
+	s.invalidate(ctx); s.broadcast(ctx, actorID, audience, protocol.TypePostUpdated, map[string]any{"id": p.ID, "authorId": p.AuthorID, "body": p.Body, "editedAt": p.EditedAt, "editVersion": p.EditVersion}); return p, nil
+}
+
+func (s *Service) DeletePost(ctx context.Context, actorID, postID string, expectedVersion int, audience []string) (store.Post, error) {
+	p, err := s.posts.DeletePost(ctx, postID, actorID, expectedVersion, s.now().UTC()); if err != nil { return store.Post{}, err }
+	s.invalidate(ctx); s.broadcast(ctx, actorID, audience, protocol.TypePostDeleted, map[string]any{"id": p.ID, "authorId": p.AuthorID, "deletedAt": p.DeletedAt, "editVersion": p.EditVersion}); return p, nil
+}
+
+func (s *Service) EditComment(ctx context.Context, actorID, commentID, body string, expectedVersion int, audience []string) (store.Comment, error) {
+	c, err := s.posts.EditComment(ctx, commentID, actorID, strings.TrimSpace(body), expectedVersion, s.now().UTC()); if err != nil { return store.Comment{}, err }
+	s.invalidate(ctx); s.broadcast(ctx, actorID, audience, protocol.TypeCommentUpdated, map[string]any{"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "body": c.Body, "editedAt": c.EditedAt, "editVersion": c.EditVersion}); return c, nil
+}
+
+func (s *Service) DeleteComment(ctx context.Context, actorID, commentID string, expectedVersion int, audience []string) (store.Comment, error) {
+	c, err := s.posts.DeleteComment(ctx, commentID, actorID, expectedVersion, s.now().UTC()); if err != nil { return store.Comment{}, err }
+	s.invalidate(ctx); s.broadcast(ctx, actorID, audience, protocol.TypeCommentDeleted, map[string]any{"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "deletedAt": c.DeletedAt, "editVersion": c.EditVersion}); return c, nil
 }
 
 func (s *Service) SavePost(ctx context.Context, postID, userID string, saved bool) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -107,7 +108,7 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		for _, p := range posts {
 			out = append(out, map[string]any{
 				"id": p.ID, "authorId": p.AuthorID, "authorRole": p.AuthorRole,
-				"author": userWire(d, r, p.AuthorID), "audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "mentions": p.Mentions, "ts": p.CreatedAt, "expiresAt": p.ExpiresAt,
+				"author": userWire(d, r, p.AuthorID), "audience": p.Audience, "kind": p.Kind, "category": store.CategoryForKind(p.Kind), "body": p.Body, "mentions": p.Mentions, "ts": p.CreatedAt, "expiresAt": p.ExpiresAt, "editedAt": p.EditedAt, "editVersion": p.EditVersion,
 				"recommendationReason": p.RecommendationReason, "matchedSignals": p.MatchedSignals, "rankingVersion": p.RankingVersion, "moderationStatus": p.ModerationStatus,
 			})
 		}
@@ -117,6 +118,28 @@ func handleListPosts(d Deps) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"posts": out, "category": category, "nextCursor": nextCursor, "hasMore": nextCursor != ""})
 	}
+}
+
+func mutationBody(r *http.Request) (string, int, error) {
+	var body struct { Body string `json:"body"`; ExpectedVersion int `json:"expectedVersion"` }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || strings.TrimSpace(body.Body) == "" { return "", 0, errors.New("body required") }
+	return strings.TrimSpace(body.Body), body.ExpectedVersion, nil
+}
+
+func handleEditPost(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { body, version, err := mutationBody(r); if err != nil { writeErr(w, http.StatusBadRequest, err.Error()); return }; p, err := d.Feed.EditPost(r.Context(), currentUser(r), chi.URLParam(r, "id"), body, version, audience(d, r)); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "authorId": p.AuthorID, "body": p.Body, "editedAt": p.EditedAt, "editVersion": p.EditVersion}) }
+}
+
+func handleDeletePost(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { var body struct { ExpectedVersion int `json:"expectedVersion"` }; _ = json.NewDecoder(r.Body).Decode(&body); p, err := d.Feed.DeletePost(r.Context(), currentUser(r), chi.URLParam(r, "id"), body.ExpectedVersion, audience(d, r)); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": p.ID, "authorId": p.AuthorID, "deletedAt": p.DeletedAt, "editVersion": p.EditVersion}) }
+}
+
+func handleEditComment(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { body, version, err := mutationBody(r); if err != nil { writeErr(w, http.StatusBadRequest, err.Error()); return }; c, err := d.Feed.EditComment(r.Context(), currentUser(r), chi.URLParam(r, "commentId"), body, version, audience(d, r)); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "body": c.Body, "editedAt": c.EditedAt, "editVersion": c.EditVersion}) }
+}
+
+func handleDeleteComment(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { var body struct { ExpectedVersion int `json:"expectedVersion"` }; _ = json.NewDecoder(r.Body).Decode(&body); c, err := d.Feed.DeleteComment(r.Context(), currentUser(r), chi.URLParam(r, "commentId"), body.ExpectedVersion, audience(d, r)); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "deletedAt": c.DeletedAt, "editVersion": c.EditVersion}) }
 }
 
 func handleCreatePost(d Deps) http.HandlerFunc {
@@ -414,7 +437,7 @@ func handleListComments(d Deps) http.HandlerFunc {
 		out := make([]map[string]any, 0, len(cs))
 		for _, c := range cs {
 			out = append(out, map[string]any{
-				"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "author": userWire(d, r, c.AuthorID), "body": c.Body, "mentions": c.Mentions, "ts": c.CreatedAt,
+				"id": c.ID, "postId": c.PostID, "authorId": c.AuthorID, "author": userWire(d, r, c.AuthorID), "body": func() string { if c.DeletedAt != nil { return "This comment was deleted" }; return c.Body }(), "mentions": c.Mentions, "ts": c.CreatedAt, "editedAt": c.EditedAt, "deletedAt": c.DeletedAt, "editVersion": c.EditVersion,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"comments": out})

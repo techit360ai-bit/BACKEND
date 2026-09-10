@@ -56,7 +56,7 @@ func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, befor
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	q := `SELECT id, conversation_id, sender_id, type, body, mentions, created_at, edited_at, edit_version, deleted_at, deleted_by
+	q := `SELECT id, conversation_id, sender_id, type, body, mentions, created_at, edited_at, edit_version, deleted_at, COALESCE(deleted_by::text,'')
 	      FROM messages WHERE conversation_id=$1`
 	args := []any{convID}
 	if before != "" {
@@ -73,9 +73,11 @@ func (s *MessageStore) MessagesByConversation(ctx context.Context, convID, befor
 	for rows.Next() {
 		var m store.Message
 		var raw []byte
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &raw, &m.CreatedAt, &m.EditedAt, &m.EditVersion, &m.DeletedAt, &m.DeletedBy); err != nil {
+		var deletedBy *string
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &raw, &m.CreatedAt, &m.EditedAt, &m.EditVersion, &m.DeletedAt, &deletedBy); err != nil {
 			return nil, err
 		}
+		if deletedBy != nil { m.DeletedBy = *deletedBy }
 		_ = json.Unmarshal(raw, &m.Mentions)
 		out = append(out, m)
 	}
@@ -115,9 +117,9 @@ func (s *MessageStore) BelongsToConversation(ctx context.Context, msgID, convID 
 
 func (s *MessageStore) EditMessage(ctx context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (store.Message, error) {
 	tx, err := s.pool.Begin(ctx); if err != nil { return store.Message{}, err }; defer tx.Rollback(ctx)
-	var m store.Message; var raw []byte; var edited, deleted *time.Time; var version int
-	err = tx.QueryRow(ctx, `SELECT id, conversation_id, channel_id, sender_id, type, body, mentions, created_at, edited_at, edit_version, deleted_at, deleted_by FROM messages WHERE id=$1 FOR UPDATE`, messageID).Scan(&m.ID, &m.ConversationID, &m.ChannelID, &m.SenderID, &m.Type, &m.Body, &raw, &m.CreatedAt, &edited, &version, &deleted, &m.DeletedBy)
-	if errors.Is(err, pgx.ErrNoRows) { return store.Message{}, store.ErrNotFound }; if err != nil { return store.Message{}, err }
+	var m store.Message; var raw []byte; var edited, deleted *time.Time; var version int; var deletedBy *string
+	err = tx.QueryRow(ctx, `SELECT id, conversation_id, channel_id, sender_id, type, body, mentions, created_at, edited_at, edit_version, deleted_at, deleted_by FROM messages WHERE id=$1 FOR UPDATE`, messageID).Scan(&m.ID, &m.ConversationID, &m.ChannelID, &m.SenderID, &m.Type, &m.Body, &raw, &m.CreatedAt, &edited, &version, &deleted, &deletedBy)
+	if errors.Is(err, pgx.ErrNoRows) { return store.Message{}, store.ErrNotFound }; if err != nil { return store.Message{}, err }; if deletedBy != nil { m.DeletedBy = *deletedBy }
 	if m.SenderID != actorID { return store.Message{}, errors.New("message edit forbidden") }; if deleted != nil { return store.Message{}, errors.New("message deleted") }; if now.Sub(m.CreatedAt) > 15*time.Minute { return store.Message{}, errors.New("message edit window expired") }; if version != expectedVersion { return store.Message{}, errors.New("message version conflict") }
 	if _, err = tx.Exec(ctx, `UPDATE messages SET body=$2, edited_at=$3, edit_version=edit_version+1 WHERE id=$1`, messageID, body, now); err != nil { return store.Message{}, err }
 	if _, err = tx.Exec(ctx, `INSERT INTO message_mutation_audit (id,message_id,actor_id,action,previous_hash,new_hash) VALUES ($1,$2,$3,'edit',$4,$5)`, uuid.New(), messageID, actorID, bodyHash(m.Body), bodyHash(body)); err != nil { return store.Message{}, err }

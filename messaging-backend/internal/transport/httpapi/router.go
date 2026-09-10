@@ -73,10 +73,14 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/channels", handleListChannels(d))
 			r.Get("/channels/{id}/messages", handleChannelHistory(d))
 			r.Post("/channels/{id}/messages", handleChannelSend(d))
+			r.Patch("/channels/{id}/messages/{messageId}", handleChannelEdit(d))
+			r.Delete("/channels/{id}/messages/{messageId}", handleChannelDelete(d))
 			r.Post("/channels/{id}/read", handleChannelRead(d))
 
 			r.Get("/posts", handleListPosts(d))
 			r.Post("/posts", handleCreatePost(d))
+			r.Patch("/posts/{id}", handleEditPost(d))
+			r.Delete("/posts/{id}", handleDeletePost(d))
 			r.Post("/posts/{id}/like", handleLikePost(d))
 			r.Delete("/posts/{id}/like", handleUnlikePost(d))
 			r.Post("/posts/{id}/save", handleSavePost(d))
@@ -97,6 +101,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/users/{userId}/block", handleCreatorControl(d, "block", false))
 			r.Get("/posts/{id}/comments", handleListComments(d))
 			r.Post("/posts/{id}/comments", handleAddComment(d))
+			r.Patch("/posts/{id}/comments/{commentId}", handleEditComment(d))
+			r.Delete("/posts/{id}/comments/{commentId}", handleDeleteComment(d))
 
 			r.Post("/demos", handleCreateDemo(d))
 			r.Get("/demos", handleListDemos(d))
