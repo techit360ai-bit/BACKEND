@@ -319,6 +319,7 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
   const paywalls = collection(db, 'paywallEvents').filter(inPeriod)
   const webhookEvents = collection(db, 'billingWebhookEvents').filter(inPeriod)
   const workflows = collection(db, 'workflowSnapshots').filter(inPeriod)
+  const usageEvents = collection(db, 'usageEvents').filter(inPeriod)
   const paidUsers = new Set([...payments, ...entitlements].map(row => row.userId).filter(Boolean))
   const creditBuyers = new Set(ledger.filter(row => ['credit_purchase', 'credits_purchased'].includes(row.type) && number(row.deltaCredits ?? row.credits) > 0).map(row => row.userId).filter(Boolean))
   const subscriptionUsers = new Set(subscriptions.map(row => row.userId).filter(Boolean))
@@ -352,6 +353,10 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
     cohortMap.set(cohort, item)
   }
   const revenue = payments.reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const usageCogs = usageEvents.reduce((sum, row) => sum + number(row.totalVariableCostUsd ?? row.totalCogs), 0)
+  const usageRevenue = usageEvents.reduce((sum, row) => sum + number(row.allocatedRevenueUsd ?? row.customerPrice), 0)
+  const usageGrossProfit = usageEvents.reduce((sum, row) => sum + number(row.grossProfitUsd), 0)
+  const usageMargin = usageRevenue > 0 ? usageGrossProfit / usageRevenue : null
   const creditRevenue = payments.filter(row => number(row.credits) > 0).reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
   const subscriptionRevenue = revenue - creditRevenue
   const completedWorkflows = workflows.filter(row => ['resumed', 'completed', 'outcome_delivered'].includes(row.status)).length
@@ -366,6 +371,10 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
       paidAccounts: paidUsers.size, creditBuyers: creditBuyers.size, activeSubscriptions: subscriptionUsers.size,
       webhookProcessed: webhookEvents.filter(row => ['processed', 'idempotent'].includes(row.status)).length,
       webhookFailures: webhookEvents.filter(row => row.status === 'failed').length,
+      usageEvents: usageEvents.length, usageCogsUsd: usageCogs, usageRevenueUsd: usageRevenue,
+      usageGrossProfitUsd: usageGrossProfit, usageGrossMargin: usageMargin,
+      marginWarnings: usageEvents.filter(row => row.marginStatus === 'warning').length,
+      marginCritical: usageEvents.filter(row => row.marginStatus === 'critical').length,
       workflowResumeRate: workflows.length ? Math.round((completedWorkflows / workflows.length) * 1000) / 10 : 0,
     },
     funnel: funnelStages.map(stage => ({ stage, count: eventCount(stage) })),
@@ -439,6 +448,19 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     const workflowId = text(input.workflowId); const workflow = workflowId ? collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId) : null
     if (workflow) { workflow.status = 'resumed'; workflow.resumedAt = now; workflow.updatedAt = now }
     return { ok: true, payment, accountEntitlement: account, workflow: workflow || null }
+  })
+}
+
+export function reversePaymentCredits(userId, paymentId, reason = 'refund') {
+  return updateAuthorityDb(db => {
+    const payment = collection(db, 'paymentIntents').find(row => row.id === paymentId && row.userId === userId)
+    if (!payment) return { ok: false, error: 'payment_not_found' }
+    const purchased = collection(db, 'creditLedger').filter(row => row.paymentIntentId === paymentId && Number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + Number(row.deltaCredits ?? row.credits), 0)
+    const reversed = collection(db, 'creditLedger').filter(row => row.paymentIntentId === paymentId && row.type === 'credit_purchase_reversal').reduce((sum, row) => sum + Math.abs(Number(row.deltaCredits ?? row.credits)), 0)
+    const remaining = Math.max(0, purchased - reversed)
+    if (remaining > 0) collection(db, 'creditLedger').push({ id: createId('credit_reversal'), userId, paymentIntentId: paymentId, deltaCredits: -remaining, credits: -remaining, type: 'credit_purchase_reversal', reason, createdAt: nowIso() })
+    payment.status = reason === 'dispute' ? 'disputed' : 'refunded'; payment.updatedAt = nowIso()
+    return { ok: true, idempotent: remaining === 0, payment, reversedCredits: remaining }
   })
 }
 

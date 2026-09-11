@@ -128,6 +128,21 @@ export async function updateSubscriptionPostgres({ userId, provider, providerId,
   }, { userId })
 }
 
+export async function reversePaymentCreditsPostgres(userId, paymentId, reason = 'refund') {
+  return withPlatformTransaction(async client => {
+    const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
+    if (!payment || payment.userId !== userId) return { ok: false, error: 'payment_not_found' }
+    const ledger = await listByUser(client, 'creditLedger', userId)
+    const purchased = ledger.filter(row => row.paymentIntentId === paymentId && number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
+    const reversed = ledger.filter(row => row.paymentIntentId === paymentId && row.type === 'credit_purchase_reversal').reduce((sum, row) => sum + Math.abs(number(row.deltaCredits ?? row.credits)), 0)
+    const remaining = Math.max(0, purchased - reversed); const now = nowIso()
+    if (remaining > 0) await upsertRecord(client, 'creditLedger', { id: createId('credit_reversal'), userId, paymentIntentId: paymentId, deltaCredits: -remaining, credits: -remaining, type: 'credit_purchase_reversal', reason, createdAt: now, updatedAt: now }, { idempotencyKey: `credit-reversal:${paymentId}:${reason}`, operation: 'insert' })
+    const updated = { ...payment, status: reason === 'dispute' ? 'disputed' : 'refunded', updatedAt: now }
+    await upsertRecord(client, 'paymentIntents', updated, { idempotencyKey: `payment:${paymentId}:${updated.status}`, operation: 'update', expectedVersion: payment.version })
+    return { ok: true, idempotent: remaining === 0, payment: updated, reversedCredits: remaining }
+  }, { userId })
+}
+
 export async function reserveUsagePostgres({ userId, workspaceId = null, requestId, taskType, estimatedCredits, grantId = null, fundingSource = 'payg', metadata = {} }) {
   const credits = Math.max(0, number(estimatedCredits))
   if (!userId || !requestId || !taskType || credits <= 0) return { ok: false, error: 'reservation_fields_required' }

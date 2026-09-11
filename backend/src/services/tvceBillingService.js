@@ -1,8 +1,8 @@
 import crypto from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
-import { fulfillPaymentAsync } from './tvceService.js'
-import { billingEventExistsPostgres, paymentUserPostgres, recordBillingEventPostgres, updateSubscriptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { fulfillPaymentAsync, reversePaymentCredits } from './tvceService.js'
+import { billingEventExistsPostgres, paymentUserPostgres, recordBillingEventPostgres, reversePaymentCreditsPostgres, updateSubscriptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { applyOrganizationPayment, applyOrganizationPaymentLifecycle } from './organizationBillingService.js'
 
 const supported = new Set(['stripe', 'paystack', 'flutterwave'])
@@ -65,6 +65,10 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
           : event.type === 'charge.dispute.created' ? 'disputed'
             : event.type === 'subscription.not_renew' ? 'cancelled'
               : String(event.status || payload.data?.object?.status || 'active')
+    if ((status === 'refunded' || status === 'disputed') && event.paymentId && event.userId) {
+      if (financePostgresEnabled()) await reversePaymentCreditsPostgres(event.userId, event.paymentId, status === 'disputed' ? 'dispute' : 'refund')
+      else reversePaymentCredits(event.userId, event.paymentId, status === 'disputed' ? 'dispute' : 'refund')
+    }
     const userId = event.userId || (financePostgresEnabled() ? await paymentUserPostgres(event.paymentId) : readAuthorityDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId)
     const organizationLifecycle = await applyOrganizationPaymentLifecycle({ paymentId: event.paymentId, providerReference: event.providerReference, status })
     if (organizationLifecycle?.ok === false) return organizationLifecycle
