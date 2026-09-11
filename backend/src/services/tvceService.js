@@ -357,6 +357,23 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
   const usageRevenue = usageEvents.reduce((sum, row) => sum + number(row.allocatedRevenueUsd ?? row.customerPrice), 0)
   const usageGrossProfit = usageEvents.reduce((sum, row) => sum + number(row.grossProfitUsd), 0)
   const usageMargin = usageRevenue > 0 ? usageGrossProfit / usageRevenue : null
+  const tokenTotals = usageEvents.reduce((summary, row) => {
+    summary.inputTokens += number(row.inputTokens ?? row.promptTokens)
+    summary.outputTokens += number(row.outputTokens ?? row.completionTokens)
+    summary.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens)
+    summary.totalTokens += number(row.totalTokens ?? (number(row.inputTokens ?? row.promptTokens) + number(row.outputTokens ?? row.completionTokens)))
+    summary.creditsSettled += number(row.credits)
+    return summary
+  }, { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, creditsSettled: 0 })
+  const providerModel = new Map()
+  for (const row of usageEvents) {
+    const key = `${row.provider || 'unknown'}:${row.model || 'unknown'}`
+    const item = providerModel.get(key) || { provider: row.provider || 'unknown', model: row.model || 'unknown', calls: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, providerCostUsd: 0, totalVariableCostUsd: 0, credits: 0, revenueUsd: 0 }
+    item.calls += 1; item.inputTokens += number(row.inputTokens ?? row.promptTokens); item.outputTokens += number(row.outputTokens ?? row.completionTokens); item.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens); item.totalTokens += number(row.totalTokens); item.providerCostUsd += number(row.providerCostUsd); item.totalVariableCostUsd += number(row.totalVariableCostUsd ?? row.totalCogs); item.credits += number(row.credits); item.revenueUsd += number(row.allocatedRevenueUsd ?? row.customerPrice); providerModel.set(key, item)
+  }
+  const walletCredits = collection(db, 'walletAccounts').reduce((sum, row) => sum + number(row.creditBalance), 0) + ledger.filter(row => number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
+  const reservedCredits = collection(db, 'usageReservations').filter(row => row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+  const freeUsage = collection(db, 'capabilityAnalytics').filter(row => row.eventType === 'capability_completed' && row.fundingSource === 'platform_subsidy' && inPeriod(row)).length
   const creditRevenue = payments.filter(row => number(row.credits) > 0).reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
   const subscriptionRevenue = revenue - creditRevenue
   const completedWorkflows = workflows.filter(row => ['resumed', 'completed', 'outcome_delivered'].includes(row.status)).length
@@ -375,6 +392,8 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
       usageGrossProfitUsd: usageGrossProfit, usageGrossMargin: usageMargin,
       marginWarnings: usageEvents.filter(row => row.marginStatus === 'warning').length,
       marginCritical: usageEvents.filter(row => row.marginStatus === 'critical').length,
+      aiTokenSpend: { ...tokenTotals, providerCostUsd: usageEvents.reduce((sum, row) => sum + number(row.providerCostUsd), 0), infrastructureCostUsd: usageEvents.reduce((sum, row) => sum + number(row.infrastructureCostUsd), 0), totalVariableCostUsd: usageCogs, freeCapabilityUses: freeUsage },
+      wallet: { grossCredits: walletCredits, reservedCredits, availableCredits: Math.max(0, walletCredits - reservedCredits), activeSubscriptionAccounts: subscriptionUsers.size },
       workflowResumeRate: workflows.length ? Math.round((completedWorkflows / workflows.length) * 1000) / 10 : 0,
     },
     funnel: funnelStages.map(stage => ({ stage, count: eventCount(stage) })),
@@ -382,7 +401,8 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
     roleCohorts: roleRetention,
     capabilityConversion: [...capabilityMap.values()].map(row => ({ ...row, conversionRate: row.paywallViews ? Math.round((row.paymentSuccesses / row.paywallViews) * 1000) / 10 : 0 })),
     attribution: [...attributed.values()].map(row => ({ source: row.source, payments: row.payments, revenue: row.revenue, paidUsers: row.paidUsers.size })),
-    drilldown: { payments: payments.slice(-100), paywalls: paywalls.slice(-100), webhooks: webhookEvents.slice(-100), workflows: workflows.slice(-100) },
+    providerModelBreakdown: [...providerModel.values()],
+    drilldown: { payments: payments.slice(-100), paywalls: paywalls.slice(-100), webhooks: webhookEvents.slice(-100), workflows: workflows.slice(-100), usage: usageEvents.slice(-100) },
   }
   return dashboard
 }
