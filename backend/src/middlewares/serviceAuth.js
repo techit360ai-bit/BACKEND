@@ -35,3 +35,9 @@ export const requireUsageGrantIssuer = requireSignedService({
   secretEnv: 'AI_USAGE_GRANT_SERVICE_SECRET',
   defaultServiceId: 'platform-backend',
 })
+
+export const requirePaymentGatewayService = requireSignedService({
+  serviceIdEnv: 'PAYMENT_GATEWAY_SERVICE_ID',
+  secretEnv: 'PAYMENT_GATEWAY_SERVICE_SECRET',
+  defaultServiceId: 'payment-gateway',
+})
