@@ -4,6 +4,8 @@ import { createOrganizationBudget } from '../services/organizationBudgetService.
 import { saveOrganizationEntitlement as saveOrganizationEntitlementRecord } from '../services/organizationEntitlementService.js'
 import { approveOrganizationHackathon } from '../services/domainService.js'
 import { listOrganizationAbuseReviews, reviewOrganizationAbuse } from '../services/organizationProgramService.js'
+import { createWorkspaceTeamGrant } from '../services/workspaceTeamEntitlementService.js'
+import { billingJobStatus, runBillingJobs } from '../services/billingJobsService.js'
 
 const body = req => req.body && typeof req.body === 'object' ? req.body : {}
 const send = (res, result, success = 200) => result?.ok === false ? res.status(result.status || (result.error === 'workflow_not_found' || result.error === 'payment_not_found' ? 404 : 400)).json(result) : res.status(success).json(result)
@@ -31,3 +33,6 @@ export async function workflowSave(req, res) { return send(res, await saveWorkfl
 export async function workflowResume(req, res) { return send(res, await resumeWorkflowAsync(req.user.id, req.params.workflowId, body(req))) }
 export async function paymentFulfill(req, res) { return send(res, await fulfillPaymentAsync(req.user.id, req.params.paymentId, body(req))) }
 export async function checkout(req, res) { const result = await createTvceCheckout(req.user.id, body(req)); return send(res, result, 201) }
+export function teamGrantCreate(req, res) { return send(res, createWorkspaceTeamGrant(req.user.id, body(req)), 201) }
+export function billingJobsRun(req, res) { return send(res, runBillingJobs(req.user.id), 201) }
+export function billingJobsStatus(_req, res) { return res.json(billingJobStatus()) }

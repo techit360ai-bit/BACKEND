@@ -4,6 +4,8 @@ import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptio
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
+import { workspaceTeamGrantFor } from './workspaceTeamEntitlementService.js'
+import { listDefaultRateCards } from './unitEconomicsService.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -14,6 +16,7 @@ const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const text = (value, fallback = '') => typeof value === 'string' ? value.trim() : fallback
 
 export const TVCE_CAPABILITIES = Object.freeze([
+  { id: 'BASIC_AI_ACTION', category: 'platform', description: 'Basic AI action', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'execute' },
   { id: 'IDEA_DIAGNOSTICS_BASIC', category: 'incubation', description: 'Basic idea diagnosis', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'discover' },
   { id: 'CUSTOMER_VALIDATION_BASIC', category: 'validation', description: 'Basic customer validation', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'validate' },
   { id: 'MVP_PLANNING_BASIC', category: 'execution', description: 'Basic MVP planning', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
@@ -105,6 +108,8 @@ export function adminCommercialConfig() {
     capabilities: capabilityCatalog(),
     plans: collection(db, 'billingPlans').map(row => ({ ...row })),
     creditPackages: collection(db, 'creditPackages').map(row => ({ ...row })),
+    rateCards: collection(db, 'rateCards').length ? collection(db, 'rateCards').map(row => ({ ...row })) : listDefaultRateCards(),
+    geoPricingProfiles: collection(db, 'geoPricingProfiles').map(row => ({ ...row })),
     providers: {
       stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
       paystack: Boolean(process.env.PAYSTACK_SECRET_KEY),
@@ -125,6 +130,8 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
     }
     if (Array.isArray(input.plans)) db.billingPlans = input.plans.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
     if (Array.isArray(input.creditPackages)) db.creditPackages = input.creditPackages.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+    if (Array.isArray(input.rateCards)) db.rateCards = input.rateCards.slice(0, 500).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
+    if (Array.isArray(input.geoPricingProfiles)) db.geoPricingProfiles = input.geoPricingProfiles.slice(0, 300).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
     if (input.capabilities && typeof input.capabilities === 'object') {
       db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.capabilities = db.tvceConfig.capabilities || {}
       for (const [capability, patch] of Object.entries(input.capabilities)) {
@@ -134,7 +141,7 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
         db.tvceConfig.capabilities[capability] = next
       }
     }
-    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined }, createdAt: nowIso() })
+    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined, rateCards: Array.isArray(input.rateCards) ? input.rateCards.length : undefined, geoPricingProfiles: Array.isArray(input.geoPricingProfiles) ? input.geoPricingProfiles.length : undefined }, createdAt: nowIso() })
     return { ok: true, config: adminCommercialConfig() }
   })
 }
@@ -174,6 +181,7 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
     : null
   const account = accountEntitlementFor(db, userId)
   const subscription = subscriptionEntitlement(db, userId)
+  const teamGrant = role === 'collaborator' && input.workspaceId ? workspaceTeamGrantFor(userId, input.workspaceId, capability, db) : null
   const credits = availableCredits(db, userId)
   const usageEstimate = Math.max(0, number(input.estimatedCredits ?? input.estimated_credits))
   const freeQuota = effectiveCatalog?.freeQuota || null
@@ -193,8 +201,9 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
     else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
     else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
   }
+  if (teamGrant && ['credits_required', 'active_subscription_required', 'subscription_or_credits_required', 'plan_capability_not_included'].includes(code)) code = 'allowed'
   const allowed = code === 'allowed'
-  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: organizationFundingOverride ? 'organization' : funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, organizationEntitlement: organizationDecision?.entitlement || null, organizationDecision, recommendedAction: subscription.active ? 'SUBSCRIPTION' : organizationDecision?.code === 'organization_funding_required' ? 'ORGANIZATION_PROGRAM_PASS' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
+  return { allowed, code, capability, role, accountEntitlement: account, subscription, teamGrant, availableCredits: credits, usageEstimate: usageEstimate || null, funding: teamGrant ? 'subscription' : organizationFundingOverride ? 'organization' : funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, organizationEntitlement: organizationDecision?.entitlement || null, organizationDecision, recommendedAction: subscription.active || teamGrant ? 'SUBSCRIPTION' : organizationDecision?.code === 'organization_funding_required' ? 'ORGANIZATION_PROGRAM_PASS' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
 export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readAuthorityDb()) }
