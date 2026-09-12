@@ -262,6 +262,9 @@ const INITIAL = {
   workspaceModelBindings: [],
   modelUsageEvents: [],
   hackathonProjectEntries: [],
+  countryRegistryConfigurations: [],
+  organizationRegistryChecks: [],
+  organizationDomainChallenges: [],
 }
 
 let sqliteDb = null
