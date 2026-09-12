@@ -36,6 +36,7 @@ import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import { postgresAuthority } from './middlewares/postgresAuthority.js'
 import { csrfProtection } from './middlewares/csrf.js'
 import { runBillingJobs } from './services/billingJobsService.js'
+import { flushTrustProjectionOutbox } from './services/trustProjectionService.js'
 
 const app = express()
 
@@ -47,6 +48,11 @@ if (process.env.BILLING_JOBS_ENABLED === 'true' && process.env.NODE_ENV !== 'tes
   setInterval(() => {
     try { runBillingJobs('billing-scheduler') } catch (error) { console.error(JSON.stringify({ event: 'billing_jobs_failed', error: error.message })) }
   }, intervalMs).unref?.()
+}
+
+if (process.env.TRUST_PROJECTION_SECRET && process.env.TRUST_PROJECTION_URL && process.env.NODE_ENV !== 'test') {
+  const intervalMs = Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))
+  setInterval(() => { flushTrustProjectionOutbox().catch(error => console.error(JSON.stringify({ event: 'trust_projection_flush_failed', error: error.message }))) }, intervalMs).unref?.()
 }
 
 // Express must trust the platform's single reverse proxy for accurate client

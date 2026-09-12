@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { requireAdmin } from '../utils/roleGuards.js'
-import { activateRole, adminCapabilityPolicies, adminCapabilityPolicyUpdate, adminReverificationNotifications, adminRegistryCheckRun, adminRiskUpdate, adminVerificationAnalytics, adminVerificationOperationReview, adminVerificationOperations, adminVerificationQueue, adminVerificationReview, capabilities, capabilityCheck, deactivateRole, evidenceUploadFinalize, evidenceUploadUrl, mfaEnroll, mfaStatusGet, mfaVerify, organizationClaim, organizationCreate, organizationDomainChallenge, organizationDomainVerify, organizationMemberAdd, organizationMembership, organizationRegistryCheck, registryCatalog, roleAssignmentList, switchRole, trustProfile, verificationEvidence, verificationEvidenceAnalyze, verificationRequest, verificationStatus } from '../controllers/authorizationController.js'
+import { requireAdmin, requireRole } from '../utils/roleGuards.js'
+import { activateRole, adminCapabilityPolicies, adminCapabilityPolicyUpdate, adminReverificationNotifications, adminRegistryCheckRun, adminRiskUpdate, adminVerificationAnalytics, adminVerificationOperationReview, adminVerificationOperations, adminVerificationQueue, adminVerificationReview, capabilities, capabilityCheck, deactivateRole, evidenceUploadFinalize, evidenceUploadUrl, founderTrustAccessDecision, founderTrustAccessList, investorTrustAccessGet, investorTrustAccessRequest, mfaEnroll, mfaStatusGet, mfaVerify, organizationClaim, organizationCreate, organizationDomainChallenge, organizationDomainVerify, organizationMemberAdd, organizationMembership, organizationRegistryCheck, registryCatalog, roleAssignmentList, switchRole, trustProfile, verificationEvidence, verificationEvidenceAnalyze, verificationRequest, verificationStatus } from '../controllers/authorizationController.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { rateLimit } from 'express-rate-limit'
 
@@ -33,6 +33,10 @@ router.post('/organizations/:organizationId/members', requireAuth, organizationM
 router.post('/organizations/:organizationId/verification/registry', requireAuth, verificationLimit, organizationRegistryCheck)
 router.post('/organizations/:organizationId/verification/domain-challenge', requireAuth, verificationLimit, organizationDomainChallenge)
 router.post('/organizations/:organizationId/verification/domain-challenge/:challengeId/verify', requireAuth, verificationLimit, organizationDomainVerify)
+router.get('/investor/trust/:projectId/access-request', requireAuth, requireRole('investor'), investorTrustAccessGet)
+router.post('/investor/trust/:projectId/access-request', requireAuth, requireRole('investor'), verificationLimit, investorTrustAccessRequest)
+router.get('/founder/trust/access-requests', requireAuth, requireRole('founder'), founderTrustAccessList)
+router.post('/founder/trust/access-requests/:requestId/decision', requireAuth, requireRole('founder'), founderTrustAccessDecision)
 router.get('/admin/verifications', requireAdminAuth, requireAdmin, adminVerificationQueue)
 router.post('/admin/verifications/:requestId/review', requireAdminAuth, requireAdmin, adminVerificationReview)
 router.get('/admin/verification-operations', requireAdminAuth, requireAdmin, adminVerificationOperations)

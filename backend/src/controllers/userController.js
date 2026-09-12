@@ -3,6 +3,7 @@ import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/ap
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
+import { publicTrustFor } from '../services/trustVerificationAuthority.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -127,6 +128,7 @@ function publicProfile(profile, db, viewerId) {
     .sort((a, b) => String(b.id).localeCompare(String(a.id)))
     .slice(0, 6)
 
+  const trust = publicTrustFor(profile.id, null, db)
   return {
     id: profile.id,
     name: userName(profile),
@@ -157,6 +159,8 @@ function publicProfile(profile, db, viewerId) {
       connections,
     },
     skills: profile.skills || [],
+    trust: { trust_score: trust.trust_score, tier: trust.tier, verification_status: trust.verification_status, confidence_score: trust.confidence_score, breakdown: trust.breakdown, proof_count: trust.proof_count },
+    verifiedSkills: trust.verifiedSkills,
     recentActivity,
   }
 }
@@ -228,6 +232,7 @@ function safeStringArray(value, maxItems = 24, maxLength = 80) {
 
 function directoryProfile(profile, db, viewerId) {
   const subscription = activeSubscription(db, profile.id)
+  const trust = publicTrustFor(profile.id, null, db)
   return {
     id: profile.id,
     name: userName(profile),
@@ -254,6 +259,8 @@ function directoryProfile(profile, db, viewerId) {
     subscriber: subscription !== null,
     subscriptionLabel: subscription ? 'Subscriber' : null,
     sharedContext: sharedPlatformContext(db, viewerId, profile.id),
+    trust: { trust_score: trust.trust_score, tier: trust.tier, verification_status: trust.verification_status, confidence_score: trust.confidence_score },
+    verifiedSkills: trust.verifiedSkills,
   }
 }
 

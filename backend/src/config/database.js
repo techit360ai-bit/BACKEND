@@ -43,6 +43,8 @@ const INITIAL = {
   contributions: [],
   organizationDashboards: [],
   investorWatchlists: [],
+  investorTrustAccessRequests: [],
+  investorTrustAccessHistory: [],
   dealFlowSnapshots: [],
   investorIntelligenceSnapshots: [],
   investorRiskSignals: [],
@@ -127,6 +129,8 @@ const INITIAL = {
   opportunityApplications: [],
   githubConnections: [],
   githubOauthStates: [],
+  linkedinConnections: [],
+  linkedinOauthStates: [],
   videoLessons: [],
   videoProgress: [],
   userStateMachine: [],
@@ -265,6 +269,12 @@ const INITIAL = {
   countryRegistryConfigurations: [],
   organizationRegistryChecks: [],
   organizationDomainChallenges: [],
+  trustVerificationHistory: [],
+  trustVerificationProofs: [],
+  trustVerificationChallenges: [],
+  verifiedSkills: [],
+  trustScoreSnapshots: [],
+  trustProjectionOutbox: [],
 }
 
 let sqliteDb = null

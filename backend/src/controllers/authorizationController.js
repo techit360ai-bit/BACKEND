@@ -6,6 +6,8 @@ import { beginMfaEnrollment, mfaStatus, verifyMfa } from '../services/mfaService
 import { createEvidenceUpload, finalizeEvidenceUpload } from '../services/evidenceStorageService.js'
 import { identitySecurityEnabled, identitySecurityFallbackEnabled, listIdentitySecurity, syncIdentitySecurity } from '../repositories/identitySecurityRepository.js'
 import { createDomainChallenge, registryCheck, registryConfigurations, reviewVerificationOperation, runRegistryCheck, verificationOperations, verifyDomainChallenge } from '../services/registryVerificationService.js'
+import { reviewTrustProof, trustOperations } from '../services/trustVerificationAuthority.js'
+import { decideInvestorTrustAccess, investorTrustAccessStatus, listFounderTrustAccessRequests, requestInvestorTrustAccess } from '../services/investorTrustAccessService.js'
 
 const body = req => req.body && typeof req.body === 'object' ? req.body : {}
 const result = (res, value, success = 200) => value?.ok === false ? res.status(Number.isInteger(value.status) ? value.status : value.error === 'profile_not_found' ? 404 : 400).json(value) : res.status(success).json(value)
@@ -32,9 +34,9 @@ export function registryCatalog(req, res) { return res.json({ configurations: re
 export function organizationRegistryCheck(req, res) { return result(res, registryCheck(req.user.id, req.params.organizationId, body(req)), 201) }
 export function organizationDomainChallenge(req, res) { return result(res, createDomainChallenge(req.user.id, req.params.organizationId, body(req)), 201) }
 export async function organizationDomainVerify(req, res) { return result(res, await verifyDomainChallenge(req.user.id, req.params.challengeId)) }
-export function adminVerificationOperations(_req, res) { return res.json(verificationOperations()) }
+export function adminVerificationOperations(_req, res) { return res.json({ ...verificationOperations(), trust: trustOperations() }) }
 export async function adminRegistryCheckRun(req, res) { return result(res, await runRegistryCheck(req.params.checkId)) }
-export function adminVerificationOperationReview(req, res) { return result(res, reviewVerificationOperation(req.user.id, req.params.kind, req.params.operationId, body(req))) }
+export function adminVerificationOperationReview(req, res) { const operation = req.params.kind === 'trust_proof' ? reviewTrustProof(req.user.id, req.params.operationId, body(req)) : reviewVerificationOperation(req.user.id, req.params.kind, req.params.operationId, body(req)); return result(res, operation) }
 export async function adminVerificationReview(req, res) { return result(res, await persistedSecurity(req, reviewVerification(req.user.id, req.params.requestId, body(req)), body(req).userId || req.params.userId || req.user.id)) }
 export function adminCapabilityPolicies(_req, res) { return res.json({ policies: Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: capabilityPolicy(capability) })) }) }
 export function adminCapabilityPolicyUpdate(req, res) { return result(res, updateCapabilityPolicy(req.user.id, req.params.capability, body(req).policy || body(req))) }
@@ -48,3 +50,7 @@ export async function evidenceUploadFinalize(req, res) { return result(res, awai
 export async function verificationEvidenceAnalyze(req, res) { return result(res, await analyzeEvidence(req.user.id, req.user.token, req.params.requestId, body(req))) }
 export function adminVerificationAnalytics(_req, res) { return res.json(verificationAnalytics()) }
 export function adminReverificationNotifications(_req, res) { return result(res, generateReverificationNotifications()) }
+export function investorTrustAccessRequest(req, res) { return result(res, requestInvestorTrustAccess(req.user.id, req.params.projectId, body(req)), 201) }
+export function investorTrustAccessGet(req, res) { return result(res, investorTrustAccessStatus(req.user.id, req.params.projectId)) }
+export function founderTrustAccessList(req, res) { return result(res, listFounderTrustAccessRequests(req.user.id, req.query.status ? String(req.query.status) : null)) }
+export function founderTrustAccessDecision(req, res) { return result(res, decideInvestorTrustAccess(req.user.id, req.params.requestId, body(req))) }
