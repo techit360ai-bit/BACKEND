@@ -1,10 +1,12 @@
 import { Router } from 'express'
 import { activity, anomaly, evidence, gsis, investorSignals, match, profileQuality, snapshot, training, trust } from '../controllers/intelligenceController.js'
+import { daily } from '../controllers/continuousIntelligenceController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
 const router = Router()
 router.use(requireAuth)
 router.get('/snapshot', snapshot)
+router.get('/daily', daily)
 router.post('/gsis', gsis)
 router.post('/investor-signals', investorSignals)
 router.post('/match', match)

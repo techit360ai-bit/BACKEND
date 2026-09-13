@@ -20,6 +20,7 @@ import complianceRoutes from './routes/compliance.js'
 import usageSettlementRoutes from './routes/usageSettlement.js'
 import discoveryRoutes from './routes/discovery.js'
 import intelligenceRoutes from './routes/intelligence.js'
+import recommendationIntelligenceRoutes from './routes/recommendationIntelligence.js'
 import authorizationRoutes from './routes/authorization.js'
 import trustRoutes from './routes/trust.js'
 import supportRoutes from './routes/support.js'
@@ -139,6 +140,7 @@ app.post('/api/investor-references/respond/:token', referenceSubmit)
 app.use('/api/organization-intelligence', organizationIntelligenceRoutes)
 app.use('/api/mentorship', mentorshipRoutes)
 app.use('/api/compliance', complianceRoutes)
+app.use('/api/recommendation-intelligence', recommendationIntelligenceRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)

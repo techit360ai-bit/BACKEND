@@ -412,6 +412,21 @@ export function nextBestAction(userId, input = {}) {
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
   const access = evaluateEntitlement(userId, { capability: catalog.id, role })
+  const usage = collection(db, 'capabilityConsumptions').filter(row => row.userId === userId)
+  const completed = usage.filter(row => ['settled', 'completed'].includes(String(row.status).toLowerCase()))
+  const successful = completed.filter(row => row.outcome === 'success' || row.success === true || row.resultStatus === 'success').length
+  const capabilityUses = completed.filter(row => row.capability === catalog.id).length
+  const priorPaywalls = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === catalog.id).length
+  const purchaseGuidance = {
+    relevant: !access.allowed && (catalog.metering === 'runtime' || Boolean(catalog.funding)),
+    whyNow: active.length ? 'An active workflow is waiting for this capability.' : `This is the next capability in your ${catalog.workflowStage || 'current'} stage.`,
+    expectedOutcome: catalog.valueStatement || catalog.description || 'Continue the current workflow with better evidence.',
+    observedPriorUses: capabilityUses,
+    observedSuccessRate: capabilityUses ? Math.round((successful / Math.max(1, capabilityUses)) * 100) : null,
+    priorPaywallViews: priorPaywalls,
+    recommendedFunding: access.allowed ? 'none' : (access.recommendation || access.recommendedAction || (catalog.funding === 'subscription' ? 'SUBSCRIPTION' : 'CREDITS_OR_SUBSCRIPTION')),
+    evidence: ['capability_catalog', 'current_entitlement', 'workflow_state', 'usage_history'],
+  }
   return {
     action: catalog.id,
     reason: input.reason || `Your next valuable step is ${catalog.description}.`,
@@ -426,6 +441,7 @@ export function nextBestAction(userId, input = {}) {
     funding: access.funding,
     freeRemaining: access.freeRemaining,
     plan: access.subscription?.plan || access.organizationEntitlement?.plan || null,
+    purchaseGuidance,
     capability: catalog,
   }
 }
