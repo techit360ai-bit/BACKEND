@@ -196,6 +196,13 @@ describe('GET /api/users', () => {
       subscriber: false,
       subscriptionLabel: null,
       sharedContext: false,
+      trust: {
+        trust_score: 0,
+        tier: 'Claimed',
+        verification_status: 'unverified',
+        confidence_score: 0,
+      },
+      verifiedSkills: [],
     }])
     expect(res.body.users[0]).not.toHaveProperty('email')
   })
