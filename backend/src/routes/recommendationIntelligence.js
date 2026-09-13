@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { collaborators, founderCollaborators, organizationTalent, mentors, investorThesis } from '../controllers/recommendationIntelligenceController.js'
+import { collaborators, founderCollaborators, organizationTalent, mentors, investorThesis, access } from '../controllers/recommendationIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -9,4 +9,5 @@ router.get('/founders/:projectId/collaborators', founderCollaborators)
 router.get('/organization/talent', organizationTalent)
 router.get('/mentors', mentors)
 router.get('/investors/thesis', investorThesis)
+router.get('/matching-access', access)
 export default router
