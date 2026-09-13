@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readDb, updateDb } from '../config/database.js'
-import { adminTvceAnalytics, capabilityCatalog, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, saveWorkflow, walletForecast } from '../services/tvceService.js'
+import { adminTvceAnalytics, capabilityCatalog, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, nextBestAction, saveWorkflow, walletForecast } from '../services/tvceService.js'
 import { codeWorkspaceAccess } from '../services/codeWorkspaceService.js'
 
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
@@ -92,5 +92,14 @@ describe('TVCE entitlement and continuation contracts', () => {
     const paid = evaluateEntitlement('u1', { capability: 'INVESTOR_INTELLIGENCE', role: 'investor' })
     expect(paid.allowed).toBe(false)
     expect(['verification_required', 'credits_required', 'subscription_or_credits_required']).toContain(paid.code)
+  })
+
+  it('explains the value and funding path for a role-specific next action', () => {
+    const action = nextBestAction('u1', { role: 'investor' })
+    expect(action.action).toBe('INVESTOR_INTELLIGENCE')
+    expect(action.expectedValue).toBeTruthy()
+    expect(action.accessStatus).toBeTruthy()
+    expect(action.funding).toBe('subscription_or_credits')
+    expect(action.subscriptionRecommendation).toBe(true)
   })
 })

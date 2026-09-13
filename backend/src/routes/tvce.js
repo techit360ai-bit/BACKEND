@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { capabilities, checkout, creditsEstimate, entitlements, evaluate, forecast, freeUsage, funnel, nextAction, paywall, paywallEvent, paymentFulfill, progress, workflowResume, workflowSave } from '../controllers/tvceController.js'
+import { capabilities, checkout, creditsEstimate, entitlements, evaluate, forecast, freeUsage, funnel, nextAction, paywall, paywallEvent, paymentFulfill, progress, teamGrantCreate, workflowResume, workflowSave } from '../controllers/tvceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -19,4 +19,5 @@ router.post('/workflow', workflowSave)
 router.post('/workflow/:workflowId/resume', workflowResume)
 router.post('/payments/:paymentId/fulfill', paymentFulfill)
 router.post('/checkout/session', checkout)
+router.post('/workspace/team-grants', teamGrantCreate)
 export default router

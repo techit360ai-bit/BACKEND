@@ -89,13 +89,17 @@ export const DEFAULT_DISCOVERY_CONFIG = {
       trust: 0.07,
       activityRecency: 0.06,
       collaborationProbability: 0.08,
+      executionScore: 0.06,
+      deliveryReliability: 0.04,
+      responseVelocity: 0.03,
+      collaborationHistory: 0.04,
       negativeSignals: 0.2,
       repetitionPenalty: 0.12,
       staleness: 0.06,
     },
     explorer: { interestSimilarity: 0.18, behavioralSimilarity: 0.13, gsisRelevance: 0.02 },
     founder: { skillCompatibility: 0.2, intentCompatibility: 0.14, collaborationProbability: 0.14 },
-    collaborator: { skillCompatibility: 0.24, collaborationProbability: 0.16, gsisRelevance: 0.02 },
+    collaborator: { skillCompatibility: 0.24, collaborationProbability: 0.16, executionScore: 0.12, deliveryReliability: 0.08, responseVelocity: 0.06, collaborationHistory: 0.1, gsisRelevance: 0.02 },
     investor: { startupRelevance: 0.12, gsisRelevance: 0.13, trust: 0.1 },
     organization: { industryRelevance: 0.14, collaborationProbability: 0.13, trust: 0.1 },
   },
@@ -301,6 +305,21 @@ function ownerProfile(db, record) {
   return rows(db, 'profiles').find(profile => profile.id === ownerId) || null
 }
 
+function executionSignals(db, userId) {
+  const profile = rows(db, 'profiles').find(row => row.id === userId) || {}
+  const score = [...rows(db, 'executionScores'), ...rows(db, 'collaboratorScores')].filter(row => [row.userId, row.collaboratorId, row.actorId].includes(userId)).sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0] || {}
+  const tasks = rows(db, 'workspaceTasks').filter(row => [row.assigneeId, row.assignedTo, row.ownerId].includes(userId))
+  const completed = tasks.filter(row => ['completed', 'done'].includes(String(row.status).toLowerCase())).length
+  const taskRate = tasks.length ? completed / tasks.length : 0
+  const events = rows(db, 'recommendationEvents').filter(row => row.userId === userId || row.actorId === userId)
+  return {
+    executionScore: Number(score.executionScore ?? score.score ?? profile.executionScore ?? profile.eviScore ?? taskRate * 100) || 0,
+    deliveryReliability: Number(score.deliveryReliability ?? score.deliveryRate ?? profile.deliveryReliability ?? taskRate * 100) || 0,
+    responseVelocity: Number(score.responseVelocity ?? score.responseScore ?? profile.responseVelocity ?? 0) || 0,
+    collaborationHistory: Math.min(100, events.filter(row => ['successful_collaboration', 'connect', 'message', 'apply', 'join'].includes(row.eventType)).length * 12),
+  }
+}
+
 function projectType(project, owner) {
   const explicit = normalizeType(project.entityType || project.kind || project.type)
   if (['startup', 'project', 'idea'].includes(explicit)) return explicit
@@ -362,6 +381,7 @@ function buildCandidates(db, userId, viewerRole) {
       creatorId: profile.id,
       url,
       actions: makeActions(type, candidateRole, viewerRole, profile.id, url),
+      ...executionSignals(db, profile.id),
     })
   }
 
@@ -390,6 +410,7 @@ function buildCandidates(db, userId, viewerRole) {
       creatorId: ownerId,
       url,
       actions: makeActions(type, normalizeRole(owner?.role), viewerRole, project.id, url),
+      ...executionSignals(db, ownerId),
     })
   }
 
@@ -580,6 +601,10 @@ function scoreCandidate(db, userId, recommendationProfile, candidate, config, su
     behavioralSimilarity: overlap(Object.keys(recommendationProfile.recentInterests || {}), tags),
     startupRelevance: candidate.type === 'startup' ? Math.max(interestMatch, industryMatch) : 0,
     gsisRelevance: candidate.gsis || 0,
+    executionScore: clamp(Number(candidate.executionScore || 0) / 100),
+    deliveryReliability: clamp(Number(candidate.deliveryReliability || 0) / 100),
+    responseVelocity: clamp(Number(candidate.responseVelocity || 0) / 100),
+    collaborationHistory: clamp(Number(candidate.collaborationHistory || 0) / 100),
     trust: candidate.trustScore ?? 0.5,
     activityRecency: recency(candidate.updatedAt || candidate.createdAt),
     collaborationProbability: Math.max(skillMatch, intentMatch) * (candidate.type === 'content' ? 0.25 : 1),

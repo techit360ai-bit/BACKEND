@@ -4,6 +4,8 @@ import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptio
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
+import { workspaceTeamGrantFor } from './workspaceTeamEntitlementService.js'
+import { listDefaultRateCards } from './unitEconomicsService.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -14,6 +16,7 @@ const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(
 const text = (value, fallback = '') => typeof value === 'string' ? value.trim() : fallback
 
 export const TVCE_CAPABILITIES = Object.freeze([
+  { id: 'BASIC_AI_ACTION', category: 'platform', description: 'Basic AI action', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'execute' },
   { id: 'IDEA_DIAGNOSTICS_BASIC', category: 'incubation', description: 'Basic idea diagnosis', requiredRole: null, freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'discover' },
   { id: 'CUSTOMER_VALIDATION_BASIC', category: 'validation', description: 'Basic customer validation', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'validate' },
   { id: 'MVP_PLANNING_BASIC', category: 'execution', description: 'Basic MVP planning', requiredRole: 'founder', freeAccess: true, subscriptionAccess: true, creditAccess: true, metering: 'runtime', workflowStage: 'build' },
@@ -105,6 +108,8 @@ export function adminCommercialConfig() {
     capabilities: capabilityCatalog(),
     plans: collection(db, 'billingPlans').map(row => ({ ...row })),
     creditPackages: collection(db, 'creditPackages').map(row => ({ ...row })),
+    rateCards: collection(db, 'rateCards').length ? collection(db, 'rateCards').map(row => ({ ...row })) : listDefaultRateCards(),
+    geoPricingProfiles: collection(db, 'geoPricingProfiles').map(row => ({ ...row })),
     providers: {
       stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
       paystack: Boolean(process.env.PAYSTACK_SECRET_KEY),
@@ -125,6 +130,8 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
     }
     if (Array.isArray(input.plans)) db.billingPlans = input.plans.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
     if (Array.isArray(input.creditPackages)) db.creditPackages = input.creditPackages.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+    if (Array.isArray(input.rateCards)) db.rateCards = input.rateCards.slice(0, 500).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
+    if (Array.isArray(input.geoPricingProfiles)) db.geoPricingProfiles = input.geoPricingProfiles.slice(0, 300).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
     if (input.capabilities && typeof input.capabilities === 'object') {
       db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.capabilities = db.tvceConfig.capabilities || {}
       for (const [capability, patch] of Object.entries(input.capabilities)) {
@@ -134,7 +141,7 @@ export function updateAdminCommercialConfig(adminId, input = {}) {
         db.tvceConfig.capabilities[capability] = next
       }
     }
-    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined }, createdAt: nowIso() })
+    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined, rateCards: Array.isArray(input.rateCards) ? input.rateCards.length : undefined, geoPricingProfiles: Array.isArray(input.geoPricingProfiles) ? input.geoPricingProfiles.length : undefined }, createdAt: nowIso() })
     return { ok: true, config: adminCommercialConfig() }
   })
 }
@@ -174,6 +181,7 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
     : null
   const account = accountEntitlementFor(db, userId)
   const subscription = subscriptionEntitlement(db, userId)
+  const teamGrant = role === 'collaborator' && input.workspaceId ? workspaceTeamGrantFor(userId, input.workspaceId, capability, db) : null
   const credits = availableCredits(db, userId)
   const usageEstimate = Math.max(0, number(input.estimatedCredits ?? input.estimated_credits))
   const freeQuota = effectiveCatalog?.freeQuota || null
@@ -193,8 +201,9 @@ function evaluateEntitlementFromDb(userId, input = {}, db) {
     else if (['credits', 'subscription_or_credits'].includes(funding) && !subscription.active && credits <= 0) code = 'credits_required'
     else if (usageEstimate > 0 && !subscription.active && credits < usageEstimate) code = 'insufficient_credits'
   }
+  if (teamGrant && ['credits_required', 'active_subscription_required', 'subscription_or_credits_required', 'plan_capability_not_included'].includes(code)) code = 'allowed'
   const allowed = code === 'allowed'
-  return { allowed, code, capability, role, accountEntitlement: account, subscription, availableCredits: credits, usageEstimate: usageEstimate || null, funding: organizationFundingOverride ? 'organization' : funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, organizationEntitlement: organizationDecision?.entitlement || null, organizationDecision, recommendedAction: subscription.active ? 'SUBSCRIPTION' : organizationDecision?.code === 'organization_funding_required' ? 'ORGANIZATION_PROGRAM_PASS' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
+  return { allowed, code, capability, role, accountEntitlement: account, subscription, teamGrant, availableCredits: credits, usageEstimate: usageEstimate || null, funding: teamGrant ? 'subscription' : organizationFundingOverride ? 'organization' : funding || 'none', metering: effectiveCatalog?.metering || decision.metering || 'none', freeQuota, freeUsage, freeRemaining: freeQuota ? Math.max(0, freeQuota - freeUsage) : null, organizationEntitlement: organizationDecision?.entitlement || null, organizationDecision, recommendedAction: subscription.active || teamGrant ? 'SUBSCRIPTION' : organizationDecision?.code === 'organization_funding_required' ? 'ORGANIZATION_PROGRAM_PASS' : metered ? 'CREDITS_OR_SUBSCRIPTION' : 'CONTINUE', alternativeAction: metered ? 'CREDITS_OR_SUBSCRIPTION' : null, value: valueFor(capability, { ...decision, policy: effectiveCatalog }, input), decision, policy: effectiveCatalog || decision.policy || null }
 }
 
 export function evaluateEntitlement(userId, input = {}) { return evaluateEntitlementFromDb(userId, input, readAuthorityDb()) }
@@ -310,6 +319,7 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
   const paywalls = collection(db, 'paywallEvents').filter(inPeriod)
   const webhookEvents = collection(db, 'billingWebhookEvents').filter(inPeriod)
   const workflows = collection(db, 'workflowSnapshots').filter(inPeriod)
+  const usageEvents = collection(db, 'usageEvents').filter(inPeriod)
   const paidUsers = new Set([...payments, ...entitlements].map(row => row.userId).filter(Boolean))
   const creditBuyers = new Set(ledger.filter(row => ['credit_purchase', 'credits_purchased'].includes(row.type) && number(row.deltaCredits ?? row.credits) > 0).map(row => row.userId).filter(Boolean))
   const subscriptionUsers = new Set(subscriptions.map(row => row.userId).filter(Boolean))
@@ -343,6 +353,27 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
     cohortMap.set(cohort, item)
   }
   const revenue = payments.reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
+  const usageCogs = usageEvents.reduce((sum, row) => sum + number(row.totalVariableCostUsd ?? row.totalCogs), 0)
+  const usageRevenue = usageEvents.reduce((sum, row) => sum + number(row.allocatedRevenueUsd ?? row.customerPrice), 0)
+  const usageGrossProfit = usageEvents.reduce((sum, row) => sum + number(row.grossProfitUsd), 0)
+  const usageMargin = usageRevenue > 0 ? usageGrossProfit / usageRevenue : null
+  const tokenTotals = usageEvents.reduce((summary, row) => {
+    summary.inputTokens += number(row.inputTokens ?? row.promptTokens)
+    summary.outputTokens += number(row.outputTokens ?? row.completionTokens)
+    summary.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens)
+    summary.totalTokens += number(row.totalTokens ?? (number(row.inputTokens ?? row.promptTokens) + number(row.outputTokens ?? row.completionTokens)))
+    summary.creditsSettled += number(row.credits)
+    return summary
+  }, { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, creditsSettled: 0 })
+  const providerModel = new Map()
+  for (const row of usageEvents) {
+    const key = `${row.provider || 'unknown'}:${row.model || 'unknown'}`
+    const item = providerModel.get(key) || { provider: row.provider || 'unknown', model: row.model || 'unknown', calls: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, providerCostUsd: 0, totalVariableCostUsd: 0, credits: 0, revenueUsd: 0 }
+    item.calls += 1; item.inputTokens += number(row.inputTokens ?? row.promptTokens); item.outputTokens += number(row.outputTokens ?? row.completionTokens); item.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens); item.totalTokens += number(row.totalTokens); item.providerCostUsd += number(row.providerCostUsd); item.totalVariableCostUsd += number(row.totalVariableCostUsd ?? row.totalCogs); item.credits += number(row.credits); item.revenueUsd += number(row.allocatedRevenueUsd ?? row.customerPrice); providerModel.set(key, item)
+  }
+  const walletCredits = collection(db, 'walletAccounts').reduce((sum, row) => sum + number(row.creditBalance), 0) + ledger.filter(row => number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
+  const reservedCredits = collection(db, 'usageReservations').filter(row => row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+  const freeUsage = collection(db, 'capabilityAnalytics').filter(row => row.eventType === 'capability_completed' && row.fundingSource === 'platform_subsidy' && inPeriod(row)).length
   const creditRevenue = payments.filter(row => number(row.credits) > 0).reduce((sum, row) => sum + number(row.amount ?? row.amountMinor ?? row.totalAmount), 0)
   const subscriptionRevenue = revenue - creditRevenue
   const completedWorkflows = workflows.filter(row => ['resumed', 'completed', 'outcome_delivered'].includes(row.status)).length
@@ -357,6 +388,12 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
       paidAccounts: paidUsers.size, creditBuyers: creditBuyers.size, activeSubscriptions: subscriptionUsers.size,
       webhookProcessed: webhookEvents.filter(row => ['processed', 'idempotent'].includes(row.status)).length,
       webhookFailures: webhookEvents.filter(row => row.status === 'failed').length,
+      usageEvents: usageEvents.length, usageCogsUsd: usageCogs, usageRevenueUsd: usageRevenue,
+      usageGrossProfitUsd: usageGrossProfit, usageGrossMargin: usageMargin,
+      marginWarnings: usageEvents.filter(row => row.marginStatus === 'warning').length,
+      marginCritical: usageEvents.filter(row => row.marginStatus === 'critical').length,
+      aiTokenSpend: { ...tokenTotals, providerCostUsd: usageEvents.reduce((sum, row) => sum + number(row.providerCostUsd), 0), infrastructureCostUsd: usageEvents.reduce((sum, row) => sum + number(row.infrastructureCostUsd), 0), totalVariableCostUsd: usageCogs, freeCapabilityUses: freeUsage },
+      wallet: { grossCredits: walletCredits, reservedCredits, availableCredits: Math.max(0, walletCredits - reservedCredits), activeSubscriptionAccounts: subscriptionUsers.size },
       workflowResumeRate: workflows.length ? Math.round((completedWorkflows / workflows.length) * 1000) / 10 : 0,
     },
     funnel: funnelStages.map(stage => ({ stage, count: eventCount(stage) })),
@@ -364,7 +401,8 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
     roleCohorts: roleRetention,
     capabilityConversion: [...capabilityMap.values()].map(row => ({ ...row, conversionRate: row.paywallViews ? Math.round((row.paymentSuccesses / row.paywallViews) * 1000) / 10 : 0 })),
     attribution: [...attributed.values()].map(row => ({ source: row.source, payments: row.payments, revenue: row.revenue, paidUsers: row.paidUsers.size })),
-    drilldown: { payments: payments.slice(-100), paywalls: paywalls.slice(-100), webhooks: webhookEvents.slice(-100), workflows: workflows.slice(-100) },
+    providerModelBreakdown: [...providerModel.values()],
+    drilldown: { payments: payments.slice(-100), paywalls: paywalls.slice(-100), webhooks: webhookEvents.slice(-100), workflows: workflows.slice(-100), usage: usageEvents.slice(-100) },
   }
   return dashboard
 }
@@ -374,7 +412,38 @@ export function nextBestAction(userId, input = {}) {
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
   const access = evaluateEntitlement(userId, { capability: catalog.id, role })
-  return { action: catalog.id, reason: input.reason || `Your next valuable step is ${catalog.description}.`, expectedValue: catalog.valueStatement, access: access.allowed ? 'available' : access.recommendation || access.recommendedAction, metering: catalog.metering || 'none', usageEstimateRequired: catalog.metering === 'runtime', subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION', capability: catalog }
+  const usage = collection(db, 'capabilityConsumptions').filter(row => row.userId === userId)
+  const completed = usage.filter(row => ['settled', 'completed'].includes(String(row.status).toLowerCase()))
+  const successful = completed.filter(row => row.outcome === 'success' || row.success === true || row.resultStatus === 'success').length
+  const capabilityUses = completed.filter(row => row.capability === catalog.id).length
+  const priorPaywalls = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === catalog.id).length
+  const purchaseGuidance = {
+    relevant: !access.allowed && (catalog.metering === 'runtime' || Boolean(catalog.funding)),
+    whyNow: active.length ? 'An active workflow is waiting for this capability.' : `This is the next capability in your ${catalog.workflowStage || 'current'} stage.`,
+    expectedOutcome: catalog.valueStatement || catalog.description || 'Continue the current workflow with better evidence.',
+    observedPriorUses: capabilityUses,
+    observedSuccessRate: capabilityUses ? Math.round((successful / Math.max(1, capabilityUses)) * 100) : null,
+    priorPaywallViews: priorPaywalls,
+    recommendedFunding: access.allowed ? 'none' : (access.recommendation || access.recommendedAction || (catalog.funding === 'subscription' ? 'SUBSCRIPTION' : 'CREDITS_OR_SUBSCRIPTION')),
+    evidence: ['capability_catalog', 'current_entitlement', 'workflow_state', 'usage_history'],
+  }
+  return {
+    action: catalog.id,
+    reason: input.reason || `Your next valuable step is ${catalog.description}.`,
+    expectedValue: catalog.valueStatement || catalog.description || 'Continue the current workflow with the required capability.',
+    access: access.allowed ? 'available' : access.recommendation || access.recommendedAction,
+    accessStatus: access.code,
+    metering: catalog.metering || 'none',
+    usageEstimateRequired: catalog.metering === 'runtime',
+    subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION' || String(access.funding || '').includes('subscription'),
+    availableCredits: access.availableCredits,
+    usageEstimate: access.usageEstimate,
+    funding: access.funding,
+    freeRemaining: access.freeRemaining,
+    plan: access.subscription?.plan || access.organizationEntitlement?.plan || null,
+    purchaseGuidance,
+    capability: catalog,
+  }
 }
 
 export function saveWorkflow(userId, input = {}) {
@@ -430,6 +499,19 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     const workflowId = text(input.workflowId); const workflow = workflowId ? collection(db, 'workflowSnapshots').find(row => row.id === workflowId && row.userId === userId) : null
     if (workflow) { workflow.status = 'resumed'; workflow.resumedAt = now; workflow.updatedAt = now }
     return { ok: true, payment, accountEntitlement: account, workflow: workflow || null }
+  })
+}
+
+export function reversePaymentCredits(userId, paymentId, reason = 'refund') {
+  return updateAuthorityDb(db => {
+    const payment = collection(db, 'paymentIntents').find(row => row.id === paymentId && row.userId === userId)
+    if (!payment) return { ok: false, error: 'payment_not_found' }
+    const purchased = collection(db, 'creditLedger').filter(row => row.paymentIntentId === paymentId && Number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + Number(row.deltaCredits ?? row.credits), 0)
+    const reversed = collection(db, 'creditLedger').filter(row => row.paymentIntentId === paymentId && row.type === 'credit_purchase_reversal').reduce((sum, row) => sum + Math.abs(Number(row.deltaCredits ?? row.credits)), 0)
+    const remaining = Math.max(0, purchased - reversed)
+    if (remaining > 0) collection(db, 'creditLedger').push({ id: createId('credit_reversal'), userId, paymentIntentId: paymentId, deltaCredits: -remaining, credits: -remaining, type: 'credit_purchase_reversal', reason, createdAt: nowIso() })
+    payment.status = reason === 'dispute' ? 'disputed' : 'refunded'; payment.updatedAt = nowIso()
+    return { ok: true, idempotent: remaining === 0, payment, reversedCredits: remaining }
   })
 }
 

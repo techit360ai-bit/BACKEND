@@ -4,6 +4,7 @@ import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../con
 import { syncFinanceProjection } from './financePostgresProjection.js'
 import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { reserveOrganizationBudget, settleOrganizationBudget } from './organizationBudgetService.js'
+import { economicsForUsage } from './unitEconomicsService.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -145,18 +146,21 @@ export function settleUsage(facts) {
     // Credits, customer price, COGS and margin are backend-owned. Router facts
     // can report provider telemetry, but cannot increase or rewrite the charge.
     const actualCredits = normalized.status === 'completed' ? reservedCredits : 0
+    const economics = economicsForUsage(normalized, reservation, db)
     const usageEvent = {
       id: createId('usage'), requestId: normalized.requestId, payloadHash, userId: normalized.userId,
       workspaceId: normalized.workspaceId, taskType: normalized.taskType, provider: normalized.provider,
       model: normalized.model, status: normalized.status, promptTokens: normalized.promptTokens,
       completionTokens: normalized.completionTokens,
       totalTokens: normalized.totalTokens || normalized.promptTokens + normalized.completionTokens,
-      providerCostUsd: normalized.providerCostUsd, latencyMs: normalized.latencyMs,
+      providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: normalized.latencyMs,
       attemptCount: normalized.attemptCount, cacheHit: normalized.cacheHit, grantId: normalized.grantId,
-      reservationId: normalized.reservationId, credits: actualCredits,
-      totalCogs: normalized.providerCostUsd,
-      customerPrice: 0,
-      grossMargin: 0,
+      reservationId: normalized.reservationId, credits: economics.settledCredits,
+      rateCardVersion: economics.rateCardVersion, targetMargin: economics.targetMargin,
+      totalCogs: economics.directServiceCogsUsd,
+      customerPrice: economics.allocatedRevenueUsd,
+      allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd,
+      grossMargin: economics.grossMargin, marginStatus: economics.marginStatus,
       fundingSource: reservation?.fundingSource || 'unknown',
       metadata: normalized.metadata, createdAt: now, updatedAt: now,
     }
@@ -166,14 +170,14 @@ export function settleUsage(facts) {
       if (!organizationSettlement.ok) return organizationSettlement
     }
     if (reservation) {
-      reservation.settledCredits = actualCredits
-      reservation.releasedCredits = Math.max(0, reservedCredits - actualCredits)
+      reservation.settledCredits = economics.settledCredits
+      reservation.releasedCredits = Math.max(0, reservedCredits - economics.settledCredits)
       reservation.status = normalized.status === 'completed' ? 'settled' : 'refunded'
       reservation.updatedAt = now
     }
-    if (actualCredits > 0 && reservation?.fundingSource !== 'organization') db.creditLedger.push({
+    if (economics.settledCredits > 0 && reservation?.fundingSource !== 'organization') db.creditLedger.push({
       id: createId('usage_debit'), userId: normalized.userId, workspaceId: normalized.workspaceId,
-      requestId: normalized.requestId, deltaCredits: -actualCredits, credits: -actualCredits,
+      requestId: normalized.requestId, deltaCredits: -economics.settledCredits, credits: -economics.settledCredits,
       type: 'usage_settlement', createdAt: now,
     })
     return { ok: true, idempotent: false, usageEvent, reservation }

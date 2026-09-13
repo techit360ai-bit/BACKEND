@@ -3,7 +3,9 @@
     "CUSTOMER_VALIDATION_BASIC": 3,
     "MVP_PLANNING_BASIC": 1,
     "GSIS_BASIC": 3,
-    "STARTUP_HEALTH_BASIC": 2
+    "STARTUP_HEALTH_BASIC": 2,
+    "IDEA_DIAGNOSTICS_BASIC": 5,
+    "BASIC_AI_ACTION": 20
   },
   "capabilities": {
     "IDEA_DIAGNOSTICS_BASIC": { "valueStatement": "Understand the shape of your idea.", "blockedMessage": "Basic diagnosis is available on the free account." },
