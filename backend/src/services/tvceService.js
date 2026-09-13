@@ -412,7 +412,22 @@ export function nextBestAction(userId, input = {}) {
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
   const access = evaluateEntitlement(userId, { capability: catalog.id, role })
-  return { action: catalog.id, reason: input.reason || `Your next valuable step is ${catalog.description}.`, expectedValue: catalog.valueStatement, access: access.allowed ? 'available' : access.recommendation || access.recommendedAction, metering: catalog.metering || 'none', usageEstimateRequired: catalog.metering === 'runtime', subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION', capability: catalog }
+  return {
+    action: catalog.id,
+    reason: input.reason || `Your next valuable step is ${catalog.description}.`,
+    expectedValue: catalog.valueStatement || catalog.description || 'Continue the current workflow with the required capability.',
+    access: access.allowed ? 'available' : access.recommendation || access.recommendedAction,
+    accessStatus: access.code,
+    metering: catalog.metering || 'none',
+    usageEstimateRequired: catalog.metering === 'runtime',
+    subscriptionRecommendation: access.recommendation === 'SUBSCRIPTION' || access.recommendedAction === 'SUBSCRIPTION' || String(access.funding || '').includes('subscription'),
+    availableCredits: access.availableCredits,
+    usageEstimate: access.usageEstimate,
+    funding: access.funding,
+    freeRemaining: access.freeRemaining,
+    plan: access.subscription?.plan || access.organizationEntitlement?.plan || null,
+    capability: catalog,
+  }
 }
 
 export function saveWorkflow(userId, input = {}) {
