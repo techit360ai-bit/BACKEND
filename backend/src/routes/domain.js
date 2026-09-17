@@ -41,6 +41,8 @@ import {
   hackathonTeamPatch,
   hackathonVelocity,
   hackathonWorkspace,
+  hackathonProjectEntryCreate,
+  hackathonProjectEntryGet,
   hackathonReport,
   hackathonFinal,
   intakeCreate,
@@ -74,6 +76,9 @@ import {
   opportunityApply,
   watchlist,
   watchlistAdd,
+  watchlistRemove,
+  watchlistPreferences,
+  watchlistPreferencesPatch,
   workspaceContextGet,
   workspaceInvitationAccept,
   workspaceInvitationCreate,
@@ -89,6 +94,7 @@ import {
 } from '../controllers/domainController.js'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireRole } from '../utils/roleGuards.js'
+import { requireCapability } from '../services/capabilityAuthorization.js'
 
 const router = Router()
 
@@ -138,41 +144,47 @@ router.post('/organization/demo-day/publish', requireRole('organization', 'organ
 router.get('/organization/demo-day/matches/:projectId', requireRole('organization', 'organisation'), orgInvestorMatches)
 router.get('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEvents)
 router.post('/organization/demo-day/events', requireRole('organization', 'organisation'), orgDemoDayEventCreate)
-router.get('/organization/demo-day/analytics', requireRole('organization', 'organisation'), orgDemoDayAnalytics)
-router.get('/organization/marketplace', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericListGet)
-router.post('/organization/marketplace', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericCreatePost)
-router.patch('/organization/marketplace/:id', bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericPatchItem)
-router.get('/organization/talent', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericListGet)
-router.post('/organization/talent', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericCreatePost)
-router.patch('/organization/talent/:id', bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericPatchItem)
-router.get('/organization/settings', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericListGet)
-router.post('/organization/settings', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericCreatePost)
-router.patch('/organization/settings/:id', bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericPatchItem)
-router.get('/organization/integrations', bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericListGet)
-router.post('/organization/integrations', bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericCreatePost)
-router.patch('/organization/integrations/:id', bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericPatchItem)
-router.get('/organization/programs', bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericListGet)
-router.post('/organization/programs', bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericCreatePost)
-router.patch('/organization/programs/:id', bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericPatchItem)
-router.get('/organization/ai-operations', bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericListGet)
-router.post('/organization/ai-operations', bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericCreatePost)
-router.patch('/organization/ai-operations/:id', bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericPatchItem)
-router.get('/organization/market-readiness', bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericListGet)
-router.post('/organization/market-readiness', bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericCreatePost)
-router.patch('/organization/market-readiness/:id', bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericPatchItem)
+router.get('/organization/demo-day/analytics', requireRole('organization', 'organisation'), requireCapability('organization.analytics', undefined, { consume: true }), orgDemoDayAnalytics)
+router.get('/organization/marketplace', requireRole('organization', 'organisation'), bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericListGet)
+router.post('/organization/marketplace', requireCapability('organization.opportunity.create'), bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericCreatePost)
+router.patch('/organization/marketplace/:id', requireCapability('organization.opportunity.create'), bindCollection('organizationMarketplace', 'items', 'item', 'market'), genericPatchItem)
+router.get('/organization/talent', requireRole('organization', 'organisation'), bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericListGet)
+router.post('/organization/talent', requireCapability('organization.recruit', undefined, { consume: true }), bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericCreatePost)
+router.patch('/organization/talent/:id', requireCapability('organization.recruit', undefined, { consume: true }), bindCollection('organizationTalent', 'talent', 'talent', 'talent'), genericPatchItem)
+router.get('/organization/settings', requireCapability('organization.profile.manage'), bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericListGet)
+router.post('/organization/settings', requireCapability('organization.profile.manage'), bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericCreatePost)
+router.patch('/organization/settings/:id', requireCapability('organization.profile.manage'), bindCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericPatchItem)
+router.get('/organization/integrations', requireCapability('organization.profile.manage'), bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericListGet)
+router.post('/organization/integrations', requireCapability('organization.profile.manage'), bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericCreatePost)
+router.patch('/organization/integrations/:id', requireCapability('organization.profile.manage'), bindCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericPatchItem)
+router.get('/organization/programs', requireRole('organization', 'organisation'), bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericListGet)
+router.post('/organization/programs', requireCapability('organization.profile.manage'), bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericCreatePost)
+router.patch('/organization/programs/:id', requireCapability('organization.profile.manage'), bindCollection('organizationPrograms', 'programs', 'program', 'program'), genericPatchItem)
+router.get('/organization/ai-operations', requireRole('organization', 'organisation'), bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericListGet)
+router.post('/organization/ai-operations', requireCapability('organization.profile.manage'), bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericCreatePost)
+router.patch('/organization/ai-operations/:id', requireCapability('organization.profile.manage'), bindCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericPatchItem)
+router.get('/organization/market-readiness', requireRole('organization', 'organisation'), bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericListGet)
+router.post('/organization/market-readiness', requireCapability('organization.profile.manage'), bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericCreatePost)
+router.patch('/organization/market-readiness/:id', requireCapability('organization.profile.manage'), bindCollection('organizationMarketReadiness', 'records', 'record', 'readiness'), genericPatchItem)
+router.get('/organization/community', requireRole('organization', 'organisation'), bindCollection('organizationCommunity', 'posts', 'post', 'orgpost'), genericListGet)
+router.post('/organization/community', requireCapability('organization.profile.manage'), bindCollection('organizationCommunity', 'posts', 'post', 'orgpost'), genericCreatePost)
+router.patch('/organization/community/:id', requireCapability('organization.profile.manage'), bindCollection('organizationCommunity', 'posts', 'post', 'orgpost'), genericPatchItem)
 
 router.get('/investor/deal-flow', dealFlow)
 router.get('/investor/watchlist', watchlist)
 router.post('/investor/watchlist', watchlistAdd)
+router.delete('/investor/watchlist/:projectId', watchlistRemove)
+router.get('/investor/watchlist/preferences', watchlistPreferences)
+router.patch('/investor/watchlist/preferences', watchlistPreferencesPatch)
 router.get('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorList)
 router.post('/investor/capital-pools', bindCollection('capitalPools', 'capitalPools', 'capitalPool', 'pool'), investorCreate)
-router.get('/investor/deal-rooms', bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorList)
-router.post('/investor/deal-rooms', bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorCreate)
-router.get('/investor/data-rooms', bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorList)
-router.post('/investor/data-rooms', bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorCreate)
+router.get('/investor/deal-rooms', requireCapability('dealroom.access', undefined, { consume: true }), bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorList)
+router.post('/investor/deal-rooms', requireCapability('dealroom.access', undefined, { consume: true }), bindCollection('dealRooms', 'dealRooms', 'dealRoom', 'dealroom'), investorCreate)
+router.get('/investor/data-rooms', requireCapability('dealroom.access', undefined, { consume: true }), bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorList)
+router.post('/investor/data-rooms', requireCapability('dealroom.access', undefined, { consume: true }), bindCollection('dataRooms', 'dataRooms', 'dataRoom', 'dataroom'), investorCreate)
 router.get('/investor/reputation', bindCollection('investorReputation', 'reputation', 'reputation', 'reputation'), investorList)
 router.post('/investor/reputation', bindCollection('investorReputation', 'reputation', 'reputation', 'reputation'), investorCreate)
-router.get('/investor/heatmap', bindCollection('dealFlowSnapshots', 'heatmap', 'heatmapPoint', 'heatmap'), investorList)
+router.get('/investor/heatmap', requireCapability('investor.intelligence.view', undefined, { consume: true }), bindCollection('dealFlowSnapshots', 'heatmap', 'heatmapPoint', 'heatmap'), investorList)
 
 router.get('/incubation/intakes', intakes)
 router.post('/incubation/intakes', intakeCreate)
@@ -200,6 +212,8 @@ router.patch('/hackathons/:hackathonId/teams/:teamId', hackathonTeamPatch)
 router.post('/hackathons/:hackathonId/teams/:teamId/final', hackathonFinal)
 router.get('/hackathons/:hackathonId/teams/:teamId/status', hackathonTeamStatus)
 router.post('/hackathons/:hackathonId/teams/:teamId/workspace', hackathonWorkspace)
+router.post('/hackathons/:hackathonId/teams/:teamId/project-entry', requireCapability('workspace.hackathon.attach'), hackathonProjectEntryCreate)
+router.get('/hackathons/:hackathonId/teams/:teamId/project-entry', hackathonProjectEntryGet)
 router.post('/hackathons/:hackathonId/teams/:teamId/report', hackathonReport)
 router.get('/hackathons/:hackathonId', hackathonGet)
 

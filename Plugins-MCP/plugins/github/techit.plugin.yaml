@@ -50,6 +50,7 @@ mcp:
       input_schema:
         type: object
         properties:
+          projectId: { type: string }
           repo: { type: string }
           path: { type: string }
           ref: { type: string }
@@ -75,6 +76,55 @@ mcp:
           number: { type: number }
         required: [repo, number]
 
+    - name: get_repository_state
+      description: Read the current branch head and file manifest for conflict-aware synchronization.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          projectId: { type: string }
+          repo: { type: string }
+          branch: { type: string }
+        required: [projectId, repo, branch]
+
+    - name: get_commit_checks
+      description: Read GitHub check-run evidence for a commit.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          projectId: { type: string }
+          repo: { type: string }
+          commitSha: { type: string }
+        required: [projectId, repo, commitSha]
+
+    - name: get_workflow_run
+      description: Read the verified status of a dispatched GitHub Actions run.
+      requiredRole: viewer
+      input_schema:
+        type: object
+        properties:
+          projectId: { type: string }
+          repo: { type: string }
+          runId: { type: number }
+        required: [projectId, repo, runId]
+
+    - name: push_files
+      description: Create a conflict-checked Git commit from workspace file changes and push it to a configured branch.
+      requiredRole: editor
+      destructive: true
+      input_schema:
+        type: object
+        properties:
+          repo: { type: string }
+          branch: { type: string }
+          expectedHeadSha: { type: string }
+          message: { type: string }
+          projectId: { type: string }
+          files: { type: array }
+          approvalRequestId: { type: string }
+        required: [repo, branch, expectedHeadSha, message, projectId, files]
+
     - name: create_pull_request
       description: Open a pull request. Destructive — routed through the approval gate.
       requiredRole: editor
@@ -97,8 +147,9 @@ mcp:
       input_schema:
         type: object
         properties:
+          projectId: { type: string }
           repo: { type: string }
           workflow: { type: string }
           ref: { type: string }
           approvalRequestId: { type: string }
-        required: [repo, workflow, ref]
+        required: [projectId, repo, workflow, ref]

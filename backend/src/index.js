@@ -1,8 +1,25 @@
 import app from './app.js'
 import { validateDatabaseConfig } from './config/database.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
+import { generateReverificationNotifications } from './services/trustVerificationService.js'
+import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
+import { initializeIdentityPostgresProjection } from './services/identityPostgresProjection.js'
+import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
+import { initializeContentPostgresProjection } from './services/contentPostgresProjection.js'
+import { initializeFinancePostgresProjection } from './services/financePostgresProjection.js'
+import { initializePlatformCollectionSchema } from './repositories/platformCollectionRepository.js'
+import { cleanupSessionsAsync } from './services/sessionService.js'
+import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
+import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
+import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
+import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
+import { initializeOrganizationCommercialProjection } from './repositories/organizationOperationsRepository.js'
 
 const PORT = process.env.PORT || 3000
+const runMaintenance = async (callback, actorId = null) => {
+  if (process.env.DB_DRIVER === 'postgres' || process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres') return runWithPlatformDatabase(() => callback(), { userId: actorId })
+  return callback()
+}
 
 function validateSecurityConfig() {
   if (process.env.NODE_ENV !== 'production') return
@@ -12,9 +29,16 @@ function validateSecurityConfig() {
     'GITHUB_TOKEN_ENCRYPTION_KEY',
     'OTP_HASH_SECRET',
     'AI_ROUTER_SETTLEMENT_SECRET',
+    'ADMIN_AI_ROUTER_TELEMETRY_SECRET',
     'AI_USAGE_GRANT_SERVICE_SECRET',
     'AI_EXECUTION_GRANT_SECRET',
+    'VERIFICATION_AUDIT_HMAC_KEY',
+    'MFA_ENCRYPTION_KEY',
+    'MFA_ASSERTION_SECRET',
   ]) {
+    if (!process.env[name]) throw new Error(`${name} is required in production`)
+  }
+  for (const name of ['EVIDENCE_STORAGE_ENDPOINT', 'EVIDENCE_STORAGE_BUCKET', 'EVIDENCE_STORAGE_ACCESS_KEY', 'EVIDENCE_STORAGE_SECRET_KEY', 'CLAMAV_HOST']) {
     if (!process.env[name]) throw new Error(`${name} is required in production`)
   }
   for (const name of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'GITHUB_REDIRECT_URI']) {
@@ -28,16 +52,42 @@ function validateSecurityConfig() {
     'GITHUB_TOKEN_ENCRYPTION_KEY',
     'OTP_HASH_SECRET',
     'AI_ROUTER_SETTLEMENT_SECRET',
+    'ADMIN_AI_ROUTER_TELEMETRY_SECRET',
     'AI_USAGE_GRANT_SERVICE_SECRET',
     'AI_EXECUTION_GRANT_SECRET',
+    'VERIFICATION_AUDIT_HMAC_KEY',
+    'MFA_ENCRYPTION_KEY',
+    'MFA_ASSERTION_SECRET',
   ]) {
     if ((process.env[name] || '').length < 32) throw new Error(`${name} must be at least 32 characters`)
   }
+  if (!process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET || process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET.length < 32) throw new Error('BACKEND_SUPPORT_MAINTENANCE_SECRET must be at least 32 characters')
 }
 
 validateDatabaseConfig()
 validateSecurityConfig()
 if (process.env.DISCOVERY_DATABASE_URL) await initializeDiscoveryInfrastructure()
+if (process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL) await initializeTrustPostgresProjection()
+if (process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL) await initializeIdentityPostgresProjection()
+if (process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL) await initializeWorkspaceProjectProjection()
+if (process.env.CONTENT_DATABASE_URL || process.env.DATABASE_URL) await initializeContentPostgresProjection()
+if (process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL) await initializeFinancePostgresProjection()
+if (process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env.IDENTITY_DATABASE_URL) await initializePlatformCollectionSchema()
+if (process.env.ORGANIZATION_DATABASE_URL || process.env.DATABASE_URL) await initializeOrganizationCommercialProjection()
+
+const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
+const reverificationTimer = setInterval(() => {
+  runMaintenance(() => generateReverificationNotifications()).catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
+}, reverificationIntervalMs)
+reverificationTimer.unref?.()
+const sessionCleanupTimer = setInterval(() => { runMaintenance(() => cleanupSessionsAsync()).catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
+sessionCleanupTimer.unref?.()
+const dealRoomMaintenanceTimer = setInterval(() => { runMaintenance(() => runDealRoomMaintenance()).catch(error => console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
+dealRoomMaintenanceTimer.unref?.()
+const organizationIntelligenceTimer = setInterval(() => { runMaintenance(() => runOrganizationIntelligenceMaintenance()).catch(error => console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
+organizationIntelligenceTimer.unref?.()
+const supportMaintenanceTimer = setInterval(() => { runMaintenance(() => runSupportMaintenance()).catch(error => console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message }))) }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
+supportMaintenanceTimer.unref?.()
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)

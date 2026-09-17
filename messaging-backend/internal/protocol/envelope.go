@@ -29,6 +29,8 @@ const (
 const (
 	TypeMessageAck      = "message.ack"
 	TypeMessageNew      = "message.new"
+	TypeMessageUpdated  = "message.updated"
+	TypeMessageDeleted  = "message.deleted"
 	TypeReceiptUpdate   = "receipt.update"
 	TypeTypingIndicator = "typing.indicator"
 	TypePresenceChanged = "presence.changed"
@@ -36,6 +38,11 @@ const (
 	TypePostNew         = "post.new"
 	TypePostLiked       = "post.liked"
 	TypePostComment     = "post.comment"
+	TypePostUpdated     = "post.updated"
+	TypePostDeleted     = "post.deleted"
+	TypeCommentUpdated  = "comment.updated"
+	TypeCommentDeleted  = "comment.deleted"
+	TypeMentionNew      = "mention.new"
 	TypeQANew           = "qa.new"
 	TypeQAVoted         = "qa.voted"
 	TypeQAResolved      = "qa.resolved"
@@ -60,9 +67,9 @@ type ReadUptoPayload struct {
 
 // CreatePostPayload is the body of a create-post request (REST).
 type CreatePostPayload struct {
-	Kind     string   `json:"kind"`
-	Body     string   `json:"body"`
-	Audience []string `json:"audience,omitempty"`
+	Kind      string   `json:"kind"`
+	Body      string   `json:"body"`
+	Audience  []string `json:"audience,omitempty"`
 	ExpiresAt string   `json:"expiresAt,omitempty"`
 }
 

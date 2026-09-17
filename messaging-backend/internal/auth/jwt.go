@@ -1,10 +1,14 @@
-// Package auth verifies and mints HS256 JWTs carrying the messaging identity
+// Package auth verifies RS256 JWTs carrying the messaging identity
 // claims {sub, name, role}. Real issuance lives elsewhere (WS5); Mint is for dev
 // and tests. The claim contract must eventually match the platform issuer.
 package auth
 
 import (
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -12,20 +16,36 @@ import (
 
 // Claims is the messaging identity extracted from a token.
 type Claims struct {
-	UserID string
-	Name   string
-	Role   string
+	UserID           string
+	Name             string
+	Role             string
+	Username         string
+	AvatarURL        string
+	Verified         bool
+	Subscriber       bool
+	SubscriptionTier string
+	CredibilityScore int
+	IdentityPresent  bool
 }
 
-// Verifier verifies and mints HS256 tokens with a shared secret.
+// Verifier verifies RS256 tokens with a public key and retains HS256 only for
+// development/test compatibility.
 type Verifier struct {
 	secret   []byte
+	publicKey *rsa.PublicKey
 	issuer   string
 	audience string
 }
 
 func NewVerifier(secret string, values ...string) *Verifier {
 	v := &Verifier{secret: []byte(secret)}
+	if raw := os.Getenv("JWT_PUBLIC_KEY"); raw != "" {
+		if block, _ := pem.Decode([]byte(raw)); block != nil {
+			if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+				v.publicKey, _ = key.(*rsa.PublicKey)
+			}
+		}
+	}
 	if len(values) > 0 {
 		v.issuer = values[0]
 	}
@@ -35,12 +55,15 @@ func NewVerifier(secret string, values ...string) *Verifier {
 	return v
 }
 
-// Verify parses and validates an HS256 token, returning its identity claims.
+// Verify parses and validates a platform token, returning its identity claims.
 func (v *Verifier) Verify(token string) (Claims, error) {
 	parsed, err := jwt.Parse(token, func(t *jwt.Token) (any, error) {
-		if t.Method != jwt.SigningMethodHS256 {
-			return nil, errors.New("unexpected signing method")
+		if v.publicKey != nil {
+			if t.Method != jwt.SigningMethodRS256 { return nil, errors.New("unexpected signing method") }
+			return v.publicKey, nil
 		}
+		if os.Getenv("ENVIRONMENT") == "production" || os.Getenv("ENVIRONMENT") == "staging" { return nil, errors.New("asymmetric verification key is required") }
+		if t.Method != jwt.SigningMethodHS256 { return nil, errors.New("unexpected signing method") }
 		return v.secret, nil
 	})
 	if err != nil {
@@ -78,7 +101,19 @@ func (v *Verifier) Verify(token string) (Claims, error) {
 	}
 	name, _ := mc["name"].(string)
 	role, _ := mc["role"].(string)
-	return Claims{UserID: sub, Name: name, Role: role}, nil
+	username, _ := mc["username"].(string)
+	avatarURL, _ := mc["avatar_url"].(string)
+	verified, _ := mc["verified"].(bool)
+	subscriber, _ := mc["subscriber"].(bool)
+	subscriptionTier, _ := mc["subscription_tier"].(string)
+	credibilityScore := 0
+	if raw, ok := mc["credibility_score"].(float64); ok {
+		credibilityScore = int(raw)
+	}
+	_, hasVerified := mc["verified"]
+	_, hasSubscriber := mc["subscriber"]
+	_, hasCredibility := mc["credibility_score"]
+	return Claims{UserID: sub, Name: name, Role: role, Username: username, AvatarURL: avatarURL, Verified: verified, Subscriber: subscriber, SubscriptionTier: subscriptionTier, CredibilityScore: credibilityScore, IdentityPresent: hasVerified || hasSubscriber || hasCredibility || username != ""}, nil
 }
 
 // Mint creates a token valid for 24h (dev/testing only).

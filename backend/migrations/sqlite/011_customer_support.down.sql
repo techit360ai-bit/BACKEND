@@ -1,0 +1,1 @@
+DELETE FROM app_collections WHERE name IN ('supportCases','supportMessages','supportEvents','supportAssignments','supportFeedback','supportSlaPolicies','supportCategories','supportTeams','supportKnowledgeBase','supportTemplates','supportAuditLogs','supportLocks','supportAttachments','supportIncidents','supportIntelligenceSignals','supportSettings');

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/channel"
@@ -48,11 +49,19 @@ func handleChannelHistory(d Deps) http.HandlerFunc {
 		for _, m := range msgs {
 			out = append(out, map[string]any{
 				"id": m.ID, "channelId": m.ChannelID, "senderId": m.SenderID,
-				"type": m.Type, "body": m.Body, "ts": m.CreatedAt,
+				"type": m.Type, "body": func() string { if m.DeletedAt != nil { return "This message was deleted" }; return m.Body }(), "ts": m.CreatedAt, "editedAt": m.EditedAt, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion,
 			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"messages": out})
 	}
+}
+
+func handleChannelEdit(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { var body struct { Body string `json:"body"`; ExpectedVersion int `json:"expectedVersion"` }; if json.NewDecoder(r.Body).Decode(&body) != nil || strings.TrimSpace(body.Body) == "" { writeErr(w, http.StatusBadRequest, "body required"); return }; m, err := d.Channels.EditMessage(r.Context(), currentUser(r), chi.URLParam(r, "messageId"), strings.TrimSpace(body.Body), body.ExpectedVersion); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "channelId": m.ChannelID, "body": m.Body, "editedAt": m.EditedAt, "editVersion": m.EditVersion}) }
+}
+
+func handleChannelDelete(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) { var body struct { ExpectedVersion int `json:"expectedVersion"` }; _ = json.NewDecoder(r.Body).Decode(&body); m, err := d.Channels.DeleteMessage(r.Context(), currentUser(r), chi.URLParam(r, "messageId"), body.ExpectedVersion); if err != nil { writeErr(w, mutationStatus(err), err.Error()); return }; writeJSON(w, http.StatusOK, map[string]any{"id": m.ID, "channelId": m.ChannelID, "deletedAt": m.DeletedAt, "editVersion": m.EditVersion}) }
 }
 
 func handleChannelSend(d Deps) http.HandlerFunc {

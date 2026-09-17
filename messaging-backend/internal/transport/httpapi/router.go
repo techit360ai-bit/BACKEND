@@ -59,19 +59,28 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(authMiddleware(d.Verifier))
 			r.Post("/conversations", handleCreateConversation(d))
+			r.Get("/users/search", handleSearchUsers(d))
 			r.Get("/conversations", handleListConversations(d))
 			r.Get("/conversations/{id}/messages", handleHistory(d))
 			r.Post("/conversations/{id}/messages", handleRESTSend(d))
+			r.Patch("/conversations/{id}/messages/{messageId}", handleEditMessage(d))
+			r.Delete("/conversations/{id}/messages/{messageId}", handleDeleteMessage(d))
 			r.Post("/conversations/{id}/read", handleMarkRead(d))
+			r.Post("/conversations/{id}/request/accept", handleMessageRequestStatus(d, "active"))
+			r.Post("/conversations/{id}/request/decline", handleMessageRequestStatus(d, "declined"))
 			r.Get("/users/online", handleOnline(d))
 
 			r.Get("/channels", handleListChannels(d))
 			r.Get("/channels/{id}/messages", handleChannelHistory(d))
 			r.Post("/channels/{id}/messages", handleChannelSend(d))
+			r.Patch("/channels/{id}/messages/{messageId}", handleChannelEdit(d))
+			r.Delete("/channels/{id}/messages/{messageId}", handleChannelDelete(d))
 			r.Post("/channels/{id}/read", handleChannelRead(d))
 
 			r.Get("/posts", handleListPosts(d))
 			r.Post("/posts", handleCreatePost(d))
+			r.Patch("/posts/{id}", handleEditPost(d))
+			r.Delete("/posts/{id}", handleDeletePost(d))
 			r.Post("/posts/{id}/like", handleLikePost(d))
 			r.Delete("/posts/{id}/like", handleUnlikePost(d))
 			r.Post("/posts/{id}/save", handleSavePost(d))
@@ -92,6 +101,8 @@ func NewRouter(d Deps) http.Handler {
 			r.Delete("/users/{userId}/block", handleCreatorControl(d, "block", false))
 			r.Get("/posts/{id}/comments", handleListComments(d))
 			r.Post("/posts/{id}/comments", handleAddComment(d))
+			r.Patch("/posts/{id}/comments/{commentId}", handleEditComment(d))
+			r.Delete("/posts/{id}/comments/{commentId}", handleDeleteComment(d))
 
 			r.Post("/demos", handleCreateDemo(d))
 			r.Get("/demos", handleListDemos(d))
@@ -147,4 +158,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]string{"error": msg})
+}
+func writeCodeErr(w http.ResponseWriter, code int, errorCode, message string) {
+	writeJSON(w, code, map[string]string{"error": errorCode, "message": message})
 }

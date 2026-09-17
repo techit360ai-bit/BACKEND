@@ -1,7 +1,12 @@
 import { createId, nowIso, userName } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
+import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
+import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
+import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
+import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, financeReadEnabled, financeReadFallbackEnabled } from '../repositories/financeRepository.js'
+import { syncFinanceProjection } from './financePostgresProjection.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -9,6 +14,14 @@ function isRecordVisible(record, userId) {
   if (!record || typeof record !== 'object') return false
   if (record.visibility === 'public' || record.public === true) return true
   return OWNER_FIELDS.some(field => record[field] === userId)
+}
+
+function organizationMember(db, userId, organizationId) {
+  return collection(db, 'organizationMemberships').some(row => row.organizationId === organizationId && row.userId === userId && row.status === 'active')
+}
+
+function hackathonVisible(db, hackathon, userId) {
+  return isRecordVisible(hackathon, userId) || Boolean(hackathon?.organizationId && organizationMember(db, userId, hackathon.organizationId))
 }
 
 function owned(record, userId, field = 'ownerId') {
@@ -160,12 +173,20 @@ function walletSummaryFor(db, userId) {
 }
 
 export function listProjects(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { projects: listOwned(db, 'projects', userId) }
 }
 
+export async function listProjectsAsync(userId) {
+  if (!workspaceReadEnabled()) return listProjects(userId)
+  try { return { projects: await listProjectsPostgres(userId) } } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listProjects(userId)
+  }
+}
+
 export function createProject(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const origin = cleanObject(body.origin)
     const promotedTeam = origin.kind === 'hackathon_promote'
       ? collection(db, 'hackathonTeams').find(team =>
@@ -217,16 +238,16 @@ export function createProject(userId, body) {
 }
 
 export function updateProject(userId, projectId, body) {
-  return updateDb(db => patchOwned(db, 'projects', projectId, userId, body))
+  return updateAuthorityDb(db => patchOwned(db, 'projects', projectId, userId, body))
 }
 
 export function listOrganizationProjects(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { projects: listOwned(db, 'projects', userId, 'organizationId') }
 }
 
 export function createOrganizationProject(userId, body) {
-  return updateDb(db => ({
+  return updateAuthorityDb(db => ({
     project: insertOwned(db, 'projects', userId, {
       title: String(body.title || '').trim(),
       tagline: body.tagline || '',
@@ -244,7 +265,7 @@ export function createOrganizationProject(userId, body) {
 }
 
 export function updateOrganizationProject(userId, projectId, body) {
-  return updateDb(db => patchOwned(db, 'projects', projectId, userId, body, 'organizationId'))
+  return updateAuthorityDb(db => patchOwned(db, 'projects', projectId, userId, body, 'organizationId'))
 }
 
 // --- Organization Intelligence: Cohort Health -------------------------------
@@ -277,7 +298,7 @@ function cohortRowAlerts(row) {
  * (decay/band/daysInactive from updatedAt + gsisScore). No fabricated data.
  */
 export function organizationCohortHealth(userId, { stage, riskLevel } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const projects = listOwned(db, 'projects', userId, 'organizationId')
 
   let cohort = projects.map(p => {
@@ -390,7 +411,7 @@ const LAUNCHED_STAGES = ['launched', 'growth', 'scaling', 'scale', 'series-a', '
  * field (users acquired, milestones) are intentionally omitted, not invented.
  */
 export function organizationImpact(userId, { template = 'quarterly' } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const projects = listOwned(db, 'projects', userId, 'organizationId')
 
   const metrics = {
@@ -420,12 +441,12 @@ export function organizationImpact(userId, { template = 'quarterly' } = {}) {
 
 // KPI targets are user-set data, so they are persisted (org-scoped), not derived.
 export function organizationKpiTargets(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { targets: listOwned(db, 'orgKpiTargets', userId, 'organizationId') }
 }
 
 export function saveOrganizationKpiTarget(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const metric = String(body.metric || '').trim()
     if (!metric) return { ok: false, error: 'metric_required' }
     const target = Number(body.target || 0)
@@ -454,7 +475,7 @@ export function saveOrganizationKpiTarget(userId, body) {
  * derived from real fields; publish state is read from real dealFlowSnapshots.
  */
 export function demoDayPipeline(userId, { threshold = 70 } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const th = Number(threshold) || 70
   const projects = listOwned(db, 'projects', userId, 'organizationId')
   const snapshots = collection(db, 'dealFlowSnapshots')
@@ -484,7 +505,7 @@ export function demoDayPipeline(userId, { threshold = 70 } = {}) {
 // Org-scoped publish. The existing publishProject is ownerId-scoped and cannot
 // publish organizationId-owned projects, so this is a dedicated org path.
 export function publishOrganizationProject(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const projectId = String(body.projectId || '').trim()
     if (!projectId) return { ok: false, error: 'projectId_required' }
     const project = findOwned(db, 'projects', projectId, userId, 'organizationId')
@@ -515,7 +536,7 @@ export function publishOrganizationProject(userId, body) {
 
 // Investor matchmaking over real investor profiles (role 'investor').
 export function investorMatches(userId, projectId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const project = findOwned(db, 'projects', projectId, userId, 'organizationId')
   if (!project) return { projectId, matches: [] }
   const investors = collection(db, 'profiles').filter(p => {
@@ -540,12 +561,12 @@ export function investorMatches(userId, projectId) {
 }
 
 export function organizationDemoDayEvents(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { events: listOwned(db, 'orgDemoDayEvents', userId, 'organizationId') }
 }
 
 export function createOrganizationDemoDayEvent(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const title = String(body.title || '').trim()
     if (!title) return { ok: false, error: 'title_required' }
     return {
@@ -563,7 +584,7 @@ export function createOrganizationDemoDayEvent(userId, body) {
 
 // Post-event analytics from real watchlist rows against this org's snapshots.
 export function organizationDemoDayAnalytics(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const snapshots = collection(db, 'dealFlowSnapshots').filter(s => s.organizationId === userId)
   const watchlists = collection(db, 'investorWatchlists')
   const projectIds = new Set(snapshots.map(s => s.projectId))
@@ -594,7 +615,7 @@ function profileRole(profile, fallback = 'member') {
 }
 
 export function listEndorsements(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const endorsements = collection(db, 'endorsements')
     .filter(row => row.subjectId === userId)
     .sort(byNewest)
@@ -610,7 +631,7 @@ export function listEndorsements(userId) {
 }
 
 export function createEndorsement(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const subjectId = String(body.subjectUserId || '').trim()
     const quote = String(body.quote || '').trim()
     if (!subjectId) return { ok: false, error: 'subject_user_required' }
@@ -644,18 +665,46 @@ export function createEndorsement(userId, body) {
 }
 
 export function listWorkspaces(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active')
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  const collaboratorMemberships = memberships.filter(row => String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  const freeCollaboratorWorkspaceId = !paid ? collaboratorMemberships[0]?.workspaceId || null : null
   const membershipByWorkspace = new Map(memberships.map(row => [row.workspaceId, row]))
   const workspaces = collection(db, 'workspaces')
-    .filter(row => row.ownerId === userId || membershipByWorkspace.has(row.id))
+    .filter(row => row.ownerId === userId || (membershipByWorkspace.has(row.id) && (paid || !collaboratorMemberships.length || row.id === freeCollaboratorWorkspaceId)))
     .sort(byNewest)
     .map(workspace => ({
       ...workspace,
       isOwner: workspace.ownerId === userId,
       accessLevel: workspace.ownerId === userId ? 'owner' : membershipByWorkspace.get(workspace.id)?.accessLevel || 'viewer',
     }))
-  return { workspaces }
+  return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: paid, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, memberships.length - workspaces.filter(row => row.ownerId !== userId).length) } }
+}
+
+export async function listWorkspacesAsync(userId) {
+  if (!workspaceReadEnabled()) return listWorkspaces(userId)
+  try {
+    const rows = await listWorkspacesPostgres(userId)
+    const collaboratorRows = rows.filter(row => row.workspace.ownerId !== userId && String(row.membership?.role || '').toLowerCase() === 'collaborator')
+    const freeCollaboratorWorkspaceId = collaboratorRows.sort((a, b) => new Date(a.membership?.joinedAt || a.membership?.createdAt || 0) - new Date(b.membership?.joinedAt || b.membership?.createdAt || 0))[0]?.workspace.id || null
+    const workspaces = rows.filter(row => row.workspace.ownerId === userId || !collaboratorRows.length || row.workspace.id === freeCollaboratorWorkspaceId).map(row => ({ ...row.workspace, isOwner: row.workspace.ownerId === userId, accessLevel: row.workspace.ownerId === userId ? 'owner' : row.membership?.accessLevel || 'viewer' }))
+    return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: false, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, rows.length - workspaces.length) } }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listWorkspaces(userId)
+  }
+}
+
+function freeCollaboratorWorkspaceAllowed(db, userId, workspaceId) {
+  const paid = collection(db, 'accountEntitlements').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'subscriptions').some(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status))
+    || collection(db, 'creditLedger').some(row => row.userId === userId && ['credit_purchase', 'credits_purchased', 'subscription_purchase'].includes(row.type) && Number(row.deltaCredits ?? row.credits ?? 0) > 0)
+  if (paid) return true
+  const memberships = collection(db, 'workspaceMembers').filter(row => row.userId === userId && row.status === 'active' && String(row.role || '').toLowerCase() === 'collaborator').sort((a, b) => new Date(a.joinedAt || a.createdAt || 0) - new Date(b.joinedAt || b.createdAt || 0))
+  return !memberships.length || memberships[0].workspaceId === workspaceId
 }
 
 function workspaceAccess(db, workspaceId, userId) {
@@ -699,7 +748,7 @@ function publicWorkspaceInvitation(db, invitation) {
 }
 
 export function createWorkspaceInvitation(userId, workspaceId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
     const collaboratorId = collaborationText(body.collaboratorId, 100)
@@ -770,7 +819,7 @@ export function createWorkspaceInvitation(userId, workspaceId, body) {
 }
 
 export function getWorkspaceInvitation(userId, invitationId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const invitation = collection(db, 'workspaceInvitations').find(row =>
     row.id === invitationId && row.collaboratorId === userId
   )
@@ -780,7 +829,7 @@ export function getWorkspaceInvitation(userId, invitationId) {
 }
 
 export function acceptWorkspaceInvitation(userId, invitationId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const invitation = collection(db, 'workspaceInvitations').find(row =>
       row.id === invitationId && row.collaboratorId === userId
     )
@@ -799,6 +848,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
     }
     const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (!freeCollaboratorWorkspaceAllowed(db, userId, workspace.id)) return { ok: false, error: 'free_collaborator_workspace_limit', limit: 1 }
     const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
       workspaceId: workspace.id,
       projectId: workspace.projectId || null,
@@ -828,7 +878,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
 }
 
 export function declineWorkspaceInvitation(userId, invitationId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const invitation = collection(db, 'workspaceInvitations').find(row =>
       row.id === invitationId && row.collaboratorId === userId && row.status === 'pending'
     )
@@ -852,7 +902,7 @@ export function declineWorkspaceInvitation(userId, invitationId) {
 }
 
 export function listWorkspaceMembers(userId, workspaceId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const access = workspaceAccess(db, workspaceId, userId)
   if (!access) return null
   const ownerProfile = collection(db, 'profiles').find(row => row.id === access.workspace.ownerId)
@@ -875,8 +925,22 @@ export function listWorkspaceMembers(userId, workspaceId) {
   }
 }
 
+export async function listWorkspaceMembersAsync(userId, workspaceId) {
+  if (!workspaceReadEnabled()) return listWorkspaceMembers(userId, workspaceId)
+  try {
+    const workspace = await findWorkspacePostgres(workspaceId)
+    if (!workspace) return null
+    const members = await listMembersPostgres(workspaceId)
+    if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
+    return { members: [{ id: `workspace_owner_${workspace.ownerId}`, workspaceId, userId: workspace.ownerId, name: workspace.ownerId, accessLevel: 'owner', role: 'Workspace owner', status: 'active' }, ...members.map(member => ({ ...member, name: member.name || member.userId, avatarUrl: member.avatarUrl || '' }))] }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return listWorkspaceMembers(userId, workspaceId)
+  }
+}
+
 export function removeWorkspaceMember(userId, workspaceId, memberId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
     const member = collection(db, 'workspaceMembers').find(row =>
@@ -901,7 +965,7 @@ export function removeWorkspaceMember(userId, workspaceId, memberId) {
 }
 
 export function provisionWorkspace(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const projectId = String(body.projectId || '').trim()
     if (!projectId) return { ok: false, error: 'projectId_required' }
     const existing = collection(db, 'workspaces').find(row => row.ownerId === userId && row.projectId === projectId)
@@ -919,7 +983,7 @@ export function provisionWorkspace(userId, body) {
 }
 
 export function workspaceContext(userId, workspaceId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const access = workspaceAccess(db, workspaceId, userId)
   if (!access) return null
   const analysis = latestByProject(db, access.workspace.projectId)
@@ -933,8 +997,22 @@ export function workspaceContext(userId, workspaceId) {
   }
 }
 
+export async function workspaceContextAsync(userId, workspaceId) {
+  if (!workspaceReadEnabled()) return workspaceContext(userId, workspaceId)
+  try {
+    const workspace = await findWorkspacePostgres(workspaceId)
+    if (!workspace) return null
+    const members = workspace.ownerId === userId ? [] : await listMembersPostgres(workspaceId)
+    if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
+    return { workspaceId, projectId: workspace.projectId || null, venture: null, blueprintAvailable: false, isOwner: workspace.ownerId === userId, accessLevel: workspace.ownerId === userId ? 'owner' : 'viewer' }
+  } catch (error) {
+    if (!workspaceReadFallbackEnabled()) throw error
+    return workspaceContext(userId, workspaceId)
+  }
+}
+
 export function listWorkspaceCollection(userId, workspaceId, name) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const access = workspaceAccess(db, workspaceId, userId)
   if (!access) return null
   if (!access.isOwner && ['workspaceAgents', 'workspaceConnectors'].includes(name)) return []
@@ -942,7 +1020,7 @@ export function listWorkspaceCollection(userId, workspaceId, name) {
 }
 
 export function createWorkspaceCollectionItem(userId, workspaceId, name, body, prefix) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const access = workspaceAccess(db, workspaceId, userId)
     if (!access || !workspaceCanWrite(access, name)) return null
     return insertOwned(db, name, userId, { ...body, workspaceId, createdBy: userId }, prefix)
@@ -950,7 +1028,7 @@ export function createWorkspaceCollectionItem(userId, workspaceId, name, body, p
 }
 
 export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const access = workspaceAccess(db, workspaceId, userId)
     if (!access || !workspaceCanWrite(access, name)) return null
     const rows = collection(db, name)
@@ -969,13 +1047,13 @@ export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, 
 }
 
 export function collaboratorEquity(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const holdings = listOwned(db, 'equityGrants', userId, 'collaboratorId')
   return { holdings, totals: equityTotals(holdings), vestingTimeline: holdings.map(vestingTimelineForGrant) }
 }
 
 export function recordDilution(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const holding = collection(db, 'equityGrants').find(row => row.collaboratorId === userId && row.projectId === body.projectId)
     const equity = Number(holding?.equityPercent || 0)
     const vestedPct = Number(holding?.vestedPercent || 0)
@@ -998,14 +1076,14 @@ export function recordDilution(userId, body) {
 }
 
 export function collaboratorEarnings(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const earnings = listOwned(db, 'collaboratorEarnings', userId, 'collaboratorId')
   const payouts = listOwned(db, 'payouts', userId, 'collaboratorId')
   return { cashEarnings: earnings, payouts, totals: cashTotals(earnings, payouts) }
 }
 
 export function requestWithdrawal(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const earnings = listOwned(db, 'collaboratorEarnings', userId, 'collaboratorId')
     const payouts = listOwned(db, 'payouts', userId, 'collaboratorId')
     const totals = cashTotals(earnings, payouts)
@@ -1023,7 +1101,25 @@ export function requestWithdrawal(userId, body) {
 }
 
 export function organizationDashboard(userId) {
-  const db = readDb()
+  const intelligence = organizationOverview(userId)
+  if (intelligence?.ok) {
+    return {
+      dashboard: null,
+      metrics: {
+        activePrograms: intelligence.metrics.activePrograms,
+        hackathons: intelligence.metrics.activePrograms,
+        members: intelligence.metrics.members,
+        opportunities: intelligence.metrics.opportunities,
+        activeCohorts: intelligence.metrics.activeCohorts,
+        startups: intelligence.metrics.startups,
+        mentors: intelligence.metrics.mentors,
+      },
+      activity: [],
+      charts: {},
+      intelligence,
+    }
+  }
+  const db = readAuthorityDb()
   const dashboard = collection(db, 'organizationDashboards').find(row => row.ownerId === userId) || null
   const hackathons = collection(db, 'hackathons').filter(row => row.ownerId === userId)
   return {
@@ -1035,7 +1131,7 @@ export function organizationDashboard(userId) {
 }
 
 export function investorDealFlow(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const watchlist = collection(db, 'investorWatchlists').filter(row => row.investorId === userId).map(row => row.projectId)
   const snapshots = collection(db, 'dealFlowSnapshots').filter(row => row.investorId === userId || row.visibility === 'public')
   const projects = collection(db, 'projects')
@@ -1047,21 +1143,21 @@ export function investorDealFlow(userId) {
 }
 
 export function investorCollection(userId, name, field = 'investorId') {
-  const db = readDb()
+  const db = readAuthorityDb()
   return listOwned(db, name, userId, field)
 }
 
 export function createInvestorCollection(userId, name, body, prefix, field = 'investorId') {
-  return updateDb(db => insertOwned(db, name, userId, body, prefix, field))
+  return updateAuthorityDb(db => insertOwned(db, name, userId, body, prefix, field))
 }
 
 export function listWatchlist(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { watchlist: listOwned(db, 'investorWatchlists', userId, 'investorId') }
 }
 
 export function addWatchlist(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const projectId = String(body.projectId || '').trim()
     if (!projectId) return { ok: false, error: 'projectId_required' }
     const existing = collection(db, 'investorWatchlists').find(row => row.investorId === userId && row.projectId === projectId)
@@ -1070,13 +1166,38 @@ export function addWatchlist(userId, body) {
   })
 }
 
+export function removeWatchlist(userId, projectId) {
+  return updateAuthorityDb(db => {
+    const before = collection(db, 'investorWatchlists').length
+    db.investorWatchlists = collection(db, 'investorWatchlists').filter(row => !(row.investorId === userId && row.projectId === projectId))
+    return { ok: db.investorWatchlists.length < before }
+  })
+}
+
+export function listWatchlistPreferences(userId) {
+  const db = readAuthorityDb()
+  const row = collection(db, 'investorWatchlistPreferences').find(item => item.investorId === userId)
+  return { preferences: { velocity: row?.velocity !== false, risk: row?.risk !== false, milestone: row?.milestone === true, trust: row?.trust === true, dealStatus: row?.dealStatus === true } }
+}
+
+export function updateWatchlistPreferences(userId, body = {}) {
+  return updateAuthorityDb(db => {
+    const rows = collection(db, 'investorWatchlistPreferences')
+    const row = rows.find(item => item.investorId === userId) || { id: createId('watch_pref'), investorId: userId, createdAt: nowIso() }
+    for (const key of ['velocity', 'risk', 'milestone', 'trust', 'dealStatus']) if (body[key] !== undefined) row[key] = Boolean(body[key])
+    row.updatedAt = nowIso()
+    if (!rows.includes(row)) rows.push(row)
+    return { preferences: { velocity: row.velocity !== false, risk: row.risk !== false, milestone: row.milestone === true, trust: row.trust === true, dealStatus: row.dealStatus === true } }
+  })
+}
+
 export function listIntakes(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { intakes: listOwned(db, 'ventureIntakes', userId) }
 }
 
 export function createIntake(userId, body) {
-  return updateDb(db => ({ intake: insertOwned(db, 'ventureIntakes', userId, {
+  return updateAuthorityDb(db => ({ intake: insertOwned(db, 'ventureIntakes', userId, {
     status: body.status || 'draft',
     submission: body.submission || body,
     structuredProfile: body.structuredProfile || null,
@@ -1084,12 +1205,12 @@ export function createIntake(userId, body) {
 }
 
 export function getIntake(userId, intakeId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return findOwned(db, 'ventureIntakes', intakeId, userId)
 }
 
 export function promoteIntake(userId, intakeId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const intake = findOwned(db, 'ventureIntakes', intakeId, userId)
     if (!intake) return null
     const project = insertOwned(db, 'projects', userId, {
@@ -1106,7 +1227,7 @@ export function promoteIntake(userId, intakeId, body = {}) {
 }
 
 export function publishProject(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const projectId = String(body.projectId || '').trim()
     if (!projectId) return { ok: false, error: 'projectId_required' }
     const project = findOwned(db, 'projects', projectId, userId)
@@ -1144,12 +1265,12 @@ export function publishProject(userId, body) {
 }
 
 export function listAnalyses(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { analyses: listOwned(db, 'ventureAnalyses', userId) }
 }
 
 export function createAnalysis(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const analysis = insertOwned(db, 'ventureAnalyses', userId, body, 'analysis')
     if (body.projectId) {
       collection(db, 'projectAnalyses').push({
@@ -1167,7 +1288,7 @@ export function createAnalysis(userId, body) {
 }
 
 export function getAnalysis(userId, analysisId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return findOwned(db, 'ventureAnalyses', analysisId, userId)
 }
 
@@ -1183,21 +1304,32 @@ function hackathonWithCounts(db, hackathon) {
 }
 
 export function listHackathons(userId, { ownedOnly = false } = {}) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return {
     hackathons: collection(db, 'hackathons')
-      .filter(row => ownedOnly ? row.ownerId === userId : isRecordVisible(row, userId))
+      .filter(row => ownedOnly ? row.ownerId === userId || (row.organizationId && organizationMember(db, userId, row.organizationId)) : hackathonVisible(db, row, userId))
       .sort(byNewest)
       .map(row => hackathonWithCounts(db, row)),
   }
 }
 
 export function createHackathon(userId, body) {
-  return updateDb(db => ({ hackathon: insertOwned(db, 'hackathons', userId, {
+  const organizationId = typeof body?.organizationId === 'string' ? body.organizationId.trim() : ''
+  if (organizationId) {
+    const context = requireOrganizationPermission(userId, 'programs', organizationId)
+    if (!context.ok) return context
+    const entitlement = evaluateOrganizationEntitlement(organizationId, 'ORGANIZATION_HACKATHON_BASIC', { consume: true })
+    if (!entitlement.allowed) return entitlement
+    if (entitlement.entitlement?.isDefault && body.approvalStatus !== 'approved') body = { ...body, approvalStatus: 'pending_approval' }
+  }
+  return updateAuthorityDb(db => {
+    const hackathon = insertOwned(db, 'hackathons', userId, {
+    ...(organizationId ? { organizationId, entitlementScope: 'organization' } : {}),
     name: body.name || body.title || 'Untitled hackathon',
     title: body.title || body.name || 'Untitled hackathon',
     theme: body.theme || '',
     status: body.status || 'draft',
+    approvalStatus: body.approvalStatus || (organizationId ? 'pending_approval' : 'not_required'),
     visibility: body.visibility || 'private',
     organizer: cleanObject(body.organizer),
     organizerName: body.organizerName || '',
@@ -1217,23 +1349,39 @@ export function createHackathon(userId, body) {
     judgingDimensions: Array.isArray(body.judgingDimensions) ? body.judgingDimensions : [],
     mentorPool: Number(body.mentorPool || 0),
     hackathonStatus: body.hackathonStatus || body.status || 'upcoming',
-  }, 'hack') }))
+    }, 'hack')
+    if (organizationId && hackathon.approvalStatus === 'pending_approval') collection(db, 'organizationAbuseReviews').push({ id: createId('org_abuse'), organizationId, userId, hackathonId: hackathon.id, signalType: 'free_event_approval', score: 20, status: 'open', evidence: { plan: 'community_host', eventName: hackathon.name }, createdAt: nowIso(), updatedAt: nowIso() })
+    return { hackathon }
+  })
+}
+
+export function approveOrganizationHackathon(adminId, hackathonId, decision = 'approved', reason = '') {
+  return updateAuthorityDb(db => {
+    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && row.organizationId)
+    if (!hackathon) return { ok: false, error: 'organization_hackathon_not_found' }
+    if (!['approved', 'rejected'].includes(decision)) return { ok: false, error: 'invalid_hackathon_approval' }
+    hackathon.approvalStatus = decision; hackathon.approvedBy = adminId; hackathon.approvedAt = nowIso(); hackathon.approvalReason = String(reason || '').slice(0, 500); hackathon.updatedAt = nowIso()
+    if (decision === 'rejected') hackathon.status = 'rejected'
+    return { ok: true, hackathon }
+  })
 }
 
 export function getHackathon(userId, hackathonId) {
-  const db = readDb()
-  const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
+  const db = readAuthorityDb()
+  const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && hackathonVisible(db, row, userId))
   return hackathon ? hackathonWithCounts(db, hackathon) : null
 }
 
 export function registerHackathon(userId, hackathonId, body) {
-  return updateDb(db => {
-    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && isRecordVisible(row, userId))
+  return updateAuthorityDb(db => {
+    const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId && hackathonVisible(db, row, userId))
     if (!hackathon) return null
+    if (hackathon.organizationId && hackathon.approvalStatus !== 'approved') return { ok: false, error: 'organization_hackathon_approval_required' }
     const existing = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.leaderId === userId)
     if (existing) return { ok: true, team: existing, registration: hackathonRegistration(db, existing, userId) }
     const team = insertOwned(db, 'hackathonTeams', userId, {
       hackathonId,
+      ...(hackathon.organizationId ? { organizationId: hackathon.organizationId, ownerOrganizationId: hackathon.organizationId } : {}),
       name: body.name || body.teamName || 'Untitled team',
       isSolo: !Array.isArray(body.members) || body.members.length <= 1,
       status: 'registered',
@@ -1246,6 +1394,7 @@ export function registerHackathon(userId, hackathonId, body) {
       collection(db, 'hackathonMembers').push({
         id: createId('member'),
         hackathonId,
+        ...(hackathon.organizationId ? { organizationId: hackathon.organizationId, ownerOrganizationId: hackathon.organizationId } : {}),
         teamId: team.id,
         userId: member.userId || member.collaboratorId || null,
         name: member.name || '',
@@ -1315,7 +1464,7 @@ function hackathonRegistration(db, team, userId) {
 }
 
 export function listHackathonRegistrations(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const memberTeamIds = new Set(
     collection(db, 'hackathonMembers')
       .filter(row => row.userId === userId)
@@ -1351,7 +1500,7 @@ function publicHackathonInvitation(invitation) {
 }
 
 export function createHackathonInvitation(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row =>
       row.id === teamId && row.hackathonId === hackathonId && row.leaderId === userId
     )
@@ -1419,7 +1568,7 @@ function targetedHackathonInvitation(db, hackathonId, teamId, token, userId) {
 }
 
 export function getHackathonInvite(userId, hackathonId, teamId, token) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const hackathon = collection(db, 'hackathons').find(row => row.id === hackathonId)
   const team = collection(db, 'hackathonTeams').find(row => row.id === teamId && row.hackathonId === hackathonId)
   if (!hackathon || !team) return { ok: false, error: 'invite_not_found' }
@@ -1448,7 +1597,7 @@ export function getHackathonInvite(userId, hackathonId, teamId, token) {
 }
 
 export function acceptHackathonInvite(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.id === teamId && row.hackathonId === hackathonId)
     if (!team) return { ok: false, error: 'invite_not_found' }
     const token = String(body.token || '')
@@ -1490,7 +1639,7 @@ export function acceptHackathonInvite(userId, hackathonId, teamId, body) {
 }
 
 export function patchHackathonTeam(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row =>
       row.id === teamId && row.hackathonId === hackathonId && row.leaderId === userId
     )
@@ -1502,7 +1651,7 @@ export function patchHackathonTeam(userId, hackathonId, teamId, body) {
 }
 
 export function submitHackathonBrief(userId, hackathonId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === body.teamId && (row.leaderId === userId || row.ownerId === userId))
     if (!team) return null
     const problem = String(body.problem || '')
@@ -1530,7 +1679,7 @@ export function submitHackathonBrief(userId, hackathonId, body) {
 }
 
 export function logHackathonCheckIn(userId, hackathonId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === body.teamId && (row.leaderId === userId || row.ownerId === userId))
     if (!team) return null
     const progressDelta = Number(body.progressDelta || 0)
@@ -1550,7 +1699,7 @@ export function logHackathonCheckIn(userId, hackathonId, body) {
 }
 
 export function submitHackathonFinal(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row =>
       row.hackathonId === hackathonId && row.id === teamId && teamOwnedBy(row, userId)
     )
@@ -1576,7 +1725,7 @@ function teamOwnedBy(team, userId) {
 }
 
 export function hackathonStatus(userId, hackathonId, teamId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === teamId && isRecordVisible({ ...row, ownerId: row.leaderId }, userId))
   if (!team) return null
   const brief = collection(db, 'hackathonBriefs').find(row => row.teamId === teamId)
@@ -1586,7 +1735,7 @@ export function hackathonStatus(userId, hackathonId, teamId) {
 }
 
 export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === teamId && row.leaderId === userId)
     if (!team) return null
     const existingBinding = collection(db, 'hackathonTeamWorkspaces')
@@ -1604,6 +1753,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
     const project = insertOwned(db, 'projects', userId, {
       title: body.projectTitle || team.name,
       stage: 'idea',
+      ...(team.organizationId ? { organizationId: team.organizationId, ownerOrganizationId: team.organizationId } : {}),
       origin: { kind: 'hackathon', hackathonId, teamId },
     }, 'project')
     const workspace = insertOwned(db, 'workspaces', userId, {
@@ -1612,7 +1762,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
       status: 'active',
       seededFromAnalysis: false,
     }, 'workspace')
-    const binding = insertOwned(db, 'hackathonTeamWorkspaces', userId, { hackathonId, teamId, projectId: project.id, workspaceId: workspace.id }, 'teamws', 'ownerId')
+    const binding = insertOwned(db, 'hackathonTeamWorkspaces', userId, { hackathonId, teamId, projectId: project.id, workspaceId: workspace.id, ...(team.organizationId ? { organizationId: team.organizationId, ownerOrganizationId: team.organizationId } : {}) }, 'teamws', 'ownerId')
     team.hasWorkspace = true
     team.projectId = project.id
     team.workspaceId = workspace.id
@@ -1621,7 +1771,7 @@ export function provisionHackathonWorkspace(userId, hackathonId, teamId, body) {
 }
 
 export function reportHackathonTeam(userId, hackathonId, teamId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row => row.hackathonId === hackathonId && row.id === teamId && row.leaderId === userId)
     if (!team) return null
     const report = insertOwned(db, 'hackathonTeamReports', userId, { hackathonId, teamId, ...body }, 'report', 'createdBy')
@@ -1630,7 +1780,7 @@ export function reportHackathonTeam(userId, hackathonId, teamId, body) {
 }
 
 export function hackathonAggregates(userId, hackathonId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const hackathon = getHackathon(userId, hackathonId)
   if (!hackathon) return null
   const teams = collection(db, 'hackathonTeams').filter(row => row.hackathonId === hackathonId)
@@ -1672,28 +1822,69 @@ export function hackathonAggregates(userId, hackathonId) {
 }
 
 export function walletSummary(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return walletSummaryFor(db, userId)
 }
 
+export async function walletSummaryAsync(userId) { if (!financeReadEnabled()) return walletSummary(userId); try { return await walletSummaryPostgres(userId) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletSummary(userId) } }
+
 export function walletList(userId, name) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return listOwned(db, name, userId, 'userId')
 }
 
+export async function walletListAsync(userId, name) { if (!financeReadEnabled()) return walletList(userId, name); try { return await walletCollectionPostgres(userId, name) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletList(userId, name) } }
+
 export function createPaymentIntent(userId, body) {
-  return updateDb(db => ({ paymentIntent: insertOwned(db, 'paymentIntents', userId, {
-    amount: Number(body.amount || 0),
-    currency: body.currency || 'USD',
-    credits: Number(body.credits || 0),
-    status: 'pending',
-    provider: body.provider || null,
-    idemKey: body.idemKey,
-  }, 'pay', 'userId') }))
+  return updateAuthorityDb(db => {
+    const idemKey = typeof body.idemKey === 'string' && body.idemKey.trim() ? body.idemKey.trim() : null
+    const existing = idemKey && collection(db, 'paymentIntents').find(row => row.userId === userId && row.idemKey === idemKey)
+    if (existing) return { paymentIntent: existing, idempotent: true }
+    const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
+    const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
+    if (packageId && !pack) return { ok: false, error: 'credit_package_not_found' }
+    const planId = typeof body.planId === 'string' ? body.planId.trim() : ''
+    const plan = planId ? collection(db, 'billingPlans').find(row => (row.id === planId || row.slug === planId) && row.active !== false) : null
+    const sponsorApplicationId = typeof body.sponsorApplicationId === 'string' ? body.sponsorApplicationId.trim() : ''
+    const sponsorApplication = sponsorApplicationId ? collection(db, 'sponsorshipApplications').find(row => row.id === sponsorApplicationId && row.status === 'approved') : null
+    const sponsorPackage = sponsorApplication ? collection(db, 'organizationSponsorshipPackages').find(row => row.id === sponsorApplication.packageId && row.organizationId === sponsorApplication.organizationId && row.status === 'active') : null
+    if (sponsorApplicationId && (!sponsorApplication || !sponsorPackage)) return { ok: false, error: 'approved_sponsorship_application_required' }
+    if (planId && !plan && process.env.NODE_ENV === 'production') return { ok: false, error: 'billing_plan_not_found' }
+    if (!packageId && !planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
+    const amount = sponsorPackage ? Number(sponsorPackage.amount || 0) : pack ? Number(pack.amount ?? pack.price ?? 0) : plan ? Number(plan.amount ?? plan.price ?? 0) : Number(body.amount || 0)
+    const credits = sponsorPackage ? Number(sponsorPackage.creditGrant || sponsorPackage.credits || 0) : pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : plan ? Number(plan.includedCredits ?? plan.credits ?? 0) : Number(body.credits || 0)
+    const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
+      packageId: pack?.id || packageId || null,
+      planId: plan?.id || planId || null,
+      organizationId: sponsorApplication?.organizationId || (typeof body.organizationId === 'string' ? body.organizationId.trim() : null),
+      purchaseType: sponsorApplication ? 'sponsor_grant' : typeof body.purchaseType === 'string' ? body.purchaseType.trim() : null,
+      programId: typeof body.programId === 'string' ? body.programId.trim() : null,
+      hackathonId: typeof body.hackathonId === 'string' ? body.hackathonId.trim() : null,
+      budgetId: typeof body.budgetId === 'string' ? body.budgetId.trim() : null,
+      sponsorApplicationId: sponsorApplicationId || null,
+      organizationCapabilities: plan?.organizationCapabilities || plan?.capabilities || null,
+      organizationLimits: plan?.organizationLimits || plan?.limits || null,
+      organizationExpiresAt: plan?.durationDays ? new Date(Date.now() + Number(plan.durationDays) * 86400000).toISOString() : null,
+      amount,
+      currency: sponsorPackage?.currency || pack?.currency || plan?.currency || body.currency || 'USD',
+      credits,
+      status: 'pending',
+      provider: body.provider || null,
+      idemKey,
+      createdAt: nowIso(),
+    }, 'pay', 'userId')
+    return { paymentIntent }
+  })
+}
+
+export async function createPaymentIntentAsync(userId, body) {
+  const result = createPaymentIntent(userId, body)
+  if (!process.env.FINANCE_WRITE_SOURCE || process.env.FINANCE_WRITE_SOURCE !== 'postgres' || result?.ok === false) return result
+  try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'create_payment_intent', error: error.message })); if (process.env.FINANCE_WRITE_FALLBACK_SQLITE !== 'false') return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
 }
 
 export function genericList(userId, name) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return collection(db, name).filter(row => isRecordVisible(row, userId)).sort(byNewest)
 }
 
@@ -1713,7 +1904,7 @@ function collaborationList(value, maxItems = 12, maxLength = 60) {
 }
 
 export function createCollaborationCall(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const projectId = collaborationText(body.projectId, 100)
     const company = collaborationText(body.company || body.projectName, 120)
     const summary = collaborationText(body.summary, 500)
@@ -1786,7 +1977,7 @@ export function createCollaborationCall(userId, body) {
 }
 
 export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const row = insertOwned(db, name, userId, body, prefix, field)
     const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
     const event = appendPlatformEventInDb(db, {
@@ -1800,7 +1991,7 @@ export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
 }
 
 export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const row = patchOwned(db, name, itemId, userId, body, field)
     if (!row) return null
     const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
@@ -1813,12 +2004,12 @@ export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
 }
 
 export function getNotificationPreferences(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return collection(db, 'notificationPreferences').find(row => row.userId === userId) || { userId, preferences: {} }
 }
 
 export function updateNotificationPreferences(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const rows = collection(db, 'notificationPreferences')
     const idx = rows.findIndex(row => row.userId === userId)
     const currentPreferences = idx === -1 ? {} : cleanObject(rows[idx].preferences)
@@ -1834,12 +2025,12 @@ export function updateNotificationPreferences(userId, body) {
 }
 
 export function listContributions(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   return { contributions: listOwned(db, 'contributions', userId, 'collaboratorId') }
 }
 
 export function getCollaboratorScores(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const contributions = listOwned(db, 'contributions', userId, 'collaboratorId')
   const verified = contributions.filter(c => c.verified)
 
@@ -1872,7 +2063,7 @@ export function getCollaboratorScores(userId) {
 }
 
 export function createContract(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const collaboratorId = String(body.collaboratorId || '').trim()
     if (!collaboratorId) return { ok: false, error: 'collaborator_required' }
     if (collaboratorId === userId) return { ok: false, error: 'self_contract_not_allowed' }
@@ -1904,7 +2095,7 @@ export function createContract(userId, body) {
 }
 
 export function listContracts(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const contracts = collection(db, 'contracts').filter(row =>
     row.founderId === userId || row.collaboratorId === userId
   ).sort(byNewest)
@@ -1912,7 +2103,7 @@ export function listContracts(userId) {
 }
 
 export function getContract(userId, contractId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const contract = collection(db, 'contracts').find(row =>
     row.id === contractId && (row.founderId === userId || row.collaboratorId === userId)
   )
@@ -1920,7 +2111,7 @@ export function getContract(userId, contractId) {
 }
 
 export function signContract(userId, contractId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const contract = collection(db, 'contracts').find(row =>
       row.id === contractId && row.collaboratorId === userId
     )
@@ -1944,7 +2135,7 @@ export function signContract(userId, contractId) {
 }
 
 export function countersignContract(userId, contractId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const contract = collection(db, 'contracts').find(row =>
       row.id === contractId && row.founderId === userId
     )
@@ -1968,7 +2159,7 @@ export function countersignContract(userId, contractId) {
 }
 
 export function applyToOpportunity(userId, opportunityId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const opportunity = collection(db, 'opportunities').find(row => row.id === opportunityId)
     if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
     if (opportunity.ownerId === userId) return { ok: false, error: 'self_application_not_allowed' }
@@ -1990,7 +2181,7 @@ export function applyToOpportunity(userId, opportunityId, body) {
 }
 
 export function listApplications(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const applications = collection(db, 'opportunityApplications')
     .filter(row => row.applicantId === userId)
     .sort(byNewest)

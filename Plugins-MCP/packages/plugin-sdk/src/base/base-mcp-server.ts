@@ -33,6 +33,12 @@ interface RegisteredTool {
   spec: ManifestMCPTool;
   handler: ToolHandler;
   contribution?: ContributionKind;
+  contributionDetails?: (params: Record<string, unknown>, data: unknown) => {
+    projectId?: string;
+    artifactId?: string;
+    weight?: number;
+    metadata?: Record<string, unknown>;
+  };
 }
 
 export abstract class BaseMCPServer implements MCPAdapter {
@@ -53,13 +59,19 @@ export abstract class BaseMCPServer implements MCPAdapter {
   }
 
   /** Register the implementation for a declared tool. */
-  protected handle(name: string, handler: ToolHandler, contribution?: ContributionKind): void {
+  protected handle(
+    name: string,
+    handler: ToolHandler,
+    contribution?: ContributionKind,
+    contributionDetails?: RegisteredTool['contributionDetails'],
+  ): void {
     const existing = this.tools.get(name);
     if (!existing) {
       throw new Error(`tool '${name}' is not declared in the manifest mcp.tools`);
     }
     existing.handler = handler;
     existing.contribution = contribution;
+    existing.contributionDetails = contributionDetails;
   }
 
   describeTools(): MCPTool[] {
@@ -130,8 +142,10 @@ export abstract class BaseMCPServer implements MCPAdapter {
       const data = await entry.handler(p);
       await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'success');
       const kind = entry.contribution ?? 'ai_action';
+      const details = entry.contributionDetails?.(p, data) ?? {};
       await emitContribution(this.runtime, this.ctx, this.sourceTool, kind, {
-        metadata: { tool },
+        ...details,
+        metadata: { tool, ...(details.metadata ?? {}) },
       });
       return ok(data);
     } catch (e) {

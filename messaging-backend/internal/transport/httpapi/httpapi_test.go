@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/auth"
@@ -26,8 +27,10 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	ver := auth.NewVerifier("s")
 	h := hub.New(pubsub.NewInMemory())
 	msg := messaging.New(st.Conversations, st.Messages, h)
+	msg.SetUsers(st.Users)
 	chSvc := channel.New(st.Channels, h)
 	feedSvc := feed.New(st.Posts, h)
+	feedSvc.SetUsers(st.Users)
 	demoSvc := demo.New(st.Demo)
 	qaSvc := qa.New(st.QA, demoSvc, h)
 	lkSvc := livekit.New("APItest", "secretsecretsecretsecretsecret12", "wss://test.livekit.cloud")
@@ -77,7 +80,7 @@ func TestCreateConversationAndHistory(t *testing.T) {
 	r, ver, st := newAPI(t)
 	ctx := context.Background()
 	_ = st.Users.Upsert(ctx, store.User{ID: "u1", DisplayName: "U1"})
-	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "u2", DisplayName: "U2", Verified: true})
 	tok, _ := ver.Mint("u1", "U1", "founder")
 
 	rec := httptest.NewRecorder()
@@ -116,6 +119,47 @@ func TestCreateConversationAndHistory(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &hist)
 	if len(hist.Messages) != 1 {
 		t.Fatalf("want 1 message, got %d (%s)", len(hist.Messages), rec.Body)
+	}
+}
+
+func TestCreateConversationRequiresTrustOrRecipientEligibility(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "sender", DisplayName: "Sender"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "target", DisplayName: "Target"})
+	tok, _ := ver.Mint("sender", "Sender", "founder")
+	create := func(target string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]string{"userId": target})
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "/api/v1/conversations", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := create("target"); rec.Code != http.StatusForbidden {
+		t.Fatalf("untrusted recipient: want 403, got %d body=%s", rec.Code, rec.Body)
+	}
+	_ = st.Users.Upsert(ctx, store.User{ID: "target", DisplayName: "Target", Verified: true})
+	if rec := create("target"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deliveryMode":"request"`) {
+		t.Fatalf("verified recipient should create request: code=%d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestCreateConversationAllowsMutualConnection(t *testing.T) {
+	r, ver, st := newAPI(t)
+	ctx := context.Background()
+	_ = st.Users.Upsert(ctx, store.User{ID: "sender", DisplayName: "Sender"})
+	_ = st.Users.Upsert(ctx, store.User{ID: "target", DisplayName: "Target"})
+	_ = st.Posts.FollowUser(ctx, "sender", "target", true)
+	_ = st.Posts.FollowUser(ctx, "target", "sender", true)
+	tok, _ := ver.Mint("sender", "Sender", "founder")
+	body, _ := json.Marshal(map[string]string{"userId": "target"})
+	req := httptest.NewRequest("POST", "/api/v1/conversations", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"deliveryMode":"direct"`) {
+		t.Fatalf("mutual connection should create direct conversation: code=%d body=%s", rec.Code, rec.Body)
 	}
 }
 

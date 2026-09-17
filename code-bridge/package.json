@@ -1,0 +1,22 @@
+{
+  "name": "@techit/code-bridge",
+  "version": "0.1.0",
+  "description": "Authorized local VS Code bridge for TechIT Workspace projects",
+  "type": "module",
+  "bin": {
+    "techit-code": "src/cli.mjs"
+  },
+  "exports": "./src/bridge.mjs",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "license": "UNLICENSED"
+}

@@ -1,0 +1,23 @@
+name: TECHIT Backend — Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/BACKEND
+            git pull https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            npm install --workspaces --if-present
+            pm2 restart techit-backend
+            echo "✅ Backend deployed"

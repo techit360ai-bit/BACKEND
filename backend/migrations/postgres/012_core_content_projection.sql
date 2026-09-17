@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS core_feed_posts (id TEXT PRIMARY KEY,user_id TEXT,workspace_id TEXT,project_id TEXT,status TEXT,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS core_feed_comments (id TEXT PRIMARY KEY,post_id TEXT,user_id TEXT,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS core_feed_likes (id TEXT PRIMARY KEY,post_id TEXT,user_id TEXT,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL,UNIQUE(post_id,user_id));
+CREATE TABLE IF NOT EXISTS core_files (id TEXT PRIMARY KEY,user_id TEXT,workspace_id TEXT,project_id TEXT,status TEXT,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS core_notifications (id TEXT PRIMARY KEY,user_id TEXT,read BOOLEAN NOT NULL DEFAULT false,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE IF NOT EXISTS core_mentorship_messages (id TEXT PRIMARY KEY,room_id TEXT,user_id TEXT,payload JSONB NOT NULL DEFAULT '{}',created_at TIMESTAMPTZ NOT NULL,updated_at TIMESTAMPTZ NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_core_feed_posts_project_time ON core_feed_posts(project_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_core_feed_comments_post_time ON core_feed_comments(post_id,created_at);
+CREATE INDEX IF NOT EXISTS idx_core_notifications_user_read ON core_notifications(user_id,read,created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_core_files_workspace ON core_files(workspace_id,created_at DESC);

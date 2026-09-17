@@ -102,6 +102,9 @@ jobs:
       - name: Validate security gate wiring
         run: npm run security:gates
 
+      - name: Validate production startup import contracts
+        run: npm run startup:check --prefix backend
+
       - name: Run Node backend tests
         run: npm test --prefix backend
 
