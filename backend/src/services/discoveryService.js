@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 
 const DAY_MS = 86_400_000
@@ -89,13 +89,17 @@ export const DEFAULT_DISCOVERY_CONFIG = {
       trust: 0.07,
       activityRecency: 0.06,
       collaborationProbability: 0.08,
+      executionScore: 0.06,
+      deliveryReliability: 0.04,
+      responseVelocity: 0.03,
+      collaborationHistory: 0.04,
       negativeSignals: 0.2,
       repetitionPenalty: 0.12,
       staleness: 0.06,
     },
     explorer: { interestSimilarity: 0.18, behavioralSimilarity: 0.13, gsisRelevance: 0.02 },
     founder: { skillCompatibility: 0.2, intentCompatibility: 0.14, collaborationProbability: 0.14 },
-    collaborator: { skillCompatibility: 0.24, collaborationProbability: 0.16, gsisRelevance: 0.02 },
+    collaborator: { skillCompatibility: 0.24, collaborationProbability: 0.16, executionScore: 0.12, deliveryReliability: 0.08, responseVelocity: 0.06, collaborationHistory: 0.1, gsisRelevance: 0.02 },
     investor: { startupRelevance: 0.12, gsisRelevance: 0.13, trust: 0.1 },
     organization: { industryRelevance: 0.14, collaborationProbability: 0.13, trust: 0.1 },
   },
@@ -301,6 +305,21 @@ function ownerProfile(db, record) {
   return rows(db, 'profiles').find(profile => profile.id === ownerId) || null
 }
 
+function executionSignals(db, userId) {
+  const profile = rows(db, 'profiles').find(row => row.id === userId) || {}
+  const score = [...rows(db, 'executionScores'), ...rows(db, 'collaboratorScores')].filter(row => [row.userId, row.collaboratorId, row.actorId].includes(userId)).sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))[0] || {}
+  const tasks = rows(db, 'workspaceTasks').filter(row => [row.assigneeId, row.assignedTo, row.ownerId].includes(userId))
+  const completed = tasks.filter(row => ['completed', 'done'].includes(String(row.status).toLowerCase())).length
+  const taskRate = tasks.length ? completed / tasks.length : 0
+  const events = rows(db, 'recommendationEvents').filter(row => row.userId === userId || row.actorId === userId)
+  return {
+    executionScore: Number(score.executionScore ?? score.score ?? profile.executionScore ?? profile.eviScore ?? taskRate * 100) || 0,
+    deliveryReliability: Number(score.deliveryReliability ?? score.deliveryRate ?? profile.deliveryReliability ?? taskRate * 100) || 0,
+    responseVelocity: Number(score.responseVelocity ?? score.responseScore ?? profile.responseVelocity ?? 0) || 0,
+    collaborationHistory: Math.min(100, events.filter(row => ['successful_collaboration', 'connect', 'message', 'apply', 'join'].includes(row.eventType)).length * 12),
+  }
+}
+
 function projectType(project, owner) {
   const explicit = normalizeType(project.entityType || project.kind || project.type)
   if (['startup', 'project', 'idea'].includes(explicit)) return explicit
@@ -362,6 +381,7 @@ function buildCandidates(db, userId, viewerRole) {
       creatorId: profile.id,
       url,
       actions: makeActions(type, candidateRole, viewerRole, profile.id, url),
+      ...executionSignals(db, profile.id),
     })
   }
 
@@ -390,6 +410,7 @@ function buildCandidates(db, userId, viewerRole) {
       creatorId: ownerId,
       url,
       actions: makeActions(type, normalizeRole(owner?.role), viewerRole, project.id, url),
+      ...executionSignals(db, ownerId),
     })
   }
 
@@ -580,6 +601,10 @@ function scoreCandidate(db, userId, recommendationProfile, candidate, config, su
     behavioralSimilarity: overlap(Object.keys(recommendationProfile.recentInterests || {}), tags),
     startupRelevance: candidate.type === 'startup' ? Math.max(interestMatch, industryMatch) : 0,
     gsisRelevance: candidate.gsis || 0,
+    executionScore: clamp(Number(candidate.executionScore || 0) / 100),
+    deliveryReliability: clamp(Number(candidate.deliveryReliability || 0) / 100),
+    responseVelocity: clamp(Number(candidate.responseVelocity || 0) / 100),
+    collaborationHistory: clamp(Number(candidate.collaborationHistory || 0) / 100),
     trust: candidate.trustScore ?? 0.5,
     activityRecency: recency(candidate.updatedAt || candidate.createdAt),
     collaborationProbability: Math.max(skillMatch, intentMatch) * (candidate.type === 'content' ? 0.25 : 1),
@@ -701,12 +726,12 @@ function generateRecommendationsInDb(db, userId, options = {}) {
 }
 
 export function getRecommendations(userId, options = {}) {
-  return updateDb(db => generateRecommendationsInDb(db, userId, options))
+  return updateAuthorityDb(db => generateRecommendationsInDb(db, userId, options))
 }
 
 export function searchDiscovery(userId, query, options = {}) {
   const text = String(query || '').trim().toLowerCase()
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     const profile = syncRecommendationProfileInDb(db, userId)
     if (!profile) return { results: [], meta: { query: text, total: 0, personalized: false } }
@@ -732,7 +757,7 @@ export function searchDiscovery(userId, query, options = {}) {
 }
 
 export function updateRecommendationProfile(userId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = syncRecommendationProfileInDb(db, userId, body)
     if (!profile) return null
     const preferences = rows(db, 'recommendationPreferences')
@@ -810,18 +835,34 @@ export function appendPlatformEventInDb(db, event) {
 export function recordRecommendationEvent(userId, body = {}) {
   const eventType = String(body.eventType || '').toLowerCase()
   if (!eventType) throw new Error('eventType is required')
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const profile = syncRecommendationProfileInDb(db, userId)
     const event = appendPlatformEventInDb(db, { ...body, userId, actorId: userId, eventType })
     if (profile) updateBehaviorSignals(profile, event)
     appendEdge(db, userId, event)
+    if (eventType === 'mention') {
+      const actor = rows(db, 'profiles').find(row => row.id === userId)
+      const targets = [...new Set(Array.isArray(body.metadata?.targetUserIds) ? body.metadata.targetUserIds : [])]
+        .filter(targetId => targetId && targetId !== userId && rows(db, 'profiles').some(row => row.id === targetId))
+        .slice(0, 10)
+      for (const targetId of targets) {
+        const duplicate = rows(db, 'notifications').some(row => row.userId === targetId && row.type === 'mention' && row.metadata?.entityId === event.entityId)
+        if (duplicate) continue
+        rows(db, 'notifications').push({
+          id: createId('notif'), userId: targetId, actorId: userId, type: 'mention', read: false,
+          content: 'mentioned you in a TechIT conversation', author: userName(actor),
+          linkTo: body.metadata?.linkTo || '/feed/notifications',
+          metadata: { entityType: event.entityType, entityId: event.entityId }, createdAt: nowIso(),
+        })
+      }
+    }
     recordActivityInDb(db, userId, eventType, body.surface, body.occurredAt)
     return event
   })
 }
 
 export function recordExposure(userId, recommendationId, body = {}) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const recommendation = rows(db, 'recommendations').find(item => item.id === recommendationId && item.userId === userId)
     if (!recommendation) return null
     const exposure = {
@@ -868,7 +909,7 @@ export function recordExposure(userId, recommendationId, body = {}) {
 export function recordFeedback(userId, recommendationId, body = {}) {
   const type = String(body.type || '').toLowerCase()
   if (!FEEDBACK_TYPES.has(type)) throw new Error('Unsupported feedback type')
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const recommendation = rows(db, 'recommendations').find(item => item.id === recommendationId && item.userId === userId)
     if (!recommendation) return null
     if (type === 'undo') {
@@ -948,7 +989,7 @@ export function recordActivityInDb(db, userId, eventType, surface, occurredAt) {
 }
 
 export function noteUserActivity(userId, eventType, surface) {
-  return updateDb(db => recordActivityInDb(db, userId, eventType, surface))
+  return updateAuthorityDb(db => recordActivityInDb(db, userId, eventType, surface))
 }
 
 function inactivityState(config, hours) {
@@ -1036,7 +1077,7 @@ function returnItemsInDb(db, userId, anchor, limit) {
 }
 
 export function getReturnSummary(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     const profile = syncRecommendationProfileInDb(db, userId)
@@ -1070,7 +1111,7 @@ export function getReturnSummary(userId) {
 }
 
 export function markCatchUpItem(userId, recommendationId, action = 'seen') {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     if (!state?.returnAnchorAt) return null
     const catchUp = rows(db, 'catchUpStates').find(item => item.userId === userId && item.anchor === state.returnAnchorAt)
@@ -1085,7 +1126,7 @@ export function markCatchUpItem(userId, recommendationId, action = 'seen') {
 }
 
 export function completeCatchUp(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const state = rows(db, 'userActivityStates').find(item => item.userId === userId)
     if (!state?.returnAnchorAt) return null
     const anchor = state.returnAnchorAt
@@ -1106,7 +1147,7 @@ export function completeCatchUp(userId) {
 }
 
 export function refreshReturnDigests() {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const config = getConfigInDb(db)
     let created = 0
     for (const profile of rows(db, 'profiles')) {
@@ -1133,11 +1174,11 @@ export function refreshReturnDigests() {
 }
 
 export function getDiscoveryConfig() {
-  return getConfigInDb(readDb())
+  return getConfigInDb(readAuthorityDb())
 }
 
 export function updateDiscoveryConfig(patch) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const configs = rows(db, 'recommendationConfigs')
     let config = configs.find(item => item.id === 'default')
     const value = deepMerge(getConfigInDb(db), patch || {})
@@ -1153,7 +1194,7 @@ export function updateDiscoveryConfig(patch) {
 }
 
 export function getDiscoveryAnalytics() {
-  const db = readDb()
+  const db = readAuthorityDb()
   const events = rows(db, 'recommendationEvents')
   const exposures = rows(db, 'recommendationExposures')
   const feedback = rows(db, 'recommendationFeedback').filter(item => !item.undoneAt)

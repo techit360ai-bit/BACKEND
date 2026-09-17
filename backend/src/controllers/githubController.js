@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto'
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
+import { addVerifiedSkill, appendTrustProof } from '../services/trustVerificationAuthority.js'
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'test-github-client-id'
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || 'test-github-client-secret'
@@ -44,10 +45,10 @@ function pruneOauthStates(states = []) {
 
 export function githubAuthorize(req, res) {
   const state = createId('ghstate')
-  const db = readDb()
+  const db = readAuthorityDb()
   db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
   db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso() })
-  writeDb(db)
+  writeAuthorityDb(db)
 
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
@@ -62,7 +63,7 @@ export async function githubCallback(req, res) {
   const { code, state } = req.query
   if (!code || !state) return res.status(400).json({ error: 'Missing code or state' })
 
-  const db = readDb()
+  const db = readAuthorityDb()
   db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
   const stateEntry = db.githubOauthStates.find(s => s.state === state)
   if (!stateEntry) return res.status(400).json({ error: 'Invalid state' })
@@ -70,7 +71,7 @@ export async function githubCallback(req, res) {
   // Consume the state before making the external token exchange. This makes
   // the callback single-use even when two requests race while GitHub is slow.
   db.githubOauthStates = db.githubOauthStates.filter(s => s.state !== state)
-  writeDb(db)
+  writeAuthorityDb(db)
 
   try {
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
@@ -98,7 +99,7 @@ export async function githubCallback(req, res) {
         if (!db.githubConnections) db.githubConnections = []
         db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
         db.githubConnections.push(connection)
-        writeDb(db)
+        writeAuthorityDb(db)
         return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
       }
       return res.status(400).json({ error: tokenData.error_description || 'Token exchange failed' })
@@ -108,6 +109,9 @@ export async function githubCallback(req, res) {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     })
     const githubUser = await userRes.json()
+    const reposRes = await fetch('https://api.github.com/user/repos?sort=updated&per_page=50', { headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/vnd.github+json' } })
+    const repos = reposRes.ok ? await reposRes.json().catch(() => []) : []
+    const languages = [...new Set((Array.isArray(repos) ? repos : []).map(repo => repo.language).filter(Boolean))].slice(0, 20)
 
     const encryptedToken = encryptToken(tokenData.access_token)
     if (!encryptedToken) return res.status(503).json({ error: 'GitHub token encryption is not configured' })
@@ -125,7 +129,9 @@ export async function githubCallback(req, res) {
     if (!db.githubConnections) db.githubConnections = []
     db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
     db.githubConnections.push(connection)
-    writeDb(db)
+    writeAuthorityDb(db)
+    const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth', status: 'verified', providerSubjectId: String(githubUser.id || githubUser.node_id || githubUser.login || ''), confidence: 0.98, metadata: { providerSubjectId: String(githubUser.id || githubUser.node_id || ''), username: githubUser.login || '', profileUrl: githubUser.html_url || '', repoCount: Number(githubUser.public_repos || 0), languages, sourceProjectId: null } })
+    for (const language of languages) addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.82 })
 
     return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
   } catch {
@@ -140,8 +146,10 @@ export async function githubCallback(req, res) {
       }
       if (!db.githubConnections) db.githubConnections = []
       db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-      db.githubConnections.push(connection)
-      writeDb(db)
+        db.githubConnections.push(connection)
+        writeAuthorityDb(db)
+        const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth_test', status: 'verified', providerSubjectId: 'test-user', confidence: 0.5, metadata: { providerSubjectId: 'test-user', username: 'test-user', repoCount: 2, languages: ['TypeScript', 'Python'] } })
+        for (const language of ['TypeScript', 'Python']) addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.6 })
       return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
     }
     return res.status(500).json({ error: 'GitHub OAuth failed' })
@@ -149,7 +157,7 @@ export async function githubCallback(req, res) {
 }
 
 export function githubStatus(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.json({ connected: false })
@@ -164,7 +172,7 @@ export function githubStatus(req, res) {
 }
 
 export async function githubRepos(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })
@@ -193,7 +201,7 @@ export async function githubRepos(req, res) {
 }
 
 export async function githubCreateRepo(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })

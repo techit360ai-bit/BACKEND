@@ -1,0 +1,34 @@
+{
+  "freeQuotas": {
+    "CUSTOMER_VALIDATION_BASIC": 3,
+    "MVP_PLANNING_BASIC": 1,
+    "GSIS_BASIC": 3,
+    "STARTUP_HEALTH_BASIC": 2,
+    "IDEA_DIAGNOSTICS_BASIC": 5,
+    "BASIC_AI_ACTION": 20
+  },
+  "capabilities": {
+    "IDEA_DIAGNOSTICS_BASIC": { "valueStatement": "Understand the shape of your idea.", "blockedMessage": "Basic diagnosis is available on the free account." },
+    "CUSTOMER_VALIDATION_BASIC": { "valueStatement": "Capture early customer evidence and identify what to test next.", "blockedMessage": "Your included validation sessions are used. Continue with the runtime usage option or a subscription." },
+    "MVP_PLANNING_BASIC": { "valueStatement": "Turn a validated problem into a focused first build plan.", "blockedMessage": "Your included MVP plan is used. Continue with the runtime usage option or a subscription." },
+    "GSIS_BASIC": { "valueStatement": "Track a transparent baseline for startup readiness.", "blockedMessage": "Your included intelligence refreshes are used. Continue with the runtime usage option or a subscription." },
+    "STARTUP_HEALTH_BASIC": { "valueStatement": "See the most important health signal and the next corrective action.", "blockedMessage": "Your included health checks are used. Continue with the runtime usage option or a subscription." },
+    "IDEA_DIAGNOSTICS_ADVANCED": { "valueStatement": "Identify your highest-risk assumptions and the next validation experiment.", "blockedMessage": "Advanced diagnosis needs a Founder context and paid execution access." },
+    "CUSTOMER_VALIDATION_ADVANCED": { "valueStatement": "Turn customer responses into evidence-backed decisions.", "blockedMessage": "Advanced validation is a paid Founder capability." },
+    "WORKSPACE_COPILOT": { "valueStatement": "Move from plan to implementation with project-aware assistance.", "blockedMessage": "Workspace Copilot requires a Founder context." },
+    "ADVANCED_WORKSPACE_AI": { "valueStatement": "Handle deeper architecture, code, and execution analysis.", "blockedMessage": "Advanced workspace AI needs paid execution access." },
+    "INVESTOR_PUBLIC_DISCOVERY": { "valueStatement": "Discover public startups and review permitted basic profiles.", "blockedMessage": "Activate the Investor role to browse public startup opportunities." },
+    "INVESTOR_WATCHLIST": { "valueStatement": "Save a limited set of public opportunities for follow-up.", "blockedMessage": "Activate the Investor role to use watchlists." },
+    "INVESTOR_INTELLIGENCE": { "valueStatement": "Screen opportunities with structured intelligence and permitted evidence.", "blockedMessage": "Investor intelligence requires verification and a funded usage source." },
+    "DUE_DILIGENCE_INTELLIGENCE": { "valueStatement": "Organize diligence evidence and surface decision-relevant risk.", "blockedMessage": "Due diligence requires verification and a funded usage source." },
+    "PORTFOLIO_INTELLIGENCE": { "valueStatement": "Monitor portfolio health and execution trends.", "blockedMessage": "Portfolio intelligence is reserved for Investor subscriptions or funded usage." },
+    "ORGANIZATION_PROFILE": { "valueStatement": "Set up and verify an organization identity.", "blockedMessage": "Activate the Organization role to manage an organization profile." },
+    "ORGANIZATION_BASIC_DASHBOARD": { "valueStatement": "See basic programs, members, projects, and activity.", "blockedMessage": "Activate the Organization role to view the organization dashboard." },
+    "ORGANIZATION_PROGRAM_SETUP": { "valueStatement": "Create one basic program or cohort and onboard startups.", "blockedMessage": "Activate the Organization role to set up a program." },
+    "ORGANIZATION_BASIC_COHORT": { "valueStatement": "Review basic cohort and startup visibility.", "blockedMessage": "Activate the Organization role to view cohort records." },
+    "ORGANIZATION_BASIC_REPORTING": { "valueStatement": "Review basic persisted organization reports.", "blockedMessage": "Activate the Organization role to view basic reporting." },
+    "ORGANIZATION_MONITORING": { "valueStatement": "See cohort progress and intervene where evidence shows risk.", "blockedMessage": "Organization monitoring requires verification and a funded usage source." },
+    "COHORT_INTELLIGENCE": { "valueStatement": "Compare cohorts, identify stagnation, and prioritize interventions.", "blockedMessage": "Cohort intelligence requires verification and a funded usage source." },
+    "MENTOR_INTELLIGENCE": { "valueStatement": "Understand mentor activity and program outcomes.", "blockedMessage": "Mentor intelligence requires an active Organization context and funded usage." }
+  }
+}

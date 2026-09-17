@@ -9,7 +9,7 @@ export async function emitContribution(
   ctx: CallContext,
   sourceTool: string,
   kind: ContributionKind,
-  opts: { artifactId?: string; weight?: number; metadata?: Record<string, unknown> } = {},
+  opts: { projectId?: string; artifactId?: string; weight?: number; metadata?: Record<string, unknown> } = {},
 ): Promise<void> {
   const event = makeContributionEvent({
     kind,
@@ -17,6 +17,7 @@ export async function emitContribution(
     actorKind: ctx.actor.kind,
     sourceTool,
     workspaceId: ctx.actor.workspaceId,
+    projectId: opts.projectId,
     artifactId: opts.artifactId,
     weight: opts.weight,
     metadata: opts.metadata,

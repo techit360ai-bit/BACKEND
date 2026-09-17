@@ -1,4 +1,4 @@
-import { readDb, updateDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
@@ -8,7 +8,7 @@ function owned(row, userId) {
 }
 
 export function exportUserData(userId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const data = {}
   for (const [name, rows] of Object.entries(db)) {
     if (Array.isArray(rows)) data[name] = rows.filter(row => owned(row, userId))
@@ -17,7 +17,7 @@ export function exportUserData(userId) {
 }
 
 export function eraseUserData(userId) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const erased = {}
     for (const [name, rows] of Object.entries(db)) {
       if (!Array.isArray(rows)) continue
@@ -30,11 +30,11 @@ export function eraseUserData(userId) {
 }
 
 export function listConsents(userId) {
-  return readDb().consentRecords.filter(row => row.userId === userId)
+  return readAuthorityDb().consentRecords.filter(row => row.userId === userId)
 }
 
 export function recordConsent(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const row = {
       id: createId('consent'), userId,
       purpose: String(body.purpose || ''), version: String(body.version || ''),
@@ -47,11 +47,11 @@ export function recordConsent(userId, body) {
 }
 
 export function listRequests(userId) {
-  return readDb().dataSubjectRequests.filter(row => row.userId === userId)
+  return readAuthorityDb().dataSubjectRequests.filter(row => row.userId === userId)
 }
 
 export function createRequest(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const row = { id: createId('dsr'), userId, type: body.type, details: body.details || '', status: 'received', createdAt: nowIso(), dueAt: body.dueAt || null }
     db.dataSubjectRequests.push(row)
     return row
@@ -59,11 +59,11 @@ export function createRequest(userId, body) {
 }
 
 export function getResidency(userId) {
-  return readDb().dataResidencyPreferences.find(row => row.userId === userId) || null
+  return readAuthorityDb().dataResidencyPreferences.find(row => row.userId === userId) || null
 }
 
 export function saveResidency(userId, body) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const existing = db.dataResidencyPreferences.find(row => row.userId === userId)
     const value = { userId, region: body.region || 'eu', internationalTransfers: body.internationalTransfers === true, transferMechanism: body.transferMechanism || null, updatedAt: nowIso() }
     if (existing) Object.assign(existing, value)
@@ -72,9 +72,9 @@ export function saveResidency(userId, body) {
   })
 }
 
-export function listRegistry(name) { return readDb()[name] || [] }
+export function listRegistry(name) { return readAuthorityDb()[name] || [] }
 export function addRegistryRecord(name, body, userId, prefix) {
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const row = { id: createId(prefix), ...body, createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }
     db[name].push(row)
     return row

@@ -24,6 +24,7 @@
       "@techit/infra-audit": ["infra/audit/src/index.ts"],
       "@techit/infra-auth": ["infra/auth/src/index.ts"],
       "@techit/plugin-github": ["plugins/github/index.ts"],
+      "@techit/plugin-git-host": ["plugins/git-host/index.ts"],
       "@techit/plugin-notion": ["plugins/notion/index.ts"],
       "@techit/plugin-figma": ["plugins/figma/index.ts"],
       "@techit/plugin-web3": ["plugins/web3/index.ts"],

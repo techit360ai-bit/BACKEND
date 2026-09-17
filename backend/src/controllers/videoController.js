@@ -1,10 +1,10 @@
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 const VIDEO_CDN_BASE = process.env.VIDEO_CDN_BASE || 'https://test-cdn.techit.dev/videos'
 
 export function listVideoLessons(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const lessons = (db.videoLessons || [])
     .sort((a, b) => (a.order || 0) - (b.order || 0))
     .map(lesson => ({
@@ -17,7 +17,7 @@ export function listVideoLessons(req, res) {
 }
 
 export function getVideoLesson(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const lesson = (db.videoLessons || []).find(l => l.id === req.params.id)
   if (!lesson) return res.status(404).json({ error: 'Lesson not found' })
   const userProgress = (db.videoProgress || []).find(p => p.userId === req.user.id && p.lessonId === lesson.id)
@@ -32,7 +32,7 @@ export function getVideoLesson(req, res) {
 }
 
 export function createVideoLesson(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   const title = String(req.body.title || '').trim()
   if (!title) return res.status(400).json({ error: 'Title is required' })
 
@@ -50,7 +50,7 @@ export function createVideoLesson(req, res) {
   }
   if (!db.videoLessons) db.videoLessons = []
   db.videoLessons.push(lesson)
-  writeDb(db)
+  writeAuthorityDb(db)
   return res.status(201).json({
     lesson: {
       ...lesson,
@@ -61,7 +61,7 @@ export function createVideoLesson(req, res) {
 }
 
 export function markVideoProgress(req, res) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.videoProgress) db.videoProgress = []
   const existing = db.videoProgress.find(p => p.userId === req.user.id && p.lessonId === req.params.id)
   if (existing) {
@@ -76,6 +76,6 @@ export function markVideoProgress(req, res) {
       watchedAt: nowIso(),
     })
   }
-  writeDb(db)
+  writeAuthorityDb(db)
   return res.json({ ok: true })
 }

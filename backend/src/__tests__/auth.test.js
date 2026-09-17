@@ -150,6 +150,31 @@ describe('POST /api/auth/signup', () => {
     expect(res.body.profile.role).toBe('founder')
   })
 
+  it('creates Explorer accounts as the base network role', async () => {
+    readDb.mockReturnValue(makeDb({
+      emailVerifications: [makeVerification('explorer@example.com')],
+    }))
+
+    const res = await request(app).post('/api/auth/signup').send({
+      email: 'explorer@example.com',
+      password: 'Secret@99',
+      firstName: 'Eli',
+      lastName: 'Explorer',
+      role: 'explorer',
+      emailVerificationToken: 'verified-token',
+    })
+
+    expect(res.status).toBe(201)
+    expect(res.body.profile.role).toBe('explorer')
+    const written = writeDb.mock.calls[0][0]
+    expect(written.userRoles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: res.body.user.id, role: 'explorer', status: 'active' }),
+    ]))
+    expect(written.activeContexts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: res.body.user.id, role: 'explorer', status: 'active' }),
+    ]))
+  })
+
   it('normalizes email casing and whitespace before storing the account', async () => {
     readDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('mixed@example.com')],

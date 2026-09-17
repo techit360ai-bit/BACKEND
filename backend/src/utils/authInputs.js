@@ -1,4 +1,4 @@
-export const ALLOWED_ROLES = new Set(['founder', 'collaborator', 'investor', 'organisation'])
+export const ALLOWED_ROLES = new Set(['explorer', 'user', 'founder', 'collaborator', 'investor', 'organisation', 'organization'])
 
 export const ADMIN_ROLES = new Set(['admin', 'super_admin'])
 
@@ -9,7 +9,7 @@ export function normalizeEmail(email) {
 }
 
 export function isAllowedRole(role) {
-  return typeof role === 'string' && ALLOWED_ROLES.has(role)
+  return typeof role === 'string' && ALLOWED_ROLES.has(role.toLowerCase())
 }
 
 export function isAdminRole(role) {

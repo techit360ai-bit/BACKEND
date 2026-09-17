@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
-import { changePassword, forgotPassword, resetPassword, signup, signin, session, signout } from '../controllers/authController.js'
+import { activeSessions, changePassword, forgotPassword, refresh, resetPassword, revokeActiveSession, revokeEverySession, revokeOtherSessions, signup, signin, session, signout } from '../controllers/authController.js'
 import { sendOtp, verifyOtp } from '../controllers/otpController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
@@ -54,8 +54,13 @@ const verifyLimit = baseLimit({
 
 router.post('/signup',      signupLimit, signup)
 router.post('/signin',      signinLimit, signin)
+router.post('/refresh',     signinLimit, refresh)
 router.get('/session',      requireAuth, session)
 router.post('/signout',     requireAuth, signout)
+router.get('/sessions',     requireAuth, activeSessions)
+router.delete('/sessions/:sessionId', requireAuth, revokeActiveSession)
+router.post('/sessions/revoke-others', requireAuth, revokeOtherSessions)
+router.post('/sessions/revoke-all', requireAuth, revokeEverySession)
 router.post('/change-password', requireAuth, changePassword)
 router.post('/forgot-password', signinLimit, forgotPassword)
 router.post('/reset-password',  signinLimit, resetPassword)

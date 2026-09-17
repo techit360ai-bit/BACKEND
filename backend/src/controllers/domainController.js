@@ -1,5 +1,8 @@
 import {
   addWatchlist,
+  removeWatchlist,
+  listWatchlistPreferences,
+  updateWatchlistPreferences,
   collaboratorEarnings,
   collaboratorEquity,
   countersignContract,
@@ -13,6 +16,7 @@ import {
   createInvestorCollection,
   createOrganizationProject,
   createPaymentIntent,
+  createPaymentIntentAsync,
   createProject,
   createWorkspaceCollectionItem,
   createWorkspaceInvitation,
@@ -50,15 +54,18 @@ import {
   createOrganizationDemoDayEvent,
   organizationDemoDayAnalytics,
   listProjects,
+  listProjectsAsync,
   listWatchlist,
   listWorkspaceCollection,
   listWorkspaceMembers,
+  listWorkspaceMembersAsync,
   patchWorkspaceCollectionItem,
   acceptWorkspaceInvitation,
   declineWorkspaceInvitation,
   getWorkspaceInvitation,
   removeWorkspaceMember,
   listWorkspaces,
+  listWorkspacesAsync,
   logHackathonCheckIn,
   organizationDashboard,
   promoteIntake,
@@ -80,10 +87,15 @@ import {
   updateOrganizationProject,
   updateProject,
   walletList,
+  walletListAsync,
   walletSummary,
+  walletSummaryAsync,
   workspaceContext,
+  workspaceContextAsync,
 } from '../services/domainService.js'
+import { attachHackathonProject, getHackathonProjectEntry } from '../services/workspaceCapabilityService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
+import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 
 function created(res, body) {
   return res.status(201).json(body)
@@ -101,21 +113,22 @@ function requireTitle(req, res) {
   }
   return title
 }
+async function persistedWorkspace(req, value, projectId = null) { if (!process.env.WORKSPACE_WRITE_SOURCE || process.env.WORKSPACE_WRITE_SOURCE !== 'postgres' || value?.ok === false) return value; try { await syncWorkspaceProjectAggregate(req.user.id, value.workspace?.id || req.params.workspaceId || null, projectId || value.project?.id || null); return value } catch (error) { console.error(JSON.stringify({ event: 'workspace_project_postgres_write_failed', error: error.message })); if (process.env.WORKSPACE_WRITE_FALLBACK_SQLITE !== 'false') return value; return { ok: false, error: 'workspace_project_write_temporarily_unavailable' } } }
 
-export function founderProjects(req, res) {
-  return res.json(listProjects(req.user.id))
+export async function founderProjects(req, res) {
+  return res.json(await listProjectsAsync(req.user.id))
 }
 
-export function founderProjectCreate(req, res) {
+export async function founderProjectCreate(req, res) {
   const title = requireTitle(req, res)
   if (!title) return
-  const result = createProject(req.user.id, { ...req.body, title })
+  const result = await persistedWorkspace(req, createProject(req.user.id, { ...req.body, title }))
   if (!result.ok) return res.status(404).json(result)
   return created(res, result)
 }
 
-export function founderProjectPatch(req, res) {
-  const project = updateProject(req.user.id, req.params.projectId, req.body)
+export async function founderProjectPatch(req, res) {
+  const project = await persistedWorkspace(req, updateProject(req.user.id, req.params.projectId, req.body), req.params.projectId)
   if (!project) return notFound(res, 'Project not found')
   return res.json({ project })
 }
@@ -133,24 +146,36 @@ export function endorsementCreate(req, res) {
   return created(res, result)
 }
 
-export function workspaces(req, res) {
-  return res.json(listWorkspaces(req.user.id))
+export async function workspaces(req, res) {
+  return res.json(await listWorkspacesAsync(req.user.id))
 }
 
-export function workspaceProvision(req, res) {
-  const result = provisionWorkspace(req.user.id, req.body)
+export async function workspaceProvision(req, res) {
+  const result = await persistedWorkspace(req, provisionWorkspace(req.user.id, req.body), null)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
 
-export function workspaceContextGet(req, res) {
-  const result = workspaceContext(req.user.id, req.params.workspaceId)
+export async function workspaceContextGet(req, res) {
+  const result = await workspaceContextAsync(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
   return res.json(result)
 }
 
-export function workspaceInvitationCreate(req, res) {
-  const result = createWorkspaceInvitation(req.user.id, req.params.workspaceId, req.body)
+export function hackathonProjectEntryCreate(req, res) {
+  const result = attachHackathonProject(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export function hackathonProjectEntryGet(req, res) {
+  const entry = getHackathonProjectEntry(req.user.id, req.params.hackathonId, req.params.teamId)
+  if (!entry) return notFound(res, 'Hackathon project entry not found')
+  return res.json({ entry })
+}
+
+export async function workspaceInvitationCreate(req, res) {
+  const result = await persistedWorkspace(req, createWorkspaceInvitation(req.user.id, req.params.workspaceId, req.body))
   if (!result.ok) {
     const status = ['workspace_not_found', 'collaborator_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json({ error: result.error })
@@ -164,8 +189,8 @@ export function workspaceInvitationGet(req, res) {
   return res.json({ invitation })
 }
 
-export function workspaceInvitationAccept(req, res) {
-  const result = acceptWorkspaceInvitation(req.user.id, req.params.invitationId)
+export async function workspaceInvitationAccept(req, res) {
+  const result = await persistedWorkspace(req, acceptWorkspaceInvitation(req.user.id, req.params.invitationId))
   if (!result.ok) {
     const status = ['invitation_not_found', 'workspace_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json({ error: result.error })
@@ -173,20 +198,20 @@ export function workspaceInvitationAccept(req, res) {
   return res.json(result)
 }
 
-export function workspaceInvitationDecline(req, res) {
-  const result = declineWorkspaceInvitation(req.user.id, req.params.invitationId)
+export async function workspaceInvitationDecline(req, res) {
+  const result = await persistedWorkspace(req, declineWorkspaceInvitation(req.user.id, req.params.invitationId))
   if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
 }
 
-export function workspaceMembersGet(req, res) {
-  const result = listWorkspaceMembers(req.user.id, req.params.workspaceId)
+export async function workspaceMembersGet(req, res) {
+  const result = await listWorkspaceMembersAsync(req.user.id, req.params.workspaceId)
   if (!result) return notFound(res, 'Workspace not found')
   return res.json(result)
 }
 
-export function workspaceMemberDelete(req, res) {
-  const result = removeWorkspaceMember(req.user.id, req.params.workspaceId, req.params.memberId)
+export async function workspaceMemberDelete(req, res) {
+  const result = await persistedWorkspace(req, removeWorkspaceMember(req.user.id, req.params.workspaceId, req.params.memberId))
   if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
 }
@@ -197,26 +222,26 @@ export function workspaceItems(req, res) {
   return res.json({ [req.responseKey]: rows })
 }
 
-export function workspaceItemCreate(req, res) {
-  const row = createWorkspaceCollectionItem(
+export async function workspaceItemCreate(req, res) {
+  const row = await persistedWorkspace(req, createWorkspaceCollectionItem(
     req.user.id,
     req.params.workspaceId,
     req.collectionName,
     req.body,
     req.itemPrefix,
-  )
+  ))
   if (!row) return notFound(res, 'Workspace not found')
   return created(res, { [req.itemKey]: row })
 }
 
 export async function workspaceItemPatch(req, res) {
-  const row = patchWorkspaceCollectionItem(
+  const row = await persistedWorkspace(req, patchWorkspaceCollectionItem(
     req.user.id,
     req.params.workspaceId,
     req.collectionName,
     req.params.itemId,
     req.body,
-  )
+  ))
   if (!row) return notFound(res, 'Workspace item not found')
   if (
     req.collectionName === 'workspaceTasks' &&
@@ -348,6 +373,13 @@ export function watchlistAdd(req, res) {
   return created(res, result)
 }
 
+export function watchlistRemove(req, res) {
+  return res.json(removeWatchlist(req.user.id, String(req.params.projectId || '').trim()))
+}
+
+export function watchlistPreferences(req, res) { return res.json(listWatchlistPreferences(req.user.id)) }
+export function watchlistPreferencesPatch(req, res) { return res.json(updateWatchlistPreferences(req.user.id, req.body || {})) }
+
 export function investorList(req, res) {
   return res.json({ [req.responseKey]: investorCollection(req.user.id, req.collectionName) })
 }
@@ -399,7 +431,12 @@ export function hackathonRegistrations(req, res) {
 }
 
 export function hackathonCreate(req, res) {
-  return created(res, createHackathon(req.user.id, req.body))
+  const result = createHackathon(req.user.id, req.body)
+  if (result?.ok === false) {
+    const status = result.error?.includes('permission') || result.error?.includes('denied') ? 403 : result.error?.includes('required') ? 400 : result.error?.includes('limit') ? 409 : 402
+    return res.status(status).json(result)
+  }
+  return created(res, result)
 }
 
 export function hackathonGet(req, res) {
@@ -517,16 +554,18 @@ export function hackathonPipeline(req, res) {
   return res.json({ hackathonId: req.params.hackathonId, buckets: result.pipeline })
 }
 
-export function walletSummaryGet(req, res) {
-  return res.json(walletSummary(req.user.id))
+export async function walletSummaryGet(req, res) {
+  return res.json(await walletSummaryAsync(req.user.id))
 }
 
-export function walletListGet(req, res) {
-  return res.json({ [req.responseKey]: walletList(req.user.id, req.collectionName) })
+export async function walletListGet(req, res) {
+  return res.json({ [req.responseKey]: await walletListAsync(req.user.id, req.collectionName) })
 }
 
-export function walletPaymentIntent(req, res) {
-  return created(res, createPaymentIntent(req.user.id, req.body))
+export async function walletPaymentIntent(req, res) {
+  const result = await createPaymentIntentAsync(req.user.id, req.body)
+  if (result?.ok === false) return res.status(400).json(result)
+  return created(res, result)
 }
 
 export function genericListGet(req, res) {
@@ -544,7 +583,7 @@ export function genericCreatePost(req, res) {
 }
 
 export function genericPatchItem(req, res) {
-  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId, req.body)
+  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
 }

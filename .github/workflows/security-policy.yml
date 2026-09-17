@@ -1,0 +1,27 @@
+name: security-policy
+
+on:
+  pull_request:
+  push:
+    branches: [main, master, feat/backend-resilience-followup]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run security:policy
+      - run: npm run security:endpoint-inventory
+      - run: npm test -- --run --pool=forks --maxWorkers=1

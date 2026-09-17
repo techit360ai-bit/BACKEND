@@ -57,6 +57,47 @@ func (s *FakeUserStore) Get(_ context.Context, id string) (User, error) {
 	}
 	return u, nil
 }
+func (s *FakeUserStore) GetByUsername(_ context.Context, username string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	for _, u := range s.m {
+		if strings.EqualFold(u.Username, username) {
+			return u, nil
+		}
+	}
+	return User{}, ErrNotFound
+}
+func (s *FakeUserStore) Search(_ context.Context, query, excludeUserID string, limit int) ([]User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	query = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(query), "@"))
+	out := []User{}
+	for _, u := range s.m {
+		if u.ID == excludeUserID {
+			continue
+		}
+		if query == "" || strings.Contains(strings.ToLower(u.DisplayName), query) || strings.Contains(strings.ToLower(u.Username), query) {
+			out = append(out, u)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Verified != out[j].Verified {
+			return out[i].Verified
+		}
+		if out[i].CredibilityScore != out[j].CredibilityScore {
+			return out[i].CredibilityScore > out[j].CredibilityScore
+		}
+		return out[i].DisplayName < out[j].DisplayName
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
 
 type FakeConversationStore struct {
 	mu      sync.Mutex
@@ -65,6 +106,7 @@ type FakeConversationStore struct {
 	seq     int
 	msgs    *FakeMessageStore
 	users   *FakeUserStore
+	meta    map[string]Conversation
 }
 
 func pairKey(a, b string) (string, string) {
@@ -75,18 +117,57 @@ func pairKey(a, b string) (string, string) {
 }
 
 func (s *FakeConversationStore) GetOrCreateDM(_ context.Context, a, b string) (Conversation, bool, error) {
+	return s.GetOrCreateDMRequest(context.Background(), a, b, a, "active")
+}
+func (s *FakeConversationStore) GetOrCreateDMRequest(_ context.Context, a, b, initiatedBy, requestStatus string) (Conversation, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.meta == nil {
+		s.meta = map[string]Conversation{}
+	}
 	lo, hi := pairKey(a, b)
 	for id, p := range s.convos {
 		if p[0] == lo && p[1] == hi {
-			return Conversation{ID: id}, false, nil
+			return s.meta[id], false, nil
 		}
 	}
 	s.seq++
 	id := "conv-" + string(rune('a'+s.seq))
 	s.convos[id] = [2]string{lo, hi}
-	return Conversation{ID: id}, true, nil
+	c := Conversation{ID: id, InitiatedBy: initiatedBy, RequestStatus: requestStatus, CreatedAt: time.Now()}
+	s.meta[id] = c
+	return c, true, nil
+}
+func (s *FakeConversationStore) FindDM(_ context.Context, a, b string) (Conversation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	lo, hi := pairKey(a, b)
+	for id, p := range s.convos {
+		if p[0] == lo && p[1] == hi {
+			return s.meta[id], nil
+		}
+	}
+	return Conversation{}, ErrNotFound
+}
+func (s *FakeConversationStore) Get(_ context.Context, id string) (Conversation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.meta[id]
+	if !ok {
+		return Conversation{}, ErrNotFound
+	}
+	return c, nil
+}
+func (s *FakeConversationStore) SetRequestStatus(_ context.Context, id, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.meta[id]
+	if !ok {
+		return ErrNotFound
+	}
+	c.RequestStatus = status
+	s.meta[id] = c
+	return nil
 }
 func (s *FakeConversationStore) Participants(_ context.Context, convID string) ([]string, error) {
 	s.mu.Lock()
@@ -143,7 +224,17 @@ func (s *FakeConversationStore) SummariesForUser(ctx context.Context, userID str
 		if s.users != nil {
 			if u, err := s.users.Get(ctx, other); err == nil {
 				sum.OtherName = u.DisplayName
+				sum.OtherUsername = u.Username
+				sum.OtherAvatarURL = u.AvatarURL
+				sum.OtherRole = u.Role
+				sum.OtherVerified = u.Verified
+				sum.OtherSubscriber = u.Subscriber
+				sum.OtherCredibilityScore = u.CredibilityScore
 			}
+		}
+		if meta := s.meta[convID]; meta.ID != "" {
+			sum.RequestStatus = meta.RequestStatus
+			sum.InitiatedBy = meta.InitiatedBy
 		}
 		if len(msgs) > 0 {
 			sum.LastBody = msgs[0].Body
@@ -223,6 +314,17 @@ func (s *FakeMessageStore) BelongsToConversation(_ context.Context, msgID, convI
 		}
 	}
 	return false, nil
+}
+func (s *FakeMessageStore) CountByConversationSender(_ context.Context, convID, senderID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, m := range s.byConv[convID] {
+		if m.SenderID == senderID {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // FakeRouter records routed envelopes per user for assertions.
@@ -333,28 +435,121 @@ func (s *FakeChannelStore) SetReadCursor(_ context.Context, channelID, userID, m
 	return nil
 }
 
+func (s *FakeChannelStore) EditMessage(_ context.Context, messageID, actorID, body string, expectedVersion int, now time.Time) (Message, error) {
+	s.mu.Lock(); defer s.mu.Unlock()
+	for channelID, messages := range s.byChan { for i := range messages { m := &messages[i]; if m.ID != messageID { continue }; if m.SenderID != actorID { return Message{}, errors.New("message edit forbidden") }; if m.DeletedAt != nil { return Message{}, errors.New("message deleted") }; if now.Sub(m.CreatedAt) > 15*time.Minute { return Message{}, errors.New("message edit window expired") }; if m.EditVersion != expectedVersion { return Message{}, errors.New("message version conflict") }; m.Body = body; m.EditedAt = &now; m.EditVersion++; s.byChan[channelID] = messages; return *m, nil } }
+	return Message{}, ErrNotFound
+}
+func (s *FakeChannelStore) DeleteMessage(_ context.Context, messageID, actorID string, expectedVersion int, now time.Time) (Message, error) {
+	s.mu.Lock(); defer s.mu.Unlock()
+	for channelID, messages := range s.byChan { for i := range messages { m := &messages[i]; if m.ID != messageID { continue }; if m.SenderID != actorID { return Message{}, errors.New("message delete forbidden") }; if m.DeletedAt != nil { return *m, nil }; if now.Sub(m.CreatedAt) > 15*time.Minute { return Message{}, errors.New("message delete window expired") }; if m.EditVersion != expectedVersion { return Message{}, errors.New("message version conflict") }; m.DeletedAt = &now; m.DeletedBy = actorID; m.EditVersion++; s.byChan[channelID] = messages; return *m, nil } }
+	return Message{}, ErrNotFound
+}
+
 // FakePostStore is an in-memory PostStore.
 type FakePostStore struct {
-	mu       sync.Mutex
-	posts    map[string]Post
-	order    []string // post IDs in creation order
-	likes    map[string]map[string]struct{}
-	comments map[string][]Comment
-	saves map[string]map[string]struct{}
-	feedback map[string]map[string]struct{}
-	follows map[string]map[string]struct{}
-	events []FeedEvent
-	controls map[string]map[string]struct{}
-	rankingDecisions []RankingDecision
+	mu                sync.Mutex
+	posts             map[string]Post
+	order             []string // post IDs in creation order
+	likes             map[string]map[string]struct{}
+	comments          map[string][]Comment
+	saves             map[string]map[string]struct{}
+	feedback          map[string]map[string]struct{}
+	follows           map[string]map[string]struct{}
+	events            []FeedEvent
+	controls          map[string]map[string]struct{}
+	rankingDecisions  []RankingDecision
 	discoveryProfiles map[string]DiscoveryProfile
 }
 
-func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.saves[postID] == nil { s.saves[postID] = map[string]struct{}{} }; if saved { s.saves[postID][userID] = struct{}{} } else { delete(s.saves[postID], userID) }; return nil }
-func (s *FakePostStore) SetPostFeedback(_ context.Context, postID, userID, feedback string) error { s.mu.Lock(); defer s.mu.Unlock(); if s.feedback[postID] == nil { s.feedback[postID] = map[string]struct{}{} }; key := userID+":"+feedback; if _, exists := s.feedback[postID][key]; !exists && feedback == "report" { p := s.posts[postID]; p.AbuseScore++; if p.AbuseScore >= 5 { p.ModerationStatus = "blocked" } else if p.AbuseScore >= 3 { p.ModerationStatus = "pending_review" }; s.posts[postID] = p }; s.feedback[postID][key] = struct{}{}; return nil }
-func (s *FakePostStore) FollowUser(_ context.Context, followerID, followeeID string, following bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.follows[followerID] == nil { s.follows[followerID] = map[string]struct{}{} }; if following { s.follows[followerID][followeeID] = struct{}{} } else { delete(s.follows[followerID], followeeID) }; return nil }
-func (s *FakePostStore) IsFollowing(_ context.Context, followerID, followeeID string) (bool, error) { s.mu.Lock(); defer s.mu.Unlock(); _, ok := s.follows[followerID][followeeID]; return ok, nil }
-func (s *FakePostStore) RecordFeedEvent(_ context.Context, event FeedEvent) error { s.mu.Lock(); defer s.mu.Unlock(); s.events = append(s.events, event); return nil }
-func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for postID, values := range s.feedback { for key := range values { if len(key) > len(userID) && key[:len(userID)] == userID && (key[len(userID):] == ":hide" || key[len(userID):] == ":not_interested" || key[len(userID):] == ":block") { out = append(out, postID); break } } }; for key := range s.controls[userID] { parts := strings.SplitN(key, ":", 2); if len(parts) == 2 && (parts[1] == "mute" || parts[1] == "block") { for id, p := range s.posts { if p.AuthorID == parts[0] { out = append(out, id) } } } }; return out, nil }
+func (s *FakePostStore) SavePost(_ context.Context, postID, userID string, saved bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saves[postID] == nil {
+		s.saves[postID] = map[string]struct{}{}
+	}
+	if saved {
+		s.saves[postID][userID] = struct{}{}
+	} else {
+		delete(s.saves[postID], userID)
+	}
+	return nil
+}
+func (s *FakePostStore) SetPostFeedback(_ context.Context, postID, userID, feedback string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.feedback[postID] == nil {
+		s.feedback[postID] = map[string]struct{}{}
+	}
+	key := userID + ":" + feedback
+	if _, exists := s.feedback[postID][key]; !exists && feedback == "report" {
+		p := s.posts[postID]
+		p.AbuseScore++
+		if p.AbuseScore >= 5 {
+			p.ModerationStatus = "blocked"
+		} else if p.AbuseScore >= 3 {
+			p.ModerationStatus = "pending_review"
+		}
+		s.posts[postID] = p
+	}
+	s.feedback[postID][key] = struct{}{}
+	return nil
+}
+func (s *FakePostStore) FollowUser(_ context.Context, followerID, followeeID string, following bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.follows[followerID] == nil {
+		s.follows[followerID] = map[string]struct{}{}
+	}
+	if following {
+		s.follows[followerID][followeeID] = struct{}{}
+	} else {
+		delete(s.follows[followerID], followeeID)
+	}
+	return nil
+}
+func (s *FakePostStore) IsFollowing(_ context.Context, followerID, followeeID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.follows[followerID][followeeID]
+	return ok, nil
+}
+func (s *FakePostStore) HasCreatorControl(_ context.Context, userID, creatorID, control string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.controls[userID][creatorID+":"+control]
+	return ok, nil
+}
+func (s *FakePostStore) RecordFeedEvent(_ context.Context, event FeedEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+func (s *FakePostStore) SuppressedPostIDs(_ context.Context, userID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []string{}
+	for postID, values := range s.feedback {
+		for key := range values {
+			if len(key) > len(userID) && key[:len(userID)] == userID && (key[len(userID):] == ":hide" || key[len(userID):] == ":not_interested" || key[len(userID):] == ":block") {
+				out = append(out, postID)
+				break
+			}
+		}
+	}
+	for key := range s.controls[userID] {
+		parts := strings.SplitN(key, ":", 2)
+		if len(parts) == 2 && (parts[1] == "mute" || parts[1] == "block") {
+			for id, p := range s.posts {
+				if p.AuthorID == parts[0] {
+					out = append(out, id)
+				}
+			}
+		}
+	}
+	return out, nil
+}
 
 func (s *FakePostStore) CreatePost(_ context.Context, p Post) error {
 	s.mu.Lock()
@@ -379,7 +574,17 @@ func (s *FakePostStore) ListPosts(_ context.Context, before string, limit int) (
 		if before != "" && id >= before {
 			continue
 		}
-		post := s.posts[id]; if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) { continue }; if post.ModerationStatus == "blocked" || post.AbuseScore >= 5 { continue }; out = append(out, post)
+		post := s.posts[id]
+		if post.DeletedAt != nil {
+			continue
+		}
+		if post.ExpiresAt != nil && !post.ExpiresAt.After(time.Now()) {
+			continue
+		}
+		if post.ModerationStatus == "blocked" || post.AbuseScore >= 5 {
+			continue
+		}
+		out = append(out, post)
 		if len(out) >= limit {
 			break
 		}
@@ -409,7 +614,16 @@ func (s *FakePostStore) ListPostsByZone(_ context.Context, viewerRole, zone, bef
 		if before != "" && id >= before {
 			continue
 		}
-		p := s.posts[id]; if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) { continue }; if p.ModerationStatus == "blocked" || p.AbuseScore >= 5 { continue }
+		p := s.posts[id]
+		if p.DeletedAt != nil {
+			continue
+		}
+		if p.ExpiresAt != nil && !p.ExpiresAt.After(time.Now()) {
+			continue
+		}
+		if p.ModerationStatus == "blocked" || p.AbuseScore >= 5 {
+			continue
+		}
 		if zone == "tribe" && !matchTribe(p) {
 			continue
 		}
@@ -458,22 +672,149 @@ func (s *FakePostStore) PostExists(_ context.Context, postID string) (bool, erro
 	return ok, nil
 }
 
+func (s *FakePostStore) EditPost(_ context.Context, postID, actorID, body string, expectedVersion int, now time.Time) (Post, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); p, ok := s.posts[postID]; if !ok { return Post{}, ErrNotFound }; if p.AuthorID != actorID { return Post{}, errors.New("post edit forbidden") }; if p.DeletedAt != nil { return Post{}, errors.New("post deleted") }; if now.Sub(p.CreatedAt) > 15*time.Minute { return Post{}, errors.New("post edit window expired") }; if p.EditVersion != expectedVersion { return Post{}, errors.New("post version conflict") }; p.Body = body; p.EditedAt = &now; p.EditVersion++; s.posts[postID] = p; return p, nil
+}
+func (s *FakePostStore) DeletePost(_ context.Context, postID, actorID string, expectedVersion int, now time.Time) (Post, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); p, ok := s.posts[postID]; if !ok { return Post{}, ErrNotFound }; if p.AuthorID != actorID { return Post{}, errors.New("post delete forbidden") }; if p.DeletedAt != nil { return p, nil }; if p.EditVersion != expectedVersion { return Post{}, errors.New("post version conflict") }; p.DeletedAt = &now; p.DeletedBy = actorID; p.EditVersion++; s.posts[postID] = p; return p, nil
+}
+func (s *FakePostStore) EditComment(_ context.Context, commentID, actorID, body string, expectedVersion int, now time.Time) (Comment, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); for postID, comments := range s.comments { for i := range comments { c := &comments[i]; if c.ID != commentID { continue }; if c.AuthorID != actorID { return Comment{}, errors.New("comment edit forbidden") }; if c.DeletedAt != nil { return Comment{}, errors.New("comment deleted") }; if now.Sub(c.CreatedAt) > 15*time.Minute { return Comment{}, errors.New("comment edit window expired") }; if c.EditVersion != expectedVersion { return Comment{}, errors.New("comment version conflict") }; c.Body = body; c.EditedAt = &now; c.EditVersion++; s.comments[postID] = comments; return *c, nil } }; return Comment{}, ErrNotFound
+}
+func (s *FakePostStore) DeleteComment(_ context.Context, commentID, actorID string, expectedVersion int, now time.Time) (Comment, error) {
+	s.mu.Lock(); defer s.mu.Unlock(); for postID, comments := range s.comments { for i := range comments { c := &comments[i]; if c.ID != commentID { continue }; if c.AuthorID != actorID { return Comment{}, errors.New("comment delete forbidden") }; if c.DeletedAt != nil { return *c, nil }; if c.EditVersion != expectedVersion { return Comment{}, errors.New("comment version conflict") }; c.DeletedAt = &now; c.DeletedBy = actorID; c.EditVersion++; s.comments[postID] = comments; return *c, nil } }; return Comment{}, ErrNotFound
+}
+
 var (
 	_ ChannelStore = (*FakeChannelStore)(nil)
 	_ PostStore    = (*FakePostStore)(nil)
 )
 
-func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]string, error) { s.mu.Lock(); defer s.mu.Unlock(); out := []string{}; for id := range s.follows[userID] { out = append(out, id) }; return out, nil }
-func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error { s.mu.Lock(); defer s.mu.Unlock(); if s.controls[userID] == nil { s.controls[userID] = map[string]struct{}{} }; key := creatorID+":"+control; if enabled { s.controls[userID][key] = struct{}{} } else { delete(s.controls[userID], key) }; return nil }
-func (s *FakePostStore) FeedEventCount(_ context.Context, userID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, event := range s.events { if event.UserID == userID { count++ } }; return count, nil }
-func (s *FakePostStore) CreatorPostCount(_ context.Context, creatorID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); count := 0; for _, post := range s.posts { if post.AuthorID == creatorID { count++ } }; return count, nil }
-func (s *FakePostStore) RecordRankingDecisions(_ context.Context, decisions []RankingDecision) error { s.mu.Lock(); defer s.mu.Unlock(); s.rankingDecisions = append(s.rankingDecisions, decisions...); return nil }
-func (s *FakePostStore) ListRankingDecisions(_ context.Context, userID string, limit int) ([]RankingDecision, error) { s.mu.Lock(); defer s.mu.Unlock(); if limit <= 0 || limit > 100 { limit = 50 }; out := make([]RankingDecision, 0, limit); for i := len(s.rankingDecisions)-1; i >= 0 && len(out) < limit; i-- { if s.rankingDecisions[i].UserID == userID { out = append(out, s.rankingDecisions[i]) } }; return out, nil }
-func (s *FakePostStore) ListModerationQueue(_ context.Context, limit int) ([]Post, error) { s.mu.Lock(); defer s.mu.Unlock(); if limit <= 0 || limit > 100 { limit = 50 }; out := []Post{}; for _, p := range s.posts { if (p.ModerationStatus == "pending_review" || p.AbuseScore > 0) && len(out) < limit { out = append(out, p) } }; return out, nil }
-func (s *FakePostStore) ReviewPost(_ context.Context, postID, reviewerID, status, reason string) error { s.mu.Lock(); defer s.mu.Unlock(); p := s.posts[postID]; p.ModerationStatus = status; s.posts[postID] = p; return nil }
-func (s *FakePostStore) SaveCount(_ context.Context, postID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return len(s.saves[postID]), nil }
-func (s *FakePostStore) ShareCount(_ context.Context, postID string) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); n := 0; for _, e := range s.events { if e.PostID == postID && e.EventType == "share" { n++ } }; return n, nil }
-func (s *FakePostStore) GetDiscoveryProfile(_ context.Context, userID string) (DiscoveryProfile, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.discoveryProfiles[userID], nil }
-func (s *FakePostStore) UpsertDiscoveryProfile(_ context.Context, p DiscoveryProfile) error { s.mu.Lock(); defer s.mu.Unlock(); s.discoveryProfiles[p.UserID] = p; return nil }
-func (s *FakePostStore) RankingMetrics(_ context.Context) ([]RankingMetrics, error) { return []RankingMetrics{}, nil }
-func (s *FakePostStore) PostInteractionCount(_ context.Context,userID,postID string)(int,error){s.mu.Lock();defer s.mu.Unlock();n:=0;for _,e:=range s.events{if e.UserID==userID&&e.PostID==postID&&(e.EventType=="open"||e.EventType=="like"||e.EventType=="comment"||e.EventType=="save"||e.EventType=="share"){n++}};return n,nil}
+func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []string{}
+	for id := range s.follows[userID] {
+		out = append(out, id)
+	}
+	return out, nil
+}
+func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.controls[userID] == nil {
+		s.controls[userID] = map[string]struct{}{}
+	}
+	key := creatorID + ":" + control
+	if enabled {
+		s.controls[userID][key] = struct{}{}
+	} else {
+		delete(s.controls[userID], key)
+	}
+	return nil
+}
+func (s *FakePostStore) FeedEventCount(_ context.Context, userID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, event := range s.events {
+		if event.UserID == userID {
+			count++
+		}
+	}
+	return count, nil
+}
+func (s *FakePostStore) CreatorPostCount(_ context.Context, creatorID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, post := range s.posts {
+		if post.AuthorID == creatorID {
+			count++
+		}
+	}
+	return count, nil
+}
+func (s *FakePostStore) RecordRankingDecisions(_ context.Context, decisions []RankingDecision) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rankingDecisions = append(s.rankingDecisions, decisions...)
+	return nil
+}
+func (s *FakePostStore) ListRankingDecisions(_ context.Context, userID string, limit int) ([]RankingDecision, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	out := make([]RankingDecision, 0, limit)
+	for i := len(s.rankingDecisions) - 1; i >= 0 && len(out) < limit; i-- {
+		if s.rankingDecisions[i].UserID == userID {
+			out = append(out, s.rankingDecisions[i])
+		}
+	}
+	return out, nil
+}
+func (s *FakePostStore) ListModerationQueue(_ context.Context, limit int) ([]Post, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	out := []Post{}
+	for _, p := range s.posts {
+		if (p.ModerationStatus == "pending_review" || p.AbuseScore > 0) && len(out) < limit {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+func (s *FakePostStore) ReviewPost(_ context.Context, postID, reviewerID, status, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.posts[postID]
+	p.ModerationStatus = status
+	s.posts[postID] = p
+	return nil
+}
+func (s *FakePostStore) SaveCount(_ context.Context, postID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.saves[postID]), nil
+}
+func (s *FakePostStore) ShareCount(_ context.Context, postID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, e := range s.events {
+		if e.PostID == postID && e.EventType == "share" {
+			n++
+		}
+	}
+	return n, nil
+}
+func (s *FakePostStore) GetDiscoveryProfile(_ context.Context, userID string) (DiscoveryProfile, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.discoveryProfiles[userID], nil
+}
+func (s *FakePostStore) UpsertDiscoveryProfile(_ context.Context, p DiscoveryProfile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.discoveryProfiles[p.UserID] = p
+	return nil
+}
+func (s *FakePostStore) RankingMetrics(_ context.Context) ([]RankingMetrics, error) {
+	return []RankingMetrics{}, nil
+}
+func (s *FakePostStore) PostInteractionCount(_ context.Context, userID, postID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, e := range s.events {
+		if e.UserID == userID && e.PostID == postID && (e.EventType == "open" || e.EventType == "like" || e.EventType == "comment" || e.EventType == "save" || e.EventType == "share") {
+			n++
+		}
+	}
+	return n, nil
+}

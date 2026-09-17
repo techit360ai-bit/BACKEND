@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import jwt from 'jsonwebtoken'
+import { verifyJwt } from './services/jwtKeyService.js'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
@@ -11,13 +11,50 @@ import videoRoutes from './routes/video.js'
 import adminRoutes from './routes/admin.js'
 import contextRoutes from './routes/context.js'
 import domainRoutes from './routes/domain.js'
+import investorIntelligenceRoutes from './routes/investorIntelligence.js'
+import investorDealRoomRoutes from './routes/investorDealRoom.js'
+import { referenceSubmit } from './controllers/investorDealRoomCompletionController.js'
+import organizationIntelligenceRoutes from './routes/organizationIntelligence.js'
+import mentorshipRoutes from './routes/mentorship.js'
 import complianceRoutes from './routes/compliance.js'
 import usageSettlementRoutes from './routes/usageSettlement.js'
 import discoveryRoutes from './routes/discovery.js'
-import { readDb } from './config/database.js'
+import intelligenceRoutes from './routes/intelligence.js'
+import recommendationIntelligenceRoutes from './routes/recommendationIntelligence.js'
+import authorizationRoutes from './routes/authorization.js'
+import trustRoutes from './routes/trust.js'
+import supportRoutes from './routes/support.js'
+import techitMomentsRoutes from './routes/techitMoments.js'
+import academyRoutes from './routes/academy.js'
+import codeWorkspaceRoutes from './routes/codeWorkspace.js'
+import tvceRoutes from './routes/tvce.js'
+import billingWebhookRoutes from './routes/billingWebhooks.js'
+import distributionRoutes from './routes/distribution.js'
+import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
+import { readDb as readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
+import { globalRateLimit } from './middlewares/globalRateLimit.js'
+import { postgresAuthority } from './middlewares/postgresAuthority.js'
+import { csrfProtection } from './middlewares/csrf.js'
+import { runBillingJobs } from './services/billingJobsService.js'
+import { flushTrustProjectionOutbox } from './services/trustProjectionService.js'
 
 const app = express()
+
+// Optional in-process scheduler for single-instance deployments. Multi-node
+// deployments should invoke the same idempotent job through a platform cron
+// or queue, with BILLING_JOBS_ENABLED enabled on exactly one worker.
+if (process.env.BILLING_JOBS_ENABLED === 'true' && process.env.NODE_ENV !== 'test') {
+  const intervalMs = Math.max(60_000, Number(process.env.BILLING_JOBS_INTERVAL_MS || 3_600_000))
+  setInterval(() => {
+    try { runBillingJobs('billing-scheduler') } catch (error) { console.error(JSON.stringify({ event: 'billing_jobs_failed', error: error.message })) }
+  }, intervalMs).unref?.()
+}
+
+if (process.env.TRUST_PROJECTION_SECRET && process.env.TRUST_PROJECTION_URL && process.env.NODE_ENV !== 'test') {
+  const intervalMs = Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))
+  setInterval(() => { flushTrustProjectionOutbox().catch(error => console.error(JSON.stringify({ event: 'trust_projection_flush_failed', error: error.message }))) }, intervalMs).unref?.()
+}
 
 // Express must trust the platform's single reverse proxy for accurate client
 // IP rate limiting. Never use `true`, which trusts attacker-supplied chains.
@@ -81,19 +118,45 @@ app.use(express.json({
     req.rawBody = buffer.toString('utf8')
   },
 }))
+app.use(csrfProtection)
+
+// Shared gateway protection. Route-specific limits remain responsible for
+// credential, OTP, authorization, and other sensitive operations.
+app.use(globalRateLimit())
+// When enabled, legacy synchronous services execute against a PostgreSQL
+// snapshot and their mutations are flushed as versioned records. This bridge
+// keeps every request path on the same authority while domain repositories are
+// converted incrementally.
+app.use(postgresAuthority)
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/domain', domainRoutes)
+app.use('/api/investor-intelligence', investorIntelligenceRoutes)
+app.use('/api/investor-deals', investorDealRoomRoutes)
+app.post('/api/investor-references/respond/:token', referenceSubmit)
+app.use('/api/organization-intelligence', organizationIntelligenceRoutes)
+app.use('/api/mentorship', mentorshipRoutes)
 app.use('/api/compliance', complianceRoutes)
+app.use('/api/recommendation-intelligence', recommendationIntelligenceRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use('/api/files', fileRoutes)
 app.use('/api/github', githubRoutes)
 app.use('/api/video', videoRoutes)
 app.use('/api/context', contextRoutes)
 app.use('/api/discovery', discoveryRoutes)
+app.use('/api/intelligence', intelligenceRoutes)
+app.use('/api/authorization', authorizationRoutes)
+app.use('/api/trust', trustRoutes)
+app.use('/api/support', supportRoutes)
+app.use('/api/moments', techitMomentsRoutes)
+app.use('/api/distribution', distributionRoutes)
+app.use('/api/academy', academyRoutes)
+app.use('/api/code', codeWorkspaceRoutes)
+app.use('/api/tvce', tvceRoutes)
+app.use('/api/billing/webhooks', billingWebhookRoutes)
 app.use('/internal/usage-settlement', usageSettlementRoutes)
 
 // Plugins-MCP backend: tools catalogue, audit log, contributions, approvals,
@@ -117,23 +180,22 @@ const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
 if (MCP_ENABLED) {
   await mountTechitApi(app, '/api/mcp', {
     resolveActor(req) {
-      if (!JWT_SECRET) return null
+      if (!JWT_SECRET && !process.env.JWT_PUBLIC_KEY) return null
       const auth = req.headers?.authorization
       if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
       try {
-        const claims = jwt.verify(auth.slice(7), JWT_SECRET, {
-          algorithms: ['HS256'],
+        const claims = verifyJwt(auth.slice(7), {
           ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
           ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
         })
-        const db = readDb()
+        const db = readAuthorityDb()
         const profile = db.profiles.find(row => row.id === claims.sub)
         const testMode = process.env.NODE_ENV === 'test'
         if (!profile && !testMode) return null
         const workspaceId = typeof profile?.workspaceId === 'string'
           ? profile.workspaceId
           : testMode && typeof claims.workspaceId === 'string' ? claims.workspaceId : `user-${claims.sub}`
-        const persistedRole = testMode ? String(claims.role || profile?.role || 'founder') : profile?.role || 'founder'
+        const persistedRole = testMode ? String(claims.role || profile?.role || 'explorer') : profile?.role || 'explorer'
         return {
           actor: {
             id: String(claims.sub ?? 'unknown'),
@@ -149,6 +211,14 @@ if (MCP_ENABLED) {
       } catch {
         return null
       }
+    },
+    authorizeInvocation({ resolved, plugin, tool, params }) {
+      if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
+      if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
+      return { allowed: true }
+    },
+    onSuccessfulInvocation({ resolved, plugin, tool, params, data }) {
+      if (plugin === 'github' && tool === 'push_files') projectCodeCommit(resolved.actor.id, params, data)
     },
   })
 }

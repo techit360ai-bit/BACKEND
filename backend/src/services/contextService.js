@@ -1,4 +1,4 @@
-import { readDb, writeDb } from '../config/database.js'
+import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 
 // State machines by role
@@ -57,7 +57,7 @@ function computeOrganisationState(db, userId) {
 }
 
 export function computeUserState(userId, role) {
-  const db = readDb()
+  const db = readAuthorityDb()
   let currentState = 'exploring'
 
   switch (role) {
@@ -89,13 +89,13 @@ export function computeUserState(userId, role) {
       updatedAt: nowIso(),
     })
   }
-  writeDb(db)
+  writeAuthorityDb(db)
 
   return { currentState, states: statesForRole(role) }
 }
 
 export function getSessionContext(userId, role) {
-  const db = readDb()
+  const db = readAuthorityDb()
 
   // 1. Last activity
   const sessionLogs = (db.userSessionLogs || [])
@@ -134,7 +134,7 @@ export function getSessionContext(userId, role) {
     userId,
     createdAt: nowIso(),
   })
-  writeDb(db)
+  writeAuthorityDb(db)
 
   // Build response
   const greeting = buildGreeting(role, profile, daysSinceActive)
@@ -179,7 +179,7 @@ function buildGreeting(role, profile, daysSinceActive) {
 }
 
 export function createCheckpoint(userId, body) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.userContextCheckpoints) db.userContextCheckpoints = []
 
   // Upsert by type + reference
@@ -208,22 +208,22 @@ export function createCheckpoint(userId, body) {
       updatedAt: nowIso(),
     })
   }
-  writeDb(db)
+  writeAuthorityDb(db)
   return { ok: true }
 }
 
 export function clearCheckpoint(userId, checkpointType, referenceId) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.userContextCheckpoints) return { ok: true }
   db.userContextCheckpoints = db.userContextCheckpoints.filter(c =>
     !(c.userId === userId && c.checkpointType === checkpointType && c.referenceId === referenceId)
   )
-  writeDb(db)
+  writeAuthorityDb(db)
   return { ok: true }
 }
 
 export function updateSuggestions(userId, suggestions) {
-  const db = readDb()
+  const db = readAuthorityDb()
   if (!db.userSuggestions) db.userSuggestions = []
   const existing = db.userSuggestions.find(s => s.userId === userId)
   if (existing) {
@@ -240,6 +240,6 @@ export function updateSuggestions(userId, suggestions) {
       updatedAt: nowIso(),
     })
   }
-  writeDb(db)
+  writeAuthorityDb(db)
   return { ok: true }
 }
