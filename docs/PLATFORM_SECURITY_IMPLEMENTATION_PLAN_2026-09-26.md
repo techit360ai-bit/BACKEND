@@ -338,11 +338,12 @@ corresponding pull requests.
   or `Missing:` sync errors.
 - `npm audit` + `.github/scripts/npm-audit-regression.mjs` exits `0` on both repos (BACKEND has 3
   high findings, all covered by the documented baseline; new-frontend reports none).
-- `npm run build` in new-frontend now gets past install and fails only on pre-existing TypeScript
-  errors in `src/components/ui/chart.tsx`, `src/dashboard/collaborators/.../Earnings.tsx` and
-  `src/dashboard/investors/.../AllocationEngine.tsx`. These are unrelated code defects that were
-  previously masked because the deploy workflow never got past `npm ci`; they are not caused by
-  WS-07 and are left for a separate change.
+- `npm run build` in new-frontend exits `0` (re-verified 2026-09-26: 30s, no errors, chunks emitted).
+  The TypeScript failures this plan previously recorded in `src/components/ui/chart.tsx`,
+  `src/dashboard/collaborators/.../Earnings.tsx` and `src/dashboard/investors/.../AllocationEngine.tsx`
+  no longer reproduce: they were type breakages introduced by the out-of-policy `recharts` 3 major,
+  which the WS-07 realignment returned to `^2.15.2`. Side effect: `Build and Deploy`,
+  `Frontend Quality Gates` and `security` flip to pass for the first time since 17 September.
 
 ### WS-07 known limitation
 
@@ -350,3 +351,205 @@ corresponding pull requests.
 live, the dependency-graph compare API returns `403`. The substitute gate fails closed on a missing,
 malformed, or out-of-sync lockfile, and the vulnerability gate is enforced by the npm audit job,
 which also runs on every pull request. Restoring the native action requires WS-06 to be unblocked.
+
+---
+
+## 12. Completion plan — WS-08 … WS-21 and the seven open gaps
+
+**Status:** plan only — no WS-08+ code is written. Written 2026-09-26 after re-verifying branches,
+PRs and CI live.
+
+### 12.1 The seven reported gaps, re-assessed
+
+| # | Reported gap | Re-verified position |
+|---|---|---|
+| 1 | WS-01 landed only half | **Split into two findings.** The cookie gap is *smaller* than reported: `ai-router/main.py:154` already runs `CORSMiddleware(allow_credentials=True, allow_origins=ALLOWED_ORIGINS)`, and the SPA already sends `credentials: 'include'` to it (`new-frontend/frontend/src/lib/api/client.ts:93`). ai-router never reads a cookie — `main.py` contains no `Cookie` reference at all — so the gap is cookie *extraction and verification* in two existing auth adapters, not a transport redesign. The second finding is *larger* than reported: WS-01 removed the storage writer but left **four readers** of the purged key behind, two of which de-authenticated live surfaces — see 12.2 item 1. |
+| 2 | WS-05 mitigates H-4 rather than closing it | Unchanged. Still needs the identity store wired and strict mode enabled. |
+| 3 | WS-06 blocked by the GitHub plan | Unchanged, and not fixable in code — decision D1. |
+| 4 | Dependency majors changed beyond security scope | Real and disclosed. It is also, separately, why the frontend build is green again — decision D2. |
+| 5 | Two pre-existing red jobs | Unchanged. `ai-router#83` is the upstream fix for the router gate; the WebContainer job is external and flaky. |
+| 6 | `BACKEND/frontend/package.json` duplicate keys | Unchanged; reference-only module with the deploy workflow disabled, deliberately untouched. |
+| 7 | WS-08 … WS-21 untouched | Unchanged. Sections 12.4–12.7 are the plan for them. |
+
+### 12.2 Leftovers found while writing this plan
+
+All four are small, in-scope, and were not in the original report:
+
+1. **WS-01 removed the writer for `techit_access_token` but left four readers**, two of which silently
+   de-authenticated live surfaces. This is the most serious thing found in this pass, and it is a
+   regression introduced by our own change, not a pre-existing defect:
+   - `src/lib/api/authorization.ts:2` — capability checks, verification status/evidence and MFA
+     enrolment, used by `CapabilityGate`, `VerificationCenter`, `MfaSetup` and `OrgStep2`. It read the
+     purged key directly, had no getter override, and did not send `credentials: 'include'`. Every one
+     of those calls went out unauthenticated.
+   - `src/lib/techitApi.ts:19` — the MCP/plugins client used by `PluginsDashboard`, Workspace
+     `Code.tsx` and `codeSync.ts`. It read the purged key, and `setTechitApiTokenGetter` is referenced
+     only in tests, never by the application.
+   - `src/lib/messaging/config.ts:30` — reads the purged key, but is correctly overridden at
+     `App.tsx:167` with the in-memory token, so messaging was unaffected.
+   - `src/lib/api/session.ts:4` — sent the purged key as a bearer header on session revocation. The
+     resulting empty `Bearer ` value also bypassed the backend CSRF check
+     (`BACKEND/backend/src/middlewares/csrf.js:12` skips CSRF whenever an `Authorization: Bearer`
+     header is present).
+
+   Fixed in this pass: all four now use the tab-scoped in-memory token, and the two that call the Node
+   backend also send the session cookie and the CSRF double-submit header. Locked by a regression test
+   added to the existing `src/lib/techitApi.test.ts` (fails against the old getter, passes now).
+2. `VITE_COOKIE_AUTH=true` is declared in `new-frontend/frontend/.env.example` but referenced nowhere
+   in `src/` — dead configuration that implies cookie auth is already switched on.
+3. `AUTH_BROWSER_BODY_TOKEN` and `AUTH_COOKIE_DOMAIN`, the two switches WS-01 introduced, are absent
+   from `BACKEND/backend/.env.example`. No deployment can discover them. Documented as part of this pass.
+4. `.github/dependency-audit-baseline.json` **expires 2026-09-30** — four days out. On 2026-10-01 the
+   npm audit gate turns red on every PR across both Node repos, by design. This is the nearest hard
+   deadline in the whole programme.
+
+### 12.3 The method
+
+All seven gaps share one cause: the work was proven with unit tests, local builds and CI — never with
+an executable statement of *"this user must not receive this"*. There was no runtime verification and
+no per-role walkthrough, so the fixes are reasoned, not demonstrated. Every remaining workstream is an
+authorization contract, and the cheapest way to get all of them right is to make the negative
+statement executable first, then drive the fixes through it.
+
+Five rules, applied to every slice:
+
+1. **Measure before fixing.** No workstream starts without a probe that reproduces the violation
+   against a running server as a specific role. A finding that cannot be reproduced is a hypothesis.
+2. **Fail closed.** A gate that cannot run is red, not skipped. WS-07 set this precedent; WS-06,
+   WS-14 and WS-19 must follow it.
+3. **One contract per slice.** Each slice ships a server-side projection *and* a field-absence
+   assertion. Never "hide it in React".
+4. **Smallest diff in existing files.** No new services, layers, routers or schemas. New behaviour
+   sits behind an env flag documented in the existing `.env.example`. Where a real fix needs
+   architecture it goes to section 9 rather than being smuggled into a patch.
+5. **Independently shippable and reversible.** One PR per slice, one commit-range revert per slice,
+   merged in the order given in 12.10.
+
+The loop for every slice: **reproduce → assert a failing test → fix in the existing
+service/middleware → assert it passes → record the before/after JSON pair in the audit report → merge.**
+
+### 12.4 Phase 0 — finish what is already 80% done
+
+Cheap, unblocks everything else, and removes the half-landed criticism. Target: one week.
+
+- **P0-1 WS-01c — finish the cookie transport.** Add cookie extraction to the existing ai-router auth
+  dependency and to the Go messaging verifier (both already verify the same platform JWT); add
+  `credentials: 'include'` to `new-frontend/frontend/src/lib/messaging/client.ts`; then set
+  `AUTH_BROWSER_BODY_TOKEN=false`. There is a production startup warning
+  (`auth_cookie_migration_incomplete`, `sessionService.js:34`) that fires on every boot until this
+  lands — treat it as the completion signal. Evidence: `Network` shows no `token` in any response;
+  ai-router and messaging accept the cookie; CSRF double-submit holds on both.
+- **P0-2 WS-05c — actually close H-4.** Wire `AI_ROUTER_IDENTITY_DATABASE_URL` to the platform
+  identity database and set `AI_ROUTER_SESSION_REVOCATION_STRICT=true`, so the check fails closed
+  instead of logging and continuing. Add a test that revoking a session denies a still-valid token.
+- **P0-3 Baseline cliff (4 days).** Either upgrade the five baselined packages (`ip-address`,
+  `nanoid`, `postcss`, `react-router`, `react-router-dom`) or regenerate the baseline with a written
+  justification and a new expiry. Do not let it expire silently — that converts a managed risk into a
+  blocked pipeline on 2026-10-01.
+- **P0-4 ai-router model registry.** Refresh the stale production registry metadata. This is the
+  single upstream cause of the `TECHIT AI Router` red gate and of `ai-router#83`; until it is fixed,
+  `ai-router#84` cannot be merged.
+- **P0-5 Merge the green PRs** in this order: `BACKEND#123`, `techit-admin-dashboard#34`, then
+  `ai-router#84` once P0-4 lands, then `new-frontend#152`. All four carry the WS-01…WS-07 work.
+- **P0-6 Leftover cleanup** — items 1–3 of 12.2.
+- **P0-7 Dependabot triage** (parallel, non-blocking): the BACKEND default branch reportedly carries
+  88 findings (10 critical, 44 high). Re-confirm the count, then split into (a) exploitable-at-runtime,
+  (b) build-time only, (c) needs a major upgrade. Item (a) is part of the release gate.
+
+### 12.5 Phase 1 — build the authorization harness before the bulk fixes (WS-19 core)
+
+**This phase deliberately precedes WS-08 … WS-18.** Without it every remaining fix is unverifiable,
+which is exactly the gap that produced the current situation. It adds tests to the existing runners —
+no new framework, no new service.
+
+- A **role fixture** for the seven roles in the brief (Explorer, Founder, Collaborator, Investor,
+  Organization, Admin, service account).
+- A **route inventory** (the existing `security:endpoint-inventory` script already enumerates routes)
+  joined to a table of *who is allowed* — the machine-readable form of the WS-18 role matrix.
+- Four assertion families, each table-driven over that inventory:
+  - **horizontal** — A requests B's `{resource}/{id}`; expect 403/404 *and* assert B's identifiers
+    appear nowhere in the body;
+  - **vertical** — lower role hits a higher-role route; expect 403;
+  - **entitlement** — free plan hits a premium route; expect 402/403;
+  - **field visibility** — response-body allow-list per viewer class, asserting *absence*, not just
+    presence.
+- One **live probe** against a staging deployment: the same four families executed once as real HTTP,
+  so the suite cannot drift into "mocked tests that pass while production leaks".
+
+Deliverable is a deliberately failing baseline that enumerates the current violations. That list — not
+this document — becomes the authoritative work queue for Phase 2, and its size is the honest measure
+of how much of WS-08 … WS-18 is real.
+
+### 12.6 Phase 2 — remaining workstreams, risk-ordered
+
+Ordered by *data sensitivity × exploitability × harness coverage*, not by WS number. Sizing is
+relative: S ≤ 1 day, M 2–3 days, L 4–8 days.
+
+| Order | WS | What it closes | Why here | Repos | Size |
+|---|---|---|---|---|---|
+| 1 | WS-17 | Missing tenant/org/workspace filters, over-broad serializers | Root-cause class: every other leak is a symptom of an authorization-unaware query. Fixing it first stops later slices reintroducing IDOR. | BACKEND | L |
+| 2 | WS-09 | Files, documents, signed URLs, Data Room | Highest-sensitivity payloads (investor decks, verification documents); a leak here is unrecoverable. Must not regress the Deal Room privacy read-model, currently the strongest area. | BACKEND, ai-router | M–L |
+| 3 | WS-08 | Entitlement / premium bypass | Direct revenue impact and premium-data exposure; the brief's "never trust plan/credits/role from the browser" rule lands here. | BACKEND, ai-router | M–L |
+| 4 | WS-16 | Messaging and WebSocket authorization | Completely unaudited, so the risk is *unknown* and must be measured early. Note `messaging-backend/cmd/smoke/main.go:102` passes the token as `?token=` in the WS URL — a token in a query string is logged and cached; move to a header or subprotocol. | messaging-backend, BACKEND | M–L |
+| 5 | WS-15 | Internal AI agent information | Prompt, routing-policy and credential leakage through the Router; distinct from WS-08 (entitlement) and WS-12 (errors). | ai-router | S–M |
+| 6 | WS-18 | Admin and automation surface | Vertical escalation; also the missing admin-dashboard audit from the coverage matrix. | BACKEND, admin | M |
+| 7 | WS-10 | Caching (Redis, CDN, service worker, query cache, browser cache) | Cross-user cache poisoning is only definable once the role matrix exists. Cache keys must include identity *and* permission version. | BACKEND, ai-router, new-frontend | M |
+| 8 | WS-12 | Error responses, stack traces, source maps | Failure-path disclosure; ai-router's `detail: str(exc)` is already a known instance. Also decide production source-map policy. | all | S–M |
+| 9 | WS-11 | Logging security | No direct browser exposure, but logs feed ops, audit and error tracking; token-in-URL (WS-16) lands in logs and must be caught here. | all | S–M |
+| 10 | WS-13 | CSP, HSTS, security headers | Defence in depth, and it needs the real origin inventory produced by P0-1 before a CSP can be written that does not break WebSocket, MCP or analytics. | BACKEND, ai-router, static host | S–M |
+| 11 | WS-14 | Rate limits on login, reset, AI, validation, messaging, downloads, MCP, admin | Abuse rather than disclosure, so it protects what the other slices lock down — and it must fail closed. | BACKEND, ai-router, messaging-backend | M |
+
+### 12.7 Phase 3 — evidence and release gate (WS-20, WS-21)
+
+- **WS-20** — the per-role DevTools runbook, executed against staging for all seven roles, recording
+  Network, Application/Storage, cookies, IndexedDB, WebSocket frames and source maps. The acceptance
+  test is not "F12 is empty"; it is "everything visible is information this role may legitimately
+  receive". Signed with run IDs and operator names.
+- **WS-21** — fold every before/after response pair, every test name and every remaining risk into the
+  audit report, including the items that need architecture rather than a patch (section 9).
+- **Release gate** — unchanged from section 10, plus: no gate may be "skipped", the dependency
+  baseline must be current, and WS-16 must have a recorded runtime probe.
+
+### 12.8 Decisions required
+
+- **D1 — GitHub plan.** Branch protection, secret scanning, push protection and CodeQL on the four
+  private repos all require GitHub Pro / Advanced Security. Options: upgrade the plan (recommended —
+  it is the only path that closes G-1…G-4); make the repos public (not recommended — it publishes
+  auth, authz and billing source); or accept the risk formally and record it. Until this is decided,
+  the security fixes themselves ship without required review or required checks.
+- **D2 — Dependency majors.** Accept the WS-07 realignment (`vitest` 5→2.1.9, `typescript` 7→5.9.3,
+  `recharts` 3→2.15.2; admin `@vitejs/plugin-react` 6→4.7.0, `date-fns` 4→3.6.0,
+  `react-resizable-panels` 4→2.1.7) and record it in the change log (recommended — it restored the
+  frontend build), or revert and keep the build broken. These majors were proposed by Dependabot
+  against the repo's own policy and were never intended to be in the tree.
+- **D3 — WS-01c path.** Cookie across subdomains (recommended, verified small in 12.1) or a BACKEND
+  edge proxy for ai-router and messaging (cleaner long-term, materially larger diff, and adds routing
+  structure the brief forbids).
+- **D4 — WS-05c strictness.** Enable `AI_ROUTER_SESSION_REVOCATION_STRICT=true` once the identity
+  store is wired, accepting that a store outage denies AI requests. Recommended: yes — fail closed.
+- **D5 — Scope guard on WS-09.** The investor Deal Room is currently the strongest area in the
+  platform. Confirm it may be touched only to add tests, not to change its behaviour.
+
+### 12.9 Definition of done for every slice
+
+1. The violation is reproduced against a running server, as a named role, with the request recorded.
+2. A test exists that fails before the change and passes after, and runs in CI.
+3. The response body has an explicit allow-list and a field-absence assertion.
+4. The before/after JSON pair is recorded in the audit report.
+5. No new files, modules, routes or schemas; any new env flag is documented in the existing `.env.example`.
+6. A single revert restores the previous behaviour.
+
+### 12.10 Sequencing at a glance
+
+```text
+Phase 0  P0-3 baseline cliff (4-day deadline)
+         P0-1 WS-01c cookie  ->  P0-2 WS-05c strict  ->  P0-4 registry  ->  P0-5 merge PRs
+         P0-6 leftovers      ->  P0-7 Dependabot triage (parallel)
+Phase 1  WS-19 harness + live probe  ->  authoritative violation list
+Phase 2  WS-17 -> WS-09 -> WS-08 -> WS-16 -> WS-15 -> WS-18 -> WS-10 -> WS-12 -> WS-11 -> WS-13 -> WS-14
+Phase 3  WS-20 per-role DevTools runbook  ->  WS-21 evidence  ->  release gate
+```
+
+Cross-repo merges stay serialised on the auth contract: `BACKEND` first, then `new-frontend`, then
+`ai-router`, then `messaging-backend`, so no window exists in which the SPA sends a cookie that a
+service cannot yet read.
