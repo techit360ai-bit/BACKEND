@@ -1,7 +1,7 @@
 # TechIT Platform — Security Implementation Plan (complete coverage)
 
 **Date:** 2026-09-26
-**Status:** plan only; no code changed
+**Status:** WS-01 … WS-07 implemented on `security/exposure-hardening-2026-09-26`; see section 11
 **Report:** `PLATFORM_SECURITY_AUDIT_2026-09-26.md`
 **Scoped plans:** `new-frontend/docs/SECURITY_REMEDIATION_PLAN_2026-09-26.md`,
 `ai-router/docs/SECURITY_REMEDIATION_PLAN_2026-09-26.md`
@@ -314,3 +314,39 @@ new-frontend in lockstep (contract change); WS-13 touches BACKEND, ai-router, an
 Do not approve production release until: C-1 and H-1..H-4 are fixed and proven; G-1..G-7 governance
 gaps are closed; WS-19 tests run green in CI on protected branches; WS-20 passes for every role; and
 `RELEASE_CANDIDATE_SIGNOFF.md` carries real run IDs, operators, and approver names.
+
+---
+
+## 11. Remediation status — WS-01 … WS-07 (2026-09-26)
+
+Verification below is local and live, not static. Full-suite CI confirmation is pending the
+corresponding pull requests.
+
+| WS | Finding | Status | Evidence |
+|---|---|---|---|
+| WS-01 | C-1 token in body + `sessionStorage` | Implemented (opt-in hardening) | Backend stops serializing `req.user.token` and projects the profile; the SPA keeps the JWT in memory only and purges the legacy key. `AUTH_BROWSER_BODY_TOKEN` (default `true`) keeps the body token until ai-router and the Go messaging service accept cookie auth, so no existing client breaks. Tests: `auth.test.js` + `authStorage.test.ts` green. |
+| WS-02 | H-1 email/plan over-exposure | Implemented | `projectOwnProfile` allow-list replaces `{ ...profile }`; `publicProfile` returns email/subscriber/subscription only to the owner or an explicit shared context. `users.test.js` green. |
+| WS-03 | H-2 MCP default-allow | Implemented | `authorizeInvocation` rejects unknown plugins and enforces `toolsAllowed`; `Plugins-MCP` mount fails closed with no hook. `mcp.test.js` green. |
+| WS-04 | H-3 unguarded Investor routes | Implemented | `_require_investor_role` applied to all 10 previously unguarded Investor routes in `main.py`; a scripted check confirms no Investor route lacks the guard. |
+| WS-05 | H-4 stale role / revoked session | Implemented | Role was already re-read per request; `_assert_token_fresh` adds an optional age bound and a `user_sessions` revocation check against the platform identity DB, failing open (logged) if that store is unreachable. `tests/test_user_context_db_hydration.py` green. |
+| WS-06 | G-1 … G-4 governance | **Partially blocked** | Dependabot alerts + automated security fixes enabled and verified on all five repos. Branch protection, secret scanning, push protection and CodeQL all return `422`/`403` — they require GitHub Pro / Advanced Security on private repos. Owner decision required. |
+| WS-07 | G-5, G-6 dependency gate | Implemented | Root cause was merge damage, not a missing file: the BACKEND root `package-lock.json` and `new-frontend/frontend/package-lock.json` were invalid JSON, so npm reported EUSAGE as if no lockfile existed. `new-frontend/frontend/package.json` additionally carried a duplicated `devDependencies` tail (including a forbidden TypeScript 5→7 major and a `vitest` 2→5 major incompatible with `vite ^5.4.21`). Both lockfiles are restored/reconciled, the manifest is deduped, and `dependency-review` now runs a real lockfile-integrity gate on private repos instead of skipping. |
+
+### WS-07 verification
+
+- `npm ci` (BACKEND root, and `npm ci --prefix frontend` for new-frontend) exits `0`; no `Invalid:`
+  or `Missing:` sync errors.
+- `npm audit` + `.github/scripts/npm-audit-regression.mjs` exits `0` on both repos (BACKEND has 3
+  high findings, all covered by the documented baseline; new-frontend reports none).
+- `npm run build` in new-frontend now gets past install and fails only on pre-existing TypeScript
+  errors in `src/components/ui/chart.tsx`, `src/dashboard/collaborators/.../Earnings.tsx` and
+  `src/dashboard/investors/.../AllocationEngine.tsx`. These are unrelated code defects that were
+  previously masked because the deploy workflow never got past `npm ci`; they are not caused by
+  WS-07 and are left for a separate change.
+
+### WS-07 known limitation
+
+`dependency-review-action` cannot run on private repos without GitHub Advanced Security — verified
+live, the dependency-graph compare API returns `403`. The substitute gate fails closed on a missing,
+malformed, or out-of-sync lockfile, and the vulnerability gate is enforced by the npm audit job,
+which also runs on every pull request. Restoring the native action requires WS-06 to be unblocked.
