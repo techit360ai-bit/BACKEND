@@ -7,7 +7,16 @@ import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
-import { clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
+import { browserBodyTokenAllowed, clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
+import { projectOwnProfile } from '../utils/api.js'
+
+// `req.user.token` exists so controllers can forward the platform JWT to
+// ai-router server-side. It must never be serialized back into a response body.
+function sessionUser(user) {
+  if (!user) return user
+  const { token: _token, ...rest } = user
+  return rest
+}
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
 import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
@@ -233,10 +242,10 @@ export async function signup(req, res) {
   const credentials = await issueSessionAsync({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
-    token: credentials.accessToken,
+    ...(browserBodyTokenAllowed() || mobileClient(req) ? { token: credentials.accessToken } : {}),
     ...(mobileClient(req) ? { refreshToken: credentials.refreshToken } : {}),
     user: { id, email, user_metadata: {} },
-    profile,
+    profile: projectOwnProfile(profile),
   })
 }
 
@@ -268,10 +277,10 @@ export async function signin(req, res) {
   const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.json({
-    token: credentials.accessToken,
+    ...(browserBodyTokenAllowed() || mobileClient(req) ? { token: credentials.accessToken } : {}),
     ...(mobileClient(req) ? { refreshToken: credentials.refreshToken } : {}),
     user: { id: user.id, email: user.email, user_metadata: {} },
-    profile,
+    profile: projectOwnProfile(profile),
   })
 }
 
@@ -283,7 +292,7 @@ export async function session(req, res) {
   recordActivityInDb(db, req.user.id, 'session', 'auth')
   writeAuthorityDb(db)
   const assignments = roleAssignments(req.user.id)
-  return res.json({ user: req.user, profile, session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
+  return res.json({ user: sessionUser(req.user), profile: projectOwnProfile(profile), session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
 }
 
 export async function signout(req, res) {
@@ -295,7 +304,7 @@ export async function signout(req, res) {
 export async function refresh(req, res) {
   const result = await rotateSessionAsync(refreshTokenFromRequest(req), req)
   if (!result.ok) { clearSessionCookies(res); return res.status(401).json({ error: result.error }) }
-  if (!mobileClient(req)) setSessionCookies(res, result); return res.json({ token: result.accessToken, ...(mobileClient(req) ? { refreshToken: result.refreshToken } : {}), user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: result.profile })
+  if (!mobileClient(req)) setSessionCookies(res, result); return res.json({ ...(browserBodyTokenAllowed() || mobileClient(req) ? { token: result.accessToken } : {}), ...(mobileClient(req) ? { refreshToken: result.refreshToken } : {}), user: { id: result.user.id, email: result.user.email, user_metadata: {} }, profile: projectOwnProfile(result.profile) })
 }
 
 export async function activeSessions(req, res) { return res.json({ sessions: await listSessionsAsync(req.user.id, req.user.sessionId) }) }

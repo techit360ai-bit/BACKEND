@@ -11,12 +11,39 @@ const CSRF_COOKIE = 'techit_csrf'
 const ACCESS_TTL_SECONDS = Math.max(300, Number(process.env.AUTH_ACCESS_TTL_SECONDS || 900))
 const REFRESH_TTL_SECONDS = Math.max(3600, Number(process.env.AUTH_REFRESH_TTL_SECONDS || 30 * 86400))
 const SESSION_TTL_SECONDS = Math.max(3600, Number(process.env.AUTH_SESSION_TTL_SECONDS || 30 * 86400))
-const cookieBase = () => ({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: process.env.AUTH_COOKIE_SAMESITE || 'lax', path: '/' })
+// A shared AUTH_COOKIE_DOMAIN lets the browser frontend read the (non-HttpOnly)
+// CSRF cookie when the SPA and the API are served from different hosts under the
+// same registrable domain. Without it the browser cannot complete the
+// double-submit check and would depend on a bearer token in the response body.
+const cookieDomain = () => process.env.AUTH_COOKIE_DOMAIN || undefined
+const cookieSameSite = () => process.env.AUTH_COOKIE_SAMESITE || 'lax'
+const cookieBase = () => ({ httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: cookieSameSite(), path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}) })
+
+// The browser session is carried by HttpOnly cookies, but ai-router and the Go
+// messaging service are served from other origins and authenticate with
+// `Authorization: Bearer` only — they do not read the platform session cookie.
+// A browser therefore still needs the access token in the response body until
+// those services accept cookie auth. Set AUTH_BROWSER_BODY_TOKEN=false only
+// after that lands, otherwise every ai-router/messaging call from the SPA fails.
+// The token is never persisted to web storage either way; see the frontend.
+export function browserBodyTokenAllowed() {
+  return process.env.AUTH_BROWSER_BODY_TOKEN !== 'false'
+}
+
+if (process.env.NODE_ENV === 'production' && browserBodyTokenAllowed()) {
+  console.warn(JSON.stringify({
+    event: 'auth_cookie_migration_incomplete',
+    message: 'Browser sessions still return a body token because ai-router and messaging require Authorization: Bearer. Set AUTH_BROWSER_BODY_TOKEN=false once those services accept the session cookie.',
+  }))
+}
 
 function randomToken() { return crypto.randomBytes(48).toString('base64url') }
 function hashToken(value) { return crypto.createHash('sha256').update(value).digest('hex') }
 function browserRequest(req) { return !req.headers.authorization && Boolean(req.headers.cookie || req.headers['x-techit-client'] === 'web') }
 function cookieOptions(maxAge) { return { ...cookieBase(), maxAge: maxAge * 1000 } }
+// The CSRF cookie must stay readable by the SPA (double-submit pattern), so it
+// is deliberately not HttpOnly, but it must share the session cookie's domain.
+function csrfCookieOptions(maxAge) { return { httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: cookieSameSite(), path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}), maxAge: maxAge * 1000 } }
 function sessionFromDb(db, identifier) { return (db.userSessions || []).find(row => row.sessionIdentifier === identifier) }
 const postgresWrites = () => process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 const writeFallbackEnabled = () => process.env.IDENTITY_WRITE_FALLBACK_SQLITE !== 'false'
@@ -77,8 +104,8 @@ export async function issueSessionAsync(user, profile, req, options = {}) {
   }
 }
 
-export function setSessionCookies(res, credentials) { res.cookie(ACCESS_COOKIE, credentials.accessToken, cookieOptions(ACCESS_TTL_SECONDS)); res.cookie(REFRESH_COOKIE, credentials.refreshToken, cookieOptions(credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400)); res.cookie(CSRF_COOKIE, randomToken(), { secure: process.env.NODE_ENV === 'production', sameSite: process.env.AUTH_COOKIE_SAMESITE || 'lax', path: '/', maxAge: (credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400) * 1000 }) }
-export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options); res.clearCookie(CSRF_COOKIE, options) }
+export function setSessionCookies(res, credentials) { const csrfMaxAge = credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400; res.cookie(ACCESS_COOKIE, credentials.accessToken, cookieOptions(ACCESS_TTL_SECONDS)); res.cookie(REFRESH_COOKIE, credentials.refreshToken, cookieOptions(credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400)); res.cookie(CSRF_COOKIE, randomToken(), csrfCookieOptions(csrfMaxAge)) }
+export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options); res.clearCookie(CSRF_COOKIE, { httpOnly: false, secure: options.secure, sameSite: options.sameSite, path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}) }) }
 export function accessTokenFromRequest(req) { const header = req.headers.authorization; if (header?.startsWith('Bearer ')) return { token: header.slice(7), source: 'bearer' }; const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${ACCESS_COOKIE}=`)); return match ? { token: decodeURIComponent(match.slice(ACCESS_COOKIE.length + 1)), source: 'cookie' } : null }
 export function refreshTokenFromRequest(req) { const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${REFRESH_COOKIE}=`)); return match ? decodeURIComponent(match.slice(REFRESH_COOKIE.length + 1)) : String(req.body?.refreshToken || '') || null }
 
