@@ -47,3 +47,32 @@ export function requireBodyString(res, value, label) {
   }
   return value.trim()
 }
+
+// Explicit allow-list for the account owner's own profile response.
+//
+// Responses must be built from this list rather than spreading the stored row,
+// otherwise any internal column added later (storage object keys, moderation
+// flags, projection metadata) silently becomes client-visible. This mirrors the
+// `Profile` contract the frontend consumes.
+export const OWN_PROFILE_FIELDS = Object.freeze([
+  'id', 'email', 'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
+  'avatarUrl', 'bio', 'role', 'activeRole', 'secondaryRoles', 'roleProfiles', 'creditBalance',
+  'credibilityScore', 'isVerified', 'isOnboarded', 'startupStage', 'industries', 'experience',
+  'skills', 'weeklyHours', 'riskTolerance', 'investmentFocus', 'ticketSize',
+  'orgName', 'orgType', 'website', 'linkedinUrl', 'githubUrl', 'portfolioUrl', 'timezone',
+  'title', 'twitterUrl', 'yearsBuilding', 'founderType', 'oneLiner', 'foundingYear', 'logoEmoji',
+  'currentTeamSize', 'openRoles', 'compensationOffered', 'equityRangeMin', 'equityRangeMax',
+  'launchStatus', 'users', 'revenueMonthly', 'fundingRaised', 'leadInvestor', 'nextMilestone',
+  'whyBuilding', 'winningIn3Years', 'unfairAdvantage', 'ownershipPhilosophy',
+  'yearsExperience', 'discipline', 'subSkills', 'techStack', 'earliestStart', 'commitmentStyle',
+  'equityPreference', 'minCashFloor', 'vestingComfort', 'certifications', 'createdAt', 'updatedAt',
+])
+
+export function projectOwnProfile(profile) {
+  if (!profile || typeof profile !== 'object') return profile
+  const projected = {}
+  for (const field of OWN_PROFILE_FIELDS) {
+    if (profile[field] !== undefined) projected[field] = profile[field]
+  }
+  return projected
+}
