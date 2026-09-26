@@ -35,13 +35,30 @@ jobs:
           fi
 
   dependency-review:
-    if: github.event_name == 'pull_request' && github.event.repository.private == false
+    # dependency-review-action requires GitHub Advanced Security on private
+    # repos (the dependency-graph compare API returns 403 without it). Skipping
+    # the job on private repos silently disabled the gate where the sensitive
+    # code lives, so private repos now run an equivalent lockfile-integrity gate
+    # here while the node-audit job below enforces the vulnerability gate.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: github.event.repository.private == true
+        with:
+          node-version: "22"
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        if: github.event.repository.private == false
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0-only,AGPL-3.0-only
+      - name: Private-repo dependency gate (GHAS substitute)
+        if: github.event.repository.private == true
+        run: |
+          # Fails closed on a missing, malformed, or out-of-sync lockfile, which
+          # is what silently broke this workflow on main.
+          npm ci --dry-run --ignore-scripts --no-audit --no-fund
 
   node-audit:
     runs-on: ubuntu-latest
@@ -55,6 +72,7 @@ jobs:
       - name: Audit for new high/critical findings
         run: |
           npm audit --audit-level=high --omit=dev --json > /tmp/npm-audit.json || true
+          test -s /tmp/npm-audit.json
           node .github/scripts/npm-audit-regression.mjs
       - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
