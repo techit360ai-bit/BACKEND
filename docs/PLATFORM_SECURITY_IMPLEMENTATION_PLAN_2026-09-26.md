@@ -402,6 +402,15 @@ All four are small, in-scope, and were not in the original report:
 4. `.github/dependency-audit-baseline.json` **expires 2026-09-30** — four days out. On 2026-10-01 the
    npm audit gate turns red on every PR across both Node repos, by design. This is the nearest hard
    deadline in the whole programme.
+5. **The npm audit gate and Dependabot disagree about the same lockfile.** On `new-frontend` the
+   WS-07 gate reports 0 findings while Dependabot reports 3 open alerts against
+   `frontend/package.json` (1 high, 2 medium) — all on `vite`: installed `5.4.21`, vulnerable
+   `<= 6.4.2`, first patched `6.4.3`, a major the repo's own Dependabot policy blocks. So
+   "`npm audit` exits 0" is **not** equivalent to "no known vulnerabilities", and the release gate
+   must consume both signals. The three advisories are Vite *dev-server* issues (Windows UNC
+   handling in `launch-editor`, a `server.fs.deny` bypass, optimized-deps `.map` traversal), so the
+   realistic exposure is a developer machine rather than the shipped bundle — which is why they are
+   medium-priority, not critical.
 
 ### 12.3 The method
 
@@ -452,9 +461,11 @@ Cheap, unblocks everything else, and removes the half-landed criticism. Target: 
 - **P0-5 Merge the green PRs** in this order: `BACKEND#123`, `techit-admin-dashboard#34`, then
   `ai-router#84` once P0-4 lands, then `new-frontend#152`. All four carry the WS-01…WS-07 work.
 - **P0-6 Leftover cleanup** — items 1–3 of 12.2.
-- **P0-7 Dependabot triage** (parallel, non-blocking): the BACKEND default branch reportedly carries
+- **P0-7 Dependabot triage** (parallel, non-blocking): the BACKEND default branch carries
   88 findings (10 critical, 44 high). Re-confirm the count, then split into (a) exploitable-at-runtime,
-  (b) build-time only, (c) needs a major upgrade. Item (a) is part of the release gate.
+  (b) build-time only, (c) needs a major upgrade. Item (a) is part of the release gate. Also
+  reconcile the gate with Dependabot (12.2 item 5) so an open alert cannot coexist with a green
+  audit job.
 
 ### 12.5 Phase 1 — build the authorization harness before the bulk fixes (WS-19 core)
 
