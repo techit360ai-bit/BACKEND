@@ -337,3 +337,32 @@ system prompts is a failure.
 Do not approve production release until: C-1 and H-1..H-4 are fixed and proven by tests; the security
 suite runs green in CI for all three repos; the DevTools walkthrough passes for every role; and
 `RELEASE_CANDIDATE_SIGNOFF.md` carries real run IDs, operators, and approver names.
+
+---
+
+## 13. Addendum — live GitHub verification (2026-09-26)
+
+Section 1 recorded that no live testing was possible. GitHub access was subsequently granted, so the
+following were verified live against the GitHub API and the real default branches. The full detail
+and remediation is in `PLATFORM_SECURITY_IMPLEMENTATION_PLAN_2026-09-26.md` §1.
+
+**C-1 confirmed on production branches.** `origin/main` was fetched and re-read for both repos: the
+token is still returned in `signin`/`session` bodies and still written to `sessionStorage` under
+`techit_access_token`. This is not a stale-checkout artefact.
+
+**New findings (repository governance / supply chain):**
+
+- **G-1** `BACKEND`, `new-frontend`, `techit-admin-dashboard`, and `TECHIT-PAYMENT-GATWAY` have **no
+  branch protection** (private repos on a plan without the feature) — direct pushes to `main` are
+  possible, with no required review and no required status checks. Only `ai-router` is protected.
+- **G-2** Dependabot alerts are disabled on 5 of 6 repos; enabled only on `ai-router`.
+- **G-3** Secret scanning and push protection are disabled on all four private repos.
+- **G-4** CodeQL is **not enabled** on `BACKEND` or `new-frontend`; the workflow runs but no analysis
+  is uploaded, so the green check is decorative.
+- **G-5** The dependency-assurance gate is broken rather than merely red: `npm ci` fails with EUSAGE
+  on both Node repos, so npm audit and the SBOM step never run.
+- **G-6** The dependency-review job is explicitly skipped on private repos, i.e. skipped exactly where
+  the sensitive code lives.
+
+These sit alongside C-1..M-6 and are treated with equal weight: an unenforced `main` branch and an
+inactive dependency gate undermine every authorization control in this report.
