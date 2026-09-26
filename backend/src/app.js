@@ -167,6 +167,9 @@ app.use('/internal/usage-settlement', usageSettlementRoutes)
 // the SAME platform secret as /api/auth so users can't self-declare roles by
 // stuffing them into the request body (the SDK's legacy fallback mode).
 const JWT_SECRET = process.env.JWT_SECRET
+// Plugins registered by Plugins-MCP (`CONNECTOR_NAMES`). Anything outside this
+// set is refused at the mount boundary rather than relying on a lookup failure.
+const MCP_KNOWN_PLUGINS = new Set(['github', 'gitlab', 'bitbucket', 'notion', 'figma', 'web3', 'ai'])
 export function mcpRoleFromClaim(role) {
   if (['viewer', 'editor', 'admin', 'owner'].includes(role)) return role
   if (role === 'admin') return 'admin'
@@ -213,6 +216,15 @@ if (MCP_ENABLED) {
       }
     },
     authorizeInvocation({ resolved, plugin, tool, params }) {
+      // Boundary gate is default-deny: only catalogue plugins are accepted, and
+      // a token that carries an explicit tool allow-list can never exceed it.
+      // Per-tool minimum role stays enforced downstream by the MCP server's
+      // permission check, which remains the RBAC source of truth.
+      if (!MCP_KNOWN_PLUGINS.has(plugin)) return { allowed: false, status: 403, error: `Unknown MCP plugin: ${plugin}` }
+      const allowedTools = resolved.actor.toolsAllowed
+      if (Array.isArray(allowedTools) && !allowedTools.includes(`${plugin}.${tool}`)) {
+        return { allowed: false, status: 403, error: `${plugin}.${tool} is not permitted for this actor` }
+      }
       if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
       if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
       return { allowed: true }

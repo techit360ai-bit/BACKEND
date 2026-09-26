@@ -136,3 +136,25 @@ describe('/api/mcp authenticated integration', () => {
     expect(approved.body).toEqual({ approved: true })
   })
 })
+
+describe('/api/mcp tool authorization boundary', () => {
+  it('refuses a plugin outside the catalogue instead of default-allowing it', async () => {
+    const res = await request(app)
+      .post('/api/mcp/invoke')
+      .set(auth(token({ workspaceId: `ws-unknown-${Date.now()}` })))
+      .send({ plugin: 'not-a-real-plugin', tool: 'do_anything', params: {} })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('permission_denied')
+  })
+
+  it('does not let a token exceed its explicit tool allow-list', async () => {
+    const res = await request(app)
+      .post('/api/mcp/invoke')
+      .set(auth(token({ workspaceId: `ws-allow-${Date.now()}`, toolsAllowed: ['notion.search'] })))
+      .send({ plugin: 'github', tool: 'create_pull_request', params: { repo: 'acme/app' } })
+
+    expect(res.status).toBe(403)
+    expect(res.body.error.code).toBe('permission_denied')
+  })
+})

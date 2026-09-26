@@ -123,12 +123,17 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
       return;
     }
     const normalizedParams = params && typeof params === 'object' && !Array.isArray(params) ? params as Record<string, unknown> : {};
-    if (authorizeInvocation) {
-      const decision = await authorizeInvocation({ resolved, plugin, tool, params: normalizedParams });
-      if (!decision.allowed) {
-        res.status(decision.status || 403).json({ ok: false, error: { code: 'permission_denied', error: decision.error } });
-        return;
-      }
+    // Fail closed: without an explicit authorizer the mount must not execute
+    // tools. A caller that genuinely wants unrestricted dev use has to opt in
+    // by supplying an authorizer that returns allowed.
+    if (!authorizeInvocation) {
+      res.status(403).json({ ok: false, error: { code: 'authorization_not_configured', error: 'Tool authorization is not configured' } });
+      return;
+    }
+    const decision = await authorizeInvocation({ resolved, plugin, tool, params: normalizedParams });
+    if (!decision.allowed) {
+      res.status(decision.status || 403).json({ ok: false, error: { code: 'permission_denied', error: decision.error } });
+      return;
     }
     const result = await svc.invoke(plugin, tool, normalizedParams, resolved.actor);
     if (result.ok && onSuccessfulInvocation) await onSuccessfulInvocation({ resolved, plugin, tool, params: normalizedParams, data: result.data });
