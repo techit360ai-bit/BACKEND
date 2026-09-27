@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -126,8 +127,19 @@ func authMiddleware(v *auth.Verifier) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := r.Header.Get("Authorization")
 			token := strings.TrimPrefix(h, "Bearer ")
+			fromCookie := false
 			if token == h || token == "" {
+				// Browser sessions carry the platform JWT in an HttpOnly cookie and
+				// are sent with `credentials: include` rather than a bearer header.
+				token = sessionCookieToken(r)
+				fromCookie = token != ""
+			}
+			if token == "" {
 				writeErr(w, http.StatusUnauthorized, "missing bearer token")
+				return
+			}
+			if fromCookie && !csrfOK(r) {
+				writeErr(w, http.StatusForbidden, "csrf_token_invalid")
 				return
 			}
 			claims, err := v.Verify(token)
@@ -139,6 +151,45 @@ func authMiddleware(v *auth.Verifier) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+const (
+	sessionCookieName = "techit_access"
+	csrfCookieName    = "techit_csrf"
+)
+
+func cookieValue(r *http.Request, name string) string {
+	if c, err := r.Cookie(name); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
+func sessionCookieToken(r *http.Request) string { return cookieValue(r, sessionCookieName) }
+
+func unsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// csrfOK enforces the double-submit token for cookie-authenticated mutations.
+// Mirrors BACKEND src/middlewares/csrf.js: a bearer header is an explicit
+// caller-supplied credential, but the cookie is ambient, so a state-changing
+// request must also prove it originated from the application.
+func csrfOK(r *http.Request) bool {
+	if !unsafeMethod(r.Method) {
+		return true
+	}
+	expected := cookieValue(r, csrfCookieName)
+	supplied := r.Header.Get("X-CSRF-Token")
+	if expected == "" || supplied == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(supplied)) == 1
 }
 
 func currentUser(r *http.Request) string {

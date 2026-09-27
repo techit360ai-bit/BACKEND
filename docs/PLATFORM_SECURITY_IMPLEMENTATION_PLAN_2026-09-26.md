@@ -620,3 +620,42 @@ worth recording rather than hiding.
 Neither is a reason to revert the visibility change: security by obscurity was never a control, and
 the same code was always reachable over the network. It does mean "public" should be treated as the
 new baseline from which the residual-risk register is written.
+
+### 12.13 WS-01c status — cookie transport (2026-09-27)
+
+Code-complete on the server side; the flag flip is deliberately held behind one unverified
+precondition, because flipping it blind would remove the only credential path that currently works
+for the messaging service.
+
+**Landed.**
+
+- **ai-router** — `get_user_context` now falls back to the `techit_access` cookie when no bearer
+  header is present, and enforces the `techit_csrf` double-submit token on `POST`/`PUT`/`PATCH`/`DELETE`
+  for cookie-authenticated requests, mirroring `BACKEND/backend/src/middlewares/csrf.js`. A bearer
+  header is still an explicit credential and skips the CSRF check. `_extract_bearer_token`, which
+  forwards the caller's JWT to `BACKEND/api/mcp`, now falls back to the cookie too, so the Workspace
+  MCP path keeps working in cookie mode. CORS already allowed credentials with an explicit origin
+  list, so no change was needed there. Five tests added to
+  `tests/test_user_context_db_hydration.py`; ai-router is 191/191.
+- **messaging-backend** — `authMiddleware` accepts the session cookie when there is no bearer header
+  and applies the same double-submit rule. The WebSocket gateway already accepted the cookie and
+  already refuses `?token=` outside development, so that path needed nothing.
+- **new-frontend** — the messaging client now sends `credentials: 'include'` on all five verbs, so
+  the cookie is transmitted at all. Frontend is 189/189 and `tsc` is clean.
+
+**Held — `AUTH_BROWSER_BODY_TOKEN` stays `true` until this is resolved.** Two findings block a safe
+flip, both about the messaging origin (`https://n.techitnetwork.com`, configured in
+`new-frontend/.github/workflows/frontend.yml`):
+
+1. **The messaging service has no CORS middleware.** `CORSOrigins` is threaded through
+   `config.CORSOrigins` into `httpapi.Deps` and then never read — no `Access-Control-Allow-Origin`
+   is emitted anywhere in the service. A cross-origin browser call therefore cannot succeed today,
+   and a cookie-authenticated one additionally needs `Access-Control-Allow-Credentials: true`, which
+   cannot be true together with a `*` origin.
+2. **`n.techitnetwork.com` has no resolvable A record** (checked with `getent hosts`; the same
+   resolver resolves `github.com`), so the cookie path cannot be verified end to end from here.
+
+If the edge in front of that host already terminates CORS, it must be confirmed to send
+`Access-Control-Allow-Credentials: true` with the exact application origin. Until then, keeping the
+body token preserves working messaging and violates no authorization rule — the token is never
+written to web storage, and the backend no longer serialises `req.user.token`.
