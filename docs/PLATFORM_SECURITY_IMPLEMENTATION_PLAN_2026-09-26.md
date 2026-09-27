@@ -329,7 +329,7 @@ corresponding pull requests.
 | WS-03 | H-2 MCP default-allow | Implemented | `authorizeInvocation` rejects unknown plugins and enforces `toolsAllowed`; `Plugins-MCP` mount fails closed with no hook. `mcp.test.js` green. |
 | WS-04 | H-3 unguarded Investor routes | Implemented | `_require_investor_role` applied to all 10 previously unguarded Investor routes in `main.py`; a scripted check confirms no Investor route lacks the guard. |
 | WS-05 | H-4 stale role / revoked session | Implemented | Role was already re-read per request; `_assert_token_fresh` adds an optional age bound and a `user_sessions` revocation check against the platform identity DB, failing open (logged) if that store is unreachable. `tests/test_user_context_db_hydration.py` green. |
-| WS-06 | G-1 … G-4 governance | **Partially blocked** | Dependabot alerts + automated security fixes enabled and verified on all five repos. Branch protection, secret scanning, push protection and CodeQL all return `422`/`403` — they require GitHub Pro / Advanced Security on private repos. Owner decision required. |
+| WS-06 | G-1 … G-4 governance | **Closed on the three public repos; open on the two private ones** | Owner made `BACKEND`, `new-frontend` and `ai-router` public on 2026-09-27. Branch protection, secret scanning, push protection and CodeQL are now enabled and verified there — see 12.11. `techit-admin-dashboard` and `TECHIT-PAYMENT-GATWAY` remain private, so `GET /branches/main/protection` still returns `403 Upgrade to GitHub Pro`. Dependabot alerts are enabled on all six. |
 | WS-07 | G-5, G-6 dependency gate | Implemented | Root cause was merge damage, not a missing file: the BACKEND root `package-lock.json` and `new-frontend/frontend/package-lock.json` were invalid JSON, so npm reported EUSAGE as if no lockfile existed. `new-frontend/frontend/package.json` additionally carried a duplicated `devDependencies` tail (including a forbidden TypeScript 5→7 major and a `vitest` 2→5 major incompatible with `vite ^5.4.21`). Both lockfiles are restored/reconciled, the manifest is deduped, and `dependency-review` now runs a real lockfile-integrity gate on private repos instead of skipping. |
 
 ### WS-07 verification
@@ -523,11 +523,11 @@ relative: S ≤ 1 day, M 2–3 days, L 4–8 days.
 
 ### 12.8 Decisions required
 
-- **D1 — GitHub plan.** Branch protection, secret scanning, push protection and CodeQL on the four
-  private repos all require GitHub Pro / Advanced Security. Options: upgrade the plan (recommended —
-  it is the only path that closes G-1…G-4); make the repos public (not recommended — it publishes
-  auth, authz and billing source); or accept the risk formally and record it. Until this is decided,
-  the security fixes themselves ship without required review or required checks.
+- **D1 — GitHub plan. RESOLVED 2026-09-27.** The owner made the three sensitive repos public, which
+  unblocked G-1 … G-4; see 12.11 for the verified state and 12.12 for the residual exposure this
+  creates. `techit-admin-dashboard` and `TECHIT-PAYMENT-GATWAY` remain private and cannot get branch
+  protection, secret scanning or push protection without GitHub Pro. Remaining choice: make those two
+  public as well, upgrade the plan, or accept and record the gap.
 - **D2 — Dependency majors.** Accept the WS-07 realignment (`vitest` 5→2.1.9, `typescript` 7→5.9.3,
   `recharts` 3→2.15.2; admin `@vitejs/plugin-react` 6→4.7.0, `date-fns` 4→3.6.0,
   `react-resizable-panels` 4→2.1.7) and record it in the change log (recommended — it restored the
@@ -564,3 +564,59 @@ Phase 3  WS-20 per-role DevTools runbook  ->  WS-21 evidence  ->  release gate
 Cross-repo merges stay serialised on the auth contract: `BACKEND` first, then `new-frontend`, then
 `ai-router`, then `messaging-backend`, so no window exists in which the SPA sends a cookie that a
 service cannot yet read.
+
+### 12.11 WS-06 closure — verified state (2026-09-27)
+
+Verified live against the GitHub API immediately after the change.
+
+| Control | BACKEND | new-frontend | ai-router | admin | payment | website |
+|---|---|---|---|---|---|---|
+| Public | yes | yes | yes | no | no | yes |
+| Branch protection on `main` | **enabled** — 12 required checks, 1 review, `enforce_admins`, no force-push, no deletion | **enabled** — 7 checks | **enabled** — 5 checks | `403` | `403` | n/a |
+| Secret scanning | **enabled** | enabled | enabled | blocked | blocked | enabled |
+| Push protection | **enabled** | enabled | enabled | blocked | blocked | enabled |
+| Code scanning (CodeQL) | **live, 0 alerts** | **live, 0 alerts** | **live, 0 alerts** | n/a | n/a | n/a |
+| Dependabot alerts | enabled | enabled | enabled | enabled | enabled | enabled |
+
+**G-4 root cause — this was not a permissions problem.** All three repos carry a `codeql.yml` whose
+`analyze` step was pinned to `upload: false`. CodeQL analysed every commit and then discarded the
+result, so the job reported success while no analysis was ever stored — which is why
+`/code-scanning/alerts` returned `404 no analysis found` on BACKEND and new-frontend. The fix is the
+removal of that one option in all three workflows (one commit per repo). Re-running the workflow on
+the security branches produced stored analyses, and the alerts endpoint now returns a real (empty)
+list on all three. This is the correct pattern for any future "the gate is green but produces
+nothing" finding: check whether the workflow is configured to throw its result away.
+
+**Leaked-credential check.** Secret scanning reports **no open alerts** on any of the three newly
+public repos, so no provider-recognised credential is exposed in their history. Non-provider patterns
+and validity checks could not be enabled through the API (`secret_scanning_non_provider_patterns` and
+`secret_scanning_validity_checks` stay `disabled`); enable both from the repository Security tab when
+convenient, as they catch generic API keys and private keys that provider patterns miss.
+
+**Actions hardening (already correct, re-verified).** All three repos run with
+`default_workflow_permissions=read` and `can_approve_pull_request_reviews=false`, so a pull request
+cannot grant itself write scope or approve itself. Branch protection now also requires review plus the
+security checks before anything reaches `main`.
+
+**Practical consequence to expect.** With 1 required approval and no self-approval, the owner cannot
+merge their own pull requests. Merges now need one collaborator review — the repos do have writers
+(`eso8484`, `chimcha67`, `andrewanuga`, `Calito55831`, `Opeyemi-Builds`, `wrefinity`) — or the review
+requirement can be temporarily set to 0 while keeping every status check required.
+
+### 12.12 Residual exposure created by making the repos public
+
+Going public bought the controls above; it also changed the threat model, and two consequences are
+worth recording rather than hiding.
+
+1. **The dependency backlog is now public and enumerable.** BACKEND's default branch carries 88 open
+   advisories (10 critical, 44 high). Anyone can read that list. Exploitability still depends on what
+   is reachable at runtime, but this promotes `P0-7` from hygiene to a time-critical item, and item
+   (a) of that triage — exploitable-at-runtime — belongs on the release gate.
+2. **The authorization code itself is now readable.** An attacker can target the exact checks that
+   WS-08 … WS-18 will harden, rather than having to discover them. This makes the WS-19 harness and
+   the Phase 2 workstreams more urgent, not less. It also means field-visibility and entitlement gaps
+   must be assumed discoverable, which is the premise the whole programme already runs on.
+
+Neither is a reason to revert the visibility change: security by obscurity was never a control, and
+the same code was always reachable over the network. It does mean "public" should be treated as the
+new baseline from which the residual-risk register is written.
