@@ -24,3 +24,12 @@ Unauthenticated users, Explorer, Founder, Collaborator, Investor, Organization m
 | Secret exposure | CRITICAL | Credential committed or logged | env-driven secrets, redacted audit patterns | Rotate credentials and enable secret scanning | CI configuration required |
 
 Risk acceptance requires implementation plus test/configuration evidence; code presence alone is insufficient.
+
+## Register update — 2026-09-28
+
+| Finding | Status change |
+|---|---|
+| Cross-tenant object access | Horizontal authorization locked at the service boundary for domain, code-workspace and admin surfaces (WS-17/WS-18, `e1218ee`). Live RLS still required. |
+| Token theft from browser storage | The SPA no longer writes the access token to web storage (`0a65cce`); it is memory-only, with the HttpOnly cookie as the durable session. Full deployment rollout still required. |
+| Prompt injection / agent exposure | ai-router agent and workspace responses are now explicit allow-lists with no internal cost/provider fields (WS-15, `3ee57e7`). |
+| (new) Cross-origin messaging disclosure | The messaging service emitted no CORS headers, which blocked all browser feed/DM calls; a credentialed exact-origin CORS policy and per-caller limiter now apply (WS-16, `64a7a86`). |
