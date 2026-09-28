@@ -767,3 +767,72 @@ and passes after, an explicit response allow-list with a field-absence assertion
 single-commit revert. Items that cannot meet that bar — because they need a live environment or a
 toolchain that is not available — stay suspended and visible here rather than being written as code
 that cannot be verified.
+
+### 12.17 WS-17 and WS-08 verification outcome, and how the suspended items resolve
+
+#### WS-17 — the sweep's first result is that the code is already scoped
+
+The sweep started with the controllers that flag highest on a naive search. Both were **already
+correct**, and the naive search was the thing at fault:
+
+- `supportController` — 17 uses of a user-supplied parameter and **zero** inline `=== req.user.id`
+  comparisons, so a grep for owner-scoping reports it as unscoped. In fact every handler passes
+  `req.user.id` into the service (`getCase(req.user.id, req.params.caseId)`), and the admin paths add
+  explicit `supportPermissionAllowed(req.user, …)` checks.
+- `investorIntelligenceController` — same shape. Every handler calls `guard(req, capability)`, which
+  runs `authorizeCapability(req.user.id, …)`, and passes `req.user.id` down. `startup` passes the
+  caller id and the requested `startupId` together, so the service decides ownership.
+
+The lesson is now a rule for the rest of the sweep: **scoping in this codebase happens at the service
+boundary, not inline in the controller**, so a controller-level grep produces false positives and
+"fixing" them would have introduced the bug it was looking for. The remaining WS-17 work therefore
+reads each service's signature, not the controller body.
+
+#### WS-08 — there are two entitlement evaluators, and that is the real finding
+
+Entitlement is enforced in two different places with two different functions:
+
+| Path | Where | Used by |
+|---|---|---|
+| `authorizeCapability` | controllers | `investorIntelligence`, `mentorship`, `authorization` |
+| `evaluateEntitlement` | services | `recommendationIntelligence`, `organizationIntelligence` |
+
+The authoritative catalogue is `CAPABILITY_POLICIES` — 48 capabilities, each with `roles`,
+`assurance` and `funding`. Nothing is missing from the catalogue, and no premium surface was found
+that is open to an unentitled caller. The risk is therefore **divergence between the two evaluators**,
+not absence of checks. No guard was added anywhere, because adding one by guesswork would revoke
+access that paying users currently have — the exact breakage this programme is meant to prevent.
+
+The invariant is now locked by seven tests in `authorization.test.js`: every premium capability in
+the catalogue is denied to a caller with no subscription, no verification and no credits, and a body
+supplying `plan: 'enterprise'`, `subscription: 'active'`, `credits: 999999`, `roles: ['investor',
+'admin']` and `is_admin: true` still changes nothing. Backend: 280/281 locally (the one failure is a
+network-dependent DNS test).
+
+Also confirmed as correctly ungated: `trust`, `academy` and `distribution` have **no** capability in
+the catalogue, so their routes are deliberately entitlement-free and were left alone.
+
+#### The four suspended items — resolutions
+
+1. **Go toolchain: install it, and memory is not the constraint.** The machine has 3.8 GiB RAM
+   (2.9 GiB available), 925 GB free disk and 4 CPUs. `golang-go 1.22` is available from apt; Go
+   installs at roughly 500 MB and compiles this service in well under 1 GiB, so it is far lighter than
+   the existing `node_modules` trees. Installing it converts the two Go items from CI-only
+   verification to local verification.
+2. **`AUTH_BROWSER_BODY_TOKEN` flip — one implementable blocker, one operational.** The code side is
+   real and small: `CORSOrigins` is already threaded into `httpapi.Deps` and simply never read, so a
+   CORS middleware that emits `Access-Control-Allow-Origin` (exact origin, never `*`) together with
+   `Access-Control-Allow-Credentials: true` is the missing piece. The operational side cannot be
+   fixed from a repository: `n.techitnetwork.com` has no A record, so the messaging origin does not
+   resolve and the cookie path cannot be exercised. Sequence: implement CORS (needs item 1), add DNS,
+   verify end to end, then flip.
+3. **Go messaging rate limiter** — unblocked by item 1.
+4. **CSP** — belongs to whatever serves the SPA's HTML, which is the `new-frontend` deploy path, not
+   these API services. It must be written from the real origin inventory (app origin, API, messaging,
+   WebSocket, analytics) once item 2 establishes it, and not copied from a template.
+
+#### Revised sequence
+
+WS-17 continues service-by-service (the controller pass is done and found nothing to change);
+WS-08 is reduced to reconciling the two evaluators, which is a design decision rather than a patch;
+then WS-16, WS-15, WS-10, WS-18 as planned; WS-20 still needs a reachable staging environment.

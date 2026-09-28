@@ -80,6 +80,47 @@ describe('capability authorization and progressive verification', () => {
     expect(db.files.some(file => file.id === 'f2')).toBe(true)
   })
 
+  // WS-08: entitlement must be decided by the server from server state. This
+  // locks the negative invariant for every premium capability in the catalogue:
+  // a caller with no subscription, no verification and no credits gets none of
+  // them, whatever the request body claims.
+  const PREMIUM_CAPABILITIES = [
+    'investor.intelligence.view',
+    'investor.ai.recommendations',
+    'investor.portfolio.analytics',
+    'institutional.analytics',
+    'organization.analytics',
+    'workspace.advanced_ai',
+  ]
+
+  it.each(PREMIUM_CAPABILITIES)(
+    'denies an unentitled caller the %s capability',
+    async (capability) => {
+      const res = await request(app)
+        .post('/api/authorization/capabilities/check')
+        .set('Authorization', `Bearer ${token('u1', 'founder')}`)
+        .send({ capability, context: { role: 'investor' } })
+      expect(res.status).toBe(200)
+      expect(res.body.allowed).toBe(false)
+    },
+  )
+
+  it('ignores plan, credits and role supplied in the request body', async () => {
+    const res = await request(app)
+      .post('/api/authorization/capabilities/check')
+      .set('Authorization', `Bearer ${token('u1', 'founder')}`)
+      .send({
+        capability: 'institutional.analytics',
+        context: { role: 'investor' },
+        plan: 'enterprise',
+        subscription: 'active',
+        credits: 999999,
+        roles: ['investor', 'admin'],
+        is_admin: true,
+      })
+    expect(res.body.allowed).toBe(false)
+  })
+
   it('activates investor without verification and exposes the capability state', async () => {
     const activated = await request(app).post('/api/authorization/roles/activate').set('Authorization', `Bearer ${token()}`).send({ role: 'investor', profile: { investorType: 'angel' } })
     expect(activated.status).toBe(201)
