@@ -90,6 +90,41 @@ describe('capability authorization and progressive verification', () => {
     expect(db.files.some(file => file.id === 'f2')).toBe(true)
   })
 
+  // WS-18: the admin automation surface must not be drivable by an ordinary
+  // authenticated account. Every mounted admin route is enumerated here, so a
+  // new admin route added without requireAdminAuth/requireAdmin fails the suite
+  // rather than shipping open.
+  const ADMIN_ROUTES = [
+    ['get', '/api/admin/me'],
+    ['get', '/api/admin/users'],
+    ['post', '/api/admin/users'],
+    ['patch', '/api/admin/users/u2'],
+    ['delete', '/api/admin/users/u2'],
+    ['get', '/api/admin/discovery/config'],
+    ['patch', '/api/admin/discovery/config'],
+    ['get', '/api/admin/discovery/analytics'],
+    ['get', '/api/admin/intelligence/telemetry'],
+    ['get', '/api/admin/ai-router/telemetry'],
+    ['get', '/api/admin/security/posture'],
+    ['get', '/api/admin/security/events'],
+    ['post', '/api/admin/investor/comparables'],
+    ['get', '/api/admin/tvce/analytics'],
+    ['get', '/api/admin/tvce/config'],
+    ['patch', '/api/admin/tvce/config'],
+    ['get', '/api/admin/tvce/billing-jobs'],
+    ['post', '/api/admin/tvce/billing-jobs/run'],
+    ['post', '/api/admin/tvce/organization-entitlements'],
+    ['post', '/api/admin/tvce/organization-budgets'],
+    ['patch', '/api/admin/tvce/organization-hackathons/h1/review'],
+    ['get', '/api/admin/tvce/organization-abuse-reviews'],
+    ['patch', '/api/admin/tvce/organization-abuse-reviews/r1'],
+  ]
+
+  it.each(ADMIN_ROUTES)('denies a founder the admin route %s %s', async (method, path) => {
+    const res = await request(app)[method](path).set('Authorization', `Bearer ${token('u1', 'founder')}`).send({})
+    expect([401, 403]).toContain(res.status)
+  })
+
   // WS-08: entitlement must be decided by the server from server state. This
   // locks the negative invariant for every premium capability in the catalogue:
   // a caller with no subscription, no verification and no credits gets none of
