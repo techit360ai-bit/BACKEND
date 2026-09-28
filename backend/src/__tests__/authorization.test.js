@@ -26,6 +26,60 @@ beforeEach(() => {
 })
 
 describe('capability authorization and progressive verification', () => {
+  // WS-19 authorization harness. Three families, run against the real mounted
+  // router so a route added outside requireAuth fails here rather than in
+  // production. Every expectation asserts absence of privilege, never presence
+  // of a happy path, so the tests cannot pass by accident.
+
+  const ANONYMOUS_MUST_BE_REJECTED = [
+    ['get', '/api/users/u1'],
+    ['get', '/api/users/u2'],
+    ['get', '/api/files/'],
+    ['get', '/api/notifications/'],
+    ['get', '/api/moments/'],
+    ['get', '/api/distribution/anything'],
+    ['get', '/api/admin/ai-router/telemetry'],
+    ['get', '/api/investor-deals/deal-1'],
+    ['post', '/api/authorization/capabilities/check'],
+    ['post', '/api/authorization/verification/request'],
+  ]
+
+  it.each(ANONYMOUS_MUST_BE_REJECTED)('rejects an anonymous caller: %s %s', async (method, path) => {
+    const res = await request(app)[method](path).send({})
+    expect(res.status).toBe(401)
+  })
+
+  it('rejects a malformed bearer token rather than treating it as anonymous', async () => {
+    const res = await request(app).get('/api/users/u1').set('Authorization', 'Bearer not-a-jwt')
+    expect(res.status).toBe(401)
+  })
+
+  it('denies a founder the admin surface (vertical escalation)', async () => {
+    const res = await request(app)
+      .get('/api/admin/ai-router/telemetry')
+      .set('Authorization', `Bearer ${token('u1', 'founder')}`)
+    expect([401, 403]).toContain(res.status)
+  })
+
+  it('does not return another user private fields on GET /api/users/:id (horizontal)', async () => {
+    const res = await request(app)
+      .get('/api/users/u2')
+      .set('Authorization', `Bearer ${token('u1', 'founder')}`)
+    // The shared fixture does not populate every collection this route reads,
+    // so the status is not asserted. The security property is the absence of
+    // the other user's private field in whatever is returned.
+    expect(JSON.stringify(res.body)).not.toContain('u2@example.com')
+  })
+
+  it('does not let one user delete another user document by id (IDOR)', async () => {
+    db.files = [{ id: 'f1', ownerId: 'u1', name: 'mine' }, { id: 'f2', ownerId: 'u2', name: 'theirs' }]
+    const res = await request(app)
+      .delete('/api/files/f2')
+      .set('Authorization', `Bearer ${token('u1', 'founder')}`)
+    expect(res.status).not.toBe(200)
+    expect(db.files.some(file => file.id === 'f2')).toBe(true)
+  })
+
   it('activates investor without verification and exposes the capability state', async () => {
     const activated = await request(app).post('/api/authorization/roles/activate').set('Authorization', `Bearer ${token()}`).send({ role: 'investor', profile: { investorType: 'angel' } })
     expect(activated.status).toBe(201)

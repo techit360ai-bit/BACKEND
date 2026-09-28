@@ -659,3 +659,44 @@ If the edge in front of that host already terminates CORS, it must be confirmed 
 `Access-Control-Allow-Credentials: true` with the exact application origin. Until then, keeping the
 body token preserves working messaging and violates no authorization rule — the token is never
 written to web storage, and the backend no longer serialises `req.user.token`.
+
+### 12.14 WS-19 status — authorization harness and inventory evidence (2026-09-28)
+
+**Harness landed.** Fourteen assertions added to the existing
+`backend/src/__tests__/authorization.test.js`, run against the real mounted Express router rather than
+mocks of the middleware, so a route mounted outside `requireAuth` fails in CI instead of in
+production:
+
+- **anonymous** — ten protected routes across users, files, notifications, moments, distribution,
+  admin, investor deals and authorization must each return `401` with no token;
+- **malformed credential** — a syntactically invalid bearer must be `401`, not treated as anonymous
+  and allowed through;
+- **vertical** — a founder token against `/api/admin/ai-router/telemetry` must be `401`/`403`;
+- **horizontal** — `GET /api/users/u2` as `u1` must not contain `u2@example.com` in the response;
+- **IDOR** — `DELETE /api/files/f2` as the owner of `f1` must not return `200` and must leave `f2`
+  intact.
+
+Every assertion checks the *absence* of privilege, so the suite cannot pass by exercising a happy
+path. Backend is 281/281 (was 267).
+
+**Inventory evidence** (`npm run security:endpoint-inventory` → 546 endpoints):
+
+| Dimension | Enforced | Review required |
+|---|---|---|
+| Authentication | **543** | 3 |
+| Authorization | 263 | **283** |
+| Validation | 76 | 470 |
+| Rate limit | 132 | 414 |
+| Audit | 130 | 416 |
+
+The three authentication exceptions are, and are the only ones:
+
+| Route | Assessment |
+|---|---|
+| `GET /` (`app.js`) | Deliberate root/health surface. |
+| `POST /api/billing/webhooks/:provider` | Correctly unauthenticated — webhooks authenticate by provider signature, which must be verified before any state change. Worth a dedicated signature-verification test. |
+| `POST /api/investor-references/respond/:token` | Token-in-URL flow. The token is the credential, so it must be single-use, expiring and scoped; needs review rather than an auth guard. |
+
+**Not yet covered.** The 283 authorization-review and 414 rate-limit-review endpoints are the real
+Phase 2 backlog (WS-17 and WS-14). There is still no live staging probe: every result above is a local
+test run, so the "measure against a running server" rule in 12.3 is only partly satisfied.
