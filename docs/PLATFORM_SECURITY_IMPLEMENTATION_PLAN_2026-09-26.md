@@ -724,3 +724,46 @@ text) with accidental internal leakage, and the brief requires refactoring caref
 blindly changing a contract the SPA may depend on. The targeted fix is to split them — keep authored
 validation messages, and replace anything derived from a caught exception with a generic message plus
 a server-side log — and it is the first item of Phase 2's error-response work.
+
+### 12.16 Remaining implementation plan — grounded in what exists (2026-09-28)
+
+The plan below is written against the code as it stands, not against an ideal design. Every item
+names the existing file it lands in, the reason it is safe to change there, and what would have to be
+true before it ships. Nothing here adds a service, layer, router or schema.
+
+**Two principles carried over from what already worked:** the correct-looking code in this codebase
+(`fileController.js` scopes every operation by `ownerId`; the Node backend and ai-router already send
+the full security-header set) was found by *reading*, not by assuming it was missing. So each item
+starts with a verification pass that can end in "already correct, add a test and move on".
+
+| Order | WS | Lands in | Verified starting point | Approach | Risk |
+|---|---|---|---|---|---|
+| 1 | WS-17 | `backend/src/controllers/*.js` | `fileController.js` already owner-scopes read/delete/create; 283 endpoints flagged for review | Work the inventory file by file, largest first. For each route confirm the query is scoped by `req.user.id` or a membership check **in the query**, not after it. Add the owner-scope assertion to `authorization.test.js` as each file is cleared. | Low per file; the risk is volume, not difficulty |
+| 2 | WS-08 | `backend/src/services/capabilityAuthorization.js`, `backend/src/routes/*.js` | `requireCapability(...)` already exists and is applied in `investorDealRoom.js` | This is an *application sweep*, not new machinery: confirm every premium route carries a `requireCapability` guard, and that the capability decision reads server state only. | Low |
+| 3 | WS-16 | `messaging-backend/internal/transport/httpapi/*.go` | WS gateway already refuses `?token=` outside dev and accepts the cookie; HTTP auth now does too | Add per-conversation membership checks to the message/channel handlers where they are missing. Then the Go rate limiter. | **Medium — no Go toolchain locally**, so every change is compile-verified only by CI's Go jobs |
+| 4 | WS-15 | `ai-router/main.py` | Global 500 handler already returns a generic message; `_safe_detail` now covers 4xx | Audit agent/workspace response builders for system prompts and routing internals in the payload; allow-list the response shape. | Low |
+| 5 | WS-10 | `backend/src/config/database.js`, Redis usage, `new-frontend/frontend/src/lib/resilience/cache.ts` | Client cache is already keyed and bounded | Make every private server response `Cache-Control: private, no-store` unless explicitly public, and confirm no shared cache key omits the user identity. | Low |
+| 6 | WS-18 | `backend/src/routes/admin.js` | Admin routes already carry `requireAdminAuth` + `requireAdmin` + a limiter | Verify the automation surface cannot be driven by a non-admin and that admin reads cannot leak another tenant's rows. | Low |
+| 7 | WS-20 | runbook only | DevTools acceptance is still **not performed for any role** | Execute the per-role walkthrough on staging and record Network, Storage, cookies, IndexedDB, WS frames. | Needs a running staging environment — **suspended until one is reachable** |
+| 8 | WS-21 | this document | Sections 12.11–12.16 already carry the evidence chain | Fold in the WS-20 results and the sign-off once WS-20 runs. | Blocked by WS-20 |
+
+**Suspended, with reasons — these are decisions, not omissions:**
+
+1. **Flipping `AUTH_BROWSER_BODY_TOKEN` to `false`.** Blocked on the messaging origin: the service
+   emits no CORS headers (`CORSOrigins` is threaded into `httpapi.Deps` and never read) and
+   `n.techitnetwork.com` has no A record, so the cookie path cannot be verified. Resolve CORS first,
+   then flip (12.13).
+2. **The Go messaging rate limiter.** There is no Go toolchain in this environment, so a limiter
+   cannot be compile-checked before pushing. The two Go changes already shipped are small and were
+   verified by CI; a limiter is larger and is deferred rather than risked blind.
+3. **A Content-Security-Policy.** The API services return JSON; the policy that matters belongs to
+   the static host serving the SPA, which is outside these repositories. Writing one here would be
+   security theatre and the brief explicitly warns against copying a CSP.
+4. **The WS-17 sweep in one pass.** 283 endpoints is a per-route review; batching it into one change
+   is what makes authorization work unsafe. It is sequenced file by file above.
+
+**What "done" looks like for each item** stays as in 12.9: reproduced first, test that fails before
+and passes after, an explicit response allow-list with a field-absence assertion, no new structure,
+single-commit revert. Items that cannot meet that bar — because they need a live environment or a
+toolchain that is not available — stay suspended and visible here rather than being written as code
+that cannot be verified.
