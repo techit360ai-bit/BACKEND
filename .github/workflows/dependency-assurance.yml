@@ -53,6 +53,14 @@ jobs:
         with:
           fail-on-severity: high
           deny-licenses: GPL-3.0-only,AGPL-3.0-only
+          # Three Vite dev-server advisories raised against the hoisted
+          # rolldown-vite in BACKEND/frontend. That workspace is reference-only
+          # with its deploy workflow disabled, so the code never runs in
+          # production; `npm audit` rates the same lockfile 0 high because the
+          # aliased package does not map to these GHSAs. Recorded as a visible,
+          # narrow exception rather than suppressed - remove it when
+          # BACKEND/frontend is retired.
+          allow-ghsas: GHSA-p9ff-h696-f583,GHSA-v2wj-q39q-566r,GHSA-fx2h-pf6j-xcff
       - name: Private-repo dependency gate (GHAS substitute)
         if: github.event.repository.private == true
         run: |
