@@ -26,6 +26,16 @@ beforeEach(() => {
 })
 
 describe('capability authorization and progressive verification', () => {
+  // WS-10: this service returns user-specific JSON. A browser or shared cache
+  // must never be able to replay one user's response to a later reader, so the
+  // cache policy is asserted on every response, not only the authenticated ones.
+  it('marks API responses as private and non-cacheable', async () => {
+    const res = await request(app).get('/api/users/u1')
+    expect(res.headers['cache-control']).toContain('private')
+    expect(res.headers['cache-control']).toContain('no-store')
+    expect(res.headers['x-content-type-options']).toBe('nosniff')
+  })
+
   // WS-19 authorization harness. Three families, run against the real mounted
   // router so a route added outside requireAuth fails here rather than in
   // production. Every expectation asserts absence of privilege, never presence

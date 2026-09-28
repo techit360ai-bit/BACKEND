@@ -105,6 +105,11 @@ app.use((_req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
   res.setHeader('Cross-Origin-Resource-Policy', 'same-site')
+  // Every response from this service is user-specific API JSON. Without an
+  // explicit directive a shared or browser cache may replay an authenticated
+  // response to a later, less-privileged reader. Public routes and SSE streams
+  // that need different semantics set their own header inside the handler.
+  res.setHeader('Cache-Control', 'private, no-store')
   if (process.env.NODE_ENV === 'production') {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   }
