@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -50,6 +51,7 @@ const claimsKey ctxKey = "claims"
 func NewRouter(d Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
 
 	r.Get("/health", handleHealth)
 
@@ -157,6 +159,24 @@ const (
 	sessionCookieName = "techit_access"
 	csrfCookieName    = "techit_csrf"
 )
+
+// securityHeaders mirrors what the Node backend and ai-router already send, so
+// the three browser-facing services agree. The WebSocket gateway is mounted
+// outside this router and is covered by its own origin check.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Cross-Origin-Resource-Policy", "same-site")
+		if os.Getenv("ENVIRONMENT") == "production" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 func cookieValue(r *http.Request, name string) string {
 	if c, err := r.Cookie(name); err == nil {

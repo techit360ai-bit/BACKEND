@@ -700,3 +700,27 @@ The three authentication exceptions are, and are the only ones:
 **Not yet covered.** The 283 authorization-review and 414 rate-limit-review endpoints are the real
 Phase 2 backlog (WS-17 and WS-14). There is still no live staging probe: every result above is a local
 test run, so the "measure against a running server" rule in 12.3 is only partly satisfied.
+
+### 12.15 WS-11 / WS-12 / WS-13 status (2026-09-28)
+
+**WS-13 — security headers. Mostly already in place, one real gap closed.** The Node backend
+(`backend/src/app.js:102`) and ai-router (`main.py:163`) both already send `X-Content-Type-Options`,
+`X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Resource-Policy` and
+production HSTS. The Go messaging service sent **none** of them; it now does, from a `securityHeaders`
+middleware on the chi router, so all three browser-facing services agree. The WebSocket gateway is
+mounted outside that router and is covered by its own origin check. A CSP is deliberately not added
+here: these services return JSON, and the policy that matters belongs on the static host that serves
+the SPA, which is outside these repositories.
+
+**WS-11 — logging. No token, secret or password logging found** in `BACKEND/backend/src` outside of
+`error.message` fields. Token-in-URL logging, which was the specific risk, is already blocked: the
+messaging WebSocket refuses `?token=` outside development.
+
+**WS-12 — error responses. Open, and the largest remaining disclosure surface.** `ai-router/main.py`
+raises `HTTPException` with `detail=str(exc)` at **28 call sites**, returning raw internal exception
+text — database errors, provider errors, internal paths — to the caller. This is not fixed in this
+pass on purpose: the sites mix deliberate user-facing validation messages (422 with hand-written
+text) with accidental internal leakage, and the brief requires refactoring carefully rather than
+blindly changing a contract the SPA may depend on. The targeted fix is to split them — keep authored
+validation messages, and replace anything derived from a caught exception with a generic message plus
+a server-side log — and it is the first item of Phase 2's error-response work.
