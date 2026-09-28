@@ -1,10 +1,24 @@
 import { Router } from 'express'
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireCapability } from '../services/capabilityAuthorization.js'
 import { checklistPatch, dealCreate, dealGet, deals, icCreate, ndaSign, noteCreate, questionCreate, questionMessage, statusChange, termSheetCreate } from '../controllers/investorDealRoomController.js'
 import { auditVerify, closingGet, closingItemSave, comparableList, documentCreate, documentDownload, documentFinalize, documentRevoke, documents, folderCreate, folders, icUpdate, packCreate, participantCreate, participantRevoke, participants, questionnaireGet, questionnaireSave, questionnaireTemplateSave, referenceCreate, references, requestCreate, revenueGet, revenueRecord, revenueRefresh, technicalDdGet, termAction, termSheets } from '../controllers/investorDealRoomCompletionController.js'
 
 const router = Router(); router.use(requireAuth)
+// WS-14: the Deal Room is the most sensitive read surface on the platform -
+// investor documents, NDA state and diligence evidence - and had no ceiling of
+// its own. Keyed per authenticated user, bounded per minute.
+router.use(rateLimit({
+  windowMs: 60 * 1000,
+  limit: Math.max(10, Number(process.env.DEAL_ROOM_REQUESTS_PER_MINUTE || 120)),
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || ipKeyGenerator(req.ip),
+  validate: { trustProxy: true, xForwardedForHeader: true },
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'rate_limit_exceeded' },
+}))
 router.get('/', requireCapability('investor.dealroom.view'), deals)
 router.post('/', requireCapability('investor.dealroom.create'), dealCreate)
 router.get('/:dealId', requireCapability('investor.dealroom.view'), dealGet)
