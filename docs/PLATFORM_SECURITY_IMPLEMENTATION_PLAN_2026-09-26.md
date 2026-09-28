@@ -871,3 +871,29 @@ to a conversation or channel by id. Existing tests already lock this
 still appends `?token=`. The gateway refuses it outside development, so real-time
 messaging needs the cookie/subprotocol change alongside the DNS work already listed
 as suspended in 12.17.
+
+### 12.19 WS-20 / WS-21 status — runbook and evidence (2026-09-28)
+
+**WS-20 runbook written, execution still blocked.** `docs/DEVTOOLS_ACCEPTANCE_RUNBOOK.md`
+contains the per-role walkthrough (Network, Storage, cookies, IndexedDB, WS frames,
+sources), the fail-closed negative checks, and a results table. It is ready to run the
+moment staging is reachable; until then every role row stays `pending` and the release
+candidate must not be approved.
+
+**WS-21 evidence.** The posture, API matrix, OWASP mapping, threat model and release
+signoff now carry the WS-08…WS-18 status with commit SHAs, local test commands and the
+CI runs below.
+
+**Branch CI, confirmed (not the `main` gates).**
+- `BACKEND` `64a7a86` (WS-16) — TECHIT Backend Services green, including **Go Messaging
+  Unit Tests** and **Go Messaging Integration Tests**, so WS-16 is CI-verified as well as
+  locally verified: https://github.com/techit360ai-bit/BACKEND/actions/runs/36491997121
+- `BACKEND` `239485e` (WS-21 docs) — green.
+- `new-frontend` `0804fa5` — Frontend Quality Gates, S3 build, Dependency Assurance and
+  frontend-security-policy green.
+
+**Known red CI, unrelated to this branch.** ai-router `deployment-env-contract` fails
+with "model registry is stale for production routing" (`MODEL_REGISTRY_MAX_AGE_DAYS`,
+default 30) on commits both before and after the security work; the model registry
+review dates need refreshing. new-frontend CodeQL fails with "Code scanning is not
+enabled for this repository" (governance gap G-4), and its WebContainer job flakes.
