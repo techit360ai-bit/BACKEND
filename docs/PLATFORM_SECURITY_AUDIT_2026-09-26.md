@@ -366,3 +366,88 @@ token is still returned in `signin`/`session` bodies and still written to `sessi
 
 These sit alongside C-1..M-6 and are treated with equal weight: an unenforced `main` branch and an
 inactive dependency gate undermine every authorization control in this report.
+
+---
+
+## 14. Addendum — browser-storage, agent-payload and authorization sweep (2026-09-28)
+
+Three more exposure classes were found by reading the shipped code (not by assuming it was missing),
+and one whole resource family was verified rather than changed.
+
+### 14.1 HIGH — private data survives an account change in browser storage
+
+**Location** `new-frontend/frontend/src/lib/resilience/cache.ts` (+ callers in `lib/messaging/*`,
+`dashboard/feed`, `dashboard/workspaces/pages/Code.tsx`).
+**Attack** snapshot keys were `messaging:conversations`, `messaging:history:<convId>`,
+`feed:<zone>:<category>`, `workspace:code:<id>` — resource-scoped, not account-scoped. On a shared or
+reused browser, account B reads account A's cached conversations, channel history and workspace code
+from DevTools → Application → IndexedDB, with no request to the server.
+**Fix** the account id is folded into the key inside `cache.ts`, and snapshots are purged whenever the
+account changes (`setCacheScope`, called on sign-in, sign-out and session bootstrap). Locked by three
+tests in `cache.test.ts`.
+**Residual** the offline *operations* queue (`lib/resilience/queue.ts`) can hold a pending private
+payload from the previous account. It is deliberately not purged: clearing it would discard the
+previous user's unsynced work. Flagged rather than hidden.
+
+### 14.2 MEDIUM — internal AI cost accounting returned to the browser
+
+**Location** `ai-router/integration_guide.py` `WorkspaceAIService.review_code`.
+**Attack** the response carried `provider_cost_usd`, exposing the platform's per-request provider
+economics. The brief lists cost accounting as never-browser-visible. No UI rendered it.
+**Fix** the field is removed; the projection is `{"review": ...}`.
+
+### 14.3 MEDIUM — upstream provider identity returned to the browser
+
+**Location** `ai-router/integration_guide.py` `WorkspaceAIService.converse`, and `plan_sprint`
+returned the whole agent result object.
+**Fix** `provider` is no longer returned; `plan_sprint` returns an explicit projection
+(`task_suggestions`, `recommendations`) so a future agent field cannot leak by default. Locked by
+tests in `tests/test_workspace_agent_forwards_tools.py`.
+
+### 14.4 Cache policy
+
+Every `BACKEND` and `ai-router` response now carries `Cache-Control: private, no-store` (SSE routes
+override with their own `no-cache`). No shared/browser cache can replay one user's API response to a
+later reader.
+
+### 14.5 Verified-correct, no change needed (WS-17 sweep)
+
+- `codeWorkspaceController` — all 32 param uses forward `req.user.id`; the VS Code bridge token is
+  bound to a single `workspaceId` **and** to its granted permission (`files.read`/`files.write`), so a
+  token cannot be replayed against another workspace. Locked by a new test.
+- `domainController` — ownership is enforced by the `*Owned` service primitives
+  (`findOwned`/`patchOwned`/`listOwned`/`insertOwned`) and `workspaceAccess`; locked by four new
+  cross-user tests (founder project, investor watchlist, hackathon team, organization project).
+- `admin.js` — every mounted route carries `requireAdminAuth` + `requireAdmin`/`requireSuperAdmin`;
+  `/login` is the only unauthenticated route and is rate-limited 5/15 min. Locked by 23 enumerated
+  route-denial tests.
+- No controller in the tree uses a user-supplied parameter with zero `req.user` reference.
+
+---
+
+## 15. Addendum — messaging CORS was blocking the feed and DMs (2026-09-28)
+
+**Symptom.** The SPA could not create a feed post, could not send a DM, and the live
+feed rendered "You are offline and no cached posts are available."
+
+**Root cause.** `messaging-backend` threaded `CORS_ORIGINS` into its API dependencies
+but never read it, so the service returned no `Access-Control-Allow-Origin`,
+`Access-Control-Allow-Credentials`, or preflight response. The SPA calls the
+messaging service on a different origin (`localhost:5173` → `localhost:8080` in
+development) with `credentials: include` and an `Authorization` header, both of which
+force a browser preflight. With no CORS headers the browser blocked every response,
+`fetch` rejected with a `TypeError`, and the feed's `isNetworkFailure` branch showed
+the offline message. Feed posts and DMs are both REST calls to this same service, so
+all three symptoms share one cause.
+
+**Fix.** Added the CORS middleware (exact-origin echo, credentials, preflight
+allow-list) and a development default of
+`http://localhost:5173,http://localhost:4173` mirroring the Node backend, so the
+service works out of the box in development and still fails closed outside it
+(`CORS_ORIGINS` remains required, non-wildcard and https-only for staging/production).
+WebSocket origins are now taken from the same list. Locked by CORS, rate-limit and
+origin-pattern tests in the Go suite.
+
+**Operational note.** A deployed messaging service must set `CORS_ORIGINS` to the
+SPA origin or the block returns. The ai-router `ALLOWED_ORIGINS` default similarly
+omits the Vite dev origin (`5173`/`4173`); staging should confirm its own allow-list.

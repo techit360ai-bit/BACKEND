@@ -99,7 +99,11 @@ func main() {
 
 	// open WS for B
 	wsbase := "ws" + base()[len("http"):]
-	connB, _, err := websocket.Dial(ctx, wsbase+"/ws?token="+tokB, nil)
+	// Send the credential as a header, never in the URL: query strings are
+	// logged by proxies and retained in browser history (WS-16).
+	connB, _, err := websocket.Dial(ctx, wsbase+"/ws", &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + tokB}},
+	})
 	must(err, "B dial")
 	defer connB.Close(websocket.StatusNormalClosure, "")
 	time.Sleep(300 * time.Millisecond)

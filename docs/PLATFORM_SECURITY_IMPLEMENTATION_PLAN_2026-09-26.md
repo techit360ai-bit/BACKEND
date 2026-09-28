@@ -836,3 +836,38 @@ the catalogue, so their routes are deliberately entitlement-free and were left a
 WS-17 continues service-by-service (the controller pass is done and found nothing to change);
 WS-08 is reduced to reconciling the two evaluators, which is a design decision rather than a patch;
 then WS-16, WS-15, WS-10, WS-18 as planned; WS-20 still needs a reachable staging environment.
+
+### 12.18 WS-16 status — messaging and WebSocket authorization (2026-09-28)
+
+**Toolchain unblocked.** Go 1.26.8 is installed locally, so `go build ./...` and
+`go test ./...` for `messaging-backend` run here instead of only in CI. The full
+module test suite is green.
+
+**Verified correct, no change needed (the service-boundary rule from 12.17 holds).**
+`messaging.Service.SendDM`, `MarkRead` and `channel.Service.SendChannel`/`RelayTyping`
+all call `IsParticipant`/`IsMember` before writing, and the WebSocket gateway
+dispatches through those same services, so a non-member cannot subscribe or publish
+to a conversation or channel by id. Existing tests already lock this
+(`TestConversationAndChannelHistoryRejectNonMembers`, `TestChannelReadRejectsNonMember`).
+
+**Changed:**
+- **CORS.** `httpapi.Deps.CORSOrigins` was threaded in and never read, so the service
+  emitted no CORS headers at all. Added `corsMiddleware`: it echoes the exact allowed
+  origin with `Access-Control-Allow-Credentials: true` (never `*`), answers preflight
+  with the method/header allow-list, and is the missing piece the
+  `AUTH_BROWSER_BODY_TOKEN` cookie flip depends on.
+- **Rate limiting.** Added a keyed token-bucket `RateLimiter` applied per caller
+  address to `/api/v1` and to the `/ws` handshake. It fails closed with `429`,
+  `Retry-After` and `rate_limit_exceeded`; disabled at `<= 0`, default 120/min via
+  `MESSAGING_RATE_LIMIT_PER_MINUTE`. `TRUST_PROXY_HOPS` mirrors the Node backend's
+  `trust proxy` so `X-Forwarded-For` is only honoured behind a known proxy.
+- **WebSocket origin.** The gateway now accepts the configured `CORS_ORIGINS` hosts
+  through `OriginPatterns`, so the SPA can open a cross-origin socket in development
+  instead of relying on the wildcard-only `InsecureSkipOriginCheck`.
+- **Smoke client.** `cmd/smoke` no longer passes `/ws?token=`, using the
+  `Authorization` header instead.
+
+**Residual.** The browser WebSocket client (`new-frontend/.../lib/messaging/ws.ts`)
+still appends `?token=`. The gateway refuses it outside development, so real-time
+messaging needs the cookie/subprotocol change alongside the DNS work already listed
+as suspended in 12.17.

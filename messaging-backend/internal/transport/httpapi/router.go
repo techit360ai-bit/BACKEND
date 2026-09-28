@@ -41,6 +41,9 @@ type Deps struct {
 	EnableDevToken bool
 	CORSOrigins    string
 	Discovery      *discovery.Client
+	// RateLimiter protects the messaging surface. A nil limiter is replaced by
+	// the service default so a wiring mistake fails closed rather than open.
+	RateLimiter *RateLimiter
 }
 
 type ctxKey string
@@ -49,13 +52,20 @@ const claimsKey ctxKey = "claims"
 
 // NewRouter builds the chi router.
 func NewRouter(d Deps) http.Handler {
+	if d.RateLimiter == nil {
+		d.RateLimiter = NewRateLimiter(120, 0)
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 	r.Use(securityHeaders)
+	r.Use(corsMiddleware(d.CORSOrigins))
 
 	r.Get("/health", handleHealth)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// One bucket per caller address, mirroring the Node backend's global
+		// limiter. /health stays outside this group so probes are never limited.
+		r.Use(rateLimitMiddleware(d.RateLimiter, ClientIPKey))
 		if d.EnableDevToken {
 			r.Get("/dev/token", handleDevToken(d))
 		}
