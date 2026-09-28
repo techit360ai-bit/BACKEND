@@ -451,3 +451,11 @@ origin-pattern tests in the Go suite.
 **Operational note.** A deployed messaging service must set `CORS_ORIGINS` to the
 SPA origin or the block returns. The ai-router `ALLOWED_ORIGINS` default similarly
 omits the Vite dev origin (`5173`/`4173`); staging should confirm its own allow-list.
+
+**Second contributing cause (frontend).** `new-frontend/.../lib/messaging/client.ts`
+sent `credentials: include` and the bearer token but not the `X-CSRF-Token`
+double-submit header that `lib/api/client.ts` and the Go service's `csrfOK` check
+require. A session that fell back to the HttpOnly cookie (for example after a reload,
+when the in-memory token is gone) would have had its feed/DM **writes** rejected with
+`403 csrf_token_invalid` even once CORS was fixed. The messaging client now forwards
+`techit_csrf`, locked by `client.test.ts`.
