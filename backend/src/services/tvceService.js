@@ -6,6 +6,7 @@ import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEvent
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { workspaceTeamGrantFor } from './workspaceTeamEntitlementService.js'
 import { listDefaultRateCards } from './unitEconomicsService.js'
+import { providerAvailability } from './billingProviderConfig.js'
 
 const configuredDefaults = () => {
   try { return process.env.TVCE_COMMERCIAL_CONFIG_JSON ? JSON.parse(process.env.TVCE_COMMERCIAL_CONFIG_JSON) : commercialDefaults } catch { return commercialDefaults }
@@ -111,9 +112,7 @@ export function adminCommercialConfig() {
     rateCards: collection(db, 'rateCards').length ? collection(db, 'rateCards').map(row => ({ ...row })) : listDefaultRateCards(),
     geoPricingProfiles: collection(db, 'geoPricingProfiles').map(row => ({ ...row })),
     providers: {
-      stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
-      paystack: Boolean(process.env.PAYSTACK_SECRET_KEY),
-      flutterwave: Boolean(process.env.FLUTTERWAVE_SECRET_KEY && process.env.FLUTTERWAVE_SECRET_HASH),
+      ...providerAvailability(),
       checkoutRedirects: Boolean(process.env.BILLING_SUCCESS_URL && process.env.BILLING_CANCEL_URL),
     },
   }
