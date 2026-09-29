@@ -90,6 +90,12 @@ import {
   workspaceItemCreate,
   workspaceItemPatch,
   workspaceItems,
+  workspaceTaskEvent,
+  workspaceTaskOne,
+  workspaceTaskRun,
+  connectorCredentialGet,
+  connectorCredentialRemove,
+  connectorCredentialSet,
   workspaceMemberDelete,
   workspaceMembersGet,
   workspaceProvision,
@@ -232,12 +238,18 @@ router.get('/workspaces/:workspaceId/members', workspaceMembersGet)
 router.delete('/workspaces/:workspaceId/members/:memberId', workspaceMemberDelete)
 router.get('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItems)
 router.post('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemCreate)
+router.get('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskOne)
+router.post('/workspaces/:workspaceId/tasks/:itemId/events', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskEvent)
+router.post('/workspaces/:workspaceId/tasks/:itemId/run', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskRun)
 router.patch('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItems)
 router.post('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemCreate)
 router.patch('/workspaces/:workspaceId/agents/:itemId', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItems)
 router.post('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemCreate)
+router.get('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialGet)
+router.post('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialSet)
+router.delete('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialRemove)
 router.patch('/workspaces/:workspaceId/connectors/:itemId', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItems)
 router.post('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemCreate)

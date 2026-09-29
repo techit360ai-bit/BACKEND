@@ -99,6 +99,7 @@ const INITIAL = {
   workspaceTasks: [],
   workspaceAgents: [],
   workspaceConnectors: [],
+  connectorCredentials: [],
   workspaceReports: [],
   projectActivities: [],
   startupActivities: [],
