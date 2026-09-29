@@ -1204,6 +1204,104 @@ export function recordDilution(userId, body) {
   })
 }
 
+// --- Founder cap table ------------------------------------------------------
+// There is no founder-declared ownership record in the authority store, so the
+// only ownership the platform actually knows is the equity a founder committed
+// to collaborators through workspace invitations. This derives a cap table from
+// those committed grants; it never invents a founder split. `retainedPercent` is
+// explicitly marked `derived` and excludes anything the platform does not track
+// (external investors, option pools, founder-declared percentages).
+
+function round2(value) {
+  return Math.round(Number(value || 0) * 100) / 100
+}
+
+function invitationEquityFor(db, workspaceId, collaboratorId, invitationId) {
+  const invitations = collection(db, 'workspaceInvitations')
+  if (invitationId) return invitations.find(row => row.id === invitationId) || null
+  return invitations.find(row =>
+    row.workspaceId === workspaceId && row.collaboratorId === collaboratorId && row.status === 'accepted'
+  ) || null
+}
+
+export function founderCapTable(userId) {
+  const db = readAuthorityDb()
+  const workspaces = collection(db, 'workspaces').filter(row => row.ownerId === userId)
+  const projects = collection(db, 'projects')
+  const members = collection(db, 'workspaceMembers')
+  const invitations = collection(db, 'workspaceInvitations')
+  const profiles = collection(db, 'profiles')
+  const nameFor = id => userName(profiles.find(row => row.id === id), 'Collaborator')
+
+  const ventures = workspaces.map(workspace => {
+    const project = projects.find(row => row.id === workspace.projectId) || null
+    const grants = []
+    const seen = new Set()
+
+    const addGrant = (collaboratorId, role, equityPercent, committedAt) => {
+      const percent = Number(equityPercent || 0)
+      if (!(percent > 0) || !collaboratorId || seen.has(collaboratorId)) return
+      seen.add(collaboratorId)
+      grants.push({
+        collaboratorId,
+        collaboratorName: nameFor(collaboratorId),
+        role: role || 'Collaborator',
+        equityPercent: round2(percent),
+        committedAt: committedAt || null,
+      })
+    }
+
+    for (const member of members.filter(row => row.workspaceId === workspace.id && row.status === 'active')) {
+      const invitation = invitationEquityFor(db, workspace.id, member.userId, member.invitationId)
+      addGrant(member.userId, invitation?.requestedRole || member.role, invitation?.equityProposal, invitation?.acceptedAt || member.joinedAt)
+    }
+    // An accepted invitation is a commitment even if the membership projection lags behind.
+    for (const invitation of invitations) {
+      if (invitation.workspaceId !== workspace.id || invitation.status !== 'accepted') continue
+      addGrant(invitation.collaboratorId, invitation.requestedRole, invitation.equityProposal, invitation.acceptedAt || invitation.updatedAt)
+    }
+
+    const pending = invitations
+      .filter(row => row.workspaceId === workspace.id && row.status === 'pending' && Number(row.equityProposal || 0) > 0)
+      .map(row => ({
+        invitationId: row.id,
+        collaboratorId: row.collaboratorId,
+        collaboratorName: nameFor(row.collaboratorId),
+        role: row.requestedRole || 'Collaborator',
+        equityPercent: round2(row.equityProposal),
+        invitedAt: row.createdAt || row.updatedAt || null,
+        expiresAt: row.expiresAt || null,
+      }))
+
+    const committedPercent = round2(grants.reduce((sum, grant) => sum + grant.equityPercent, 0))
+    return {
+      workspaceId: workspace.id,
+      projectId: workspace.projectId || null,
+      name: project?.title || workspace.name || 'Venture',
+      committedPercent,
+      retainedPercent: round2(Math.max(0, 100 - committedPercent)),
+      retainedDerived: true,
+      grants: grants.sort((a, b) => b.equityPercent - a.equityPercent),
+      pending: pending.sort((a, b) => b.equityPercent - a.equityPercent),
+    }
+  }).sort((a, b) => b.committedPercent - a.committedPercent || String(a.name).localeCompare(String(b.name)))
+
+  const withEquity = ventures.filter(venture => venture.committedPercent > 0)
+  return {
+    ventures,
+    totals: {
+      ventures: ventures.length,
+      venturesWithEquity: withEquity.length,
+      committedGrants: ventures.reduce((sum, venture) => sum + venture.grants.length, 0),
+      pendingProposals: ventures.reduce((sum, venture) => sum + venture.pending.length, 0),
+      averageRetainedPercent: ventures.length
+        ? round2(ventures.reduce((sum, venture) => sum + venture.retainedPercent, 0) / ventures.length)
+        : 100,
+    },
+    basis: 'Derived from equity commitments recorded on workspace invitations. External investors, option pools and founder-declared splits are not tracked by the platform.',
+  }
+}
+
 export function collaboratorEarnings(userId) {
   const db = readAuthorityDb()
   const earnings = listOwned(db, 'collaboratorEarnings', userId, 'collaboratorId')
@@ -2149,6 +2247,16 @@ export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
       importance: type === 'opportunity' ? 'HIGH' : 'MEDIUM', metadata: { industry: row.industry, skills: row.requiredSkills || row.skills || [] },
     })
     return row
+  })
+}
+
+export function genericDelete(userId, name, itemId, field = 'ownerId') {
+  return updateAuthorityDb(db => {
+    const rows = collection(db, name)
+    const idx = rows.findIndex(row => row.id === itemId && row[field] === userId)
+    if (idx === -1) return null
+    const [removed] = rows.splice(idx, 1)
+    return removed
   })
 }
 

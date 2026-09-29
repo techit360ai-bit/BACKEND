@@ -20,8 +20,10 @@ import {
   createProject,
   createWorkspaceCollectionItem,
   createWorkspaceInvitation,
+  founderCapTable,
   genericCreate,
   genericList,
+  genericDelete,
   genericPatch,
   getAnalysis,
   getCollaboratorScores,
@@ -591,6 +593,17 @@ export function genericPatchItem(req, res) {
   const row = genericPatch(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
+}
+
+export function genericDeleteItem(req, res) {
+  const row = genericDelete(req.user.id, req.collectionName, req.params.itemId || req.params.id)
+  if (!row) return notFound(res, 'Record not found')
+  return res.json({ ok: true, [req.itemKey]: row })
+}
+
+// Founder-facing cap table derived from committed workspace equity (see founderCapTable).
+export function founderEquity(req, res) {
+  return res.json(founderCapTable(req.user.id))
 }
 
 export function notificationPrefsGet(req, res) {
