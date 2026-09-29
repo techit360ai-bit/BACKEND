@@ -68,6 +68,7 @@ import {
   organizationProjectCreate,
   organizationProjectPatch,
   organizationProjects,
+  walletAnalyticsGet,
   walletListGet,
   walletPaymentIntent,
   walletSummaryGet,
@@ -246,6 +247,7 @@ router.get('/wallet/plans', bindCollection('billingPlans', 'plans', 'plan', 'pla
 router.get('/wallet/credit-packages', bindCollection('creditPackages', 'creditPackages', 'creditPackage', 'package'), walletListGet)
 router.get('/wallet/subscriptions', bindCollection('subscriptions', 'subscriptions', 'subscription', 'subscription'), walletListGet)
 router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice', 'invoice'), walletListGet)
+router.get('/wallet/analytics', walletAnalyticsGet)
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)

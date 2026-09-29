@@ -87,6 +87,7 @@ import {
   updateOrganizationProject,
   updateProject,
   walletList,
+  walletAnalyticsAsync,
   walletListAsync,
   walletSummary,
   walletSummaryAsync,
@@ -556,6 +557,10 @@ export function hackathonPipeline(req, res) {
 
 export async function walletSummaryGet(req, res) {
   return res.json(await walletSummaryAsync(req.user.id))
+}
+
+export async function walletAnalyticsGet(req, res) {
+  return res.json(await walletAnalyticsAsync(req.user.id, { period: req.query?.period }))
 }
 
 export async function walletListGet(req, res) {

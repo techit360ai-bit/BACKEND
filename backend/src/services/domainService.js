@@ -156,21 +156,150 @@ function cashTotals(earnings, payouts) {
   }
 }
 
+// Funding sources recorded by the metering service (see usageSettlementService).
+// Labels and priority describe observed behaviour; nothing here is invented.
+const FUNDING_SOURCE_LABELS = Object.freeze({
+  subscription: 'Subscription allowance',
+  platform_subsidy: 'Free plan',
+  payg: 'Pay-as-you-go credits',
+  organization: 'Organization budget',
+  unknown: 'Unattributed',
+})
+// The metering service has no static waterfall: the caller requests a funding
+// source per usage event (see usageSettlementService.reserveUsage), so the
+// wallet reports the sources that were actually used, most-used first.
+const FUNDING_SOURCE_ORDER = ['subscription', 'platform_subsidy', 'payg', 'organization', 'unknown']
+
+function observedDeductionOrder(sourceTotals) {
+  return Object.keys(sourceTotals).sort((a, b) => (sourceTotals[b] || 0) - (sourceTotals[a] || 0)
+    || FUNDING_SOURCE_ORDER.indexOf(a) - FUNDING_SOURCE_ORDER.indexOf(b))
+}
+
+function completedUsage(db, userId) {
+  return collection(db, 'usageEvents').filter(row => row.userId === userId && row.status === 'completed')
+}
+
+function sourceTotalsFor(events) {
+  const totals = {}
+  for (const row of events) {
+    const source = row.fundingSource || 'unknown'
+    totals[source] = Math.round((totals[source] || 0) + Math.abs(Number(row.credits || 0)))
+  }
+  return totals
+}
+
+function subscriptionUsageFor(db, userId, events) {
+  const subscription = collection(db, 'subscriptions')
+    .filter(row => row.userId === userId && (row.status === 'active' || row.status === 'trialing'))
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0]
+  if (!subscription) return null
+  const plan = collection(db, 'billingPlans').find(row => row.id === subscription.planId) || null
+  const allowance = Number(plan?.credits ?? subscription.includedCredits)
+  const included = Number.isFinite(allowance) && allowance > 0 ? allowance : null
+  const periodStart = new Date()
+  periodStart.setUTCDate(1)
+  periodStart.setUTCHours(0, 0, 0, 0)
+  const consumed = Math.round(events
+    .filter(row => row.fundingSource === 'subscription' && new Date(row.createdAt || 0).getTime() >= periodStart.getTime())
+    .reduce((sum, row) => sum + Math.abs(Number(row.credits || 0)), 0))
+  return {
+    included,
+    consumed,
+    remaining: included === null ? null : Math.max(0, included - consumed),
+    period: 'calendar_month',
+    renewalAt: subscription.currentPeriodEnd || null,
+  }
+}
+
 function walletSummaryFor(db, userId) {
   const account = collection(db, 'walletAccounts').find(row => row.userId === userId) || null
   const ledger = collection(db, 'creditLedger').filter(row => row.userId === userId)
   const usage = collection(db, 'usageEvents').filter(row => row.userId === userId)
+  const settled = completedUsage(db, userId)
   const ledgerDelta = ledger.reduce((sum, row) => sum + Number(row.deltaCredits || row.credits || 0), 0)
   // Settled usage already creates a credit-ledger debit. Including usage
   // events again would display and enforce a double charge.
   const balance = Number(account?.creditBalance ?? account?.balance ?? 0) + ledgerDelta
+  const sourceTotals = sourceTotalsFor(settled)
+  const periodStart = new Date()
+  periodStart.setUTCDate(1)
+  periodStart.setUTCHours(0, 0, 0, 0)
+  const alerts = collection(db, 'walletAccounts')
+    .filter(row => row.userId === userId && row.expiresAt && new Date(row.expiresAt).getTime() > Date.now())
+    .sort((a, b) => String(a.expiresAt).localeCompare(String(b.expiresAt)))
+    .slice(0, 3)
+    .map(row => ({ walletId: row.id, message: `${row.label || row.type || 'Credit balance'} expires soon.`, expiresAt: row.expiresAt }))
   return {
     account: account || { userId, creditBalance: balance, currency: 'USD' },
     creditBalance: balance,
     lifetimeCreditsUsed: usage.reduce((sum, row) => sum + Math.abs(Number(row.credits || 0)), 0),
     pendingPayments: collection(db, 'paymentIntents').filter(row => row.userId === userId && row.status === 'pending').length,
+    sourceTotals,
+    deductionOrder: observedDeductionOrder(sourceTotals),
+    subscriptionUsage: subscriptionUsageFor(db, userId, settled),
+    consumedThisPeriod: Math.round(settled
+      .filter(row => new Date(row.createdAt || 0).getTime() >= periodStart.getTime())
+      .reduce((sum, row) => sum + Math.abs(Number(row.credits || 0)), 0)),
+    lowBalance: balance <= 0,
+    expirationAlerts: alerts,
   }
 }
+
+function analyticsBuckets(period, now = new Date()) {
+  const buckets = []
+  if (period === 'weekly') {
+    for (let index = 7; index >= 0; index -= 1) {
+      const start = new Date(now.getTime() - index * 7 * 86400000)
+      start.setUTCHours(0, 0, 0, 0)
+      start.setUTCDate(start.getUTCDate() - start.getUTCDay())
+      buckets.push({ key: `week:${start.toISOString().slice(0, 10)}`, label: start.toISOString().slice(0, 10), start: start.getTime(), end: start.getTime() + 7 * 86400000 })
+    }
+    return buckets
+  }
+  if (period === 'monthly') {
+    for (let index = 5; index >= 0; index -= 1) {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - index, 1))
+      const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
+      buckets.push({ key: `month:${start.toISOString().slice(0, 7)}`, label: start.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }), start: start.getTime(), end: end.getTime() })
+    }
+    return buckets
+  }
+  for (let index = 6; index >= 0; index -= 1) {
+    const start = new Date(now.getTime() - index * 86400000)
+    start.setUTCHours(0, 0, 0, 0)
+    buckets.push({ key: `day:${start.toISOString().slice(0, 10)}`, label: start.toLocaleString('en-US', { weekday: 'short', timeZone: 'UTC' }), start: start.getTime(), end: start.getTime() + 86400000 })
+  }
+  return buckets
+}
+
+export function walletAnalytics(userId, { period = 'daily' } = {}) {
+  const normalized = ['daily', 'weekly', 'monthly'].includes(period) ? period : 'daily'
+  const db = readAuthorityDb()
+  const events = completedUsage(db, userId)
+  const buckets = analyticsBuckets(normalized)
+  const points = []
+  for (const source of FUNDING_SOURCE_ORDER) {
+    const sourceEvents = events.filter(row => (row.fundingSource || 'unknown') === source)
+    if (!sourceEvents.length) continue
+    for (const bucket of buckets) {
+      const credits = Math.round(sourceEvents
+        .filter(row => { const at = new Date(row.createdAt || 0).getTime(); return at >= bucket.start && at < bucket.end })
+        .reduce((sum, row) => sum + Math.abs(Number(row.credits || 0)), 0))
+      if (credits > 0) points.push({ label: bucket.label, credits, walletSource: source, walletLabel: FUNDING_SOURCE_LABELS[source] })
+    }
+  }
+  const peak = points.reduce((max, point) => Math.max(max, point.credits), 0)
+  const withPercent = points.map(point => ({ ...point, displayPercent: peak > 0 ? Math.round((point.credits / peak) * 100) : 0 }))
+  return {
+    period: normalized,
+    points: withPercent,
+    sourceTotals: sourceTotalsFor(events),
+    sourceLabels: FUNDING_SOURCE_LABELS,
+    totalConsumed: withPercent.reduce((sum, point) => sum + point.credits, 0),
+  }
+}
+
+export async function walletAnalyticsAsync(userId, query) { return walletAnalytics(userId, query) }
 
 export function listProjects(userId) {
   const db = readAuthorityDb()
@@ -1826,7 +1955,27 @@ export function walletSummary(userId) {
   return walletSummaryFor(db, userId)
 }
 
-export async function walletSummaryAsync(userId) { if (!financeReadEnabled()) return walletSummary(userId); try { return await walletSummaryPostgres(userId) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletSummary(userId) } }
+export async function walletSummaryAsync(userId) {
+  if (!financeReadEnabled()) return walletSummary(userId)
+  try {
+    const summary = await walletSummaryPostgres(userId)
+    // The Postgres read model carries no analytics fields. Derive them from the
+    // authority store, which is the write source of truth projected to Postgres.
+    const derived = walletSummaryFor(readAuthorityDb(), userId)
+    return {
+      ...summary,
+      sourceTotals: derived.sourceTotals,
+      deductionOrder: derived.deductionOrder,
+      subscriptionUsage: derived.subscriptionUsage,
+      consumedThisPeriod: derived.consumedThisPeriod,
+      expirationAlerts: derived.expirationAlerts,
+      lowBalance: derived.lowBalance,
+    }
+  } catch (error) {
+    if (!financeReadFallbackEnabled()) throw error
+    return walletSummary(userId)
+  }
+}
 
 export function walletList(userId, name) {
   const db = readAuthorityDb()

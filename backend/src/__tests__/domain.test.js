@@ -934,6 +934,44 @@ describe('domain live-data endpoints', () => {
     expect(summary.body.lifetimeCreditsUsed).toBe(5)
   })
 
+  it('reports wallet source totals, observed deduction order, and subscription usage', async () => {
+    const now = new Date().toISOString()
+    const db = makeDb({
+      walletAccounts: [{ id: 'wallet_1', userId: 'user-uuid-1', creditBalance: 25, label: 'Monthly credits', expiresAt: '2030-01-01T00:00:00.000Z' }],
+      usageEvents: [
+        { id: 'usage_1', userId: 'user-uuid-1', credits: 4, status: 'completed', fundingSource: 'subscription', createdAt: now },
+        { id: 'usage_2', userId: 'user-uuid-1', credits: 9, status: 'completed', fundingSource: 'platform_subsidy', createdAt: now },
+        { id: 'usage_3', userId: 'user-uuid-1', credits: 3, status: 'reserved', fundingSource: 'payg', createdAt: now },
+      ],
+      subscriptions: [{ id: 'sub_1', userId: 'user-uuid-1', planId: 'plan_pro', status: 'active', currentPeriodEnd: '2030-01-01T00:00:00.000Z' }],
+      billingPlans: [{ id: 'plan_pro', credits: 100 }],
+    })
+    readDb.mockReturnValue(db)
+    const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
+    expect(summary.body.sourceTotals).toEqual({ subscription: 4, platform_subsidy: 9 })
+    expect(summary.body.deductionOrder).toEqual(['platform_subsidy', 'subscription'])
+    expect(summary.body.subscriptionUsage).toMatchObject({ included: 100, consumed: 4, remaining: 96 })
+    expect(summary.body.expirationAlerts).toEqual([{ walletId: 'wallet_1', message: 'Monthly credits expires soon.', expiresAt: '2030-01-01T00:00:00.000Z' }])
+  })
+
+  it('returns wallet consumption analytics bucketed by funding source', async () => {
+    const now = new Date().toISOString()
+    const db = makeDb({
+      usageEvents: [
+        { id: 'usage_1', userId: 'user-uuid-1', credits: 5, status: 'completed', fundingSource: 'payg', createdAt: now },
+        { id: 'usage_2', userId: 'user-uuid-1', credits: 7, status: 'completed', fundingSource: 'subscription', createdAt: now },
+      ],
+    })
+    readDb.mockReturnValue(db)
+    const res = await request(app).get('/api/domain/wallet/analytics?period=daily').set('Authorization', `Bearer ${validToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.period).toBe('daily')
+    expect(res.body.sourceTotals).toEqual({ payg: 5, subscription: 7 })
+    expect(res.body.totalConsumed).toBe(12)
+    expect(res.body.points).toHaveLength(2)
+    expect(res.body.points.every(point => point.displayPercent > 0)).toBe(true)
+  })
+
   it('persists role-scoped notification preferences without overwriting another role', async () => {
     const db = makeDb()
     readDb.mockReturnValue(db)
