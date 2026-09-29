@@ -15,3 +15,16 @@
 | OWASP API Security Top 10 | Shared auth, capability checks, ownership predicates, rate limits, webhook signatures | Generated endpoint matrix must be reviewed per route change |
 | OWASP GenAI/LLM Top 10 | untrusted prompt/RAG model, grants, tool registry, spend/rate limits, output boundaries | Prompt-injection corpus and RAG tenant tests |
 | ASVS 5.0 | Security headers, session controls, validation, auditability, deployment gates | Formal requirement-by-requirement verification |
+
+## Status update — 2026-09-28
+
+- **A01 Broken Access Control** — WS-17 service-boundary sweep and WS-18 admin denial
+  matrix added to `backend/src/__tests__/`. Live RLS still outstanding.
+- **A02 Security Misconfiguration** — messaging service now emits the same header set
+  as Node and ai-router (WS-13), including CORS with an exact-origin echo.
+- **A05 Injection / abuse** — messaging service gained a keyed rate limiter (WS-16);
+  a deployed messaging origin must still set `CORS_ORIGINS`.
+- **A07 Authentication Failures** — access token is memory-only in the SPA (`0a65cce`),
+  carried between reloads by the HttpOnly cookie; messaging/ai-router accept the cookie.
+- **A10 Mishandling Exceptions** — response caching is closed (`private, no-store`) and
+  ai-router error details are sanitised (`0a97ccf`).

@@ -430,3 +430,45 @@ describe('Unknown routes', () => {
     expect(res.body.error).toBe('Not found')
   })
 })
+
+// ── GET /api/users/:id ────────────────────────────────────────────────────────
+
+describe('GET /api/users/:id', () => {
+  function makeDirectoryDb(overrides = {}) {
+    return {
+      users: [BASE_USER],
+      profiles: [BASE_PROFILE, { ...BASE_PROFILE, id: 'user-uuid-2', email: 'bob@example.com', firstName: 'Bob', lastName: 'Jones', username: 'bob', isVerified: true }],
+      feedPosts: [],
+      feedComments: [],
+      networkEdges: [],
+      subscriptions: [],
+      workspaceMembers: [],
+      organizationMemberships: [],
+      ...overrides,
+    }
+  }
+
+  it('does not disclose a verified member email address to another member', async () => {
+    readDb.mockReturnValue(makeDirectoryDb())
+
+    const res = await request(app)
+      .get('/api/users/user-uuid-2')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.email).toBeNull()
+    expect(JSON.stringify(res.body)).not.toContain('bob@example.com')
+  })
+
+  it('still returns the owner their own email address', async () => {
+    readDb.mockReturnValue(makeDirectoryDb())
+
+    const res = await request(app)
+      .get('/api/users/user-uuid-1')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.isOwnProfile).toBe(true)
+    expect(res.body.email).toBe('alice@example.com')
+  })
+})

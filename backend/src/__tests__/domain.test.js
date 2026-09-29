@@ -1381,3 +1381,70 @@ describe('domain live-data endpoints', () => {
     expect(scores.body.scores.crs).toBe(67)
   })
 })
+
+describe('WS-17 horizontal authorization at the service boundary', () => {
+  // Scoping in this codebase happens inside the domain service, not inline in
+  // the controller: every handler forwards req.user.id and the service filters
+  // by an owner field. These tests lock that contract per resource family, so a
+  // future handler that skips the owner id fails here.
+  const A = 'user-uuid-1'
+  const B = 'user-uuid-2'
+
+  it('does not let another founder patch a project they do not own', async () => {
+    const db = makeDb({ projects: [{ id: 'proj-a', ownerId: A, title: 'Alice project', stage: 'idea' }] })
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .patch('/api/domain/founder/projects/proj-a')
+      .set('Authorization', `Bearer ${validToken(B)}`)
+      .send({ title: 'Hijacked' })
+
+    expect(res.status).toBe(404)
+    expect(db.projects[0].title).toBe('Alice project')
+  })
+
+  it('does not let another investor remove a watchlist entry they do not own', async () => {
+    const db = makeDb({ investorWatchlists: [{ id: 'w-a', investorId: A, projectId: 'proj-a' }] })
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .delete('/api/domain/investor/watchlist/proj-a')
+      .set('Authorization', `Bearer ${validToken(B, 'investor')}`)
+
+    expect(res.body.ok).toBe(false)
+    expect(db.investorWatchlists).toHaveLength(1)
+  })
+
+  it('does not expose a hackathon team to a caller who is not a member', async () => {
+    const db = makeDb({
+      hackathons: [{ id: 'h-a', ownerId: A, name: 'Alice hackathon' }],
+      hackathonTeams: [{ id: 'team-a', hackathonId: 'h-a', leaderId: A }],
+      hackathonMembers: [{ id: 'm-a', hackathonId: 'h-a', teamId: 'team-a', userId: A }],
+    })
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .get('/api/domain/hackathons/h-a/teams/team-a/status')
+      .set('Authorization', `Bearer ${validToken(B)}`)
+
+    expect(res.status).toBe(404)
+  })
+
+  it('does not let an organization patch another organization project', async () => {
+    const orgA = { id: 'org-a', ownerId: A, name: 'Org A' }
+    const db = makeDb({
+      organizations: [orgA, { id: 'org-b', ownerId: B, name: 'Org B' }],
+      projects: [{ id: 'proj-org-a', organizationId: 'org-a', ownerId: A, title: 'Org A project' }],
+      profiles: [makeProfile(A, 'alice@example.com', 'organisation'), makeProfile(B, 'bob@example.com', 'organisation')],
+    })
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .patch('/api/domain/organization/projects/proj-org-a')
+      .set('Authorization', `Bearer ${validToken(B, 'organisation')}`)
+      .send({ title: 'Hijacked' })
+
+    expect(res.status).toBe(404)
+    expect(db.projects[0].title).toBe('Org A project')
+  })
+})

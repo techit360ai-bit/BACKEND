@@ -4,8 +4,10 @@ package httpapi
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -39,6 +41,9 @@ type Deps struct {
 	EnableDevToken bool
 	CORSOrigins    string
 	Discovery      *discovery.Client
+	// RateLimiter protects the messaging surface. A nil limiter is replaced by
+	// the service default so a wiring mistake fails closed rather than open.
+	RateLimiter *RateLimiter
 }
 
 type ctxKey string
@@ -47,12 +52,20 @@ const claimsKey ctxKey = "claims"
 
 // NewRouter builds the chi router.
 func NewRouter(d Deps) http.Handler {
+	if d.RateLimiter == nil {
+		d.RateLimiter = NewRateLimiter(120, 0)
+	}
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
+	r.Use(securityHeaders)
+	r.Use(corsMiddleware(d.CORSOrigins))
 
 	r.Get("/health", handleHealth)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		// One bucket per caller address, mirroring the Node backend's global
+		// limiter. /health stays outside this group so probes are never limited.
+		r.Use(rateLimitMiddleware(d.RateLimiter, ClientIPKey))
 		if d.EnableDevToken {
 			r.Get("/dev/token", handleDevToken(d))
 		}
@@ -126,8 +139,19 @@ func authMiddleware(v *auth.Verifier) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := r.Header.Get("Authorization")
 			token := strings.TrimPrefix(h, "Bearer ")
+			fromCookie := false
 			if token == h || token == "" {
+				// Browser sessions carry the platform JWT in an HttpOnly cookie and
+				// are sent with `credentials: include` rather than a bearer header.
+				token = sessionCookieToken(r)
+				fromCookie = token != ""
+			}
+			if token == "" {
 				writeErr(w, http.StatusUnauthorized, "missing bearer token")
+				return
+			}
+			if fromCookie && !csrfOK(r) {
+				writeErr(w, http.StatusForbidden, "csrf_token_invalid")
 				return
 			}
 			claims, err := v.Verify(token)
@@ -139,6 +163,63 @@ func authMiddleware(v *auth.Verifier) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+const (
+	sessionCookieName = "techit_access"
+	csrfCookieName    = "techit_csrf"
+)
+
+// securityHeaders mirrors what the Node backend and ai-router already send, so
+// the three browser-facing services agree. The WebSocket gateway is mounted
+// outside this router and is covered by its own origin check.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Cross-Origin-Resource-Policy", "same-site")
+		if os.Getenv("ENVIRONMENT") == "production" {
+			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func cookieValue(r *http.Request, name string) string {
+	if c, err := r.Cookie(name); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
+func sessionCookieToken(r *http.Request) string { return cookieValue(r, sessionCookieName) }
+
+func unsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}
+
+// csrfOK enforces the double-submit token for cookie-authenticated mutations.
+// Mirrors BACKEND src/middlewares/csrf.js: a bearer header is an explicit
+// caller-supplied credential, but the cookie is ambient, so a state-changing
+// request must also prove it originated from the application.
+func csrfOK(r *http.Request) bool {
+	if !unsafeMethod(r.Method) {
+		return true
+	}
+	expected := cookieValue(r, csrfCookieName)
+	supplied := r.Header.Get("X-CSRF-Token")
+	if expected == "" || supplied == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(supplied)) == 1
 }
 
 func currentUser(r *http.Request) string {

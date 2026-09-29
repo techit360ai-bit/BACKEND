@@ -34,8 +34,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.EnableDevToken {
 		t.Error("EnableDevToken = true, want false")
 	}
-	if cfg.CORSOrigins != "" {
-		t.Errorf("CORSOrigins = %q, want empty development default", cfg.CORSOrigins)
+	if cfg.CORSOrigins != "http://localhost:5173,http://localhost:4173" {
+		t.Errorf("CORSOrigins = %q, want the development frontend origins", cfg.CORSOrigins)
 	}
 }
 
