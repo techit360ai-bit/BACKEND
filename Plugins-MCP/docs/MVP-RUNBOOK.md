@@ -4,22 +4,31 @@ This is the operator's guide to the MCP execution layer: what's built, how to te
 it (three ways, fastest first), and how it reaches the website. Everything here
 is live in `BACKEND/Plugins-MCP` and mounted on the platform API at `/api/mcp`.
 
+> **Testing from the browser?** See
+> [`MCP-FRONTEND-TESTING-GUIDE.md`](./MCP-FRONTEND-TESTING-GUIDE.md) — starting
+> both apps, the read and destructive-tool walkthroughs, and a troubleshooting
+> table. This runbook covers the API and CLI paths.
+
 ---
 
 ## 1. What's built
 
-Five connectors, **22 tools**, all registered in `server/techit-service.ts` and
+Seven connectors, **34 tools**, all registered in `server/techit-service.ts` and
 served over MCP. Each connector is **hybrid**: a deterministic in-memory *fake*
 (the default — safe for demos, needs no secrets) and a *real* implementation you
 flip on per-connector with an env var.
 
 | Connector | Tools | Destructive (approval-gated) | Real mode |
 |-----------|-------|------------------------------|-----------|
-| `github`  | list_repositories, read_file, list_issues, get_pr_status, create_pull_request, run_workflow | create_pull_request, run_workflow | fake only (real API is task #2) |
+| `github`  | list_repositories, read_file, list_issues, get_pr_status, get_repository_state, get_commit_checks, get_workflow_run, push_files, create_pull_request, run_workflow | push_files, create_pull_request, run_workflow | `GITHUB_CONNECTOR_MODE=real` + connected OAuth token |
+| `gitlab`  | get_repository_state, read_file, get_commit_checks, push_files | push_files | `GITLAB_CONNECTOR_MODE=real` + token |
+| `bitbucket` | get_repository_state, read_file, get_commit_checks, push_files | push_files | `BITBUCKET_CONNECTOR_MODE=real` + token |
 | `notion`  | search, get_page, create_page, append_blocks | create_page, append_blocks | `NOTION_CONNECTOR_MODE=real` + token |
 | `figma`   | get_file, export_frame, list_comments, post_comment | post_comment | `FIGMA_CONNECTOR_MODE=real` + token |
 | `web3`    | get_balance, get_transaction, read_contract, siwe_verify | — (read-only Sepolia) | `WEB3_CONNECTOR_MODE=real` + RPC URL |
 | `ai`      | generate_code, review_code, deep_research, run_sandbox | run_sandbox | `AI_HARNESS_CONNECTOR_MODE=real` + `AI_ROUTER_URL` |
+
+Nine tools in total are destructive and route through the approval gate.
 
 **Safety note:** `ai.run_sandbox` is **always simulated** — it never executes real
 code, in either mode — but it still routes through the approval gate so the
@@ -36,7 +45,7 @@ Frontend (/plugins Inspector)  ──HTTP──▶  backend Express  /api/mcp/* 
                               server/techit-service.ts  (singleton)
                                                 │  MCPClient → MCPRegistry
                                                 ▼
-                    5 connectors ──▶ FakeXApi (default)  |  RealXApi (env-gated)
+                    7 connectors ──▶ FakeXApi (default)  |  RealXApi (env-gated)
 ```
 
 Every invocation is: **validate input → permission check (role + agent
@@ -50,7 +59,7 @@ allow-list) → approval gate if destructive → run → audit + contribution em
 ### (a) Unit tests + typecheck (no backend, seconds)
 ```bash
 cd BACKEND/Plugins-MCP
-npx vitest run          # 12 files, 57 tests
+npx vitest run          # 16 files / 76 tests (72 passing, 4 skipped)
 npm run typecheck       # tsc --noEmit, must be clean
 ```
 
@@ -59,7 +68,7 @@ npm run typecheck       # tsc --noEmit, must be clean
 cd BACKEND/Plugins-MCP
 MCP_DATA_FILE=/tmp/smoke.json npx tsx scripts/smoke.mts
 ```
-Expected: `total tools: 22`, and `invoke <connector>.<tool>: OK` for all five.
+Expected: `total tools: 34`, and `invoke <connector>.<tool>: OK` for all seven.
 Using a throwaway `MCP_DATA_FILE` keeps the demo seed out of your real store.
 
 ### (c) Full-stack — through the HTTP API the website uses
@@ -74,15 +83,17 @@ Without this the backend fails to boot with `Cannot find package '@techit/plugin
 
 ```bash
 # 1. Start the backend (serves /api/mcp on :3000). JWT_SECRET is required or every
-#    request is rejected 401. MCP_DATA_FILE isolates the demo store.
-cd BACKEND/backend && JWT_SECRET=testsecret MCP_DATA_FILE=/tmp/mcp.json npm start
+#    request is rejected 401, and MCP_ENABLED must be true or the whole /api/mcp
+#    surface is never mounted and every route 404s. MCP_DATA_FILE isolates the
+#    demo store.
+cd BACKEND/backend && JWT_SECRET=testsecret MCP_ENABLED=true MCP_DATA_FILE=/tmp/mcp.json npm start
 
 # 2. Mint a test JWT (identity/role come from the token, never the request body)
 cd BACKEND/backend && TOKEN=$(node --import tsx -e \
   "import jwt from 'jsonwebtoken'; console.log(jwt.sign({sub:'founder',role:'founder',workspaceId:'ws-acme'}, 'testsecret'))")
 
-# 3. List the live catalogue (all 22 tools)
-curl -s localhost:3000/api/mcp/tools -H "Authorization: Bearer $TOKEN" | jq 'length'   # → 22
+# 3. List the live catalogue (all 34 tools)
+curl -s localhost:3000/api/mcp/tools -H "Authorization: Bearer $TOKEN" | jq 'length'   # → 34
 
 # 4. Invoke a read-only tool
 curl -s localhost:3000/api/mcp/invoke -H "Authorization: Bearer $TOKEN" \
@@ -164,9 +175,11 @@ The approval is single-use; replaying the final request should be denied.
 
 - **`/plugins` (MCP Inspector)** — *already live against `/api/mcp`.* It calls
   `techitApi.tools()` / `.audit()` / `.contributions()` / `.approvals()` and can
-  `.invoke()` + `.approve()`. All 22 tools appear automatically with the 6
+  `.invoke()` + `.approve()`. All 34 tools appear automatically with the 9
   destructive ones flagged; **no frontend change was needed** for the new
   connectors. Point it at a deployed backend with `VITE_TECHIT_API`.
+- **`/plugins` → Connections** — reads `/api/mcp/connections` and drives
+  connect/disconnect (§9). Owner/admin only.
 - **`/workspaces/connectors`** — currently reads a separate *seeded* collection
   (`workspaceConnectors`), decoupled from the live registry. Consolidating this
   page onto `/api/mcp/tools` is remaining frontend work (task #9).
@@ -203,14 +216,18 @@ them into the repository. GitHub currently remains fake-only in this MVP.
 
 ## 7. Known-good state (2026-08-14)
 
-- `npx vitest run` → 12 files / 57 tests passing.
+- `npx vitest run` → 16 files / 76 tests (72 passing, 4 skipped).
 - `npm run typecheck` → clean.
-- `scripts/smoke.mts` → 5 connectors, 22 tools, one live read each OK.
+- `scripts/smoke.mts` → 7 connectors, 34 tools, one live read each OK.
 - **Full-stack HTTP path verified:** backend boots on :3000, `/api/mcp/tools`
-  returns 22, a read invoke returns live data, and the destructive-tool approval
+  returns 34, a read invoke returns live data, and the destructive-tool approval
   loop works end-to-end (`pending_approval` → approve → re-invoke → `success`,
   visible in `/api/mcp/audit`).
-- The suite uses a 15-second timeout because cold registration of all five
+- **Connector credentials verified live:** `GET /api/mcp/connections` returns all
+  7 with `mode`/`connected`/`source` and no secret material; connect → status
+  flips to `source: vault` → disconnect → `source: none`, and a non-operator
+  token is refused.
+- The suite uses a 15-second timeout because cold registration of all seven
   connectors can exceed Vitest's default 5-second timeout on slower machines.
 
 ## 8. Backlog (not yet built)
@@ -218,5 +235,45 @@ them into the repository. GitHub currently remains fake-only in this MVP.
 1. Postgres-backed stores + AES-256-GCM secret vault + webhook receiver (task #1).
 2. Real GitHub API + OAuth (task #2).
 3. ai-router: inject incubation context into agent prompts (task #8).
-4. Frontend: real connect flows + workspace connectors on the live registry +
-   incubation-context card (task #9).
+4. Frontend: workspace connectors on the live registry + incubation-context card
+   (task #9). The connect/disconnect flow itself now exists (§9).
+5. **Per-tenant connector credentials.** Credentials live per *plugin*, not per
+   workspace, because the connectors are process-wide singletons registered once
+   at boot. Multi-tenant credentials need the vault handle threaded through
+   `MCPClient.invoke`; the connect routes are owner/admin-only until then.
+6. **Feed the platform's GitHub OAuth result into the MCP vault.** `/api/github/*`
+   already completes a real OAuth dance with the shared scope set
+   (`src/config/github.js`); the MCP connector currently takes a token supplied
+   through `/api/mcp/connections` instead.
+
+## 9. Connector credentials (connect / disconnect)
+
+`GET /api/mcp/connections` reports, per enabled connector, whether a credential
+is stored, where it came from (`vault`/`env`/`none`), when it expires, and
+whether invocations hit the live provider (`mode: real`) or the deterministic
+fake (`mode: fake`). It never returns the secret.
+
+```bash
+# status
+curl -s localhost:3000/api/mcp/connections -H "Authorization: Bearer $TOKEN" | jq
+
+# store (owner/admin only)
+curl -s -X POST localhost:3000/api/mcp/connections/web3 -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"credential":"https://sepolia.example/v3/KEY"}' | jq
+
+# remove (owner/admin only)
+curl -s -X DELETE localhost:3000/api/mcp/connections/web3 -H "Authorization: Bearer $TOKEN" | jq
+```
+
+Three things this deliberately does **not** do:
+
+- **Read a credential back.** There is no route that returns a stored secret to a
+  caller; connectors resolve credentials server-side at invoke time.
+- **Flip a connector to real.** A stored credential with
+  `<NAME>_CONNECTOR_MODE` unset is stored but unused — the row still reads
+  `mode: fake`. Set the mode var to make it live.
+- **Isolate by workspace.** See backlog #5.
+
+Credentials stored with no explicit `ttlSeconds` **do not expire** — the
+in-memory vault's default was aligned to the Postgres vault's (`Never expires`).
+Both now report the sentinel `9999-12-31T23:59:59.999Z`.

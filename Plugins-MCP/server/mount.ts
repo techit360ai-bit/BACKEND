@@ -8,8 +8,11 @@
  *   GET  /api/audit           → immutable audit log
  *   GET  /api/contributions   → execution-intelligence feed
  *   GET  /api/approvals       → approval requests (pending/approved/rejected)
+ *   GET  /api/connections     → connector credential status (never the secret)
  *   POST /api/invoke          → { plugin, tool, params } → structured Result
  *   POST /api/approvals/:id/approve → approve then re-invoke client-side
+ *   POST /api/connections/:plugin   → store a connector credential (owner/admin)
+ *   DELETE /api/connections/:plugin → remove a connector credential (owner/admin)
  *
  * Auth: pass `opts.resolveActor` to gate every route on a verified JWT (or any
  * authenticator the backend chooses). When set, requests that don't produce an
@@ -34,6 +37,7 @@ interface Res {
 interface App {
   get(path: string, handler: (req: Req, res: Res) => void): void;
   post(path: string, handler: (req: Req, res: Res) => void): void;
+  delete(path: string, handler: (req: Req, res: Res) => void): void;
 }
 
 export interface ResolvedActor {
@@ -87,8 +91,23 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
   app.get(`${base}/health`, async (req, res) => {
     const resolved = await gate(req, res);
     if (!resolved) return;
+    const workspaceId = resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId;
     await svc.healthCheck();
-    res.json({ ok: true, workspaceId: resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId });
+    // Dev-only convenience: give this workspace its demo feeds on first sight.
+    // Never let it break health — a seeded feed is not worth a 500.
+    try {
+      await svc.ensureDemoActivity(workspaceId);
+    } catch {
+      /* seeding is best-effort */
+    }
+    res.json({
+      ok: true,
+      workspaceId,
+      // What the server actually resolved. The dashboard used to offer a role
+      // <select> whose value resolveActor overwrote, which taught callers
+      // something false about their own authority; this is the real answer.
+      actor: { id: resolved.actor.id, kind: resolved.actor.kind, role: resolved.actor.role },
+    });
   });
   app.get(`${base}/tools`, async (req, res) => {
     if (!(await gate(req, res))) return;
@@ -154,4 +173,56 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
     }
     res.json(out);
   });
+
+  app.get(`${base}/connections`, async (req, res) => {
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    res.json(await svc.connections());
+  });
+
+  app.post(`${base}/connections/:plugin`, async (req, res) => {
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    if (!requireOperator(resolved, res)) return;
+    const { credential, ttlSeconds } = req.body as { credential?: unknown; ttlSeconds?: unknown };
+    const out = await svc.connect(req.params.plugin ?? '', credential as string, Number(ttlSeconds));
+    if (!out.ok) {
+      res.status(out.error === 'unknown_connector' ? 404 : 400).json(out);
+      return;
+    }
+    res.json(out);
+  });
+
+  app.delete(`${base}/connections/:plugin`, async (req, res) => {
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    if (!requireOperator(resolved, res)) return;
+    const out = await svc.disconnect(req.params.plugin ?? '');
+    if (!out.ok) {
+      res.status(out.error === 'unknown_connector' ? 404 : 400).json(out);
+      return;
+    }
+    res.json(out);
+  });
+}
+
+/**
+ * Connector credentials are process-wide, not per-workspace: rotating one
+ * changes the credential every invocation in this process uses, for every
+ * tenant. That is an operator action, so it takes the same bar as approving a
+ * destructive tool — a human at admin or owner. Agents can never do it.
+ */
+function requireOperator(resolved: ResolvedActor, res: Res): boolean {
+  const { actor } = resolved;
+  if (actor.kind !== 'human' || !['admin', 'owner'].includes(actor.role)) {
+    res.status(403).json({
+      ok: false,
+      error: {
+        code: 'permission_denied',
+        error: 'Connector credentials can only be managed by a human admin or owner.',
+      },
+    });
+    return false;
+  }
+  return true;
 }

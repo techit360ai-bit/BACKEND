@@ -13,7 +13,7 @@ and **how it connects to the site**.
 
 **Building now**
 - Durable persistence for the MCP layer (Postgres) replacing single-file JSON + in-memory secret vault.
-- 5 connector "clients", each exposing ~4–8 real MCP tools through the existing SDK
+- 7 connector "clients" exposing **34** real MCP tools through the existing SDK
   (permission → approval → audit → contribution plumbing inherited, not re-implemented).
 - Real OAuth/token connect flows for the deployment trio; testnet/sandbox for the rest (hybrid).
 - Light incubation-context injection into the AI agents (they know the startup's stage/GSIS/sprint/goal).
@@ -32,7 +32,9 @@ Category **Deployment Tools** (real execution, hybrid):
 
 | Client | Tools (role, ✎=destructive→approval) |
 |---|---|
-| **GitHub** | list_repositories, get_repository, read_file, list_issues, get_pr_status, create_issue ✎, create_pull_request ✎, run_workflow ✎ |
+| **GitHub** | list_repositories, read_file, list_issues, get_pr_status, get_repository_state, get_commit_checks, get_workflow_run, push_files ✎, create_pull_request ✎, run_workflow ✎ |
+| **GitLab** | get_repository_state, read_file, get_commit_checks, push_files ✎ |
+| **Bitbucket** | get_repository_state, read_file, get_commit_checks, push_files ✎ |
 | **Notion** | search, get_page, create_page ✎, append_blocks ✎ |
 | **Figma** | get_file, export_frame, list_comments, post_comment ✎ |
 
@@ -66,7 +68,7 @@ connector uniformly — no per-connector approval code.
                                       │    ├─ connectors (5)          │      │ Figma API      │
  ai-router (FastAPI :8000)            │    └─ Pg stores + vault  ─────┼──┐   │ Sepolia RPC    │
  ┌───────────────────────┐  Bearer    │  /api/mcp/webhooks/:plugin    │  │   │ ai-router      │
- │ workspace agents       │──JWT──────▶│  /api/mcp/connectors/:p/... │  │   └───────────────┘
+ │ workspace agents       │──JWT──────▶│  /api/mcp/connections/:plugin │  │   └───────────────┘
  │ mcp_client → /invoke   │            └──────────────────────────────┘  │
  │ + incubation context   │                                              ▼
  └───────────────────────┘                                   Postgres (audit, approvals,
@@ -78,17 +80,26 @@ connector uniformly — no per-connector approval code.
   open **C10** decision in `CROSS-REPO-ALIGNMENT-PLAN.md` for the MVP: both paths, one governed executor.
 - **Identity is never self-declared.** `resolveActor` in `backend/src/app.js` verifies the platform JWT and
   derives actor id/role/workspace from claims (`mcpRoleFromClaim`). Body-supplied actors are dev-only.
+- **Connector credentials are operator-managed and write-only.** `GET/POST/DELETE /api/mcp/connections`
+  reports and manages per-connector credentials in the scoped vault. No route reads a credential back out;
+  connect/disconnect require a human admin or owner, because a credential here is process-wide.
+  A stored credential does **not** by itself select the live API — `<NAME>_CONNECTOR_MODE=real` does.
 - **State is durable.** Audit log, approvals, contributions, and connector secrets live in Postgres.
-  Secrets are AES-256-GCM encrypted at rest, scoped per plugin (`secrets://<plugin>/*`).
+  Secrets are AES-256-GCM encrypted at rest, scoped per plugin (`secrets://<plugin>/*`). With
+  `MCP_STORE=file` the vault is in-process instead: connections are lost on restart (see the runbook §8).
+  Credentials stored without an explicit TTL do not expire, in either store.
 
 ---
 
 ## 4. How to test it (three layers)
 
 **Layer 1 — In-app MCP Inspector (this is also the investor demo).**
-`new-frontend` → `/plugins` → "Invoke a Tool": pick connector + tool + actor (human/agent) + role,
-pass JSON params, see the structured Result, the new audit-log row, and the contribution feed update.
-For a destructive tool you see the full `pending_approval → Approve → re-invoke → success` flow live.
+`new-frontend` → `/plugins` → "Invoke a Tool": pick connector + tool, pass params (generated from the
+tool's `input_schema`, with a raw-JSON escape hatch), see the structured Result, the new audit-log row,
+and the contribution feed update. The actor and role shown are the ones the **server** resolved from the
+JWT — `POST /invoke` ignores any actor in the body, so the UI no longer offers a role picker that would
+be silently overridden. For a destructive tool you see the full `pending_approval → Approve → re-invoke →
+success` flow live. A Connections panel drives `/api/mcp/connections` (owner/admin only).
 
 **Layer 2 — CLI inspector (headless, fast dev loop).**
 `cd BACKEND/Plugins-MCP && npm run mcp:inspect` — lists the catalogue and invokes tools without the UI.
@@ -105,8 +116,11 @@ Dev Postgres for tests/local: `postgresql://techit:techit@127.0.0.1:55432/techit
 
 ## 5. Real vs sandbox (hybrid) & required credentials
 
-Each connector defaults to a deterministic **Fake API** (no network — safe for tests and a can't-fail demo),
-and switches to its **Real API** when a token is present in the scoped vault and/or `<NAME>_CONNECTOR_MODE=real`.
+Each connector defaults to a deterministic **Fake API** (no network — safe for tests and a can't-fail demo).
+`<NAME>_CONNECTOR_MODE=real` selects the **Real API**; a credential must then also be present in the scoped
+vault (supplied via `POST /api/mcp/connections`, or seeded from the matching env var at startup), or the
+tool fails with `no stored OAuth token`. Note the two are independent: a stored credential without the mode
+var changes nothing, and the mode var without a credential fails at invoke time.
 
 To flip a connector to real, provide (not blocking to start — sandbox works without them):
 - **GitHub:** OAuth app (`GITHUB_CLIENT_ID`/`SECRET`) or a PAT.

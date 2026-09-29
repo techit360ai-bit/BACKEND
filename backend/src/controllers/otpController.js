@@ -23,6 +23,15 @@ function getResend() {
   return _resend
 }
 
+// Dev-only delivery sink. With no provider key configured the code cannot be
+// emailed, but a local signup must still be completable — so print it to the
+// server console instead. Deliberately an allowlist on `development`: every
+// other NODE_ENV (production, staging, test) keeps the original fail-closed
+// behaviour of returning 502 when RESEND_API_KEY is missing.
+function devConsoleDelivery() {
+  return process.env.NODE_ENV === 'development' && !process.env.RESEND_API_KEY
+}
+
 const EXPIRES   = parseInt(process.env.OTP_EXPIRES_MINUTES || '10', 10)
 const RESEND_COOLDOWN_SECONDS = 60   // minimum gap between sends per email
 const MAX_ATTEMPTS = 5               // wrong guesses before OTP is invalidated
@@ -98,60 +107,66 @@ export async function sendOtp(req, res) {
   const expiresAt = new Date(now + EXPIRES * 60 * 1000).toISOString()
   const sentAt    = new Date(now).toISOString()
 
-  // ── Send email via Resend ─────────────────────────────────────────────────
-  try {
-    const delivery = await getResend().emails.send({
-      from:    configuredFromEmail('OTP emails'),
-      to:      [email],
-      subject: 'Your TechIT verification code',
-      html: `
-        <!DOCTYPE html>
-        <html>
-          <head><meta charset="utf-8"></head>
-          <body style="margin:0;padding:0;background:#09090f;font-family:'Inter',Arial,sans-serif;">
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090f;padding:40px 0;">
-              <tr><td align="center">
-                <table width="480" cellpadding="0" cellspacing="0" style="background:#111120;border-radius:16px;border:1px solid rgba(139,92,246,.18);overflow:hidden;">
-                  <!-- Header -->
-                  <tr>
-                    <td style="background:linear-gradient(135deg,#5b21b6,#4f46e5);padding:32px 40px;">
-                      <p style="margin:0;font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.5px;">TECHIT NETWORK</p>
-                      <p style="margin:4px 0 0;font-size:12px;color:rgba(255,255,255,.7);letter-spacing:3px;font-family:monospace;">EMAIL VERIFICATION</p>
-                    </td>
-                  </tr>
-                  <!-- Body -->
-                  <tr>
-                    <td style="padding:40px;">
-                      <p style="margin:0 0 8px;font-size:15px;color:#ededf5;">Your verification code:</p>
-                      <!-- OTP box -->
-                      <div style="margin:20px 0;background:#1a1a2e;border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:24px;text-align:center;">
-                        <span style="font-size:42px;font-weight:800;letter-spacing:12px;color:#a78bfa;font-family:monospace;">${code}</span>
-                      </div>
-                      <p style="margin:0 0 6px;font-size:13px;color:#8080a0;">This code expires in <strong style="color:#c4b5fd;">${EXPIRES} minutes</strong>.</p>
-                      <p style="margin:0;font-size:13px;color:#8080a0;">If you didn't request this, you can safely ignore this email.</p>
-                    </td>
-                  </tr>
-                  <!-- Footer -->
-                  <tr>
-                    <td style="padding:20px 40px;border-top:1px solid rgba(139,92,246,.1);">
-                      <p style="margin:0;font-size:12px;color:#5c5c78;text-align:center;">TechIT Network · Building the future, together</p>
-                    </td>
-                  </tr>
-                </table>
-              </td></tr>
-            </table>
-          </body>
-        </html>
-      `,
-    })
-    assertEmailAccepted(delivery, 'OTP email')
-  } catch (err) {
-    console.error(JSON.stringify({
-      event: 'otp_email_send_failed',
-      requestId: req.id,
-      error: describeEmailProviderError(err),
-    }))
-    return res.status(502).json({ error: 'Failed to send email. Please try again.' })
+  // ── Deliver the code ──────────────────────────────────────────────────────
+  if (devConsoleDelivery()) {
+    // No provider key in development: the code is printed to this terminal
+    // and nowhere else. It is still never persisted in the clear (see below).
+    console.log(`[dev-otp] ${email} -> ${code}`)
+  } else {
+    try {
+      const delivery = await getResend().emails.send({
+        from:    configuredFromEmail('OTP emails'),
+        to:      [email],
+        subject: 'Your TechIT verification code',
+        html: `
+          <!DOCTYPE html>
+          <html>
+            <head><meta charset="utf-8"></head>
+            <body style="margin:0;padding:0;background:#09090f;font-family:'Inter',Arial,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#09090f;padding:40px 0;">
+                <tr><td align="center">
+                  <table width="480" cellpadding="0" cellspacing="0" style="background:#111120;border-radius:16px;border:1px solid rgba(139,92,246,.18);overflow:hidden;">
+                    <!-- Header -->
+                    <tr>
+                      <td style="background:linear-gradient(135deg,#5b21b6,#4f46e5);padding:32px 40px;">
+                        <p style="margin:0;font-size:22px;font-weight:700;color:#fff;letter-spacing:-0.5px;">TECHIT NETWORK</p>
+                        <p style="margin:4px 0 0;font-size:12px;color:rgba(255,255,255,.7);letter-spacing:3px;font-family:monospace;">EMAIL VERIFICATION</p>
+                      </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                      <td style="padding:40px;">
+                        <p style="margin:0 0 8px;font-size:15px;color:#ededf5;">Your verification code:</p>
+                        <!-- OTP box -->
+                        <div style="margin:20px 0;background:#1a1a2e;border:1px solid rgba(139,92,246,.3);border-radius:12px;padding:24px;text-align:center;">
+                          <span style="font-size:42px;font-weight:800;letter-spacing:12px;color:#a78bfa;font-family:monospace;">${code}</span>
+                        </div>
+                        <p style="margin:0 0 6px;font-size:13px;color:#8080a0;">This code expires in <strong style="color:#c4b5fd;">${EXPIRES} minutes</strong>.</p>
+                        <p style="margin:0;font-size:13px;color:#8080a0;">If you didn't request this, you can safely ignore this email.</p>
+                      </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                      <td style="padding:20px 40px;border-top:1px solid rgba(139,92,246,.1);">
+                        <p style="margin:0;font-size:12px;color:#5c5c78;text-align:center;">TechIT Network · Building the future, together</p>
+                      </td>
+                    </tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+          </html>
+        `,
+      })
+      assertEmailAccepted(delivery, 'OTP email')
+    } catch (err) {
+      console.error(JSON.stringify({
+        event: 'otp_email_send_failed',
+        requestId: req.id,
+        error: describeEmailProviderError(err),
+      }))
+      return res.status(502).json({ error: 'Failed to send email. Please try again.' })
+    }
   }
 
   // Never persist the six-digit OTP itself. A database read must not be

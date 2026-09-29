@@ -7,6 +7,7 @@
 
 import type { Actor, AgentDefinition, Role } from '@techit/core';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
+import { InMemorySecretVault, type SecretVault } from '@techit/infra-secrets';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
 import { registerBitbucketPlugin, registerGitLabPlugin } from '@techit/plugin-git-host';
@@ -47,6 +48,67 @@ export interface ActorInput {
   toolsAllowed?: string[];
 }
 
+/**
+ * How each connector authenticates, and where its credential lives.
+ *
+ * Every entry mirrors the `TOKEN_KEY`/`RPC_KEY` constant exported by that
+ * plugin's `auth.ts` (gitlab and bitbucket share `plugins/git-host`, which uses
+ * the bare key `access_token` and does not export a constant). The vault key
+ * MUST match, or a credential connected through the API is invisible to the
+ * connector that is supposed to read it — `server/__tests__` asserts this for
+ * every plugin that does export its key.
+ *
+ * Credentials are stored per *plugin namespace*, not per workspace. The
+ * connectors are process-wide singletons registered once at boot, so a
+ * per-workspace credential could not be routed to the right connector anyway.
+ * Multi-tenant credential isolation needs the vault handle threaded through
+ * `MCPClient.invoke`; until then this is explicitly single-tenant and the
+ * connect route is restricted to platform owners/admins.
+ */
+interface ConnectorCredential {
+  /** Vault key inside `secrets://<plugin>/`. */
+  key: string;
+  /** Human label for the credential. */
+  label: string;
+  kind: 'oauth_token' | 'api_key' | 'rpc_url';
+  /** `<NAME>_CONNECTOR_MODE` — `real` selects the live API over the fake. */
+  modeVar: string;
+  /** Env var that seeds this credential at boot when the vault is empty. */
+  envVar?: string;
+  /** True when the tools work with no credential at all (fake API / public reads). */
+  optional: boolean;
+}
+
+/** Exported for the drift guard in tests/secrets-vault.test.ts. */
+export const CONNECTOR_CREDENTIALS: Record<ConnectorName, ConnectorCredential> = {
+  github: { key: 'oauth_access_token', label: 'GitHub token', kind: 'oauth_token', modeVar: 'GITHUB_CONNECTOR_MODE', envVar: 'MCP_GITHUB_TOKEN', optional: false },
+  gitlab: { key: 'access_token', label: 'GitLab token', kind: 'api_key', modeVar: 'GITLAB_CONNECTOR_MODE', envVar: 'MCP_GITLAB_TOKEN', optional: false },
+  bitbucket: { key: 'access_token', label: 'Bitbucket token', kind: 'api_key', modeVar: 'BITBUCKET_CONNECTOR_MODE', envVar: 'MCP_BITBUCKET_TOKEN', optional: false },
+  notion: { key: 'access_token', label: 'Notion integration token', kind: 'api_key', modeVar: 'NOTION_CONNECTOR_MODE', envVar: 'NOTION_TOKEN', optional: false },
+  figma: { key: 'access_token', label: 'Figma personal access token', kind: 'api_key', modeVar: 'FIGMA_CONNECTOR_MODE', envVar: 'FIGMA_TOKEN', optional: false },
+  web3: { key: 'rpc_url', label: 'Sepolia RPC URL', kind: 'rpc_url', modeVar: 'WEB3_CONNECTOR_MODE', envVar: 'WEB3_RPC_URL', optional: true },
+  ai: { key: 'ai_router_token', label: 'ai-router token', kind: 'api_key', modeVar: 'AI_HARNESS_CONNECTOR_MODE', envVar: 'AI_ROUTER_TOKEN', optional: true },
+};
+
+/** What a connector looks like from outside — never includes the secret itself. */
+export interface ConnectionStatus {
+  plugin: string;
+  label: string;
+  kind: ConnectorCredential['kind'];
+  /** True when a credential is stored in the vault. */
+  connected: boolean;
+  /** Where the credential came from: the vault, the environment, or nowhere. */
+  source: 'vault' | 'env' | 'none';
+  /** ISO expiry, or NEVER_EXPIRES when it does not expire. Absent when unconnected. */
+  expiresAt?: string;
+  /** Whether invocation hits the live provider or the deterministic fake. */
+  mode: 'real' | 'fake';
+  /** True when the connector works without a credential. */
+  optional: boolean;
+  /** Set by disconnect when the env var will re-seed this credential on restart. */
+  envFallback?: boolean;
+}
+
 export interface TechitService {
   workspaceId: string;
   listTools(): { plugin: string; tool: unknown }[];
@@ -59,7 +121,29 @@ export interface TechitService {
     requestId: string,
     actor?: ActorInput,
   ): Promise<{ approved: true } | { approved: false; reason: string }>;
+  /**
+   * Dev-only: populate a caller's own workspace with the demo feeds the first
+   * time it is seen, so a signed-in user has something to look at. No-op unless
+   * MCP_SEED_DEMO_ACTIVITY=true (forbidden in production), and memoized per
+   * workspace, so it is cheap enough to call on every request.
+   */
+  ensureDemoActivity(workspaceId?: string): Promise<void>;
+  /** Per-connector credential status. Never returns secret material. */
+  connections(): Promise<ConnectionStatus[]>;
+  /** Store a connector credential in its scoped vault namespace. */
+  connect(plugin: string, credential: string, ttlSeconds?: number): Promise<ConnectResult>;
+  /** Remove a connector credential from its scoped vault namespace. */
+  disconnect(plugin: string): Promise<DisconnectResult>;
 }
+
+export type ConnectResult =
+  | { ok: true; connection: ConnectionStatus }
+  | { ok: false; error: string };
+
+export type DisconnectResult =
+  | { ok: true; connection: ConnectionStatus; removed: boolean; envFallback: boolean }
+  | { ok: false; error: string };
+
 
 function toContext(input: ActorInput | undefined): CallContext {
   const role: Role = input?.role ?? 'owner';
@@ -80,6 +164,42 @@ function toContext(input: ActorInput | undefined): CallContext {
   return { actor, resourceWorkspaceId: workspaceId };
 }
 
+/** Opt-in local demo data. validateProductionConfig() forbids this in prod. */
+const demoSeedEnabled = () => process.env.MCP_SEED_DEMO_ACTIVITY === 'true';
+
+/**
+ * Writes the demo activity into one workspace, across every connector.
+ *
+ * Every invoke passes the workspace explicitly. The actor default in
+ * toContext() falls back to WS, which would file a real caller's demo rows
+ * under a workspace they cannot read — the feed routes all filter by caller
+ * workspace, so the seed would run and still show as empty.
+ */
+async function seedDemoActivity(service: TechitService, workspaceId: string): Promise<void> {
+  const human: ActorInput = { kind: 'human', role: 'owner', workspaceId };
+  await service.invoke('github', 'list_repositories', {}, human);
+  await service.invoke('github', 'list_issues', { repo: 'acme/app' }, human);
+  await service.invoke(
+    'github',
+    'create_pull_request',
+    { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
+    { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'], workspaceId },
+  );
+  // One read per new connector so every plugin appears in the demo feeds.
+  await service.invoke('notion', 'search', { query: 'roadmap' }, human);
+  await service.invoke('figma', 'get_file', { file_key: 'demo123' }, human);
+  await service.invoke('web3', 'get_balance', { address: '0x1234567890abcdef1234567890abcdef12345678' }, human);
+  await service.invoke(
+    'ai',
+    'review_code',
+    { code: 'const x: any = 1;', language: 'typescript' },
+    { id: 'founder', kind: 'human', role: 'editor', workspaceId },
+  );
+}
+
+/** Workspaces already offered the lazy demo seed in this process. */
+const seededWorkspaces = new Set<string>();
+
 async function build(): Promise<TechitService> {
   validateProductionConfig();
   const storeMode = (process.env.MCP_STORE || (isProductionLike() ? 'postgres' : 'file')).toLowerCase();
@@ -87,7 +207,11 @@ async function build(): Promise<TechitService> {
   let approvals: FileApprovalStore | PgMcpStore;
   let contributions: FileContributionSink | PgMcpStore;
   let healthCheck: () => Promise<void>;
-  let vault;
+  // Always concrete. In file mode the service used to leave this undefined and
+  // let createRuntime() fall back to its own InMemorySecretVault — so the
+  // service held no handle on the vault the plugins actually read, and could
+  // not have implemented connect/disconnect at all. Same instance now.
+  let vault: SecretVault;
   if (storeMode === 'postgres') {
     validatePostgresMcpConfig();
     const pool = createMcpPool();
@@ -104,11 +228,12 @@ async function build(): Promise<TechitService> {
     audit = new FileAuditLogger();
     approvals = new FileApprovalStore();
     contributions = new FileContributionSink();
+    vault = new InMemorySecretVault();
     healthCheck = async () => undefined;
   } else {
     throw new Error(`Unsupported MCP_STORE=${storeMode}; expected postgres or file.`);
   }
-  const runtime = createRuntime({ audit, approvals, contributions, ...(vault ? { vault } : {}) });
+  const runtime = createRuntime({ audit, approvals, contributions, vault });
   const registry = new MCPRegistry();
   const connectors = enabledConnectors();
   if (connectors.has('github')) await registerGithubPlugin({ runtime, registry, workspaceId: WS });
@@ -155,30 +280,75 @@ async function build(): Promise<TechitService> {
       }
       return { approved: true };
     },
+    ensureDemoActivity: async (workspaceId?: string) => {
+      const ws = workspaceId || WS;
+      if (!demoSeedEnabled() || seededWorkspaces.has(ws)) return;
+      seededWorkspaces.add(ws);
+      if ((await audit.entriesForWorkspace(ws)).length > 0) return;
+      await seedDemoActivity(service, ws);
+    },
+    connections: async () => {
+      const enabled = enabledConnectors();
+      return Promise.all(
+        CONNECTOR_NAMES.filter((name) => enabled.has(name))
+          .map((name) => connectionStatusFor(vault, name)),
+      );
+    },
+    connect: async (plugin, credential, ttlSeconds) => {
+      const name = asConnector(plugin);
+      if (!name) return { ok: false, error: 'unknown_connector' };
+      if (!enabledConnectors().has(name)) return { ok: false, error: 'connector_not_enabled' };
+      const spec = CONNECTOR_CREDENTIALS[name];
+      const value = typeof credential === 'string' ? credential.trim() : '';
+      if (!value) return { ok: false, error: 'credential_required' };
+      // Bound the payload before it reaches the vault, so a paste accident or a
+      // request-body flood cannot write megabytes of junk into a secret row.
+      if (value.length > 4096) return { ok: false, error: 'credential_too_long' };
+      if (spec.kind === 'rpc_url') {
+        let parsed: URL;
+        try {
+          parsed = new URL(value);
+        } catch {
+          return { ok: false, error: 'rpc_url_invalid' };
+        }
+        // A provider URL is a credential: over plain http the key travels in
+        // the clear on every request. Production already requires https.
+        if (!['http:', 'https:'].includes(parsed.protocol)) return { ok: false, error: 'rpc_url_invalid_scheme' };
+        if (isProductionLike() && parsed.protocol !== 'https:') return { ok: false, error: 'rpc_url_requires_https' };
+      }
+      const ttl = Number.isFinite(ttlSeconds) && (ttlSeconds as number) > 0 ? Number(ttlSeconds) : 0;
+      await vault.scopeTo(name).set(spec.key, value, ttl);
+      return { ok: true, connection: await connectionStatusFor(vault, name) };
+    },
+    disconnect: async (plugin) => {
+      const name = asConnector(plugin);
+      if (!name) return { ok: false, error: 'unknown_connector' };
+      const spec = CONNECTOR_CREDENTIALS[name];
+      const removed = await vault.scopeTo(name).delete(spec.key);
+      const connection = await connectionStatusFor(vault, name);
+      // The env var is read at authenticate() time, so a restart re-seeds it.
+      // Saying so is the difference between "disconnected" and "disconnected
+      // until the next boot, then silently back" — the operator needs to know.
+      const envFallback = Boolean(spec.envVar && process.env[spec.envVar]);
+      return {
+        ok: true,
+        connection: { ...connection, envFallback },
+        removed,
+        envFallback,
+      };
+    },
   };
 
   // Demo seed activity is opt-in and forbidden in production/staging. An audit
   // log must contain only real actions unless an operator explicitly launches
   // a local demo.
-  if (process.env.MCP_SEED_DEMO_ACTIVITY === 'true' && (await audit.entries()).length === 0) {
-    await service.invoke('github', 'list_repositories', {});
-    await service.invoke('github', 'list_issues', { repo: 'acme/app' });
-    await service.invoke(
-      'github',
-      'create_pull_request',
-      { repo: 'acme/app', head: 'feat/login', base: 'main', title: 'Add login flow' },
-      { id: 'coding-agent', kind: 'agent', role: 'editor', toolsAllowed: ['github.create_pull_request'] },
-    );
-    // One read per new connector so every plugin appears in the demo feeds.
-    await service.invoke('notion', 'search', { query: 'roadmap' });
-    await service.invoke('figma', 'get_file', { file_key: 'demo123' });
-    await service.invoke('web3', 'get_balance', { address: '0x1234567890abcdef1234567890abcdef12345678' });
-    await service.invoke(
-      'ai',
-      'review_code',
-      { code: 'const x: any = 1;', language: 'typescript' },
-      { id: 'founder', kind: 'human', role: 'editor' },
-    );
+  //
+  // This boot seed only covers WS. Real callers authenticate into their own
+  // workspace (app.js resolveActor derives `user-<profileId>`), and every feed
+  // route filters by caller workspace — so this alone leaves a signed-in user
+  // staring at empty panels. ensureDemoActivity() below covers them.
+  if (demoSeedEnabled() && (await audit.entries()).length === 0) {
+    await seedDemoActivity(service, WS);
   }
 
   return service;
@@ -243,4 +413,37 @@ function enabledConnectors(): Set<ConnectorName> {
   const invalid = values.filter((value) => !CONNECTOR_NAMES.includes(value as ConnectorName));
   if (invalid.length) throw new Error(`Unknown MCP connector(s): ${invalid.join(', ')}`);
   return new Set(values as ConnectorName[]);
+}
+
+/** Narrow an untrusted plugin string from a request body to a known connector. */
+function asConnector(value: unknown): ConnectorName | undefined {
+  return typeof value === 'string' && (CONNECTOR_NAMES as readonly string[]).includes(value)
+    ? (value as ConnectorName)
+    : undefined;
+}
+
+/**
+ * Read a connector's credential state out of the vault.
+ *
+ * Returns presence and expiry only — never the value. There is deliberately no
+ * route that reads a stored secret back out to a caller; the connectors resolve
+ * credentials server-side at invoke time, so a leaked browser session cannot
+ * exfiltrate a provider token through this API.
+ */
+async function connectionStatusFor(vault: SecretVault, name: ConnectorName): Promise<ConnectionStatus> {
+  const spec = CONNECTOR_CREDENTIALS[name];
+  const lease = await vault.scopeTo(name).get(spec.key);
+  const mode: ConnectionStatus['mode'] = process.env[spec.modeVar] === 'real' ? 'real' : 'fake';
+  const base = { plugin: name, label: spec.label, kind: spec.kind, mode, optional: spec.optional };
+  if (lease) {
+    return { ...base, connected: true, source: 'vault', expiresAt: lease.expiresAt };
+  }
+  // No vault entry, but the environment supplies one: the connector re-seeds it
+  // from that var at authenticate() time, so this reads as provisioned — it
+  // just is not in the vault *right now* (fresh boot, or after a disconnect).
+  return {
+    ...base,
+    connected: false,
+    source: spec.envVar && process.env[spec.envVar] ? 'env' : 'none',
+  };
 }
