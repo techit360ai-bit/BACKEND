@@ -3,7 +3,8 @@ import { reconcileGithubPush } from '../services/codeExecutionProjectionService.
 import { applyCodeExecutionRun, createCodeExecutionRun, finalizeCodeExecutionRun, getCodeExecutionRun, recordCodeExecutionStage, recordCodeReviewDecision } from '../services/codeExecutionRunService.js'
 import { bridgeTokenFromRequest, codeBridgeSnapshot, exchangeCodeBridgeGrant, revokeCodeBridgeSessions, syncCodeBridgeFiles } from '../services/codeBridgeService.js'
 import { syncWorkspaceCode, workspaceCodeEnabled, workspaceCodeFallbackEnabled } from '../repositories/workspaceCodeRepository.js'
-import { chooseBuildPath, createCostEstimate, setLifecycleView, createPreviewContext, getBuildContext, listModelConnections, createModelConnection, revokeModelConnection, listWorkspaceModels, bindWorkspaceModel } from '../services/workspaceCapabilityService.js'
+import { chooseBuildPath, createCostEstimate, setLifecycleView, createPreviewContext, getBuildContext, listModelConnections, createModelConnection, revokeModelConnection, listWorkspaceModels, bindWorkspaceModel, unbindWorkspaceModel } from '../services/workspaceCapabilityService.js'
+import { orchestrateCodeTask, planCodeTask, proposeCodeChanges } from '../services/codeIntelligenceService.js'
 const send = (res, value, created = false) => res.status(value?.status || (value?.ok === false ? 400 : created ? 201 : 200)).json(value)
 async function persisted(req, value) { if (!workspaceCodeEnabled() || value?.ok === false) return value; try { await syncWorkspaceCode(req.params.workspaceId, req.user?.id); return value } catch (error) { console.error(JSON.stringify({ event: 'workspace_code_postgres_write_failed', workspaceId: req.params.workspaceId, error: error.message })); if (workspaceCodeFallbackEnabled()) return value; return { ok: false, status: 503, error: 'workspace_code_write_temporarily_unavailable' } } }
 export const files = (req, res) => send(res, listProjectFiles(req.user.id, req.params.workspaceId, req.query.includeDeleted === 'true'))
@@ -41,3 +42,10 @@ export const modelConnectionCreate = (req, res) => send(res, createModelConnecti
 export const modelConnectionRevoke = (req, res) => send(res, revokeModelConnection(req.user.id, req.params.connectionId))
 export const workspaceModels = (req, res) => { const models = listWorkspaceModels(req.user.id, req.params.workspaceId); return send(res, models === null ? { ok: false, status: 404, error: 'workspace_not_found' } : { bindings: models }) }
 export const workspaceModelBind = (req, res) => send(res, bindWorkspaceModel(req.user.id, req.params.workspaceId, req.body), true)
+export const workspaceModelUnbind = (req, res) => send(res, unbindWorkspaceModel(req.user.id, req.params.workspaceId, req.params.bindingId))
+
+// Coding-area intelligence. `plan`/`orchestrate` are deterministic and derived from stored
+// project state; `propose` requires the AI router and fails explicitly without it.
+export const codePlan = async (req, res) => send(res, await planCodeTask(req.user.id, req.params.workspaceId, req.body, req.user.token))
+export const codePropose = async (req, res) => send(res, await proposeCodeChanges(req.user.id, req.params.workspaceId, req.body, req.user.token))
+export const codeOrchestrate = async (req, res) => send(res, await orchestrateCodeTask(req.user.id, req.params.workspaceId, req.body))

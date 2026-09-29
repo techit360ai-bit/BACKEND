@@ -98,6 +98,8 @@ import {
 } from '../services/domainService.js'
 import { attachHackathonProject, getHackathonProjectEntry } from '../services/workspaceCapabilityService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
+import { appendWorkspaceTaskEvent, getWorkspaceTask, runWorkspaceTask } from '../services/workspaceTaskService.js'
+import { connectorCredentialStatus, removeConnectorCredential, setConnectorCredential } from '../services/connectorCredentialService.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 
 function created(res, body) {
@@ -235,6 +237,44 @@ export async function workspaceItemCreate(req, res) {
   ))
   if (!row) return notFound(res, 'Workspace not found')
   return created(res, { [req.itemKey]: row })
+}
+
+// --- Workspace agent tasks: single-task read, event append, and one real run ----
+export function workspaceTaskOne(req, res) {
+  const result = getWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json({ task: result.task })
+}
+
+export function workspaceTaskEvent(req, res) {
+  const result = appendWorkspaceTaskEvent(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, { task: result.task, event: result.event })
+}
+
+export async function workspaceTaskRun(req, res) {
+  const result = await runWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId, req.user.token)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error, task: result.task })
+  return res.json({ task: result.task })
+}
+
+// --- Connector credential handshake (sealed at rest, masked in responses) ----
+export function connectorCredentialGet(req, res) {
+  const result = connectorCredentialStatus(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json(result)
+}
+
+export function connectorCredentialSet(req, res) {
+  const result = setConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, result)
+}
+
+export function connectorCredentialRemove(req, res) {
+  const result = removeConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json(result)
 }
 
 export async function workspaceItemPatch(req, res) {

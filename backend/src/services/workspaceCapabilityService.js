@@ -94,6 +94,16 @@ function encryptSecret(value) {
   const secret = keyMaterial(); if (secret.length < 16) throw new Error('byok_encryption_key_not_configured')
   const key = crypto.createHash('sha256').update(secret).digest(); const iv = crypto.randomBytes(12); const cipher = crypto.createCipheriv('aes-256-gcm', key, iv); const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return `${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${encrypted.toString('base64url')}`
 }
+
+/** Shared at-rest sealing for provider credentials (same key material as BYOK connections). */
+export function sealSecret(value) { return encryptSecret(value) }
+export function openSecret(payload) {
+  const secret = keyMaterial(); if (secret.length < 16) throw new Error('byok_encryption_key_not_configured')
+  const [iv, tag, body] = String(payload || '').split('.')
+  if (!iv || !tag || !body) throw new Error('sealed_secret_malformed')
+  const key = crypto.createHash('sha256').update(secret).digest(); const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'base64url')); decipher.setAuthTag(Buffer.from(tag, 'base64url'))
+  return Buffer.concat([decipher.update(Buffer.from(body, 'base64url')), decipher.final()]).toString('utf8')
+}
 const publicConnection = row => ({ id: row.id, provider: row.provider, displayName: row.displayName, modelAllowList: row.modelAllowList || [], status: row.status, maskedIdentifier: row.maskedIdentifier, lastHealthCheck: row.lastHealthCheck || null, createdAt: row.createdAt, updatedAt: row.updatedAt })
 
 export function listModelConnections(userId) { return collection(readAuthorityDb(), 'userModelConnections').filter(row => row.userId === userId).map(publicConnection) }
@@ -107,6 +117,17 @@ export function createModelConnection(userId, body = {}) {
 export function revokeModelConnection(userId, id) { return updateAuthorityDb(db => { const row = collection(db, 'userModelConnections').find(item => item.id === id && item.userId === userId); if (!row) return { ok: false, status: 404, error: 'connection_not_found' }; row.status = 'revoked'; row.encryptedSecret = null; row.updatedAt = nowIso(); return { ok: true, connection: publicConnection(row) } }) }
 export function listWorkspaceModels(userId, workspaceId) { const db = readAuthorityDb(); if (!workspaceFor(db, workspaceId, userId)) return null; return collection(db, 'workspaceModelBindings').filter(row => row.workspaceId === workspaceId && row.userId === userId).map(row => ({ ...row, connection: publicConnection(collection(db, 'userModelConnections').find(c => c.id === row.connectionId) || {}) })) }
 export function bindWorkspaceModel(userId, workspaceId, body = {}) { return updateAuthorityDb(db => { if (!workspaceFor(db, workspaceId, userId)) return { ok: false, status: 404, error: 'workspace_not_found' }; const connection = collection(db, 'userModelConnections').find(row => row.id === body.connectionId && row.userId === userId && row.status === 'active'); if (!connection) return { ok: false, status: 404, error: 'connection_not_found' }; const row = { id: createId('model_binding'), workspaceId, userId, connectionId: connection.id, modelId: String(body.modelId || connection.modelAllowList?.[0] || '').slice(0, 120), operations: Array.isArray(body.operations) ? body.operations : ['plan', 'chat', 'propose', 'review', 'scaffold'], fallback: body.fallback === true, status: 'active', createdAt: nowIso(), updatedAt: nowIso() }; collection(db, 'workspaceModelBindings').push(row); return { ok: true, binding: row } }) }
+
+export function unbindWorkspaceModel(userId, workspaceId, bindingId) {
+  return updateAuthorityDb(db => {
+    if (!workspaceFor(db, workspaceId, userId)) return { ok: false, status: 404, error: 'workspace_not_found' }
+    const list = collection(db, 'workspaceModelBindings')
+    const index = list.findIndex(row => row.id === bindingId && row.workspaceId === workspaceId && row.userId === userId)
+    if (index === -1) return { ok: false, status: 404, error: 'binding_not_found' }
+    const [removed] = list.splice(index, 1)
+    return { ok: true, binding: removed }
+  })
+}
 
 export function attachHackathonProject(userId, hackathonId, teamId, body = {}) {
   return updateAuthorityDb(db => {

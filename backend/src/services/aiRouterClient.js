@@ -125,6 +125,22 @@ export async function requestWorkspaceAI(token, input, routing = {}) {
 }
 
 /**
+ * Workspace copilot / agent conversation. Used by the coding area and the
+ * Agents console. Returns null when ai-router is unavailable so callers can
+ * degrade honestly instead of inventing an answer.
+ */
+export async function requestWorkspaceConversation(token, body) {
+  if (!token) return null
+  try {
+    return await requestJson('/api/v1/workspace/conversation', {
+      token,
+      body,
+      timeoutMs: Number(process.env.AI_ROUTER_WORKSPACE_TIMEOUT_MS || '45000') || 45_000,
+    })
+  } catch { return null }
+}
+
+/**
  * Best-effort extraction of a human-readable recommendation string from the
  * (LLM-driven, variable-shape) ai-router response. Returns null if none found.
  */
