@@ -1,10 +1,5 @@
 {
-  "expires": "2026-09-30",
-  "knownPackages": {
-    "ip-address": "Upgrade with SSRF and connector regression tests.",
-    "nanoid": "Upgrade transitive build dependency.",
-    "postcss": "Upgrade with frontend build validation.",
-    "react-router": "Upgrade as a coordinated router pair.",
-    "react-router-dom": "Upgrade as a coordinated router pair."
-  }
+  "expires": "2026-12-31",
+  "note": "No exemptions. The six high/critical npm findings present on 2026-09-27 were resolved rather than baselined: concurrently and shell-quote by upgrading the direct dev dependency, browserslist, ip-address, nanoid and postcss by a targeted transitive update. The gate still fails closed on any new high/critical finding, and on expiry, which forces this file to be re-reviewed every quarter.",
+  "knownPackages": {}
 }

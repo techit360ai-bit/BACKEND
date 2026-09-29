@@ -4,20 +4,23 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type Config struct {
-	Port           string
-	DatabaseURL    string
-	RedisURL       string
-	JWTSecret      string
-	JWTIssuer      string
-	JWTAudience    string
-	CORSOrigins    string
-	Environment    string
+	Port            string
+	DatabaseURL     string
+	RedisURL        string
+	JWTSecret       string
+	JWTIssuer       string
+	JWTAudience     string
+	CORSOrigins     string
+	Environment     string
 	EnableDevToken  bool
 	DiscoveryAPIURL string
+	// RateLimitPerMinute caps requests per caller address. <= 0 disables it.
+	RateLimitPerMinute int
 
 	LiveKitAPIKey    string
 	LiveKitAPISecret string
@@ -49,16 +52,17 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Port:           envOr("PORT", "8080"),
-		DatabaseURL:    databaseURL,
-		RedisURL:       redisURL,
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		JWTIssuer:      os.Getenv("JWT_ISSUER"),
-		JWTAudience:    os.Getenv("JWT_AUDIENCE"),
-		CORSOrigins:    envOr("CORS_ORIGINS", ""),
-		Environment:    environment,
-		EnableDevToken:  os.Getenv("ENABLE_DEV_TOKEN") == "1",
-		DiscoveryAPIURL: strings.TrimRight(strings.TrimSpace(os.Getenv("DISCOVERY_API_URL")), "/"),
+		Port:               envOr("PORT", "8080"),
+		DatabaseURL:        databaseURL,
+		RedisURL:           redisURL,
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		JWTIssuer:          os.Getenv("JWT_ISSUER"),
+		JWTAudience:        os.Getenv("JWT_AUDIENCE"),
+		CORSOrigins:        envOr("CORS_ORIGINS", ""),
+		Environment:        environment,
+		EnableDevToken:     os.Getenv("ENABLE_DEV_TOKEN") == "1",
+		DiscoveryAPIURL:    strings.TrimRight(strings.TrimSpace(os.Getenv("DISCOVERY_API_URL")), "/"),
+		RateLimitPerMinute: envInt("MESSAGING_RATE_LIMIT_PER_MINUTE", 120),
 
 		LiveKitAPIKey:    os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret: os.Getenv("LIVEKIT_API_SECRET"),
@@ -66,6 +70,13 @@ func Load() (Config, error) {
 	}
 	if cfg.JWTSecret == "" {
 		return Config{}, errors.New("JWT_SECRET is required")
+	}
+	if !requiresDurableStores(environment) && strings.TrimSpace(cfg.CORSOrigins) == "" {
+		// Mirror the Node backend's development default so the Vite dev server
+		// (5173) and `vite preview` (4173) can reach the messaging API with
+		// credentials. Outside development CORS_ORIGINS is required explicitly
+		// and validated below, so this never widens a deployed service.
+		cfg.CORSOrigins = "http://localhost:5173,http://localhost:4173"
 	}
 	if requiresDurableStores(environment) && len(cfg.JWTSecret) < 32 {
 		return Config{}, errors.New("JWT_SECRET must be at least 32 characters outside development and test")
@@ -107,6 +118,20 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envInt parses a positive integer environment variable, falling back to def on
+// anything unset, non-numeric or negative.
+func envInt(key string, def int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return def
+	}
+	return value
 }
 
 func firstEnv(keys ...string) string {

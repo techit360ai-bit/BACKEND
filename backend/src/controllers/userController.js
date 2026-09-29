@@ -1,5 +1,5 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
-import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
+import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
@@ -27,7 +27,7 @@ export async function getMe(req, res) {
   }
   profile ||= db.profiles.find(p => p.id === req.user.id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
-  const response = { ...profile }
+  const response = projectOwnProfile(profile)
   if (profile.avatarObjectKey) response.avatarUrl = privateDownloadUrl(profile.avatarObjectKey, 900)
   return res.json(response)
 }
@@ -48,7 +48,7 @@ export async function updateMe(req, res) {
           db.profiles[idx] = { ...db.profiles[idx], ...profile }
           syncRecommendationProfileInDb(db, req.user.id)
         })
-        return res.json(profile)
+        return res.json(projectOwnProfile(profile))
       }
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'Profile not found' })
     } catch (error) {
@@ -64,7 +64,7 @@ export async function updateMe(req, res) {
     return db.profiles[idx]
   })
   if (!result) return res.status(404).json({ error: 'Profile not found' })
-  return res.json(result)
+  return res.json(projectOwnProfile(result))
 }
 
 export function avatarUploadUrl(req, res) {
@@ -94,7 +94,7 @@ export async function avatarFinalize(req, res) {
     row.updatedAt = nowIso()
     return row
   })
-  return profile ? res.json({ profile, avatarUrl: profile.avatarUrl, scan }) : res.status(404).json({ error: 'Profile not found' })
+  return profile ? res.json({ profile: projectOwnProfile(profile), avatarUrl: profile.avatarUrl, scan }) : res.status(404).json({ error: 'Profile not found' })
 }
 
 export function avatarRemove(req, res) {
@@ -104,7 +104,7 @@ export function avatarRemove(req, res) {
     row.avatarObjectKey = null; row.avatarUrl = null; row.avatarContentType = null; row.avatarSizeBytes = 0; row.updatedAt = nowIso()
     return row
   })
-  return profile ? res.json({ ok: true, profile }) : res.status(404).json({ error: 'Profile not found' })
+  return profile ? res.json({ ok: true, profile: projectOwnProfile(profile) }) : res.status(404).json({ error: 'Profile not found' })
 }
 
 function publicProfile(profile, db, viewerId) {
@@ -129,6 +129,8 @@ function publicProfile(profile, db, viewerId) {
     .slice(0, 6)
 
   const trust = publicTrustFor(profile.id, null, db)
+  const isOwner = viewerId === profile.id
+  const sharedContext = sharedPlatformContext(db, viewerId, profile.id)
   return {
     id: profile.id,
     name: userName(profile),
@@ -139,7 +141,9 @@ function publicProfile(profile, db, viewerId) {
     gsis: profile.credibilityScore || 0,
     location: [profile.country, profile.timezone].filter(Boolean).join(' · ') || 'Not specified',
     joinedDate: profile.createdAt,
-    email: viewerId === profile.id || profile.isVerified ? profile.email : null,
+    // Contact details are owner-only. Verification status is not an
+    // authorization reason to disclose another member's email address.
+    email: isOwner ? profile.email : null,
     bio: profile.bio || '',
     website: profile.website || profile.portfolioUrl || profile.linkedinUrl || profile.githubUrl || '',
     avatar: profile.avatarUrl || avatarGradient(profile.id),
@@ -147,10 +151,12 @@ function publicProfile(profile, db, viewerId) {
     isVerified: Boolean(profile.isVerified),
     credibilityScore: boundedNumber(profile.credibilityScore, 0, 100),
     credibilityLevel: credibilityLevel(profile.credibilityScore),
-    subscriber: activeSubscription(db, profile.id) !== null,
-    subscriptionLabel: activeSubscription(db, profile.id) ? 'Subscriber' : null,
-    sharedContext: sharedPlatformContext(db, viewerId, profile.id),
-    isOwnProfile: viewerId === profile.id,
+    // Commercial status is not public directory data: only the owner or a
+    // member who already shares a workspace/organization/connection sees it.
+    subscriber: isOwner || sharedContext ? activeSubscription(db, profile.id) !== null : null,
+    subscriptionLabel: isOwner || sharedContext ? (activeSubscription(db, profile.id) ? 'Subscriber' : null) : null,
+    sharedContext,
+    isOwnProfile: isOwner,
     stats: {
       decay: null,
       stageProgress: null,

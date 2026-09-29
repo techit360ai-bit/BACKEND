@@ -623,6 +623,18 @@ describe('GET /api/auth/session', () => {
       .set('Authorization', `Bearer ${validToken()}`)
     expect(res.status).toBe(401)
   })
+
+  it('never serializes the raw bearer token back to the client', async () => {
+    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+
+    const res = await request(app)
+      .get('/api/auth/session')
+      .set('Authorization', `Bearer ${validToken()}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.user.token).toBeUndefined()
+    expect(JSON.stringify(res.body)).not.toContain(validToken())
+  })
 })
 
 // ── POST /api/auth/signout ─────────────────────────────────────────────────────

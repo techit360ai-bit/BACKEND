@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -32,6 +33,10 @@ type Deps struct {
 	Presence  *presence.Service
 	// InsecureSkipOriginCheck disables same-origin enforcement (dev/CORS=*).
 	InsecureSkipOriginCheck bool
+	// AllowedOrigins are host[:port] patterns (from CORS_ORIGINS) that may open
+	// a cross-origin socket. The request's own host is always allowed by the
+	// websocket library, so this is only needed for the SPA on another origin.
+	AllowedOrigins []string
 }
 
 // Gateway handles WebSocket upgrades.
@@ -53,7 +58,10 @@ func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
 	if token == "" {
 		for _, part := range strings.Split(r.Header.Get("Cookie"), ";") {
 			part = strings.TrimSpace(part)
-			if strings.HasPrefix(part, "techit_access=") { token = strings.TrimPrefix(part, "techit_access="); break }
+			if strings.HasPrefix(part, "techit_access=") {
+				token = strings.TrimPrefix(part, "techit_access=")
+				break
+			}
 		}
 	}
 	// Development/test compatibility only. Production and staging must never
@@ -70,6 +78,8 @@ func (g *Gateway) Handle(w http.ResponseWriter, r *http.Request) {
 	opts := &websocket.AcceptOptions{}
 	if g.d.InsecureSkipOriginCheck {
 		opts.InsecureSkipVerify = true
+	} else if len(g.d.AllowedOrigins) > 0 {
+		opts.OriginPatterns = g.d.AllowedOrigins
 	}
 	conn, err := websocket.Accept(w, r, opts)
 	if err != nil {
@@ -203,4 +213,24 @@ func (g *Gateway) send(ctx context.Context, userID, typ string, data map[string]
 
 func (g *Gateway) sendError(ctx context.Context, userID, code, msg string) {
 	g.send(ctx, userID, protocol.TypeError, map[string]any{"code": code, "message": msg})
+}
+
+// OriginPatterns converts a comma-separated CORS allow-list into the host
+// patterns the websocket library matches against an Origin header. Entries may
+// be full origins (https://app.example.com) or bare hosts; a lone "*" is
+// dropped because wildcard access is handled by InsecureSkipOriginCheck.
+func OriginPatterns(origins string) []string {
+	var patterns []string
+	for _, origin := range strings.Split(origins, ",") {
+		origin = strings.TrimSpace(origin)
+		if origin == "" || origin == "*" {
+			continue
+		}
+		host := origin
+		if parsed, err := url.Parse(origin); err == nil && parsed.Host != "" {
+			host = parsed.Host
+		}
+		patterns = append(patterns, strings.ToLower(host))
+	}
+	return patterns
 }

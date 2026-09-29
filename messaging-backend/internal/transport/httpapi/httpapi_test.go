@@ -23,6 +23,14 @@ import (
 )
 
 func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
+	t.Helper()
+	return newAPIWith(t, nil)
+}
+
+// newAPIWith builds the router, letting a test override dependencies (CORS
+// origins, the rate limiter) before the router is created.
+func newAPIWith(t *testing.T, mutate func(*Deps)) (http.Handler, *auth.Verifier, *store.FakeStores) {
+	t.Helper()
 	st := store.NewFakeStores()
 	ver := auth.NewVerifier("s")
 	h := hub.New(pubsub.NewInMemory())
@@ -35,11 +43,18 @@ func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
 	qaSvc := qa.New(st.QA, demoSvc, h)
 	lkSvc := livekit.New("APItest", "secretsecretsecretsecretsecret12", "wss://test.livekit.cloud")
 	pres := presence.New(presence.NewInMemoryStore(), nil)
-	r := NewRouter(Deps{
+	deps := Deps{
 		Verifier: ver, Users: st.Users, Conversations: st.Conversations,
 		Messages: st.Messages, Messaging: msg, Channels: chSvc, ChannelStore: st.Channels,
 		Feed: feedSvc, Demo: demoSvc, QA: qaSvc, LiveKit: lkSvc, Presence: pres, EnableDevToken: true,
-	})
+	}
+	// Default the general-purpose test router well clear of the limiter so tests
+	// that make many requests are never throttled; the limiter has its own test.
+	deps.RateLimiter = NewRateLimiter(100000, 0)
+	if mutate != nil {
+		mutate(&deps)
+	}
+	r := NewRouter(deps)
 	return r, ver, st
 }
 

@@ -73,18 +73,23 @@ func main() {
 	gw := ws.New(ws.Deps{
 		Hub: h, Verifier: ver, Users: pg.Users, Messaging: msgSvc, Channels: chSvc, Presence: presSvc,
 		InsecureSkipOriginCheck: cfg.CORSOrigins == "*",
+		AllowedOrigins:          ws.OriginPatterns(cfg.CORSOrigins),
 	})
+	// Separate buckets for the REST surface and the WebSocket handshake so a
+	// flood of upgrades cannot starve ordinary API calls.
+	apiLimiter := httpapi.NewRateLimiter(cfg.RateLimitPerMinute, 0)
+	wsLimiter := httpapi.NewRateLimiter(cfg.RateLimitPerMinute, 0)
 	api := httpapi.NewRouter(httpapi.Deps{
 		Verifier: ver, Users: pg.Users, Conversations: pg.Conversations,
 		Messages: pg.Messages, Messaging: msgSvc, Channels: chSvc, ChannelStore: pg.Channels,
 		Feed: feedSvc, Demo: demoSvc, QA: qaSvc, LiveKit: lkSvc, Presence: presSvc,
 		EnableDevToken: cfg.EnableDevToken, CORSOrigins: cfg.CORSOrigins,
-		Discovery: discoveryClient,
+		Discovery: discoveryClient, RateLimiter: apiLimiter,
 	})
 
 	mux := http.NewServeMux()
 	mux.Handle("/", api)
-	mux.HandleFunc("/ws", gw.Handle)
+	mux.HandleFunc("/ws", httpapi.RateLimited(wsLimiter, httpapi.ClientIPKey, gw.Handle))
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: mux}
 	go func() {

@@ -133,4 +133,22 @@ describe('authoritative code workspace', () => {
     const deployment = service.recordDeployment('owner', 'w1', { confirm: true, environment: 'production', destination: 'gitlab:team/app', commitSha: 'abc', buildStatus: 'passed', testStatus: 'passed', securityStatus: 'passed' }).deployment
     expect(service.verifyCodeDeployment('owner', 'w1', deployment.id, { providerStatus: 'success', checks: [{ name: 'build', conclusion: 'success' }], url: 'https://deploy.example' }).deployment.status).toBe('verified')
   })
+
+  // WS-17: the VS Code bridge authenticates with a long-lived token instead of
+  // a session. The token must be bound to exactly the workspace it was issued
+  // for, so possessing it cannot be turned into a cross-workspace read (IDOR).
+  it('binds a bridge token to one workspace and to its granted permissions', () => {
+    db.workspaces.push({ id: 'w2', projectId: 'p2', ownerId: 'owner', name: 'Other' })
+    db.projects.push({ id: 'p2', ownerId: 'owner' })
+    service.saveProjectFile('owner', 'w1', { path: 'src/secret.ts', content: 'internal' })
+
+    const grant = service.createBridgeGrant('owner', 'w1', {})
+    const session = bridge.exchangeCodeBridgeGrant({ grant: grant.grant.token })
+    expect(session.ok).toBe(true)
+    const token = session.session.token
+
+    expect(bridge.codeBridgeSnapshot(token, 'w1').ok).toBe(true)
+    expect(bridge.codeBridgeSnapshot(token, 'w2').status).toBe(401)
+    expect(bridge.syncCodeBridgeFiles(token, 'w2', { changes: [{ path: 'a.ts', content: 'x' }] }).status).toBe(401)
+  })
 })
