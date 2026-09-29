@@ -21,7 +21,9 @@ import {
   founderProjectCreate,
   founderProjectPatch,
   founderProjects,
+  founderEquity,
   genericCreatePost,
+  genericDeleteItem,
   genericListGet,
   genericPatchItem,
   hackathonBrief,
@@ -114,6 +116,7 @@ function bindCollection(collectionName, responseKey, itemKey, itemPrefix) {
 router.get('/founder/projects', founderProjects)
 router.post('/founder/projects', founderProjectCreate)
 router.patch('/founder/projects/:projectId', founderProjectPatch)
+router.get('/founder/equity', founderEquity)
 
 router.get('/endorsements', endorsements)
 router.post('/endorsements', endorsementCreate)
@@ -257,6 +260,8 @@ router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportun
 router.post('/opportunities/:id/apply', opportunityApply)
 router.get('/applications', applicationsList)
 router.get('/files', bindCollection('files', 'files', 'file', 'file'), genericListGet)
+router.post('/files', bindCollection('files', 'files', 'file', 'file'), genericCreatePost)
+router.delete('/files/:itemId', bindCollection('files', 'files', 'file', 'file'), genericDeleteItem)
 router.get('/notifications/preferences', notificationPrefsGet)
 router.patch('/notifications/preferences', notificationPrefsPatch)
 router.get('/settings', bindCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings'), genericListGet)
