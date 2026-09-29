@@ -13,7 +13,7 @@
     "@techit/infra-audit": "0.1.0",
     "@techit/infra-auth": "0.1.0",
     "@techit/infra-secrets": "0.1.0",
-    "yaml": "^2.6.1",
-    "zod": "^4.4.3"
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
   }
 }
