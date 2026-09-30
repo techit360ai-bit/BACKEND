@@ -9,12 +9,16 @@ import (
 )
 
 type Config struct {
-	Port            string
-	DatabaseURL     string
-	RedisURL        string
-	JWTSecret       string
-	JWTIssuer       string
-	JWTAudience     string
+	Port        string
+	DatabaseURL string
+	RedisURL    string
+	JWTSecret   string
+	JWTIssuer   string
+	JWTAudience string
+	// JWTPublicKey is the PEM RSA public key used to verify RS256 platform
+	// tokens. Required outside development/test, where the platform signs with
+	// RS256 and HS256 is rejected.
+	JWTPublicKey    string
 	CORSOrigins     string
 	Environment     string
 	EnableDevToken  bool
@@ -58,6 +62,7 @@ func Load() (Config, error) {
 		JWTSecret:          os.Getenv("JWT_SECRET"),
 		JWTIssuer:          os.Getenv("JWT_ISSUER"),
 		JWTAudience:        os.Getenv("JWT_AUDIENCE"),
+		JWTPublicKey:       strings.TrimSpace(os.Getenv("JWT_PUBLIC_KEY")),
 		CORSOrigins:        envOr("CORS_ORIGINS", ""),
 		Environment:        environment,
 		EnableDevToken:     os.Getenv("ENABLE_DEV_TOKEN") == "1",
@@ -83,6 +88,9 @@ func Load() (Config, error) {
 	}
 	if requiresDurableStores(environment) && (cfg.JWTIssuer == "" || cfg.JWTAudience == "") {
 		return Config{}, errors.New("JWT_ISSUER and JWT_AUDIENCE are required outside development and test")
+	}
+	if requiresDurableStores(environment) && cfg.JWTPublicKey == "" {
+		return Config{}, errors.New("JWT_PUBLIC_KEY is required outside development and test")
 	}
 	if requiresDurableStores(environment) && strings.TrimSpace(cfg.CORSOrigins) == "" {
 		return Config{}, errors.New("CORS_ORIGINS is required outside development and test")

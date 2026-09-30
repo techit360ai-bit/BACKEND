@@ -1,4 +1,10 @@
 import {
+  livekitEnabled,
+  livekitRoomName,
+  livekitUrl,
+  mintLivekitToken,
+} from '../services/livekitService.js'
+import {
   addWatchlist,
   removeWatchlist,
   listWatchlistPreferences,
@@ -219,6 +225,25 @@ export async function workspaceMemberDelete(req, res) {
   const result = await persistedWorkspace(req, removeWorkspaceMember(req.user.id, req.params.workspaceId, req.params.memberId))
   if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
+}
+
+// Mint a real LiveKit participant token for a workspace audio/video call.
+// Membership is authorized against the platform authority (workspaceMembers);
+// when LiveKit is not configured we return an explicit unavailable state so the
+// client can render an honest message instead of a fake call surface.
+export async function workspaceCallToken(req, res) {
+  const { workspaceId } = req.params
+  const members = await listWorkspaceMembersAsync(req.user.id, workspaceId)
+  if (!members) return res.status(403).json({ error: 'workspace_forbidden' })
+  if (!livekitEnabled()) return res.json({ available: false, reason: 'live_calls_not_configured', workspaceId })
+  try {
+    const room = livekitRoomName(workspaceId)
+    const token = mintLivekitToken({ room, identity: req.user.id, canPublish: true })
+    return res.json({ available: true, token, url: livekitUrl(), room, identity: req.user.id, canPublish: true })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'livekit_token_mint_failed', workspaceId, error: error.message }))
+    return res.status(503).json({ error: 'live_call_token_unavailable' })
+  }
 }
 
 export function workspaceItems(req, res) {

@@ -456,6 +456,11 @@ func (s *Service) SetCreatorControl(ctx context.Context, userID, creatorID, cont
 func (s *Service) IsFollowing(ctx context.Context, followerID, followeeID string) (bool, error) {
 	return s.posts.IsFollowing(ctx, followerID, followeeID)
 }
+
+// FollowCounts returns the explicit follower/following counts for a user.
+func (s *Service) FollowCounts(ctx context.Context, userID string) (int, int, error) {
+	return s.posts.FollowCounts(ctx, userID)
+}
 func (s *Service) IsBlockedBetween(ctx context.Context, a, b string) (bool, error) {
 	blocked, err := s.posts.HasCreatorControl(ctx, a, b, "block")
 	if err != nil {

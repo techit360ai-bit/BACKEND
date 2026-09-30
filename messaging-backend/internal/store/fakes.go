@@ -699,6 +699,17 @@ func (s *FakePostStore) FollowedUserIDs(_ context.Context, userID string) ([]str
 	}
 	return out, nil
 }
+func (s *FakePostStore) FollowCounts(_ context.Context, userID string) (int, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	followers := 0
+	for _, set := range s.follows {
+		if _, ok := set[userID]; ok {
+			followers++
+		}
+	}
+	return followers, len(s.follows[userID]), nil
+}
 func (s *FakePostStore) SetCreatorControl(_ context.Context, userID, creatorID, control string, enabled bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

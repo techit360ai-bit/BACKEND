@@ -1,6 +1,41 @@
 package auth
 
-import "testing"
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"testing"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+func TestVerifyAcceptsRS256WithPublicKey(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pub, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatalf("marshal public key: %v", err)
+	}
+	pemStr := string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pub}))
+
+	token, err := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
+		"sub": "user-rsa", "name": "Rsa", "role": "founder",
+	}).SignedString(key)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	claims, err := NewVerifier("ignored").WithPublicKey(pemStr).Verify(token)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if claims.UserID != "user-rsa" || claims.Name != "Rsa" {
+		t.Errorf("bad claims: %+v", claims)
+	}
+}
 
 func TestMintThenVerify(t *testing.T) {
 	v := NewVerifier("topsecret")
