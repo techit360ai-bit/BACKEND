@@ -74,6 +74,36 @@ function valueFor(capability, decision, input) {
   return { title: input.goal || catalog?.description || capability, outcomes, workflowStage: input.workflowStage || catalog?.workflowStage || 'execute' }
 }
 
+// Build a non-empty recommendation value statement. The commercial config owns
+// the canonical `valueStatement`; when it is absent we fall back to the
+// capability description. The statement is then qualified with the caller's
+// real funding position so the value reflects what a subscription or credit
+// purchase actually unlocks for THIS account.
+function recommendationValueStatement(catalog, access) {
+  const configured = access?.policy?.valueStatement
+    || access?.value?.outcomes?.[0]
+    || catalog?.valueStatement
+    || catalog?.description
+    || 'Continue the current workflow with the required capability.'
+  const credits = Math.max(0, Math.round(Number(access?.availableCredits || 0)))
+  if (access?.subscription?.active) {
+    return `${configured} Included with your ${access.subscription?.planId || access.subscription?.plan || access.plan || 'active'} subscription.`
+  }
+  if (access?.allowed && credits > 0) {
+    return `${configured} Covered by your ${credits} available credit${credits === 1 ? '' : 's'}.`
+  }
+  if (!access?.allowed && credits > 0) {
+    return `${configured} Spend your ${credits} available credit${credits === 1 ? '' : 's'} to unlock it.`
+  }
+  if (!access?.allowed && Number(access?.freeRemaining || 0) > 0) {
+    return `${configured} Included in your free allowance (${access.freeRemaining} left this month).`
+  }
+  if (!access?.allowed) {
+    return `${configured} Subscribe or buy credits to unlock it.`
+  }
+  return configured
+}
+
 function freeUsageFor(db, userId, capability, now = Date.now()) {
   const monthStart = new Date(now)
   monthStart.setUTCDate(1); monthStart.setUTCHours(0, 0, 0, 0)
@@ -416,10 +446,11 @@ export function nextBestAction(userId, input = {}) {
   const successful = completed.filter(row => row.outcome === 'success' || row.success === true || row.resultStatus === 'success').length
   const capabilityUses = completed.filter(row => row.capability === catalog.id).length
   const priorPaywalls = collection(db, 'paywallEvents').filter(row => row.userId === userId && row.capability === catalog.id).length
+  const valueStatement = recommendationValueStatement(catalog, access)
   const purchaseGuidance = {
     relevant: !access.allowed && (catalog.metering === 'runtime' || Boolean(catalog.funding)),
     whyNow: active.length ? 'An active workflow is waiting for this capability.' : `This is the next capability in your ${catalog.workflowStage || 'current'} stage.`,
-    expectedOutcome: catalog.valueStatement || catalog.description || 'Continue the current workflow with better evidence.',
+    expectedOutcome: valueStatement,
     observedPriorUses: capabilityUses,
     observedSuccessRate: capabilityUses ? Math.round((successful / Math.max(1, capabilityUses)) * 100) : null,
     priorPaywallViews: priorPaywalls,
@@ -429,7 +460,7 @@ export function nextBestAction(userId, input = {}) {
   return {
     action: catalog.id,
     reason: input.reason || `Your next valuable step is ${catalog.description}.`,
-    expectedValue: catalog.valueStatement || catalog.description || 'Continue the current workflow with the required capability.',
+    expectedValue: valueStatement,
     access: access.allowed ? 'available' : access.recommendation || access.recommendedAction,
     accessStatus: access.code,
     metering: catalog.metering || 'none',

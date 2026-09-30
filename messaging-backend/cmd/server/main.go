@@ -67,7 +67,7 @@ func main() {
 	demoSvc := demo.New(pg.Demo)
 	qaSvc := qa.New(pg.QA, demoSvc, h)
 	lkSvc := livekit.New(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitURL)
-	ver := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
+	ver := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience).WithPublicKey(cfg.JWTPublicKey)
 	discoveryClient := discovery.New(ctx, cfg.DiscoveryAPIURL)
 
 	gw := ws.New(ws.Deps{

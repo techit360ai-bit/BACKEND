@@ -102,4 +102,23 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(action.funding).toBe('subscription_or_credits')
     expect(action.subscriptionRecommendation).toBe(true)
   })
+
+  it('never returns an empty recommendation value and reflects credits or subscription', () => {
+    const noFunding = nextBestAction('u1', { role: 'founder', capability: 'IDEA_DIAGNOSTICS_ADVANCED' })
+    expect(typeof noFunding.expectedValue).toBe('string')
+    expect(noFunding.expectedValue.trim().length).toBeGreaterThan(0)
+    expect(noFunding.expectedValue).toMatch(/subscribe|buy credits/i)
+
+    db.walletAccounts = [{ userId: 'u1', creditBalance: 40 }]
+    db.creditLedger = [{ id: 'cl1', userId: 'u1', type: 'credit_purchase', deltaCredits: 40 }]
+    const withCredits = nextBestAction('u1', { role: 'founder', capability: 'IDEA_DIAGNOSTICS_ADVANCED' })
+    expect(withCredits.expectedValue.trim().length).toBeGreaterThan(0)
+    expect(withCredits.expectedValue).toMatch(/credit/i)
+
+    db.subscriptions = [{ id: 's1', userId: 'u1', status: 'active', planId: 'founder-pro' }]
+    const withSubscription = nextBestAction('u1', { role: 'founder', capability: 'IDEA_DIAGNOSTICS_ADVANCED' })
+    expect(withSubscription.expectedValue.trim().length).toBeGreaterThan(0)
+    expect(withSubscription.expectedValue).toMatch(/subscription/i)
+    expect(withSubscription.expectedValue).toContain('founder-pro')
+  })
 })

@@ -108,6 +108,7 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/feed/modules", handleDiscoveryModules(d))
 			r.Post("/users/{userId}/follow", handleFollowUser(d))
 			r.Delete("/users/{userId}/follow", handleUnfollowUser(d))
+			r.Get("/users/{userId}/follow-stats", handleFollowCounts(d))
 			r.Post("/users/{userId}/mute", handleCreatorControl(d, "mute", true))
 			r.Delete("/users/{userId}/mute", handleCreatorControl(d, "mute", false))
 			r.Post("/users/{userId}/block", handleCreatorControl(d, "block", true))

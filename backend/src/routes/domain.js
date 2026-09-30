@@ -83,6 +83,7 @@ import {
   watchlistPreferences,
   watchlistPreferencesPatch,
   workspaceContextGet,
+  workspaceCallToken,
   workspaceInvitationAccept,
   workspaceInvitationCreate,
   workspaceInvitationDecline,
@@ -233,6 +234,7 @@ router.get('/workspace-invitations/:invitationId', workspaceInvitationGet)
 router.post('/workspace-invitations/:invitationId/accept', workspaceInvitationAccept)
 router.post('/workspace-invitations/:invitationId/decline', workspaceInvitationDecline)
 router.get('/workspaces/:workspaceId/context', workspaceContextGet)
+router.post('/workspaces/:workspaceId/call-token', workspaceCallToken)
 router.post('/workspaces/:workspaceId/invitations', workspaceInvitationCreate)
 router.get('/workspaces/:workspaceId/members', workspaceMembersGet)
 router.delete('/workspaces/:workspaceId/members/:memberId', workspaceMemberDelete)
