@@ -721,6 +721,9 @@ function generateRecommendationsInDb(db, userId, options = {}) {
       returned: selected.length,
       configVersion: config.version,
       coldStart: rows(db, 'recommendationEvents').filter(event => event.userId === userId).length < 5,
+      // Freshness: the wall-clock time this recommendation set was generated.
+      // Preserved through the Redis cache so the UI can show "Updated Xm ago".
+      generatedAt: nowIso(),
     },
   }
 }

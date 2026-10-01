@@ -1,6 +1,7 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
+import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 import { publicTrustFor } from '../services/trustVerificationAuthority.js'
@@ -491,10 +492,14 @@ export async function connectUser(req, res) {
         db.notifications.push(notification)
       }
     }
-    return { status: 200, notification, requestId: request.id, connectionStatus: connected ? 'connected' : 'pending' }
+    return { status: 200, notification, requestId: request.id, targetId: target.id, connectionStatus: connected ? 'connected' : 'pending' }
   })
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
   await persistNotificationToContent(result.notification)
+  // Targeted recommendation invalidation: a new connection changes the graph for
+  // both people involved, so clear only their caches (never a broad flush).
+  void invalidateDiscoveryUser(req.user.id)
+  if (result.targetId && result.targetId !== req.user.id) void invalidateDiscoveryUser(result.targetId)
   return res.json({ ok: true, connectionRequestId: result.requestId, status: result.connectionStatus })
 }
 
@@ -556,6 +561,10 @@ export async function respondConnectionRequest(req, res) {
   })
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
   await persistNotificationToContent(result.notification)
+  if (result.decision === 'accept') {
+    void invalidateDiscoveryUser(req.user.id)
+    if (result.fromUserId && result.fromUserId !== req.user.id) void invalidateDiscoveryUser(result.fromUserId)
+  }
   return res.json({ ok: true, status: result.decision === 'accept' ? 'connected' : 'declined' })
 }
 
