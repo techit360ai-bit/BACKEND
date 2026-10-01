@@ -22,12 +22,13 @@ import (
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/pubsub"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/qa"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store/storetest"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/transport/httpapi"
 )
 
-func newTestGateway(t *testing.T) (*httptest.Server, *auth.Verifier, *store.FakeStores) {
+func newTestGateway(t *testing.T) (*httptest.Server, *auth.Verifier, *storetest.FakeStores) {
 	t.Helper()
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	h := hub.New(pubsub.NewInMemory())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)

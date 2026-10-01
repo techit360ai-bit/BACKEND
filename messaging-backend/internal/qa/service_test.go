@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/demo"
-	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store/storetest"
 )
 
 // liveEvent creates an event via demo.Service and drives it to "live".
@@ -25,13 +25,13 @@ func liveEvent(t *testing.T, ctx context.Context, ds *demo.Service, host string)
 	return ev.ID
 }
 
-func newSvc(st *store.FakeStores) (*Service, *demo.Service) {
+func newSvc(st *storetest.FakeStores) (*Service, *demo.Service) {
 	ds := demo.New(st.Demo)
-	return New(st.QA, ds, store.NewFakeRouter()), ds
+	return New(st.QA, ds, storetest.NewFakeRouter()), ds
 }
 
 func TestAsk_RequiresLiveAndParticipant(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	s, ds := newSvc(st)
 	ctx := context.Background()
 	id := liveEvent(t, ctx, ds, "host1")
@@ -61,7 +61,7 @@ func TestAsk_RequiresLiveAndParticipant(t *testing.T) {
 }
 
 func TestAsk_NotLive(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	s, ds := newSvc(st)
 	ctx := context.Background()
 	ev, _ := ds.Create(ctx, "host1", demo.CreateEventInput{Kind: "startup", Title: "T"}) // draft
@@ -71,7 +71,7 @@ func TestAsk_NotLive(t *testing.T) {
 }
 
 func TestUpvote_Toggle(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	s, ds := newSvc(st)
 	ctx := context.Background()
 	id := liveEvent(t, ctx, ds, "host1")
@@ -88,7 +88,7 @@ func TestUpvote_Toggle(t *testing.T) {
 }
 
 func TestResolve_HostOrPresenterOnly(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	s, ds := newSvc(st)
 	ctx := context.Background()
 	id := liveEvent(t, ctx, ds, "host1")
@@ -114,7 +114,7 @@ func TestResolve_HostOrPresenterOnly(t *testing.T) {
 }
 
 func TestList_ArrivalOrderAndAuthz(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	s, ds := newSvc(st)
 	ctx := context.Background()
 	id := liveEvent(t, ctx, ds, "host1")
