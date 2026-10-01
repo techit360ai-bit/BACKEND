@@ -226,11 +226,16 @@ warming is deferred until usage volume justifies it.
 
 ### Presentation
 
-Two separate labelled rows — **People you may know** and **Opportunities for
-you** — each recording exposure/feedback under its own surface (`feed-people`,
-`feed-opportunities`). The generic "Recommended for you" grid was removed so
-intent is explicit and per-surface data is clean. An unobtrusive **"Updated Xm
-ago"** label uses the recommendation set's `meta.generatedAt`.
+- The original mixed **"Recommended for you"** module leads the feed (surface
+  `feed`), preserving cross-type serendipity from the initial design.
+- Three labelled rows follow, each on its own surface: **People you may know**
+  (`feed-people`), **Opportunities for you** (`feed-opportunities`), and
+  **Startups, projects & ideas** (`feed-innovation`, covering `startup`,
+  `project`, `idea`).
+- Rows are de-duplicated against the leading module so one entity is never shown
+  — or counted as an impression — twice.
+- An unobtrusive **"Updated Xm ago"** label uses the recommendation set's
+  `meta.generatedAt`.
 
 ### Ranking and feedback
 
