@@ -185,7 +185,10 @@ is empty.
 
 ---
 
-## 4. P3 — Recommendation cadence + feed recommendations
+## 4. P3 — Recommendation cadence + feed recommendations (shipped)
+
+**Status:** implemented. Backend `feat/recommendation-cadence`; frontend
+`feat/feed-recommendation-rows`.
 
 ### Current state (verified)
 
@@ -194,34 +197,53 @@ is empty.
 - `discoveryInfrastructure.js` already caches per user/surface/type in Redis with
   a TTL and invalidates on profile-update, feedback, and recommendation events
   (`invalidateDiscoveryUser`, `enqueueDiscoveryRefresh`).
-- The feed **already renders** a "Recommended for you" module
-  (`FeedPage.tsx` → `listRecommendations({surface:'feed', limit:6})`).
+- `scripts/discovery-worker.js` drains the refresh queue and periodically does a
+  full refresh; there is no nightly warm.
+- Recommendation generation is separate from presentation: surfaces consume
+  `GET /api/discovery/recommendations` and never rank entities themselves.
 
-So the cadence exists but is **one global TTL (default 300s)** for every type.
+The cadence existed as **one global TTL (default 300s)** for every type.
 
-### Decision — per-surface cadence
+### Decision — per-surface cadence (confirmed, shipped)
 
-| Surface | Freshness need | Cadence | TTL |
-|---|---|---|---|
-| People you may know | changes when you follow/connect/update profile | compute on feed open if cache stale; invalidate on graph/profile events | **10 min** |
-| Opportunities (projects, roles, collabs) | changes when someone posts/applies | compute on feed open; invalidate on new opportunity/post | **60 min** |
-| Catch-up / return intelligence | per visit | no cache (session) | n/a |
-
-Plus an optional nightly warm job (off by default) that re-computes for users
-active in the last 24h, so a cold cache is rare.
-
-### Tasks
-
-| Task | Repo | Change |
+| Surface | TTL | Env var |
 |---|---|---|
-| P3.1 Per-type TTL | BACKEND | `discoveryInfrastructure.js`: `DISCOVERY_PEOPLE_TTL_SECONDS` (600) / `DISCOVERY_OPPORTUNITY_TTL_SECONDS` (3600), keyed by `options.type`; default keeps `DISCOVERY_CACHE_TTL_SECONDS` |
-| P3.2 Explicit invalidation | BACKEND | already fires on profile/feedback/events; add follow/connect + new-opportunity post to `invalidateDiscoveryUser` callers |
-| P3.3 Feed "People you may know" | new-frontend | second `listRecommendations({surface:'feed', type:'people', limit:4})` row, labelled, with follow action |
-| P3.4 Config + docs | BACKEND/new-frontend | document env in `.env.example`; surface cadence in this plan |
+| General feed | 5 min | `DISCOVERY_CACHE_TTL_SECONDS` (300) |
+| People you may know | 10 min | `DISCOVERY_PEOPLE_TTL_SECONDS` (600) |
+| Opportunities | 60 min | `DISCOVERY_OPPORTUNITY_TTL_SECONDS` (3600) |
+
+Refresh model: cache-hit-or-compute + background worker (unchanged). **No nightly
+warm** — recompute is driven by activity and invalidation events; scheduled
+warming is deferred until usage volume justifies it.
+
+### Invalidation (targeted)
+
+| Event | Action |
+|---|---|
+| Follow / connect (request or accept) | `invalidateDiscoveryUser` for **both** users |
+| New opportunity posted | `invalidateDiscoveryType('opportunities')` — clears only the opportunities surface across users |
+| Profile update / feedback / recommendation event | existing `invalidateDiscoveryUser` + enqueue |
+
+### Presentation
+
+Two separate labelled rows — **People you may know** and **Opportunities for
+you** — each recording exposure/feedback under its own surface (`feed-people`,
+`feed-opportunities`). The generic "Recommended for you" grid was removed so
+intent is explicit and per-surface data is clean. An unobtrusive **"Updated Xm
+ago"** label uses the recommendation set's `meta.generatedAt`.
+
+### Ranking and feedback
+
+- Ranking stays **fully deterministic** (role/context, skills, industry/domain,
+  trust/reputation/GSIS, behaviour/engagement). No LLM enrichment — auditable and
+  reproducible.
+- `not_interested` is **entity-specific and persistent**, stored and reversible
+  (`undo`); it suppresses the exact entity rather than banning the category
+  (`dont_recommend_type` remains the explicit category mute).
 
 **Acceptance.** People recommendations refresh within 10 min of a graph change;
-opportunities within the hour; the feed shows a distinct people row separate from
-the general recommendations; both invalidate on the documented events.
+opportunities within the hour; general feed within 5 min; the two rows invalidate
+on the documented events; exposure/feedback are recorded per surface and type.
 
 ---
 
