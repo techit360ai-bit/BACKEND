@@ -9,6 +9,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MIGRATION_PATH = path.join(__dirname, '../../migrations/postgres/001_discovery_intelligence.sql')
 const VECTOR_DIMENSIONS = 128
 const CACHE_TTL_SECONDS = Math.max(30, Number(process.env.DISCOVERY_CACHE_TTL_SECONDS || 300))
+// Per-surface cadence (see BACKEND/docs/PLATFORM_IMPLEMENTATION_PLAN_P0_P4_2026-10-01.md §4):
+//   people you may know -> short TTL, invalidated on follow/connect/profile change
+//   opportunities       -> longer TTL, invalidated on new opportunity/post
+// The general feed keeps the baseline TTL.
+const PEOPLE_TTL_SECONDS = Math.max(30, Number(process.env.DISCOVERY_PEOPLE_TTL_SECONDS || 600))
+const OPPORTUNITY_TTL_SECONDS = Math.max(30, Number(process.env.DISCOVERY_OPPORTUNITY_TTL_SECONDS || 3600))
+const PEOPLE_TYPES = new Set(['people', 'person', 'founder', 'collaborator', 'investor'])
+const OPPORTUNITY_TYPES = new Set(['opportunities', 'opportunity'])
 const QUEUE_KEY = process.env.DISCOVERY_QUEUE_KEY || 'techit:discovery:refresh'
 
 let pool
@@ -65,6 +73,14 @@ export function recommendationCacheKey(userId, options = {}) {
   return `techit:discovery:recommendations:${userId}:${options.surface || 'discovery'}:${options.type || 'all'}:${options.limit || 'default'}`
 }
 
+/** Cache TTL for a recommendation request, by surface type. */
+export function discoveryCacheTtlSeconds(options = {}) {
+  const type = String(options.type || '').toLowerCase()
+  if (PEOPLE_TYPES.has(type)) return PEOPLE_TTL_SECONDS
+  if (OPPORTUNITY_TYPES.has(type)) return OPPORTUNITY_TTL_SECONDS
+  return CACHE_TTL_SECONDS
+}
+
 export async function getCachedDiscovery(key) {
   const client = await getRedis()
   if (!client) return null
@@ -72,10 +88,10 @@ export async function getCachedDiscovery(key) {
   return value ? JSON.parse(value) : null
 }
 
-export async function setCachedDiscovery(key, value) {
+export async function setCachedDiscovery(key, value, options = {}) {
   const client = await getRedis()
   if (!client) return false
-  await client.set(key, JSON.stringify(value), { EX: CACHE_TTL_SECONDS })
+  await client.set(key, JSON.stringify(value), { EX: discoveryCacheTtlSeconds(options) })
   return true
 }
 
