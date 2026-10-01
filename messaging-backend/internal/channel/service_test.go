@@ -5,12 +5,12 @@ import (
 	"testing"
 
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/protocol"
-	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store/storetest"
 )
 
-func newSvc() (*Service, *store.FakeStores, *store.FakeRouter) {
-	st := store.NewFakeStores()
-	rt := store.NewFakeRouter()
+func newSvc() (*Service, *storetest.FakeStores, *storetest.FakeRouter) {
+	st := storetest.NewFakeStores()
+	rt := storetest.NewFakeRouter()
 	return New(st.Channels, rt), st, rt
 }
 
