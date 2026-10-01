@@ -102,6 +102,33 @@ export async function invalidateDiscoveryUser(userId) {
   return true
 }
 
+// Type aliases used only for targeted surface invalidation (a new opportunity
+// should clear the opportunities surface, not every user's whole cache).
+const INVALIDATION_TYPE_ALIASES = {
+  people: ['people', 'person', 'founder', 'collaborator', 'investor'],
+  person: ['people', 'person', 'founder', 'collaborator', 'investor'],
+  opportunities: ['opportunities', 'opportunity'],
+  opportunity: ['opportunities', 'opportunity'],
+}
+
+/**
+ * Targeted invalidation for one recommendation type across all users. Used when
+ * an entity that feeds a single surface changes (e.g. a new opportunity), so we
+ * do not flush unrelated caches. Prefer invalidateDiscoveryUser for events that
+ * only affect one user's own signals.
+ */
+export async function invalidateDiscoveryType(type) {
+  const client = await getRedis()
+  if (!client) return false
+  const normalized = String(type || '').toLowerCase()
+  if (!normalized) return false
+  const aliases = INVALIDATION_TYPE_ALIASES[normalized] || [normalized]
+  for (const alias of aliases) {
+    for await (const key of client.scanIterator({ MATCH: `techit:discovery:recommendations:*:*:${alias}:*`, COUNT: 100 })) await client.del(key)
+  }
+  return true
+}
+
 export async function enqueueDiscoveryRefresh(userId, reason = 'signal_changed') {
   const client = await getRedis()
   if (!client) return false

@@ -4,6 +4,7 @@ import {
   livekitUrl,
   mintLivekitToken,
 } from '../services/livekitService.js'
+import { invalidateDiscoveryType } from '../services/discoveryInfrastructure.js'
 import {
   addWatchlist,
   removeWatchlist,
@@ -651,7 +652,11 @@ export function collaborationCallCreate(req, res) {
 }
 
 export function genericCreatePost(req, res) {
-  return created(res, { [req.itemKey]: genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix) })
+  const entity = genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix)
+  // A new opportunity changes the opportunities surface for matching users.
+  // Targeted surface invalidation keeps people/general caches intact.
+  if (req.collectionName === 'opportunities') void invalidateDiscoveryType('opportunities')
+  return created(res, { [req.itemKey]: entity })
 }
 
 export function genericPatchItem(req, res) {
