@@ -228,10 +228,10 @@ warming is deferred until usage volume justifies it.
 
 - The original mixed **"Recommended for you"** module leads the feed (surface
   `feed`), preserving cross-type serendipity from the initial design.
-- Three labelled rows follow, each on its own surface: **People you may know**
-  (`feed-people`), **Opportunities for you** (`feed-opportunities`), and
-  **Startups, projects & ideas** (`feed-innovation`, covering `startup`,
-  `project`, `idea`).
+- Five labelled rows follow, each on its own surface: **People you may know**
+  (`feed-people`), **Opportunities for you** (`feed-opportunities`),
+  **Startups for you** (`feed-startups`), **Projects for you**
+  (`feed-projects`), and **Ideas for you** (`feed-ideas`).
 - Rows are de-duplicated against the leading module so one entity is never shown
   — or counted as an impression — twice.
 - An unobtrusive **"Updated Xm ago"** label uses the recommendation set's
