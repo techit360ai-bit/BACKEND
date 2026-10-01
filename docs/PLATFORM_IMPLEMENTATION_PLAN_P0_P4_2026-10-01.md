@@ -17,7 +17,7 @@ repo, each verifiable by its own test suite.
 | P0.4 | Merge ai-router RS256 PR #84 after #83 | ai-router | low | blocked on #83 |
 | P1 | Payment authority: activate **or** retire the dormant gateway | TECHIT-PAYMENT-GATWAY + BACKEND | med | decision below |
 | P2 | Remove `fakes.go` from the production Go package | BACKEND/messaging-backend | med | this plan |
-| P3 | Recommendation cadence (people-you-may-know / opportunities) | BACKEND + new-frontend | med | this plan |
+| P3 | Recommendation cadence (people-you-may-know / opportunities) | BACKEND + new-frontend | med | shipped |
 | P4 | Deliberate-limitation honesty pass | new-frontend | low | this plan |
 
 ---
@@ -252,4 +252,3 @@ Also sync `techit-website` (behind `origin/main`) if in release scope.
 - No new identity/wallet/entitlement authority outside Backend/TVCE.
 - No converting labelled limitations into fakes.
 - No unrelated bug fixes.
-
