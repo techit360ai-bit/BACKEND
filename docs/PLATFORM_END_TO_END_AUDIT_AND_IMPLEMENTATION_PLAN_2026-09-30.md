@@ -383,3 +383,42 @@ and deployed SHA == `main`; add a scheduled drift workflow.
    `Access-Control-Allow-Origin` on all three services (pending AWS env).
 4. No fake/dummy store implementation compiles into the production messaging
    binary; production refuses to start without Postgres/Redis.
+
+## H7. Live production smoke results (2026-10-03)
+
+The new `frontend/scripts/smoke.mjs` gate was run against production after the
+P0/P1 code landed. It reports **all** failures in one pass:
+
+| Check | Result | Meaning |
+|---|---|---|
+| `frontend` `https://beta.techitnetwork.com/` | ✅ 200 | SPA origin is live (CORS fix target confirmed) |
+| `node-backend` `/` | ✅ 200 | Node service up on the old build |
+| `mcp-auth-boundary` `${VITE_TECHIT_API}/health` | ❌ 404 (expected 401) | **MCP mount is not present in production** — a real pre-existing gap |
+| `ai-router` `/health` | ✅ 200 | Router up |
+| `messaging` `/health` | ✅ 200 | Messaging up |
+| `node-backend-version` `/health` | ❌ 404 | New probe not deployed yet (expected pre-merge) |
+| `ai-router-version` `/version` | ❌ 404 | New probe not deployed yet (expected pre-merge) |
+| `messaging-version` `/health` sha | ⚠️ `undefined` | Build stamp not deployed yet (expected pre-merge) |
+| `node-backend-ready` `/ready` | ⚠️ 404 | New probe not deployed yet |
+| `ai-router-ready` `/ready` | ⚠️ **503** | Confirms the AWS `MCP_BASE_URL` is not https (`runtime_config.py` check) |
+| `messaging-ready` `/ready` | ⚠️ 404 | New probe not deployed yet |
+
+Interpretation:
+
+- The `404`s on the new `/health`/`/ready`/`/version` paths are expected until the
+  P0 branches (`feat/service-health-readiness`, ai-router) are merged and
+  deployed; then `/ready` becomes the enforced gate.
+- The ai-router `/ready` **503** is the live P0 blocker: set AWS
+  `MCP_BASE_URL=https://backend.techitnetwork.com/api/mcp`.
+- The MCP **404** is separate from the three services and must be resolved
+  (enable/mount the MCP surface at `/api/mcp`, or fix the deployed path) before
+  `VITE_TECHIT_API` consumers work.
+
+## H8. P1/P2 execution status (2026-10-03)
+
+| Task | Repo | Branch/PR | Status |
+|---|---|---|---|
+| P1 payment activation (Dockerfile, CI, deploy, `/health`+`/ready`, `required` authority mode) | `TECHIT-PAYMENT-GATWAY` | `feat/activate-payment-gateway` | ✅ code complete; AWS keys/secrets + domain still to set |
+| P1 remove legacy `billing_logic/` LLM stub | `TECHIT-PAYMENT-GATWAY` | same branch | ✅ deleted |
+| Smoke `/ready` + build-SHA gate + 6-hourly drift workflow | `new-frontend` | `fix/production-readiness-p0` | ✅ |
+| P2 remove `fakes.go`/`*_fake.go` from production Go package | `BACKEND` | `refactor/messaging-storetest-postgres-only` | ✅ all Go packages pass |
