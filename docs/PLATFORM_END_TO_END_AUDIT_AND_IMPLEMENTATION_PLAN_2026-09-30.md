@@ -256,3 +256,169 @@ complete.
 - No new identity/wallet/entitlement authority outside the Node backend/TVCE.
 - No unrelated bug fixes outside the surfaces named above.
 
+---
+
+# Part H — 2026-10-03 Addendum: AWS server verification, offline-first fixes, and P0 execution
+
+**Trigger:** production symptoms reported after the first audit —
+"Failed to fetch" when an idea is submitted in the Incubation Hub, and the feed
+showing *"You are offline and no cached posts are available"* after loading live
+posts. Plus a direct question: the three services run on AWS — **how do we verify
+them at codebase level?**
+
+## H1. Confirmed production origin (partial CORS)
+
+- The production frontend origin is **`https://beta.techitnetwork.com`**. It is
+  not recorded anywhere in the repositories (CloudFront/S3 values live in GitHub
+  Actions secrets), so no codebase check can currently prove the deployed origin.
+- **Partial CORS fix applied at code level:** the expected origin is now encoded
+  in each service's `.env.example` (and origin-contract tests) as
+  `https://beta.techitnetwork.com`. It is **not yet applied to the AWS runtime**
+  because the frontend-origin secret is not available — the deployed env vars
+  (`CORS_ORIGINS`, `ALLOWED_ORIGINS`) still have to be set/confirmed in AWS.
+- Measured drift that motivated this: preflight from `app.techitnetwork.com`
+  returned no `Access-Control-Allow-Origin` on all three services, and
+  `OPTIONS /health` on messaging returned **405** although current code answers
+  every `OPTIONS` with **204** — evidence that deployed binaries/config are not
+  guaranteed to match `main`.
+
+## H2. Root cause of the two reported messages
+
+**"Failed to fetch" (Incubation Hub)**
+
+- `MainIncubationPanel.handleRunFullAnalysis` → `runVenturePipeline()` →
+  `POST ${VITE_API_BASE_URL}/api/v1/incubation/pipeline/run`.
+- Local `.env` points `VITE_API_BASE_URL` at `http://localhost:8000`; with no
+  listener the browser raises `TypeError: Failed to fetch`.
+- `VITE_API_STRICT=1` makes `withFallback` rethrow instead of returning `null`,
+  and the `catch` rendered the raw `err.message` — hence the literal string.
+- This is an **availability** failure, distinct from the earlier **401**
+  (ai-router verified only HS256 while production issues RS256; fixed on
+  `security/exposure-hardening-2026-09-26` / PR #84, commit `b2b4f45`).
+
+**"You are offline and no cached posts are available" (Feed)**
+
+- `useFeedPosts` → `fetchPostsPage()` → `GET ${VITE_MESSAGING_BASE_URL}/api/v1/posts`.
+- `isNetworkFailure()` treated **any** `TypeError` as device-offline, so a
+  server-down / CORS-blocked request was mislabelled as "you are offline".
+- `readSnapshot('feed:global:for-you')` is empty because snapshots are only
+  written after a successful load, and `setCacheScope()` purges them on auth
+  changes. The service worker registers only in PROD and caches the app shell,
+  never API data.
+
+**Unifying production suspect:** if the real origin
+(`https://beta.techitnetwork.com`) is missing from the three allow-lists (or the
+lists still default to localhost), every browser call is CORS-blocked and
+surfaces as "Failed to fetch" / "offline".
+
+## H3. Answer: verifying the three AWS services at codebase level
+
+Principle: a deployed service must be able to prove **which commit and which
+config** it is running; CI then compares that to `main` and to the contract in
+the repo. Five layers, with current status:
+
+| Layer | ai-router | messaging (Go) | Node backend | Action |
+|---|---|---|---|---|
+| Build/commit stamp (`GIT_SHA`, `BUILD_TIME`, `SERVICE_NAME`, `ENVIRONMENT`) | ❌ `/health` hardcodes `version: "3.0.0"` | ❌ `/health` returns `{"status":"ok"}` only | ❌ no health route | Add stamp + expose via `/health`/`/version` |
+| Liveness `/health` | ✅ | ✅ | ❌ (only `GET /`) | Add Node `/health` |
+| Readiness `/ready` (config + dependencies) | ✅ (currently **503**) | ❌ | ❌ | Add; fix ai-router `MCP_BASE_URL` |
+| Origin contract as code (https, non-wildcard, exact origin) | ✅ validation, ❌ no prod value | ✅ validation, ❌ no prod value | ⚠️ default localhost only | Encode `beta.techitnetwork.com`; assert in `/ready` |
+| Post-deploy smoke + drift alarm | partial (`smoke.mjs` hits `/health`) | partial | partial | Extend to `/ready` + `/version` + real CORS preflight |
+
+**Measured today (live):** `backend.techitnetwork.com/` → 200
+`{"status":"TechIT API running"}`; `api.techitnetwork.com/health` → 200;
+`api.techitnetwork.com/ready` → **503**, failing check `mcp.base_url`
+("must use one of: https", `ai-router/runtime_config.py:131`);
+`messaging.techitnetwork.com/health` → 200.
+
+**Remediation:** fix the ai-router AWS env `MCP_BASE_URL` to
+`https://backend.techitnetwork.com/api/mcp`; add `/ready` to Node + messaging;
+stamp every build; extend `frontend/scripts/smoke.mjs` to assert `/ready` == 200
+and deployed SHA == `main`; add a scheduled drift workflow.
+
+## H4. Decisions locked
+
+- **Payment authority = ACTIVATE** the standalone `TECHIT-PAYMENT-GATWAY`
+  (retirement is only safe if it provably does not affect the whole payment
+  logic; default is activate so `usage-settlement` becomes live). Reversible:
+  the retire path stays documented in Part D / P1.3.
+- **`fakes.go` = REMOVE from production.** It is a normal (non-`_test.go`) file
+  in `package store` and compiles into the production binary, but no non-test
+  code imports it. Production is Postgres-only (`cmd/server/main.go` already
+  `log.Fatal`s on Postgres/migrate/Redis failure). Keep equivalent fixtures in
+  `_test.go` files or a `storetest` package only. Applies equally to
+  `demo_fake.go` / `qa_fake.go`.
+- **Feed surfaces keep the original design:** `Recommended for you` + People +
+  Opportunities + Startups + Projects + Ideas (deduped), each with its own
+  surface key for exposure/feedback analytics.
+- **Recommendation cadence:** people 600s, opportunities 3600s, general 300s;
+  env-configurable; cache-hit-or-compute + background worker; targeted
+  invalidation; deterministic ranking; per-entity persistent (reversible)
+  `not_interested`; "Updated Xm ago" freshness.
+
+## H5. Implementation status (this pass)
+
+| Task | Repo | Status |
+|---|---|---|
+| H5.1 Failure taxonomy: offline vs service-unavailable vs timeout vs auth | new-frontend | ✅ this pass |
+| H5.2 Feed error copy must never claim "offline" while online | new-frontend | ✅ this pass |
+| H5.3 Incubation error copy: actionable, no raw "Failed to fetch" | new-frontend | ✅ this pass |
+| H5.4 Node `/health` + `/ready` + build stamp | BACKEND/backend | ✅ this pass |
+| H5.5 messaging `/ready` + `/health` build stamp | BACKEND/messaging-backend | ✅ this pass |
+| H5.6 ai-router build stamp in `/health`/`/version` | ai-router | ✅ this pass |
+| H5.7 Partial CORS origin contract (`beta.techitnetwork.com`) | all three | ✅ code-level; AWS env pending |
+| H5.8 Node `/ready` asserts CORS + JWT config in prod | BACKEND/backend | ✅ this pass |
+| H5.9 Remove `fakes.go` / `*_fake.go` from production package | BACKEND/messaging-backend | ⏳ P2 |
+| H5.10 Incubation write-behind queue for true zero-connectivity | new-frontend | ⏳ P1 |
+| H5.11 SW network-first API cache + dev registration | new-frontend | ⏳ P1 |
+| H5.12 Targeted recommendation cache invalidation hooks | BACKEND + new-frontend | ⏳ P3 |
+
+## H6. Added acceptance criteria
+
+1. Killing a backend while the device is online shows a **service-unavailable**
+   message (plus saved content when present), never "you are offline".
+2. `GET /health` and `GET /ready` exist and return a build SHA on all three
+   services; a deploy fails if `/ready` != 200.
+3. CORS preflight from `https://beta.techitnetwork.com` returns the exact
+   `Access-Control-Allow-Origin` on all three services (pending AWS env).
+4. No fake/dummy store implementation compiles into the production messaging
+   binary; production refuses to start without Postgres/Redis.
+
+## H7. Live production smoke results (2026-10-03)
+
+The new `frontend/scripts/smoke.mjs` gate was run against production after the
+P0/P1 code landed. It reports **all** failures in one pass:
+
+| Check | Result | Meaning |
+|---|---|---|
+| `frontend` `https://beta.techitnetwork.com/` | ✅ 200 | SPA origin is live (CORS fix target confirmed) |
+| `node-backend` `/` | ✅ 200 | Node service up on the old build |
+| `mcp-auth-boundary` `${VITE_TECHIT_API}/health` | ❌ 404 (expected 401) | **MCP mount is not present in production** — a real pre-existing gap |
+| `ai-router` `/health` | ✅ 200 | Router up |
+| `messaging` `/health` | ✅ 200 | Messaging up |
+| `node-backend-version` `/health` | ❌ 404 | New probe not deployed yet (expected pre-merge) |
+| `ai-router-version` `/version` | ❌ 404 | New probe not deployed yet (expected pre-merge) |
+| `messaging-version` `/health` sha | ⚠️ `undefined` | Build stamp not deployed yet (expected pre-merge) |
+| `node-backend-ready` `/ready` | ⚠️ 404 | New probe not deployed yet |
+| `ai-router-ready` `/ready` | ⚠️ **503** | Confirms the AWS `MCP_BASE_URL` is not https (`runtime_config.py` check) |
+| `messaging-ready` `/ready` | ⚠️ 404 | New probe not deployed yet |
+
+Interpretation:
+
+- The `404`s on the new `/health`/`/ready`/`/version` paths are expected until the
+  P0 branches (`feat/service-health-readiness`, ai-router) are merged and
+  deployed; then `/ready` becomes the enforced gate.
+- The ai-router `/ready` **503** is the live P0 blocker: set AWS
+  `MCP_BASE_URL=https://backend.techitnetwork.com/api/mcp`.
+- The MCP **404** is separate from the three services and must be resolved
+  (enable/mount the MCP surface at `/api/mcp`, or fix the deployed path) before
+  `VITE_TECHIT_API` consumers work.
+
+## H8. P1/P2 execution status (2026-10-03)
+
+| Task | Repo | Branch/PR | Status |
+|---|---|---|---|
+| P1 payment activation (Dockerfile, CI, deploy, `/health`+`/ready`, `required` authority mode) | `TECHIT-PAYMENT-GATWAY` | `feat/activate-payment-gateway` | ✅ code complete; AWS keys/secrets + domain still to set |
+| P1 remove legacy `billing_logic/` LLM stub | `TECHIT-PAYMENT-GATWAY` | same branch | ✅ deleted |
+| Smoke `/ready` + build-SHA gate + 6-hourly drift workflow | `new-frontend` | `fix/production-readiness-p0` | ✅ |
+| P2 remove `fakes.go`/`*_fake.go` from production Go package | `BACKEND` | `refactor/messaging-storetest-postgres-only` | ✅ all Go packages pass |
