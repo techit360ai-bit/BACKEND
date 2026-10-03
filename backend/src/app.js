@@ -1,6 +1,6 @@
 import express from 'express'
 import cors from 'cors'
-import { verifyJwt } from './services/jwtKeyService.js'
+import { verifyJwt, assertJwtConfigured } from './services/jwtKeyService.js'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
@@ -34,6 +34,14 @@ import { authorizeCodeDestination, projectCodeCommit } from './services/codeExec
 import { readDb as readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
+import {
+  buildInfo,
+  assertCorsConfigured,
+  databaseConfigStatus,
+  expectedOriginAllowed,
+  EXPECTED_PRODUCTION_ORIGIN,
+  isProdLike,
+} from './config/runtimeConfig.js'
 import { postgresAuthority } from './middlewares/postgresAuthority.js'
 import { csrfProtection } from './middlewares/csrf.js'
 import { runBillingJobs } from './services/billingJobsService.js'
@@ -128,6 +136,43 @@ app.use(csrfProtection)
 // Shared gateway protection. Route-specific limits remain responsible for
 // credential, OTP, authorization, and other sensitive operations.
 app.use(globalRateLimit())
+
+// Liveness + readiness. Mounted before postgresAuthority/CSRF so probes never
+// load a full DB snapshot; the global limiter already exempts these paths. The
+// deep config check doubles as the codebase-level contract for AWS deploys.
+app.get('/health', (_req, res) => res.json({ status: 'ok', ...buildInfo() }))
+
+app.get('/ready', (_req, res) => {
+  const checks = []
+  const database = databaseConfigStatus()
+  checks.push({ name: 'database.config', ...database })
+
+  try {
+    checks.push({ name: 'jwt.keys', ok: true, detail: assertJwtConfigured() })
+  } catch (error) {
+    checks.push({ name: 'jwt.keys', ok: false, detail: error.message })
+  }
+
+  const cors = assertCorsConfigured()
+  checks.push({ name: 'cors.origins', ok: cors.ok, detail: cors.detail })
+
+  // The deployed SPA origin is a warning, not a hard failure, until the AWS
+  // env is finalized; it must still be visible on every probe.
+  const warnings = [{
+    name: 'cors.expected_origin',
+    ok: !isProdLike() || expectedOriginAllowed(),
+    detail: `${EXPECTED_PRODUCTION_ORIGIN} ${expectedOriginAllowed() ? 'present' : 'missing from CORS_ORIGINS'}`,
+  }]
+
+  const ok = checks.every(check => check.ok)
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'ready' : 'not_ready',
+    ...buildInfo(),
+    checks,
+    warnings,
+  })
+})
+
 // When enabled, legacy synchronous services execute against a PostgreSQL
 // snapshot and their mutations are flushed as versioned records. This bridge
 // keeps every request path on the same authority while domain repositories are
