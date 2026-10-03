@@ -30,3 +30,13 @@ export function verifyJwt(token, options = {}) {
 }
 
 export function jwtAlgorithm() { return algorithm() }
+
+/**
+ * Readiness probe: throws if the signing/verification material is missing or
+ * illegal for the current environment, otherwise returns the active algorithm.
+ * Never returns key material.
+ */
+export function assertJwtConfigured() {
+  const pair = keyPair()
+  return pair.alg
+}

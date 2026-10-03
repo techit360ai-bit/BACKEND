@@ -61,6 +61,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Use(corsMiddleware(d.CORSOrigins))
 
 	r.Get("/health", handleHealth)
+	r.Get("/ready", handleReady)
 
 	r.Route("/api/v1", func(r chi.Router) {
 		// One bucket per caller address, mirroring the Node backend's global
