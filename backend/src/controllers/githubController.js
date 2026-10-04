@@ -163,6 +163,10 @@ export async function githubCallback(req, res) {
       db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
       db.githubConnections.push(connection)
       writeAuthorityDb(db)
+      // WS-J4: feed the platform OAuth result into the MCP workspace vault so a
+      // single connect powers the GitHub MCP tools too. Best-effort — a vault
+      // failure must never break the OAuth redirect.
+      await bridgeGithubToMcpVault(stateEntry.userId, tokenData.access_token, scopes)
     }
     const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth', status: 'verified', providerSubjectId: String(githubUser.id || githubUser.node_id || githubUser.login || ''), confidence: 0.98, metadata: { providerSubjectId: String(githubUser.id || githubUser.node_id || ''), username: githubUser.login || '', profileUrl: githubUser.html_url || '', repoCount: Number(githubUser.public_repos || 0), languages, sourceProjectId: null, scopes, repoEnrichmentSkipped: !canReadRepos } })
     for (const language of languages) addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.82 })
@@ -187,6 +191,31 @@ export async function githubCallback(req, res) {
       return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
     }
     return res.status(500).json({ error: 'GitHub OAuth failed' })
+  }
+}
+
+/**
+ * WS-J4 — feed a completed connect-purpose GitHub OAuth into the MCP workspace
+ * vault so one connect powers the GitHub MCP tools. The token and its GRANTED
+ * scopes are imported into the caller's workspace lane; the vault never returns
+ * them to a client. Best-effort: any failure is logged and swallowed so it can
+ * never break the OAuth redirect.
+ */
+async function bridgeGithubToMcpVault(userId, accessToken, scopes) {
+  if (process.env.MCP_ENABLED !== 'true') return
+  try {
+    const db = readAuthorityDb()
+    const profile = (db.profiles || []).find(p => p.id === userId)
+    const workspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId : `user-${userId}`
+    const { getTechitService } = await import('../../../Plugins-MCP/server/techit-service.ts')
+    const svc = await getTechitService()
+    await svc.importCredential(workspaceId, 'github', accessToken, scopes)
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: 'mcp_vault_bridge_failed',
+      userId,
+      error: String((err && err.message) || err),
+    }))
   }
 }
 

@@ -36,6 +36,9 @@ export type PluginErrorCode =
   // deliberately distinct from auth_failed so a missing credential never looks
   // like a bad token, and never triggers any fallback.
   | 'credential_missing'
+  // Clean DENY when a stored credential's scopes do not cover what the connector
+  // requires (verified at resolve time; ADR-1 step "verify provider + scope").
+  | 'scope_insufficient'
   | 'upstream_error'
   | 'internal_error';
 

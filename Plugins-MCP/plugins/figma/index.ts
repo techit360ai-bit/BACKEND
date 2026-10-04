@@ -76,7 +76,7 @@ export class FigmaPlugin extends BasePlugin {
 
   static async install(opts: FigmaPluginOptions): Promise<FigmaPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'figma');
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'figma', manifest.auth.scopes);
     const plugin = new FigmaPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();

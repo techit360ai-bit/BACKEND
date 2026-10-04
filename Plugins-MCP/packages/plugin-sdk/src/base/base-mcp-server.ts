@@ -22,7 +22,7 @@ import {
 } from '../contract/types.js';
 import type { ManifestMCPTool } from '../manifest/schema.js';
 import type { SdkRuntime } from '../runtime.js';
-import { CredentialMissingError, type WorkspaceCredentialHandle } from '../credentials.js';
+import { CredentialMissingError, ScopeInsufficientError, type WorkspaceCredentialHandle } from '../credentials.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
 import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
@@ -165,6 +165,13 @@ export abstract class BaseMCPServer implements MCPAdapter {
           reason: 'credential_missing',
         });
         return err('credential_missing', `Connect ${this.sourceTool} for this workspace to use this tool`, e.message);
+      }
+      if (e instanceof ScopeInsufficientError) {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+          reason: 'scope_insufficient',
+          missing: e.missing,
+        });
+        return err('scope_insufficient', `Reconnect ${this.sourceTool} with all required scopes`, e.message);
       }
       await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
         message: (e as Error).message,

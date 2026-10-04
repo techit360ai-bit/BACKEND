@@ -8,6 +8,12 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InMemorySecretVault, vaultNamespace } from '@techit/infra-secrets';
+import {
+  WorkspaceCredentialHandle,
+  CredentialMissingError,
+  ScopeInsufficientError,
+  CREDENTIAL_SCOPES_KEY,
+} from '@techit/plugin-sdk';
 
 let tmpDir: string;
 
@@ -142,5 +148,65 @@ describe('missing credential is a clean DENY (no fallback)', () => {
       // Actionable: the message tells the workspace to connect the provider.
       expect(res.error.error).toMatch(/Connect github/i);
     }
+  });
+});
+
+describe('provider + scope verification at resolve time (ADR-1 step 3)', () => {
+  test('missing credential throws CredentialMissingError', async () => {
+    const handle = new WorkspaceCredentialHandle(new InMemorySecretVault(), 'github', ['repo']);
+    handle.use('ws-1');
+    await expect(handle.token('oauth_access_token')).rejects.toBeInstanceOf(CredentialMissingError);
+  });
+
+  test('recorded-but-insufficient scopes throw ScopeInsufficientError', async () => {
+    const vault = new InMemorySecretVault();
+    const scoped = vault.scopeTo('github', 'ws-1');
+    await scoped.set('oauth_access_token', 'ghp_x');
+    await scoped.set(CREDENTIAL_SCOPES_KEY, JSON.stringify(['read:user'])); // no `repo`
+
+    const handle = new WorkspaceCredentialHandle(vault, 'github', ['repo', 'read:user']);
+    handle.use('ws-1');
+    await expect(handle.token('oauth_access_token')).rejects.toBeInstanceOf(ScopeInsufficientError);
+  });
+
+  test('sufficient scopes resolve the credential', async () => {
+    const vault = new InMemorySecretVault();
+    const scoped = vault.scopeTo('github', 'ws-1');
+    await scoped.set('oauth_access_token', 'ghp_x');
+    await scoped.set(CREDENTIAL_SCOPES_KEY, JSON.stringify(['repo', 'read:user']));
+
+    const handle = new WorkspaceCredentialHandle(vault, 'github', ['repo', 'read:user']);
+    handle.use('ws-1');
+    expect(await handle.token('oauth_access_token')).toBe('ghp_x');
+  });
+
+  test('unknown scopes (opaque token) do not block, but are reported unverified', async () => {
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+    // No scopes passed on connect → scopes unknown.
+    await svc.connect('ws-unknown', 'github', 'ghp_opaque', 0, 'owner');
+    const status = (await svc.connections('ws-unknown')).find((c: { plugin: string }) => c.plugin === 'github');
+    expect(status?.connected).toBe(true);
+    expect(status?.scopes).toEqual([]);
+    expect(status?.scopesVerified).toBe(false);
+  });
+
+  test('connect records granted scopes and status verifies them', async () => {
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+    await svc.connect('ws-scoped', 'github', 'ghp_scoped', 0, 'owner', ['repo', 'read:user']);
+    const status = (await svc.connections('ws-scoped')).find((c: { plugin: string }) => c.plugin === 'github');
+    expect(status?.scopes).toEqual(['repo', 'read:user']);
+    expect(status?.scopesVerified).toBe(true);
+  });
+
+  test('importCredential (WS-J4 bridge) stores token + scopes for the workspace', async () => {
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+    const out = await svc.importCredential('ws-bridge', 'github', 'ghp_from_oauth', ['repo', 'read:user']);
+    expect(out.ok).toBe(true);
+    const status = (await svc.connections('ws-bridge')).find((c: { plugin: string }) => c.plugin === 'github');
+    expect(status?.connected).toBe(true);
+    expect(status?.scopesVerified).toBe(true);
   });
 });

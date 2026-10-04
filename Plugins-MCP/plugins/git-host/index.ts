@@ -17,7 +17,7 @@ async function register(provider: 'gitlab' | 'bitbucket', runtime: SdkRuntime, r
   const tokenName = provider === 'gitlab' ? 'MCP_GITLAB_TOKEN' : 'MCP_BITBUCKET_TOKEN'
   const modeName = provider === 'gitlab' ? 'GITLAB_CONNECTOR_MODE' : 'BITBUCKET_CONNECTOR_MODE'
   const token = process.env[tokenName] || ''
-  const creds = new WorkspaceCredentialHandle(runtime.vault, provider)
+  const creds = new WorkspaceCredentialHandle(runtime.vault, provider, manifest.auth.scopes)
   const resolveToken = async () => { const value = await creds.value('access_token'); if (!value) throw new CredentialMissingError(provider); return value }
   const real = provider === 'gitlab' ? new RealGitLabApi(resolveToken) : new RealBitbucketApi(resolveToken)
   return new GitHostPlugin(manifest, api || (process.env[modeName] === 'real' ? real : new FakeGitHostApi(provider)), token, creds).install(runtime, registry)

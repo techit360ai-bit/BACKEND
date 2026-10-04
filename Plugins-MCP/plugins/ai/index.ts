@@ -91,7 +91,7 @@ export class AiPlugin extends BasePlugin {
 
   static async install(opts: AiPluginOptions): Promise<AiPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'ai');
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'ai', manifest.auth.scopes);
     const plugin = new AiPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();

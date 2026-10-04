@@ -8,6 +8,7 @@
 import type { Actor, AgentDefinition, Role } from '@techit/core';
 import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
 import { InMemorySecretVault, type SecretVault } from '@techit/infra-secrets';
+import { CREDENTIAL_SCOPES_KEY } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
 import { registerGithubPlugin } from '@techit/plugin-github';
 import { registerBitbucketPlugin, registerGitLabPlugin } from '@techit/plugin-git-host';
@@ -91,6 +92,21 @@ export const CONNECTOR_CREDENTIALS: Record<ConnectorName, ConnectorCredential> =
 };
 
 /**
+ * Scopes each connector requires, mirroring the manifest `auth.scopes`. Used for
+ * resolve-time scope verification (ADR-1 step 3): a stored credential whose
+ * recorded scopes do not cover these is denied with `scope_insufficient`.
+ */
+const REQUIRED_SCOPES: Record<ConnectorName, readonly string[]> = {
+  github: ['repo', 'read:user'],
+  gitlab: ['api', 'read_repository'],
+  bitbucket: ['repository'],
+  notion: [],
+  figma: [],
+  web3: [],
+  ai: [],
+};
+
+/**
  * Legacy / bootstrap credential mechanism — NOT production architecture
  * (ADR-3). Environment connector tokens are imported into the canonical
  * workspace vault only when `MCP_CREDENTIAL_BOOTSTRAP=import` is set, with
@@ -142,6 +158,10 @@ export interface ConnectionStatus {
   deprecatedEnv?: boolean;
   /** Set by disconnect when a legacy env var could re-seed this credential. */
   envFallback?: boolean;
+  /** Granted scope set recorded with the credential (empty when unknown). */
+  scopes?: string[];
+  /** True when the granted scopes were known and cover what the connector requires. */
+  scopesVerified?: boolean;
 }
 
 export interface TechitService {
@@ -166,7 +186,13 @@ export interface TechitService {
   /** Per-connector credential status for ONE workspace. Never returns secret material. */
   connections(workspaceId: string): Promise<ConnectionStatus[]>;
   /** Store a connector credential in the workspace's canonical vault lane. */
-  connect(workspaceId: string, plugin: string, credential: string, ttlSeconds?: number, actorId?: string): Promise<ConnectResult>;
+  connect(workspaceId: string, plugin: string, credential: string, ttlSeconds?: number, actorId?: string, scopes?: string[]): Promise<ConnectResult>;
+  /**
+   * System import of a credential the platform already obtained (e.g. the
+   * GitHub OAuth dance). Not an HTTP route and not operator-gated: it exists so
+   * one connection powers both the platform and the MCP tool layer (WS-J4).
+   */
+  importCredential(workspaceId: string, plugin: string, credential: string, scopes?: string[]): Promise<ConnectResult>;
   /** Remove a connector credential from the workspace's canonical vault lane. */
   disconnect(workspaceId: string, plugin: string): Promise<DisconnectResult>;
 }
@@ -337,7 +363,7 @@ async function build(): Promise<TechitService> {
           .map((name) => connectionStatusFor(vault, name, workspaceId)),
       );
     },
-    connect: async (workspaceId, plugin, credential, ttlSeconds, actorId) => {
+    connect: async (workspaceId, plugin, credential, ttlSeconds, actorId, scopes) => {
       const name = asConnector(plugin);
       if (!name) return { ok: false, error: 'unknown_connector' };
       if (!enabledConnectors().has(name)) return { ok: false, error: 'connector_not_enabled' };
@@ -364,6 +390,11 @@ async function build(): Promise<TechitService> {
       // CANONICAL workspace lane only (ADR-1/ADR-2). The secret value is written
       // here and never returned; only presence/expiry leave this function.
       await vault.scopeTo(name, workspaceId).set(spec.key, value, ttl);
+      // Record granted scopes alongside the secret (metadata, not a secret) so
+      // resolve-time scope verification has something to check (ADR-1 step 3).
+      if (Array.isArray(scopes)) {
+        await vault.scopeTo(name, workspaceId).set(CREDENTIAL_SCOPES_KEY, JSON.stringify(scopes.map(String)), ttl);
+      }
       // Non-secret telemetry for the connection record (ADR-1 model fields).
       console.log(JSON.stringify({
         event: 'connector_connected',
@@ -372,6 +403,25 @@ async function build(): Promise<TechitService> {
         createdBy: actorId ?? null,
         ttlSeconds: ttl,
         scopes: [],
+        at: new Date().toISOString(),
+      }));
+      return { ok: true, connection: await connectionStatusFor(vault, name, workspaceId) };
+    },
+    importCredential: async (workspaceId, plugin, credential, scopes) => {
+      const name = asConnector(plugin);
+      if (!name || !workspaceId) return { ok: false, error: 'unknown_connector' };
+      const spec = CONNECTOR_CREDENTIALS[name];
+      const value = typeof credential === 'string' ? credential.trim() : '';
+      if (!value) return { ok: false, error: 'credential_required' };
+      await vault.scopeTo(name, workspaceId).set(spec.key, value, 0);
+      if (Array.isArray(scopes)) {
+        await vault.scopeTo(name, workspaceId).set(CREDENTIAL_SCOPES_KEY, JSON.stringify(scopes.map(String)), 0);
+      }
+      console.log(JSON.stringify({
+        event: 'connector_imported_from_platform_oauth',
+        plugin: name,
+        workspaceId,
+        scopes: Array.isArray(scopes) ? scopes : [],
         at: new Date().toISOString(),
       }));
       return { ok: true, connection: await connectionStatusFor(vault, name, workspaceId) };
@@ -556,10 +606,26 @@ async function connectionStatusFor(vault: SecretVault, name: ConnectorName, work
   const spec = CONNECTOR_CREDENTIALS[name];
   // If bootstrap import is enabled, reflect a pending migration in status.
   await maybeImportLegacyCredential(vault, name, workspaceId);
-  const lease = await vault.scopeTo(name, workspaceId).get(spec.key);
+  const scoped = vault.scopeTo(name, workspaceId);
+  const lease = await scoped.get(spec.key);
   const mode: ConnectionStatus['mode'] = process.env[spec.modeVar] === 'real' ? 'real' : 'fake';
   const base = { plugin: name, label: spec.label, kind: spec.kind, mode, optional: spec.optional };
   if (lease) {
+    // Report granted scopes when recorded, and whether they cover what this
+    // connector requires. Unknown scopes (opaque pasted token) are flagged, not
+    // silently treated as sufficient.
+    let scopes: string[] = [];
+    const scopeLease = await scoped.get(CREDENTIAL_SCOPES_KEY);
+    if (scopeLease?.value) {
+      try {
+        const parsed = JSON.parse(scopeLease.value);
+        if (Array.isArray(parsed)) scopes = parsed.map(String);
+      } catch {
+        scopes = [];
+      }
+    }
+    const required = REQUIRED_SCOPES[name] ?? [];
+    const scopesVerified = scopes.length > 0 && required.every((s) => scopes.includes(s));
     // `deprecatedEnv` tells ops the legacy var is still set and should be removed
     // once the workspace lane holds the credential (ADR-3 removal milestone).
     return {
@@ -567,6 +633,8 @@ async function connectionStatusFor(vault: SecretVault, name: ConnectorName, work
       connected: true,
       source: 'vault',
       expiresAt: lease.expiresAt,
+      scopes,
+      scopesVerified,
       ...(legacyEnvPresent(name) ? { deprecatedEnv: true } : {}),
     };
   }

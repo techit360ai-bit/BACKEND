@@ -76,14 +76,15 @@ export class GitHubPlugin extends BasePlugin {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
     // Workspace-scoped credential handle (ADR-1): the acting workspace is set
     // on bind() and the real API resolves the CANONICAL lane from it.
-    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'github');
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'github', manifest.auth.scopes);
     const plugin = new GitHubPlugin(
       manifest,
       opts.api ?? (process.env.GITHUB_CONNECTOR_MODE === 'real'
         ? new RealGitHubApi(async () => {
-            const token = await creds.value(GITHUB_TOKEN_KEY);
-            if (!token) throw new CredentialMissingError('github');
-            return token;
+            // token() enforces provider + scope at resolve time: missing
+            // credential → CredentialMissingError; recorded-but-insufficient
+            // scopes → ScopeInsufficientError.
+            return creds.token(GITHUB_TOKEN_KEY);
           })
         : new FakeGitHubApi()),
       opts.oauth ?? new StubOAuthExchange(),

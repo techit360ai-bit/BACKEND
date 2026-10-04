@@ -86,7 +86,7 @@ export class Web3Plugin extends BasePlugin {
 
   static async install(opts: Web3PluginOptions): Promise<Web3Plugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'web3');
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'web3', manifest.auth.scopes);
     const plugin = new Web3Plugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();

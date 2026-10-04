@@ -81,7 +81,7 @@ export class NotionPlugin extends BasePlugin {
 
   static async install(opts: NotionPluginOptions): Promise<NotionPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'notion');
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'notion', manifest.auth.scopes);
     const plugin = new NotionPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
