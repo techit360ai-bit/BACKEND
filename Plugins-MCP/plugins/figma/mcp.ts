@@ -8,12 +8,13 @@ import {
   BaseMCPServer,
   type ManifestMCPTool,
   type SdkRuntime,
+  type WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { FigmaApi } from './figma-api.js';
 
 export class FigmaMCPServer extends BaseMCPServer {
-  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: FigmaApi) {
-    super('figma', runtime, toolSpecs);
+  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: FigmaApi, creds?: WorkspaceCredentialHandle) {
+    super('figma', runtime, toolSpecs, creds);
 
     this.handle('get_file', async (p) => this.api.getFile(String(p.file_key)));
 

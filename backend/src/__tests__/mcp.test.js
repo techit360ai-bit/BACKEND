@@ -35,7 +35,14 @@ describe('/api/mcp authenticated integration', () => {
       .set(auth(token({ workspaceId })))
 
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ ok: true, workspaceId })
+    expect(res.body.ok).toBe(true)
+    expect(res.body.workspaceId).toBe(workspaceId)
+    // /health also echoes the actor the server actually resolved, so the
+    // dashboard can show real authority instead of a client-chosen role that
+    // resolveActor would overwrite.
+    expect(res.body.actor).toMatchObject({ kind: 'human' })
+    expect(typeof res.body.actor.id).toBe('string')
+    expect(typeof res.body.actor.role).toBe('string')
   })
 
   it('enforces approval workspace isolation, role authorization, and single-use execution', async () => {
@@ -134,6 +141,121 @@ describe('/api/mcp authenticated integration', () => {
 
     expect(approved.status).toBe(200)
     expect(approved.body).toEqual({ approved: true })
+  })
+})
+
+describe('/api/mcp connector credentials', () => {
+  it('requires a bearer token to read connections', async () => {
+    const res = await request(app).get('/api/mcp/connections')
+
+    expect(res.status).toBe(401)
+    expect(res.body.error.code).toBe('unauthenticated')
+  })
+
+  it('never returns secret material on the connections list', async () => {
+    const res = await request(app)
+      .get('/api/mcp/connections')
+      .set(auth(token({ workspaceId: `ws-conn-${Date.now()}` })))
+
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body)).toBe(true)
+    expect(res.body).toHaveLength(7)
+    for (const connection of res.body) {
+      expect(connection).toMatchObject({
+        plugin: expect.any(String),
+        connected: expect.any(Boolean),
+        mode: expect.any(String),
+      })
+      // The value must never be echoed — only presence, expiry and provenance.
+      expect(connection).not.toHaveProperty('credential')
+      expect(connection).not.toHaveProperty('value')
+      expect(connection).not.toHaveProperty('accessToken')
+    }
+  })
+
+  it('refuses credential management to a non-operator role', async () => {
+    const viewerToken = token({ sub: 'viewer-2', role: 'investor', workspaceId: `ws-conn-v-${Date.now()}` })
+
+    const created = await request(app)
+      .post('/api/mcp/connections/web3')
+      .set(auth(viewerToken))
+      .send({ credential: 'https://sepolia.example/rpc' })
+    expect(created.status).toBe(403)
+    expect(created.body.error.code).toBe('permission_denied')
+
+    const removed = await request(app)
+      .delete('/api/mcp/connections/web3')
+      .set(auth(viewerToken))
+    expect(removed.status).toBe(403)
+    expect(removed.body.error.code).toBe('permission_denied')
+  })
+
+  it('rejects an unknown connector and an empty credential', async () => {
+    const ownerToken = token({ sub: 'owner-3', role: 'founder', workspaceId: `ws-conn-b-${Date.now()}` })
+
+    const unknown = await request(app)
+      .post('/api/mcp/connections/not-a-connector')
+      .set(auth(ownerToken))
+      .send({ credential: 'x' })
+    expect(unknown.status).toBe(404)
+    expect(unknown.body.error).toBe('unknown_connector')
+
+    const blank = await request(app)
+      .post('/api/mcp/connections/web3')
+      .set(auth(ownerToken))
+      .send({ credential: '   ' })
+    expect(blank.status).toBe(400)
+    expect(blank.body.error).toBe('credential_required')
+
+    // A stored credential would be unusable if the URL were not a URL.
+    const badUrl = await request(app)
+      .post('/api/mcp/connections/web3')
+      .set(auth(ownerToken))
+      .send({ credential: 'not a url' })
+    expect(badUrl.status).toBe(400)
+    expect(badUrl.body.error).toBe('rpc_url_invalid')
+  })
+
+  it('connects and disconnects a credential end to end', async () => {
+    const ownerToken = token({ sub: 'owner-4', role: 'founder', workspaceId: `ws-conn-e2e-${Date.now()}` })
+
+    const connected = await request(app)
+      .post('/api/mcp/connections/web3')
+      .set(auth(ownerToken))
+      .send({ credential: 'https://sepolia.example/rpc' })
+
+    expect(connected.status).toBe(200)
+    expect(connected.body.ok).toBe(true)
+    expect(connected.body.connection).toMatchObject({
+      plugin: 'web3',
+      connected: true,
+      source: 'vault',
+      kind: 'rpc_url',
+    })
+    // No explicit TTL means the credential does not expire — see the
+    // InMemorySecretVault default, which now matches the Postgres vault.
+    expect(connected.body.connection.expiresAt).toBe('9999-12-31T23:59:59.999Z')
+
+    const listed = await request(app)
+      .get('/api/mcp/connections')
+      .set(auth(ownerToken))
+    const web3 = listed.body.find((c) => c.plugin === 'web3')
+    expect(web3.connected).toBe(true)
+
+    const disconnected = await request(app)
+      .delete('/api/mcp/connections/web3')
+      .set(auth(ownerToken))
+
+    expect(disconnected.status).toBe(200)
+    expect(disconnected.body.ok).toBe(true)
+    expect(disconnected.body.removed).toBe(true)
+
+    const after = await request(app)
+      .get('/api/mcp/connections')
+      .set(auth(ownerToken))
+    const web3After = after.body.find((c) => c.plugin === 'web3')
+    expect(web3After.connected).toBe(false)
+    expect(web3After.source).toBe('none')
   })
 })
 

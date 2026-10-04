@@ -7,13 +7,14 @@ import {
   BaseMCPServer,
   type ManifestMCPTool,
   type SdkRuntime,
+  type WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { Web3Api } from './web3-api.js';
 import { verifySiwe } from './siwe.js';
 
 export class Web3MCPServer extends BaseMCPServer {
-  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: Web3Api) {
-    super('web3', runtime, toolSpecs);
+  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: Web3Api, creds?: WorkspaceCredentialHandle) {
+    super('web3', runtime, toolSpecs, creds);
 
     this.handle('get_balance', async (p) => this.api.getBalance(String(p.address)));
 

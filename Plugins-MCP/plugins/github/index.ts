@@ -16,12 +16,15 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { GitHubConnector } from './connector.js';
 import { GitHubMCPServer } from './mcp.js';
 import { FakeGitHubApi, RealGitHubApi, type GitHubApi } from './github-api.js';
 import { StubOAuthExchange, resolveToken, storeToken, type OAuthExchange } from './auth.js';
+import { GITHUB_TOKEN_KEY } from './auth.js';
 
 const MANIFEST_PATH = fileURLToPath(new URL('./techit.plugin.yaml', import.meta.url));
 
@@ -45,52 +48,54 @@ export class GitHubPlugin extends BasePlugin {
     private readonly api: GitHubApi,
     private readonly oauth: OAuthExchange,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
 
   protected override async authenticateImpl(secrets: ScopedSecrets): Promise<AuthToken> {
-    // Dev/reference convenience: if no token is stored yet, run the (stub) OAuth
-    // exchange once so the lifecycle reaches `ready`. Production supplies a real
-    // exchange and an explicit connect step.
-    const existing = await secrets.get('oauth_access_token');
-    if (!existing) {
-      if (process.env.MCP_GITHUB_TOKEN) {
-        await secrets.set('oauth_access_token', process.env.MCP_GITHUB_TOKEN);
-      } else if (['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase())) {
-        throw new Error('MCP_GITHUB_TOKEN is required for the production GitHub connector.');
-      } else {
-        await storeToken(secrets, this.oauth, 'devcode');
-      }
+    // Boot MUST NOT require a credential: credentials are per-workspace (ADR-1)
+    // and resolved lazily at invoke time from the canonical vault lane. Dev
+    // convenience only: seed a throwaway token so a local lifecycle reaches
+    // `ready`. Production boots with an empty vault and fails closed per request.
+    const existing = await secrets.get(GITHUB_TOKEN_KEY);
+    if (!existing && !['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase())) {
+      await storeToken(secrets, this.oauth, 'devcode');
     }
-    return resolveToken(secrets);
+    const lease = await secrets.get(GITHUB_TOKEN_KEY);
+    return { accessToken: lease?.value ?? '', tokenType: 'bearer', scopes: [], expiresAt: lease?.expiresAt };
   }
 
   /** Build connector + MCP server once secrets are bound. */
   private buildComponents(): void {
     this.connector = new GitHubConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new GitHubMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new GitHubMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   static async install(opts: GithubPluginOptions): Promise<GitHubPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
+    // Workspace-scoped credential handle (ADR-1): the acting workspace is set
+    // on bind() and the real API resolves the CANONICAL lane from it.
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'github', manifest.auth.scopes);
     const plugin = new GitHubPlugin(
       manifest,
       opts.api ?? (process.env.GITHUB_CONNECTOR_MODE === 'real'
-        ? new RealGitHubApi(async () => (await pluginTokenFromRuntime(opts.runtime)) ?? '')
+        ? new RealGitHubApi(async () => {
+            // token() enforces provider + scope at resolve time: missing
+            // credential → CredentialMissingError; recorded-but-insufficient
+            // scopes → ScopeInsufficientError.
+            return creds.token(GITHUB_TOKEN_KEY);
+          })
         : new FakeGitHubApi()),
       opts.oauth ?? new StubOAuthExchange(),
       opts.workspaceId,
+      creds,
     );
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);
     return plugin;
   }
-}
-
-async function pluginTokenFromRuntime(runtime: SdkRuntime): Promise<string | undefined> {
-  return (await runtime.vault.scopeTo('github').get('oauth_access_token'))?.value;
 }
 
 export async function registerGithubPlugin(opts: GithubPluginOptions): Promise<GitHubPlugin> {

@@ -17,6 +17,8 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { NotionConnector } from './connector.js';
@@ -44,6 +46,7 @@ export class NotionPlugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: NotionApi | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -61,23 +64,25 @@ export class NotionPlugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new NotionConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new NotionMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new NotionMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): NotionApi {
-    const real = process.env.NOTION_CONNECTOR_MODE === 'real' && !!process.env.NOTION_TOKEN;
+    // Real mode is selected by the connector mode alone (ADR-3): credentials are
+    // per-workspace and resolved from the canonical vault lane at call time, so
+    // the presence of a legacy env token must not decide the API.
+    const real = process.env.NOTION_CONNECTOR_MODE === 'real';
     if (real) {
-      return new RealNotionApi(async () => {
-        const lease = await this.secrets.get(NOTION_TOKEN_KEY);
-        return lease?.value ?? process.env.NOTION_TOKEN ?? '';
-      });
+      // token() enforces provider + scope at resolve time (ADR-1 step 3).
+      return new RealNotionApi(async () => this.creds.token(NOTION_TOKEN_KEY));
     }
     return new FakeNotionApi();
   }
 
   static async install(opts: NotionPluginOptions): Promise<NotionPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new NotionPlugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'notion', manifest.auth.scopes);
+    const plugin = new NotionPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);

@@ -11,10 +11,10 @@ import type {
 } from '@techit/core';
 import type { AuditEntry, AuditInput, AuditLogger } from '@techit/infra-audit';
 import type { ScopedSecrets, SecretLease, SecretVault } from '@techit/infra-secrets';
+import { NEVER_EXPIRES, vaultNamespace } from '@techit/infra-secrets';
 import { Pool, type PoolClient, type PoolConfig } from 'pg';
 
 const MIGRATION_PATH = fileURLToPath(new URL('../migrations/001_mcp_production.sql', import.meta.url));
-const NEVER_EXPIRES = '9999-12-31T23:59:59.999Z';
 
 function productionLike(): boolean {
   return ['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase());
@@ -271,9 +271,8 @@ export class EncryptedPgSecretVault implements SecretVault {
     this.keys = new Map([this.primary, ...previous].map((key) => [key.id, key]));
   }
 
-  scopeTo(plugin: string): ScopedSecrets {
-    if (!plugin || !/^[a-z0-9_-]+$/i.test(plugin)) throw new Error(`invalid plugin namespace: ${plugin}`);
-    const namespace = `secrets://${plugin}/`;
+  scopeTo(plugin: string, owner?: string): ScopedSecrets {
+    const namespace = vaultNamespace(plugin, owner);
     return {
       namespace,
       get: (key) => this.get(namespace, key),
@@ -282,7 +281,18 @@ export class EncryptedPgSecretVault implements SecretVault {
         await this.set(namespace, key, value, ttlSeconds);
         return { value, expiresAt: expiry(ttlSeconds) };
       },
+      delete: (key) => this.remove(namespace, key),
     };
+  }
+
+  /** Remove a stored secret. Returns true when a row was actually deleted. */
+  private async remove(namespace: string, key: string): Promise<boolean> {
+    validateSecretKey(key);
+    const result = await this.pool.query(
+      'DELETE FROM mcp_secrets WHERE namespace = $1 AND key_name = $2',
+      [namespace, key],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   private async get(namespace: string, key: string): Promise<SecretLease | undefined> {
@@ -295,7 +305,7 @@ export class EncryptedPgSecretVault implements SecretVault {
     if (result.rowCount !== 1) return undefined;
     const row = result.rows[0];
     if (row.expires_at && new Date(row.expires_at).getTime() <= Date.now()) {
-      await this.pool.query('DELETE FROM mcp_secrets WHERE namespace = $1 AND key_name = $2', [namespace, key]);
+      await this.remove(namespace, key);
       return undefined;
     }
     const encryptionKey = this.keys.get(String(row.key_id));

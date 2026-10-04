@@ -22,6 +22,7 @@ import {
 } from '../contract/types.js';
 import type { ManifestMCPTool } from '../manifest/schema.js';
 import type { SdkRuntime } from '../runtime.js';
+import { CredentialMissingError, ScopeInsufficientError, type WorkspaceCredentialHandle } from '../credentials.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
 import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
@@ -49,12 +50,19 @@ export abstract class BaseMCPServer implements MCPAdapter {
     protected readonly sourceTool: string,
     protected readonly runtime: SdkRuntime,
     toolSpecs: ManifestMCPTool[],
+    /**
+     * Workspace-scoped credential handle. When supplied, `bind(ctx)` points it
+     * at the acting workspace so real-API resolvers read the CANONICAL lane for
+     * that workspace (ADR-1), never a process-wide credential.
+     */
+    protected readonly creds?: WorkspaceCredentialHandle,
   ) {
     for (const spec of toolSpecs) this.tools.set(spec.name, { spec, handler: notImplemented(spec.name) });
   }
 
   bind(ctx: CallContext): this {
     this.ctx = ctx;
+    this.creds?.use(ctx.resourceWorkspaceId);
     return this;
   }
 
@@ -149,6 +157,22 @@ export abstract class BaseMCPServer implements MCPAdapter {
       });
       return ok(data);
     } catch (e) {
+      // A missing workspace credential is a clean DENY, not an upstream error.
+      // This is the "Credential missing? → DENY → ask the workspace to connect"
+      // edge (ADR-1/ADR-3). No fallback is attempted anywhere above.
+      if (e instanceof CredentialMissingError) {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+          reason: 'credential_missing',
+        });
+        return err('credential_missing', `Connect ${this.sourceTool} for this workspace to use this tool`, e.message);
+      }
+      if (e instanceof ScopeInsufficientError) {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+          reason: 'scope_insufficient',
+          missing: e.missing,
+        });
+        return err('scope_insufficient', `Reconnect ${this.sourceTool} with all required scopes`, e.message);
+      }
       await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
         message: (e as Error).message,
       });

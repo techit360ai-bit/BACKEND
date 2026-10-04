@@ -76,6 +76,7 @@ import {
   walletSummaryGet,
   applicationsList,
   incubationPublish,
+  executionIntelligence,
   opportunityApply,
   watchlist,
   watchlistAdd,
@@ -118,6 +119,20 @@ function bindCollection(collectionName, responseKey, itemKey, itemPrefix) {
     req.itemPrefix = itemPrefix
     next()
   }
+}
+
+/**
+ * The workspace `connectors` collection predates the canonical MCP registry
+ * (BACKEND Plugins-MCP, `/api/mcp/*`). It is retained for existing deployments
+ * but is NOT the production credential surface: connector credentials are
+ * workspace-scoped in the MCP vault (ADR-1) and the UI now reads
+ * `/api/mcp/tools` + `/api/mcp/connections`. Deprecated — removal is tied to the
+ * legacy bootstrap-credential milestone (2026-12-31).
+ */
+function deprecatedConnectorCollection(_req, res, next) {
+  res.set('Deprecation', 'true')
+  res.set('Link', '</api/mcp/connections>; rel="successor-version"')
+  next()
 }
 
 router.get('/founder/projects', founderProjects)
@@ -202,6 +217,8 @@ router.post('/incubation/intakes', intakeCreate)
 router.get('/incubation/intakes/:intakeId', intakeGet)
 router.post('/incubation/intakes/:intakeId/promote', intakePromote)
 router.post('/incubation/publish', incubationPublish)
+// WS-H: one canonical execution-intelligence view for every consumer surface.
+router.get('/execution-intelligence', executionIntelligence)
 router.get('/incubation/analyses', analyses)
 router.post('/incubation/analyses', analysisCreate)
 router.get('/incubation/analyses/:analysisId', analysisGet)
@@ -247,12 +264,16 @@ router.patch('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspace
 router.get('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItems)
 router.post('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemCreate)
 router.patch('/workspaces/:workspaceId/agents/:itemId', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemPatch)
-router.get('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItems)
-router.post('/workspaces/:workspaceId/connectors', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemCreate)
-router.get('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialGet)
-router.post('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialSet)
-router.delete('/workspaces/:workspaceId/connectors/:itemId/credential', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialRemove)
-router.patch('/workspaces/:workspaceId/connectors/:itemId', bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemPatch)
+// Legacy workspace connector surface — retained for compatibility, deprecated in
+// favour of /api/mcp/connections (ADR-1). The sealed-credential routes below were
+// added on main; they are kept working but marked deprecated so nothing new
+// builds on the non-MCP credential store.
+router.get('/workspaces/:workspaceId/connectors', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItems)
+router.post('/workspaces/:workspaceId/connectors', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemCreate)
+router.get('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialGet)
+router.post('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialSet)
+router.delete('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialRemove)
+router.patch('/workspaces/:workspaceId/connectors/:itemId', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItems)
 router.post('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemCreate)
 router.patch('/workspaces/:workspaceId/reports/:itemId', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemPatch)

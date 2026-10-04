@@ -9,12 +9,13 @@ import {
   BaseMCPServer,
   type ManifestMCPTool,
   type SdkRuntime,
+  type WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { AiHarnessApi } from './ai-api.js';
 
 export class AiHarnessMCPServer extends BaseMCPServer {
-  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: AiHarnessApi) {
-    super('ai', runtime, toolSpecs);
+  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: AiHarnessApi, creds?: WorkspaceCredentialHandle) {
+    super('ai', runtime, toolSpecs, creds);
 
     this.handle(
       'generate_code',

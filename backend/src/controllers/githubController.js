@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { addVerifiedSkill, appendTrustProof } from '../services/trustVerificationAuthority.js'
+import { GITHUB_OAUTH_SCOPES_CONNECT, hasScopes, parseGrantedScopes } from '../config/github.js'
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'test-github-client-id'
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || 'test-github-client-secret'
@@ -47,13 +48,19 @@ export function githubAuthorize(req, res) {
   const state = createId('ghstate')
   const db = readAuthorityDb()
   db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
-  db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso() })
+  // `purpose` records which surface started the flow. Both surfaces share this
+  // one array and this one callback, so without it the callback cannot tell a
+  // connect attempt from a trust attempt and must guess at what to enrich.
+  db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso(), purpose: 'connect' })
   writeAuthorityDb(db)
 
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
     redirect_uri: GITHUB_REDIRECT_URI,
-    scope: 'repo read:user',
+    // The connect flow needs repo access; the trust surface requests a narrower
+    // set against the same callback (services/trustVerificationAuthority.js).
+    // Purpose-scoping is what prevents asking a trust-only user for `repo`.
+    scope: GITHUB_OAUTH_SCOPES_CONNECT,
     state,
   })
   return res.json({ url: `https://github.com/login/oauth/authorize?${params}` })
@@ -109,28 +116,59 @@ export async function githubCallback(req, res) {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
     })
     const githubUser = await userRes.json()
-    const reposRes = await fetch('https://api.github.com/user/repos?sort=updated&per_page=50', { headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/vnd.github+json' } })
-    const repos = reposRes.ok ? await reposRes.json().catch(() => []) : []
+
+    // Record what GitHub ACTUALLY granted, not what we asked for. GitHub
+    // returns the intersection of the request and the OAuth app's configured
+    // scopes, so a partial grant is always possible. Previously neither this
+    // callback nor githubStatus stored it, which is why a `repo`-less token
+    // degraded into `languages = []` and zero verified skills with no
+    // indication that anything had gone wrong.
+    const scopes = parseGrantedScopes(tokenData.scope)
+    const canReadRepos = hasScopes(scopes, ['repo'])
+    let repos = []
+    if (canReadRepos) {
+      const reposRes = await fetch('https://api.github.com/user/repos?sort=updated&per_page=50', { headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/vnd.github+json' } })
+      repos = reposRes.ok ? await reposRes.json().catch(() => []) : []
+    }
     const languages = [...new Set((Array.isArray(repos) ? repos : []).map(repo => repo.language).filter(Boolean))].slice(0, 20)
 
-    const encryptedToken = encryptToken(tokenData.access_token)
-    if (!encryptedToken) return res.status(503).json({ error: 'GitHub token encryption is not configured' })
-    const connection = {
-      id: createId('ghconn'),
-      userId: stateEntry.userId,
-      provider: 'github',
-      accessTokenEncrypted: encryptedToken,
-      username: githubUser.login || '',
-      avatarUrl: githubUser.avatar_url || '',
-      profileUrl: githubUser.html_url || '',
-      repoCount: githubUser.public_repos || 0,
-      connectedAt: nowIso(),
+    // A trust-purpose flow produces a *verification proof*, not a connector.
+    // The two surfaces share this callback, and the trust surface now requests
+    // only identity scopes (no `repo`), so writing it as a connection would
+    // DOWNGRADE a user's existing repo-scoped connect to a repo-less one. The
+    // report's recommendation is explicit: the trust route stops at a proof and
+    // never mints a connector token.
+    const connectPurpose = (stateEntry.purpose || 'connect') !== 'trust'
+    if (connectPurpose) {
+      const encryptedToken = encryptToken(tokenData.access_token)
+      if (!encryptedToken) return res.status(503).json({ error: 'GitHub token encryption is not configured' })
+      const connection = {
+        id: createId('ghconn'),
+        userId: stateEntry.userId,
+        provider: 'github',
+        accessTokenEncrypted: encryptedToken,
+        username: githubUser.login || '',
+        avatarUrl: githubUser.avatar_url || '',
+        profileUrl: githubUser.html_url || '',
+        repoCount: githubUser.public_repos || 0,
+        scopes,
+        // True when we could not read repos because `repo` was not granted. The
+        // proof is still valid — it is built from /user — but it carries no
+        // language evidence, and that distinction is now visible.
+        repoEnrichmentSkipped: !canReadRepos,
+        connectedVia: stateEntry.purpose || 'connect',
+        connectedAt: nowIso(),
+      }
+      if (!db.githubConnections) db.githubConnections = []
+      db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
+      db.githubConnections.push(connection)
+      writeAuthorityDb(db)
+      // WS-J4: feed the platform OAuth result into the MCP workspace vault so a
+      // single connect powers the GitHub MCP tools too. Best-effort — a vault
+      // failure must never break the OAuth redirect.
+      await bridgeGithubToMcpVault(stateEntry.userId, tokenData.access_token, scopes)
     }
-    if (!db.githubConnections) db.githubConnections = []
-    db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-    db.githubConnections.push(connection)
-    writeAuthorityDb(db)
-    const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth', status: 'verified', providerSubjectId: String(githubUser.id || githubUser.node_id || githubUser.login || ''), confidence: 0.98, metadata: { providerSubjectId: String(githubUser.id || githubUser.node_id || ''), username: githubUser.login || '', profileUrl: githubUser.html_url || '', repoCount: Number(githubUser.public_repos || 0), languages, sourceProjectId: null } })
+    const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth', status: 'verified', providerSubjectId: String(githubUser.id || githubUser.node_id || githubUser.login || ''), confidence: 0.98, metadata: { providerSubjectId: String(githubUser.id || githubUser.node_id || ''), username: githubUser.login || '', profileUrl: githubUser.html_url || '', repoCount: Number(githubUser.public_repos || 0), languages, sourceProjectId: null, scopes, repoEnrichmentSkipped: !canReadRepos } })
     for (const language of languages) addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.82 })
 
     return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
@@ -156,11 +194,37 @@ export async function githubCallback(req, res) {
   }
 }
 
+/**
+ * WS-J4 — feed a completed connect-purpose GitHub OAuth into the MCP workspace
+ * vault so one connect powers the GitHub MCP tools. The token and its GRANTED
+ * scopes are imported into the caller's workspace lane; the vault never returns
+ * them to a client. Best-effort: any failure is logged and swallowed so it can
+ * never break the OAuth redirect.
+ */
+async function bridgeGithubToMcpVault(userId, accessToken, scopes) {
+  if (process.env.MCP_ENABLED !== 'true') return
+  try {
+    const db = readAuthorityDb()
+    const profile = (db.profiles || []).find(p => p.id === userId)
+    const workspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId : `user-${userId}`
+    const { getTechitService } = await import('../../../Plugins-MCP/server/techit-service.ts')
+    const svc = await getTechitService()
+    await svc.importCredential(workspaceId, 'github', accessToken, scopes)
+  } catch (err) {
+    console.error(JSON.stringify({
+      event: 'mcp_vault_bridge_failed',
+      userId,
+      error: String((err && err.message) || err),
+    }))
+  }
+}
+
 export function githubStatus(req, res) {
   const db = readAuthorityDb()
   const connections = db.githubConnections || []
   const connection = connections.find(c => c.userId === req.user.id)
   if (!connection) return res.json({ connected: false })
+  const grantedScopes = connection.scopes || []
   return res.json({
     connected: true,
     username: connection.username,
@@ -168,6 +232,12 @@ export function githubStatus(req, res) {
     profileUrl: connection.profileUrl,
     repoCount: connection.repoCount,
     connectedAt: connection.connectedAt,
+    // Enough for a caller to tell a healthy connection from a scope-starved
+    // one, which previously looked identical from the outside.
+    scopes: grantedScopes,
+    repoAccess: grantedScopes.length === 0 ? 'unknown' : (grantedScopes.includes('repo') ? 'granted' : 'missing'),
+    repoEnrichmentSkipped: Boolean(connection.repoEnrichmentSkipped),
+    connectedVia: connection.connectedVia || null,
   })
 }
 

@@ -20,3 +20,6 @@ export { emitContribution } from './hooks/contribution.js';
 
 // Runtime
 export * from './runtime.js';
+
+// Workspace-scoped credential handle (ADR-1/ADR-2)
+export * from './credentials.js';

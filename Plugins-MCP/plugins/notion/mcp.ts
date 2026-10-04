@@ -8,12 +8,13 @@ import {
   BaseMCPServer,
   type ManifestMCPTool,
   type SdkRuntime,
+  type WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { NotionApi, NotionBlock } from './notion-api.js';
 
 export class NotionMCPServer extends BaseMCPServer {
-  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: NotionApi) {
-    super('notion', runtime, toolSpecs);
+  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: NotionApi, creds?: WorkspaceCredentialHandle) {
+    super('notion', runtime, toolSpecs, creds);
 
     this.handle('search', async (p) => this.api.search(p.query ? String(p.query) : undefined));
 

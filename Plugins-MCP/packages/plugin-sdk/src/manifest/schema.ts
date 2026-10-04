@@ -7,7 +7,14 @@
 
 import { z } from 'zod';
 
-export const AuthKind = z.enum(['oauth2', 'api_key', 'none']);
+/**
+ * Auth taxonomy — kept in lockstep with the credential descriptors in
+ * `server/techit-service.ts`. `rpc_url` was added because web3 uses a provider
+ * URL, not an API key, and `none` marks connectors that work with no credential
+ * at all. Drift between a manifest and the credential descriptor is a bug: it
+ * misleads a generic "Connect" UI (report F6).
+ */
+export const AuthKind = z.enum(['oauth2', 'api_key', 'rpc_url', 'none']);
 
 export const AuthSpec = z.object({
   kind: AuthKind,

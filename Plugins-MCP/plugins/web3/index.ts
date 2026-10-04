@@ -15,6 +15,7 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { Web3Connector } from './connector.js';
@@ -47,6 +48,7 @@ export class Web3Plugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: Web3Api | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -65,24 +67,24 @@ export class Web3Plugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new Web3Connector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new Web3MCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new Web3MCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): Web3Api {
-    const url = envRpcUrl();
-    const real = process.env.WEB3_CONNECTOR_MODE === 'real' && !!url;
+    // Real mode is selected by the connector mode alone (ADR-3): the RPC URL is
+    // a per-workspace vault entry resolved at call time, not an env prerequisite.
+    const real = process.env.WEB3_CONNECTOR_MODE === 'real';
     if (real) {
-      return new RealWeb3Api(async () => {
-        const lease = await this.secrets.get(WEB3_RPC_KEY);
-        return lease?.value ?? url ?? '';
-      });
+      // token() enforces provider + scope at resolve time (ADR-1 step 3).
+      return new RealWeb3Api(async () => this.creds.token(WEB3_RPC_KEY));
     }
     return new FakeWeb3Api();
   }
 
   static async install(opts: Web3PluginOptions): Promise<Web3Plugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new Web3Plugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'web3', manifest.auth.scopes);
+    const plugin = new Web3Plugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);
