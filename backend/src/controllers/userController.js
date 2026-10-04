@@ -1,9 +1,11 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
+import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 import { publicTrustFor } from '../services/trustVerificationAuthority.js'
+import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -110,7 +112,11 @@ export function avatarRemove(req, res) {
 function publicProfile(profile, db, viewerId) {
   const posts = db.feedPosts.filter(p => p.authorId === profile.id)
   const comments = db.feedComments.filter(c => c.authorId === profile.id)
-  const connections = (db.networkEdges || []).filter(edge => edge.sourceId === profile.id || edge.targetId === profile.id).length
+  // Edges are written as fromEntityId/toEntityId (see discoveryService.appendEdge),
+  // so the old sourceId/targetId read always counted zero. Count distinct
+  // accepted counterparts instead of double-counting reciprocal edges.
+  const connections = distinctConnectionIds(db, profile.id).size
+  const connectionStatus = connectionStatusFor(db, viewerId, profile.id)
   const recentActivity = [
     ...posts.map(p => ({
       id: p.id,
@@ -157,6 +163,8 @@ function publicProfile(profile, db, viewerId) {
     subscriptionLabel: isOwner || sharedContext ? (activeSubscription(db, profile.id) ? 'Subscriber' : null) : null,
     sharedContext,
     isOwnProfile: isOwner,
+    connectionStatus,
+    connectionRequestId: pendingConnectionRequestId(db, viewerId, profile.id),
     stats: {
       decay: null,
       stageProgress: null,
@@ -347,7 +355,75 @@ function invitationContent(invitation) {
   ].join(' ')
 }
 
-export function connectUser(req, res) {
+function connectionRequests(db) {
+  if (!Array.isArray(db.connectionRequests)) db.connectionRequests = []
+  return db.connectionRequests
+}
+
+function connectionCounterpart(edge, userId) {
+  return edge.fromEntityId === userId ? edge.toEntityId : edge.fromEntityId
+}
+
+function distinctConnectionIds(db, userId) {
+  const ids = new Set()
+  for (const edge of (db.networkEdges || [])) {
+    if (edge.type !== 'CONNECTS') continue
+    if (edge.fromEntityId !== userId && edge.toEntityId !== userId) continue
+    const other = connectionCounterpart(edge, userId)
+    if (other && other !== userId) ids.add(other)
+  }
+  return ids
+}
+
+function connectionStatusFor(db, viewerId, profileId) {
+  if (!viewerId || viewerId === profileId) return 'self'
+  const activeEdge = (db.networkEdges || []).some(edge => edge.type === 'CONNECTS'
+    && ((edge.fromEntityId === viewerId && edge.toEntityId === profileId) || (edge.fromEntityId === profileId && edge.toEntityId === viewerId)))
+  const acceptedRequest = connectionRequests(db).some(row => row.status === 'active'
+    && ((row.fromUserId === viewerId && row.toUserId === profileId) || (row.fromUserId === profileId && row.toUserId === viewerId)))
+  if (activeEdge || acceptedRequest) return 'connected'
+  const outgoing = connectionRequests(db).some(row => row.fromUserId === viewerId && row.toUserId === profileId && row.status === 'pending')
+  if (outgoing) return 'pending'
+  const incoming = connectionRequests(db).some(row => row.fromUserId === profileId && row.toUserId === viewerId && row.status === 'pending')
+  if (incoming) return 'incoming'
+  return 'none'
+}
+
+function connectionRequestSummary(db, row) {
+  const from = db.profiles.find(p => p.id === row.fromUserId)
+  return {
+    id: row.id,
+    fromUserId: row.fromUserId,
+    name: userName(from, 'TechIT member'),
+    avatar: from?.avatarUrl || avatarGradient(row.fromUserId),
+    role: from?.role || 'community',
+    username: from?.username || null,
+    message: from?.oneLiner || from?.bio || '',
+    createdAt: row.createdAt,
+    status: row.status,
+  }
+}
+
+function pendingConnectionRequestId(db, viewerId, profileId) {
+  if (!viewerId || !profileId) return null
+  const row = connectionRequests(db).find(item => item.fromUserId === profileId && item.toUserId === viewerId && item.status === 'pending')
+  return row?.id || null
+}
+
+// The JSON authority store and the PostgreSQL content store are separate read
+// paths (CONTENT_READ_SOURCE). Notifications created here must reach both, or
+// a receiver whose notifications are read from Postgres never sees the request.
+async function persistNotificationToContent(notification) {
+  if (!notification || !contentWriteEnabled()) return
+  try {
+    await createNotificationPostgres(notification)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'connection_notification', error: error.message }))
+    if (!contentWriteFallbackEnabled()) throw error
+  }
+}
+
+export async function connectUser(req, res) {
   const normalized = normalizeInvitation(req.body?.invitation)
   if (normalized.error) return res.status(400).json({ error: normalized.error })
   const invitation = normalized.invitation
@@ -356,30 +432,17 @@ export function connectUser(req, res) {
     const actor = db.profiles.find(p => p.id === req.user.id)
     if (!target) return { status: 404, error: 'Profile not found' }
     if (target.id === req.user.id) return { status: 400, error: 'Cannot connect with yourself' }
-    const exists = db.notifications.some(n =>
-      n.userId === target.id &&
-      n.actorId === req.user.id &&
-      n.type === 'collab' &&
-      n.linkTo === `/feed/profile/${req.user.id}` &&
-      (invitation
-        ? n.metadata?.invitation?.projectId === invitation.projectId
-        : !n.metadata?.invitation)
-    )
-    if (!exists) {
-      db.notifications.push({
-        id: createId('notif'),
-        userId: target.id,
-        actorId: req.user.id,
-        type: 'collab',
-        read: false,
-        content: invitation ? invitationContent(invitation) : 'wants to connect with you',
-        author: userName(actor),
-        avatar: avatarGradient(req.user.id),
-        linkTo: `/feed/profile/${req.user.id}`,
-        metadata: invitation ? { invitation } : undefined,
-        createdAt: nowIso(),
-      })
-    }
+    const requests = connectionRequests(db)
+    const now = nowIso()
+    // If the target already invited us, this is an acceptance: connect both
+    // directions immediately rather than leaving two dangling pending rows.
+    const inbound = requests.find(row => row.fromUserId === target.id && row.toUserId === req.user.id && row.status === 'pending')
+    const existing = requests.find(row => row.fromUserId === req.user.id && row.toUserId === target.id)
+    const request = existing || { id: createId('connreq'), fromUserId: req.user.id, toUserId: target.id, status: 'pending', createdAt: now, updatedAt: now }
+    if (!existing) requests.push(request)
+    if (existing && existing.status !== 'active') { existing.status = 'pending'; existing.updatedAt = now }
+    if (inbound) { inbound.status = 'active'; inbound.respondedAt = now; inbound.updatedAt = now; request.status = 'active'; request.respondedAt = now }
+    const connected = request.status === 'active'
     const event = appendPlatformEventInDb(db, {
       userId: req.user.id,
       actorId: req.user.id,
@@ -390,8 +453,133 @@ export function connectUser(req, res) {
       metadata: { targetName: userName(target) },
     })
     appendRelationshipInDb(db, req.user.id, event)
-    return { status: 200 }
+    if (connected) {
+      const reciprocal = appendPlatformEventInDb(db, {
+        userId: target.id,
+        actorId: target.id,
+        eventType: 'connect',
+        entityType: 'person',
+        entityId: req.user.id,
+        importance: 'HIGH',
+        metadata: { targetName: userName(actor) },
+      })
+      appendRelationshipInDb(db, target.id, reciprocal)
+    }
+    let notification = null
+    if (!connected) {
+      const exists = db.notifications.some(n =>
+        n.userId === target.id
+        && n.actorId === req.user.id
+        && n.type === 'collab'
+        && n.metadata?.connectionRequestId === request.id
+      )
+      if (!exists) {
+        notification = {
+          id: createId('notif'),
+          userId: target.id,
+          actorId: req.user.id,
+          type: 'collab',
+          read: false,
+          content: invitation ? invitationContent(invitation) : 'wants to connect with you',
+          author: userName(actor),
+          avatar: avatarGradient(req.user.id),
+          linkTo: `/feed/profile/${req.user.id}`,
+          metadata: invitation
+            ? { invitation, connectionRequestId: request.id, connectionRequest: true }
+            : { connectionRequestId: request.id, connectionRequest: true },
+          createdAt: now,
+        }
+        db.notifications.push(notification)
+      }
+    }
+    return { status: 200, notification, requestId: request.id, targetId: target.id, connectionStatus: connected ? 'connected' : 'pending' }
   })
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
-  return res.json({ ok: true })
+  await persistNotificationToContent(result.notification)
+  // Targeted recommendation invalidation: a new connection changes the graph for
+  // both people involved, so clear only their caches (never a broad flush).
+  void invalidateDiscoveryUser(req.user.id)
+  if (result.targetId && result.targetId !== req.user.id) void invalidateDiscoveryUser(result.targetId)
+  return res.json({ ok: true, connectionRequestId: result.requestId, status: result.connectionStatus })
+}
+
+export function listConnectionRequests(req, res) {
+  const db = readAuthorityDb()
+  const requests = connectionRequests(db)
+    .filter(row => row.toUserId === req.user.id && row.status === 'pending')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(row => connectionRequestSummary(db, row))
+  return res.json({ requests })
+}
+
+export async function respondConnectionRequest(req, res) {
+  const decision = String(req.body?.decision || '').trim().toLowerCase()
+  if (!['accept', 'decline'].includes(decision)) return res.status(400).json({ error: 'decision must be accept or decline' })
+  const result = updateAuthorityDb(db => {
+    const request = connectionRequests(db).find(row => row.id === req.params.requestId && row.toUserId === req.user.id)
+    if (!request) return { status: 404, error: 'Connection request not found' }
+    if (request.status !== 'pending') return { status: 409, error: 'Connection request already resolved' }
+    const now = nowIso()
+    const actor = db.profiles.find(p => p.id === req.user.id)
+    const sender = db.profiles.find(p => p.id === request.fromUserId)
+    request.status = decision === 'accept' ? 'active' : 'declined'
+    request.respondedAt = now
+    request.updatedAt = now
+    let notification = null
+    if (decision === 'accept') {
+      for (const [userId, counterparty] of [[req.user.id, sender], [request.fromUserId, actor]]) {
+        if (!counterparty) continue
+        const event = appendPlatformEventInDb(db, {
+          userId,
+          actorId: userId,
+          eventType: 'connect',
+          entityType: 'person',
+          entityId: counterparty.id,
+          importance: 'HIGH',
+          metadata: { targetName: userName(counterparty) },
+        })
+        appendRelationshipInDb(db, userId, event)
+      }
+      const reciprocal = connectionRequests(db).find(row => row.fromUserId === req.user.id && row.toUserId === request.fromUserId)
+      if (reciprocal) { reciprocal.status = 'active'; reciprocal.updatedAt = now }
+      notification = {
+        id: createId('notif'),
+        userId: request.fromUserId,
+        actorId: req.user.id,
+        type: 'collab',
+        read: false,
+        content: 'accepted your connection request',
+        author: userName(actor),
+        avatar: avatarGradient(req.user.id),
+        linkTo: `/feed/profile/${req.user.id}`,
+        metadata: { connectionRequestId: request.id, connectionAccepted: true },
+        createdAt: now,
+      }
+      db.notifications.push(notification)
+    }
+    return { status: 200, notification, decision, fromUserId: request.fromUserId }
+  })
+  if (result.status !== 200) return res.status(result.status).json({ error: result.error })
+  await persistNotificationToContent(result.notification)
+  if (result.decision === 'accept') {
+    void invalidateDiscoveryUser(req.user.id)
+    if (result.fromUserId && result.fromUserId !== req.user.id) void invalidateDiscoveryUser(result.fromUserId)
+  }
+  return res.json({ ok: true, status: result.decision === 'accept' ? 'connected' : 'declined' })
+}
+
+export function listConnections(req, res) {
+  const db = readAuthorityDb()
+  const connections = [...distinctConnectionIds(db, req.user.id)]
+    .map(id => db.profiles.find(p => p.id === id))
+    .filter(Boolean)
+    .map(profile => ({
+      id: profile.id,
+      name: userName(profile, 'TechIT member'),
+      username: profile.username || null,
+      role: profile.role || 'community',
+      avatar: profile.avatarUrl || avatarGradient(profile.id),
+      headline: profile.oneLiner || profile.bio || '',
+    }))
+  return res.json({ connections })
 }

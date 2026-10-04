@@ -37,7 +37,7 @@ export async function listRecommendations(req, res) {
   const cached = await getCachedDiscovery(cacheKey).catch(() => null)
   if (cached) return res.json({ ...cached, meta: { ...cached.meta, cached: true } })
   const result = getRecommendations(req.user.id, options)
-  await Promise.allSettled([setCachedDiscovery(cacheKey, result), persistDiscoveryBatch(result)])
+  await Promise.allSettled([setCachedDiscovery(cacheKey, result, options), persistDiscoveryBatch(result)])
   return res.json({ ...result, intelligence: { schema_version: 'intelligence-v1', deterministic: intelligenceFlags.deterministicEnabled, ai_enrichment: false } })
 }
 

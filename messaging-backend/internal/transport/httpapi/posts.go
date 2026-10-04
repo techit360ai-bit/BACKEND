@@ -426,6 +426,31 @@ func handleUnfollowUser(d Deps) http.HandlerFunc {
 	}
 }
 
+// handleFollowCounts reports explicit follower/following counts for a user.
+// Tribe membership is derived from post audience, not follow edges, so it is
+// never counted here.
+func handleFollowCounts(d Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := chi.URLParam(r, "userId")
+		if userID == "" {
+			writeErr(w, http.StatusBadRequest, "userId is required")
+			return
+		}
+		followers, following, err := d.Feed.FollowCounts(r.Context(), userID)
+		if err != nil {
+			feedErr(w, err)
+			return
+		}
+		viewerFollows := false
+		if viewer := currentUser(r); viewer != "" && viewer != userID {
+			if following, err := d.Feed.IsFollowing(r.Context(), viewer, userID); err == nil {
+				viewerFollows = following
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"userId": userID, "followers": followers, "following": following, "viewerFollows": viewerFollows})
+	}
+}
+
 func handleListComments(d Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		postID := chi.URLParam(r, "id")

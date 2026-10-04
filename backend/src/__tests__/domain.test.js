@@ -105,6 +105,7 @@ describe('domain live-data endpoints', () => {
     const token = validToken()
     const projects = await request(app).get('/api/domain/founder/projects').set('Authorization', `Bearer ${token}`)
     const equity = await request(app).get('/api/domain/collaborator/equity').set('Authorization', `Bearer ${token}`)
+    const capTable = await request(app).get('/api/domain/founder/equity').set('Authorization', `Bearer ${token}`)
     const wallet = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${token}`)
 
     expect(projects.status).toBe(200)
@@ -112,6 +113,10 @@ describe('domain live-data endpoints', () => {
     expect(equity.status).toBe(200)
     expect(equity.body.holdings).toEqual([])
     expect(equity.body.totals.totalValueUSD).toBe(0)
+    expect(capTable.status).toBe(200)
+    expect(capTable.body.ventures).toEqual([])
+    expect(capTable.body.totals.ventures).toBe(0)
+    expect(capTable.body.totals.averageRetainedPercent).toBe(100)
     expect(wallet.status).toBe(200)
     expect(wallet.body.creditBalance).toBe(0)
     expect(wallet.body.pendingPayments).toBe(0)
@@ -932,6 +937,100 @@ describe('domain live-data endpoints', () => {
     const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
     expect(summary.body.creditBalance).toBe(20)
     expect(summary.body.lifetimeCreditsUsed).toBe(5)
+  })
+
+  it('reports wallet source totals, observed deduction order, and subscription usage', async () => {
+    const now = new Date().toISOString()
+    const db = makeDb({
+      walletAccounts: [{ id: 'wallet_1', userId: 'user-uuid-1', creditBalance: 25, label: 'Monthly credits', expiresAt: '2030-01-01T00:00:00.000Z' }],
+      usageEvents: [
+        { id: 'usage_1', userId: 'user-uuid-1', credits: 4, status: 'completed', fundingSource: 'subscription', createdAt: now },
+        { id: 'usage_2', userId: 'user-uuid-1', credits: 9, status: 'completed', fundingSource: 'platform_subsidy', createdAt: now },
+        { id: 'usage_3', userId: 'user-uuid-1', credits: 3, status: 'reserved', fundingSource: 'payg', createdAt: now },
+      ],
+      subscriptions: [{ id: 'sub_1', userId: 'user-uuid-1', planId: 'plan_pro', status: 'active', currentPeriodEnd: '2030-01-01T00:00:00.000Z' }],
+      billingPlans: [{ id: 'plan_pro', credits: 100 }],
+    })
+    readDb.mockReturnValue(db)
+    const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
+    expect(summary.body.sourceTotals).toEqual({ subscription: 4, platform_subsidy: 9 })
+    expect(summary.body.deductionOrder).toEqual(['platform_subsidy', 'subscription'])
+    expect(summary.body.subscriptionUsage).toMatchObject({ included: 100, consumed: 4, remaining: 96 })
+    expect(summary.body.expirationAlerts).toEqual([{ walletId: 'wallet_1', message: 'Monthly credits expires soon.', expiresAt: '2030-01-01T00:00:00.000Z' }])
+  })
+
+  it('returns wallet consumption analytics bucketed by funding source', async () => {
+    const now = new Date().toISOString()
+    const db = makeDb({
+      usageEvents: [
+        { id: 'usage_1', userId: 'user-uuid-1', credits: 5, status: 'completed', fundingSource: 'payg', createdAt: now },
+        { id: 'usage_2', userId: 'user-uuid-1', credits: 7, status: 'completed', fundingSource: 'subscription', createdAt: now },
+      ],
+    })
+    readDb.mockReturnValue(db)
+    const res = await request(app).get('/api/domain/wallet/analytics?period=daily').set('Authorization', `Bearer ${validToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.period).toBe('daily')
+    expect(res.body.sourceTotals).toEqual({ payg: 5, subscription: 7 })
+    expect(res.body.totalConsumed).toBe(12)
+    expect(res.body.points).toHaveLength(2)
+    expect(res.body.points.every(point => point.displayPercent > 0)).toBe(true)
+  })
+
+  it('derives a founder cap table from committed workspace equity without inventing a split', async () => {
+    const db = makeDb({
+      workspaces: [
+        { id: 'ws_1', ownerId: 'user-uuid-1', name: 'Payments workspace', projectId: 'proj_1' },
+        { id: 'ws_2', ownerId: 'user-uuid-2', name: 'Other workspace', projectId: 'proj_2' },
+      ],
+      projects: [{ id: 'proj_1', ownerId: 'user-uuid-1', title: 'Ledger' }],
+      workspaceMembers: [
+        { id: 'wm_1', workspaceId: 'ws_1', userId: 'user-uuid-3', status: 'active', accessLevel: 'contributor', role: 'Engineer', invitationId: 'inv_1' },
+      ],
+      workspaceInvitations: [
+        { id: 'inv_1', workspaceId: 'ws_1', collaboratorId: 'user-uuid-3', status: 'accepted', requestedRole: 'Engineer', equityProposal: 8, acceptedAt: '2026-02-01T00:00:00.000Z' },
+        { id: 'inv_2', workspaceId: 'ws_1', collaboratorId: 'user-uuid-2', status: 'pending', requestedRole: 'Designer', equityProposal: 4, expiresAt: '2026-03-01T00:00:00.000Z' },
+        { id: 'inv_3', workspaceId: 'ws_2', collaboratorId: 'user-uuid-3', status: 'accepted', requestedRole: 'Engineer', equityProposal: 30 },
+      ],
+    })
+    readDb.mockReturnValue(db)
+    const res = await request(app).get('/api/domain/founder/equity').set('Authorization', `Bearer ${validToken()}`)
+    expect(res.status).toBe(200)
+    expect(res.body.ventures).toHaveLength(1)
+    const venture = res.body.ventures[0]
+    expect(venture).toMatchObject({ workspaceId: 'ws_1', projectId: 'proj_1', name: 'Ledger', committedPercent: 8, retainedPercent: 92, retainedDerived: true })
+    expect(venture.grants).toHaveLength(1)
+    expect(venture.grants[0]).toMatchObject({ collaboratorId: 'user-uuid-3', role: 'Engineer', equityPercent: 8, committedAt: '2026-02-01T00:00:00.000Z' })
+    expect(venture.grants[0].collaboratorName).toEqual(expect.any(String))
+    expect(venture.pending).toHaveLength(1)
+    expect(venture.pending[0]).toMatchObject({ collaboratorId: 'user-uuid-2', role: 'Designer', equityPercent: 4 })
+    expect(res.body.totals).toMatchObject({ ventures: 1, venturesWithEquity: 1, committedGrants: 1, pendingProposals: 1, averageRetainedPercent: 92 })
+    expect(res.body.basis).toContain('workspace invitations')
+  })
+
+  it('registers file metadata and lets the owner remove it', async () => {
+    const db = makeDb()
+    readDb.mockReturnValue(db)
+    const token = validToken()
+
+    const created = await request(app)
+      .post('/api/domain/files')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ name: 'roadmap.pdf', type: 'file', size: '12.0 KB', sizeBytes: 12288 })
+    expect(created.status).toBe(201)
+    expect(created.body.file.name).toBe('roadmap.pdf')
+
+    const listed = await request(app).get('/api/domain/files').set('Authorization', `Bearer ${token}`)
+    expect(listed.body.files).toHaveLength(1)
+
+    const other = await request(app).delete(`/api/domain/files/${created.body.file.id}`).set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    expect(other.status).toBe(404)
+    expect(db.files).toHaveLength(1)
+
+    const removed = await request(app).delete(`/api/domain/files/${created.body.file.id}`).set('Authorization', `Bearer ${token}`)
+    expect(removed.status).toBe(200)
+    expect(removed.body.ok).toBe(true)
+    expect(db.files).toHaveLength(0)
   })
 
   it('persists role-scoped notification preferences without overwriting another role', async () => {

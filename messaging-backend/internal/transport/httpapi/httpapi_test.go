@@ -20,18 +20,19 @@ import (
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/pubsub"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/qa"
 	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store/storetest"
 )
 
-func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *store.FakeStores) {
+func newAPI(t *testing.T) (http.Handler, *auth.Verifier, *storetest.FakeStores) {
 	t.Helper()
 	return newAPIWith(t, nil)
 }
 
 // newAPIWith builds the router, letting a test override dependencies (CORS
 // origins, the rate limiter) before the router is created.
-func newAPIWith(t *testing.T, mutate func(*Deps)) (http.Handler, *auth.Verifier, *store.FakeStores) {
+func newAPIWith(t *testing.T, mutate func(*Deps)) (http.Handler, *auth.Verifier, *storetest.FakeStores) {
 	t.Helper()
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	ver := auth.NewVerifier("s")
 	h := hub.New(pubsub.NewInMemory())
 	msg := messaging.New(st.Conversations, st.Messages, h)
@@ -631,7 +632,7 @@ func TestDemoRtcToken(t *testing.T) {
 }
 
 func TestDemoRtcTokenUnconfigured(t *testing.T) {
-	st := store.NewFakeStores()
+	st := storetest.NewFakeStores()
 	ver := auth.NewVerifier("s")
 	demoSvc := demo.New(st.Demo)
 	r := NewRouter(Deps{

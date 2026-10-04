@@ -39,18 +39,28 @@ type Verifier struct {
 
 func NewVerifier(secret string, values ...string) *Verifier {
 	v := &Verifier{secret: []byte(secret)}
-	if raw := os.Getenv("JWT_PUBLIC_KEY"); raw != "" {
-		if block, _ := pem.Decode([]byte(raw)); block != nil {
-			if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
-				v.publicKey, _ = key.(*rsa.PublicKey)
-			}
-		}
-	}
+	v.WithPublicKey(os.Getenv("JWT_PUBLIC_KEY"))
 	if len(values) > 0 {
 		v.issuer = values[0]
 	}
 	if len(values) > 1 {
 		v.audience = values[1]
+	}
+	return v
+}
+
+// WithPublicKey sets the RS256 verification key from a PEM-encoded public key.
+// It is safe to call with an empty string (HS256/development path).
+func (v *Verifier) WithPublicKey(raw string) *Verifier {
+	if raw == "" {
+		return v
+	}
+	if block, _ := pem.Decode([]byte(raw)); block != nil {
+		if key, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+			if rsaKey, ok := key.(*rsa.PublicKey); ok {
+				v.publicKey = rsaKey
+			}
+		}
 	}
 	return v
 }

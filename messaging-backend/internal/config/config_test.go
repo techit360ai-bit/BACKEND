@@ -9,7 +9,7 @@ func clearConfigEnv(t *testing.T) {
 	for _, key := range []string{
 		"PORT", "DATABASE_URL", "REDIS_URL", "JWT_SECRET", "CORS_ORIGINS",
 		"ENVIRONMENT", "APP_ENV", "NODE_ENV", "ENABLE_DEV_TOKEN",
-		"JWT_ISSUER", "JWT_AUDIENCE",
+		"JWT_ISSUER", "JWT_AUDIENCE", "JWT_PUBLIC_KEY",
 	} {
 		t.Setenv(key, "")
 	}
@@ -58,6 +58,7 @@ func TestLoadOverrides(t *testing.T) {
 	t.Setenv("CORS_ORIGINS", "https://app.example.com")
 	t.Setenv("JWT_ISSUER", "techit-backend")
 	t.Setenv("JWT_AUDIENCE", "techit-platform")
+	t.Setenv("JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq\n-----END PUBLIC KEY-----")
 	cfg, _ := Load()
 	if cfg.Port != "9999" || cfg.DatabaseURL != "postgres://u@h/db" || cfg.RedisURL != "redis://localhost:6379" {
 		t.Errorf("overrides not applied: %+v", cfg)
@@ -77,8 +78,23 @@ func TestLoadRejectsDevTokenInProduction(t *testing.T) {
 	t.Setenv("CORS_ORIGINS", "https://app.example.com")
 	t.Setenv("JWT_ISSUER", "techit-backend")
 	t.Setenv("JWT_AUDIENCE", "techit-platform")
+	t.Setenv("JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq\n-----END PUBLIC KEY-----")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected error when ENABLE_DEV_TOKEN is on in production")
+	}
+}
+
+func TestLoadRequiresJWTPublicKeyOutsideDevelopment(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("ENVIRONMENT", "production")
+	t.Setenv("DATABASE_URL", "postgres://u@h/db")
+	t.Setenv("REDIS_URL", "redis://h:6379")
+	t.Setenv("CORS_ORIGINS", "https://app.example.com")
+	t.Setenv("JWT_ISSUER", "techit-backend")
+	t.Setenv("JWT_AUDIENCE", "techit-platform")
+	if _, err := Load(); err == nil || err.Error() != "JWT_PUBLIC_KEY is required outside development and test" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -132,6 +148,7 @@ func TestLoadRejectsInsecureCORSOutsideDevelopment(t *testing.T) {
 	t.Setenv("REDIS_URL", "redis://h:6379")
 	t.Setenv("JWT_ISSUER", "techit-backend")
 	t.Setenv("JWT_AUDIENCE", "techit-platform")
+	t.Setenv("JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkq\n-----END PUBLIC KEY-----")
 	t.Setenv("CORS_ORIGINS", "http://app.example.com")
 	if _, err := Load(); err == nil {
 		t.Fatal("expected insecure CORS origin to be rejected")

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store"
+	"github.com/techit360ai-bit/BACKEND/messaging-backend/internal/store/storetest"
 )
 
-func newSvc() *Service { return New(store.NewFakeStores().Demo) }
+func newSvc() *Service { return New(storetest.NewFakeStores().Demo) }
 
 func TestCreateStampsDraftAndHostRoster(t *testing.T) {
 	s := newSvc()

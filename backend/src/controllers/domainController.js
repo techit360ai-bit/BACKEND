@@ -1,4 +1,11 @@
 import {
+  livekitEnabled,
+  livekitRoomName,
+  livekitUrl,
+  mintLivekitToken,
+} from '../services/livekitService.js'
+import { invalidateDiscoveryType } from '../services/discoveryInfrastructure.js'
+import {
   addWatchlist,
   removeWatchlist,
   listWatchlistPreferences,
@@ -20,8 +27,10 @@ import {
   createProject,
   createWorkspaceCollectionItem,
   createWorkspaceInvitation,
+  founderCapTable,
   genericCreate,
   genericList,
+  genericDelete,
   genericPatch,
   getAnalysis,
   getCollaboratorScores,
@@ -87,6 +96,7 @@ import {
   updateOrganizationProject,
   updateProject,
   walletList,
+  walletAnalyticsAsync,
   walletListAsync,
   walletSummary,
   walletSummaryAsync,
@@ -95,6 +105,8 @@ import {
 } from '../services/domainService.js'
 import { attachHackathonProject, getHackathonProjectEntry } from '../services/workspaceCapabilityService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
+import { appendWorkspaceTaskEvent, getWorkspaceTask, runWorkspaceTask } from '../services/workspaceTaskService.js'
+import { connectorCredentialStatus, removeConnectorCredential, setConnectorCredential } from '../services/connectorCredentialService.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 import { executionIntelligenceFor } from '../services/executionIntelligenceService.js'
 
@@ -217,6 +229,25 @@ export async function workspaceMemberDelete(req, res) {
   return res.json(result)
 }
 
+// Mint a real LiveKit participant token for a workspace audio/video call.
+// Membership is authorized against the platform authority (workspaceMembers);
+// when LiveKit is not configured we return an explicit unavailable state so the
+// client can render an honest message instead of a fake call surface.
+export async function workspaceCallToken(req, res) {
+  const { workspaceId } = req.params
+  const members = await listWorkspaceMembersAsync(req.user.id, workspaceId)
+  if (!members) return res.status(403).json({ error: 'workspace_forbidden' })
+  if (!livekitEnabled()) return res.json({ available: false, reason: 'live_calls_not_configured', workspaceId })
+  try {
+    const room = livekitRoomName(workspaceId)
+    const token = mintLivekitToken({ room, identity: req.user.id, canPublish: true })
+    return res.json({ available: true, token, url: livekitUrl(), room, identity: req.user.id, canPublish: true })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'livekit_token_mint_failed', workspaceId, error: error.message }))
+    return res.status(503).json({ error: 'live_call_token_unavailable' })
+  }
+}
+
 export function workspaceItems(req, res) {
   const rows = listWorkspaceCollection(req.user.id, req.params.workspaceId, req.collectionName)
   if (!rows) return notFound(res, 'Workspace not found')
@@ -233,6 +264,44 @@ export async function workspaceItemCreate(req, res) {
   ))
   if (!row) return notFound(res, 'Workspace not found')
   return created(res, { [req.itemKey]: row })
+}
+
+// --- Workspace agent tasks: single-task read, event append, and one real run ----
+export function workspaceTaskOne(req, res) {
+  const result = getWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json({ task: result.task })
+}
+
+export function workspaceTaskEvent(req, res) {
+  const result = appendWorkspaceTaskEvent(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, { task: result.task, event: result.event })
+}
+
+export async function workspaceTaskRun(req, res) {
+  const result = await runWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId, req.user.token)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error, task: result.task })
+  return res.json({ task: result.task })
+}
+
+// --- Connector credential handshake (sealed at rest, masked in responses) ----
+export function connectorCredentialGet(req, res) {
+  const result = connectorCredentialStatus(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json(result)
+}
+
+export function connectorCredentialSet(req, res) {
+  const result = setConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, result)
+}
+
+export function connectorCredentialRemove(req, res) {
+  const result = removeConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId)
+  if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
+  return res.json(result)
 }
 
 export async function workspaceItemPatch(req, res) {
@@ -559,6 +628,10 @@ export async function walletSummaryGet(req, res) {
   return res.json(await walletSummaryAsync(req.user.id))
 }
 
+export async function walletAnalyticsGet(req, res) {
+  return res.json(await walletAnalyticsAsync(req.user.id, { period: req.query?.period }))
+}
+
 export async function walletListGet(req, res) {
   return res.json({ [req.responseKey]: await walletListAsync(req.user.id, req.collectionName) })
 }
@@ -580,13 +653,28 @@ export function collaborationCallCreate(req, res) {
 }
 
 export function genericCreatePost(req, res) {
-  return created(res, { [req.itemKey]: genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix) })
+  const entity = genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix)
+  // A new opportunity changes the opportunities surface for matching users.
+  // Targeted surface invalidation keeps people/general caches intact.
+  if (req.collectionName === 'opportunities') void invalidateDiscoveryType('opportunities')
+  return created(res, { [req.itemKey]: entity })
 }
 
 export function genericPatchItem(req, res) {
   const row = genericPatch(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
+}
+
+export function genericDeleteItem(req, res) {
+  const row = genericDelete(req.user.id, req.collectionName, req.params.itemId || req.params.id)
+  if (!row) return notFound(res, 'Record not found')
+  return res.json({ ok: true, [req.itemKey]: row })
+}
+
+// Founder-facing cap table derived from committed workspace equity (see founderCapTable).
+export function founderEquity(req, res) {
+  return res.json(founderCapTable(req.user.id))
 }
 
 export function notificationPrefsGet(req, res) {

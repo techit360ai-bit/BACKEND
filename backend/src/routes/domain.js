@@ -21,7 +21,9 @@ import {
   founderProjectCreate,
   founderProjectPatch,
   founderProjects,
+  founderEquity,
   genericCreatePost,
+  genericDeleteItem,
   genericListGet,
   genericPatchItem,
   hackathonBrief,
@@ -68,6 +70,7 @@ import {
   organizationProjectCreate,
   organizationProjectPatch,
   organizationProjects,
+  walletAnalyticsGet,
   walletListGet,
   walletPaymentIntent,
   walletSummaryGet,
@@ -81,6 +84,7 @@ import {
   watchlistPreferences,
   watchlistPreferencesPatch,
   workspaceContextGet,
+  workspaceCallToken,
   workspaceInvitationAccept,
   workspaceInvitationCreate,
   workspaceInvitationDecline,
@@ -88,6 +92,12 @@ import {
   workspaceItemCreate,
   workspaceItemPatch,
   workspaceItems,
+  workspaceTaskEvent,
+  workspaceTaskOne,
+  workspaceTaskRun,
+  connectorCredentialGet,
+  connectorCredentialRemove,
+  connectorCredentialSet,
   workspaceMemberDelete,
   workspaceMembersGet,
   workspaceProvision,
@@ -128,6 +138,7 @@ function deprecatedConnectorCollection(_req, res, next) {
 router.get('/founder/projects', founderProjects)
 router.post('/founder/projects', founderProjectCreate)
 router.patch('/founder/projects/:projectId', founderProjectPatch)
+router.get('/founder/equity', founderEquity)
 
 router.get('/endorsements', endorsements)
 router.post('/endorsements', endorsementCreate)
@@ -240,17 +251,28 @@ router.get('/workspace-invitations/:invitationId', workspaceInvitationGet)
 router.post('/workspace-invitations/:invitationId/accept', workspaceInvitationAccept)
 router.post('/workspace-invitations/:invitationId/decline', workspaceInvitationDecline)
 router.get('/workspaces/:workspaceId/context', workspaceContextGet)
+router.post('/workspaces/:workspaceId/call-token', workspaceCallToken)
 router.post('/workspaces/:workspaceId/invitations', workspaceInvitationCreate)
 router.get('/workspaces/:workspaceId/members', workspaceMembersGet)
 router.delete('/workspaces/:workspaceId/members/:memberId', workspaceMemberDelete)
 router.get('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItems)
 router.post('/workspaces/:workspaceId/tasks', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemCreate)
+router.get('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskOne)
+router.post('/workspaces/:workspaceId/tasks/:itemId/events', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskEvent)
+router.post('/workspaces/:workspaceId/tasks/:itemId/run', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceTaskRun)
 router.patch('/workspaces/:workspaceId/tasks/:itemId', bindCollection('workspaceTasks', 'tasks', 'task', 'task'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItems)
 router.post('/workspaces/:workspaceId/agents', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemCreate)
 router.patch('/workspaces/:workspaceId/agents/:itemId', bindCollection('workspaceAgents', 'agents', 'agent', 'agent'), workspaceItemPatch)
+// Legacy workspace connector surface — retained for compatibility, deprecated in
+// favour of /api/mcp/connections (ADR-1). The sealed-credential routes below were
+// added on main; they are kept working but marked deprecated so nothing new
+// builds on the non-MCP credential store.
 router.get('/workspaces/:workspaceId/connectors', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItems)
 router.post('/workspaces/:workspaceId/connectors', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemCreate)
+router.get('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialGet)
+router.post('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialSet)
+router.delete('/workspaces/:workspaceId/connectors/:itemId/credential', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), connectorCredentialRemove)
 router.patch('/workspaces/:workspaceId/connectors/:itemId', deprecatedConnectorCollection, bindCollection('workspaceConnectors', 'connectors', 'connector', 'connector'), workspaceItemPatch)
 router.get('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItems)
 router.post('/workspaces/:workspaceId/reports', bindCollection('workspaceReports', 'reports', 'report', 'report'), workspaceItemCreate)
@@ -263,6 +285,7 @@ router.get('/wallet/plans', bindCollection('billingPlans', 'plans', 'plan', 'pla
 router.get('/wallet/credit-packages', bindCollection('creditPackages', 'creditPackages', 'creditPackage', 'package'), walletListGet)
 router.get('/wallet/subscriptions', bindCollection('subscriptions', 'subscriptions', 'subscription', 'subscription'), walletListGet)
 router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice', 'invoice'), walletListGet)
+router.get('/wallet/analytics', walletAnalyticsGet)
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
 router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
@@ -272,6 +295,8 @@ router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportun
 router.post('/opportunities/:id/apply', opportunityApply)
 router.get('/applications', applicationsList)
 router.get('/files', bindCollection('files', 'files', 'file', 'file'), genericListGet)
+router.post('/files', bindCollection('files', 'files', 'file', 'file'), genericCreatePost)
+router.delete('/files/:itemId', bindCollection('files', 'files', 'file', 'file'), genericDeleteItem)
 router.get('/notifications/preferences', notificationPrefsGet)
 router.patch('/notifications/preferences', notificationPrefsPatch)
 router.get('/settings', bindCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings'), genericListGet)

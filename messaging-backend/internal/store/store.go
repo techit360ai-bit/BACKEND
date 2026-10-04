@@ -262,6 +262,7 @@ type PostStore interface {
 	RecordFeedEvent(ctx context.Context, event FeedEvent) error
 	SuppressedPostIDs(ctx context.Context, userID string) ([]string, error)
 	FollowedUserIDs(ctx context.Context, userID string) ([]string, error)
+	FollowCounts(ctx context.Context, userID string) (followers int, following int, err error)
 	SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error
 	FeedEventCount(ctx context.Context, userID string) (int, error)
 	CreatorPostCount(ctx context.Context, creatorID string) (int, error)

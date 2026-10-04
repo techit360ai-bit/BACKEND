@@ -297,6 +297,101 @@ describe('POST /api/users/:id/connect', () => {
     expect(invitation.equityProposal).toBe(30)
     expect(invitation.cashReward).toBe(250)
   })
+
+  it('records a pending connection request that the receiver can accept', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2', firstName: 'Bob', lastName: 'Jones' }
+    const db = {
+      users: [BASE_USER, { ...BASE_USER, id: 'user-uuid-2', email: 'bob@example.com' }],
+      profiles: [BASE_PROFILE, target],
+      notifications: [],
+      feedPosts: [],
+      feedComments: [],
+      networkEdges: [],
+      connectionRequests: [],
+    }
+    readDb.mockReturnValue(db)
+
+    const sent = await request(app)
+      .post('/api/users/user-uuid-2/connect')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+      .send({})
+
+    expect(sent.status).toBe(200)
+    expect(sent.body.status).toBe('pending')
+    expect(db.connectionRequests).toHaveLength(1)
+    expect(db.connectionRequests[0]).toMatchObject({ fromUserId: 'user-uuid-1', toUserId: 'user-uuid-2', status: 'pending' })
+    expect(db.notifications[0].metadata.connectionRequestId).toBe(sent.body.connectionRequestId)
+    expect(db.networkEdges).toHaveLength(1)
+
+    // The receiver sees the request in their inbox.
+    const inbox = await request(app)
+      .get('/api/users/connections/requests')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    expect(inbox.status).toBe(200)
+    expect(inbox.body.requests).toHaveLength(1)
+    expect(inbox.body.requests[0].fromUserId).toBe('user-uuid-1')
+
+    // Accepting creates reciprocal edges and tells the sender.
+    const accepted = await request(app)
+      .post(`/api/users/connections/requests/${inbox.body.requests[0].id}/accept`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ decision: 'accept' })
+    expect(accepted.status).toBe(200)
+    expect(accepted.body.status).toBe('connected')
+    expect(db.connectionRequests[0].status).toBe('active')
+    expect(db.networkEdges.filter(edge => edge.type === 'CONNECTS')).toHaveLength(2)
+    expect(db.notifications.some(n => n.userId === 'user-uuid-1' && /accepted your connection request/.test(n.content))).toBe(true)
+  })
+
+  it('declines a connection request without creating a reciprocal edge', async () => {
+    const target = { ...BASE_PROFILE, id: 'user-uuid-2' }
+    const db = {
+      users: [BASE_USER, { ...BASE_USER, id: 'user-uuid-2', email: 'bob@example.com' }],
+      profiles: [BASE_PROFILE, target],
+      notifications: [],
+      feedPosts: [],
+      feedComments: [],
+      networkEdges: [],
+      connectionRequests: [{ id: 'connreq-1', fromUserId: 'user-uuid-2', toUserId: 'user-uuid-1', status: 'pending', createdAt: '2026-01-01T00:00:00.000Z' }],
+    }
+    readDb.mockReturnValue(db)
+
+    const declined = await request(app)
+      .post('/api/users/connections/requests/connreq-1/decline')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+      .send({ decision: 'decline' })
+
+    expect(declined.status).toBe(200)
+    expect(declined.body.status).toBe('declined')
+    expect(db.connectionRequests[0].status).toBe('declined')
+    expect(db.networkEdges).toHaveLength(0)
+  })
+
+  it('reflects connection state and counts accepted edges on the public profile', async () => {
+    const db = {
+      users: [BASE_USER, { ...BASE_USER, id: 'user-uuid-2', email: 'bob@example.com' }],
+      profiles: [BASE_PROFILE, { ...BASE_PROFILE, id: 'user-uuid-2', firstName: 'Bob', lastName: 'Jones' }],
+      feedPosts: [],
+      feedComments: [],
+      subscriptions: [],
+      workspaceMembers: [],
+      organizationMemberships: [],
+      networkEdges: [
+        { id: 'edge-1', type: 'CONNECTS', fromEntityId: 'user-uuid-1', toEntityId: 'user-uuid-2' },
+        { id: 'edge-2', type: 'CONNECTS', fromEntityId: 'user-uuid-2', toEntityId: 'user-uuid-1' },
+      ],
+      connectionRequests: [],
+    }
+    readDb.mockReturnValue(db)
+
+    const res = await request(app)
+      .get('/api/users/user-uuid-2')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+
+    expect(res.status).toBe(200)
+    expect(res.body.connectionStatus).toBe('connected')
+    expect(res.body.stats.connections).toBe(1)
+  })
 })
 
 // ── PATCH /api/users/me ───────────────────────────────────────────────────────

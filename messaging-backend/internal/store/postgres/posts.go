@@ -252,6 +252,22 @@ func (s *PostStore) FollowedUserIDs(ctx context.Context, userID string) ([]strin
 	return out, rows.Err()
 }
 
+// FollowCounts returns (followers, following) for a user from feed_follows.
+// Counts are explicit follow relationships only: tribe/role overlap or shared
+// workspace membership never contribute.
+func (s *PostStore) FollowCounts(ctx context.Context, userID string) (int, int, error) {
+	var followers, following int
+	err := s.pool.QueryRow(ctx,
+		`SELECT (SELECT count(*) FROM feed_follows WHERE followee_id=$1),
+		        (SELECT count(*) FROM feed_follows WHERE follower_id=$1)`,
+		userID,
+	).Scan(&followers, &following)
+	if err != nil {
+		return 0, 0, err
+	}
+	return followers, following, nil
+}
+
 func (s *PostStore) SetCreatorControl(ctx context.Context, userID, creatorID, control string, enabled bool) error {
 	if enabled {
 		_, err := s.pool.Exec(ctx, `INSERT INTO feed_creator_controls (user_id,creator_id,control) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, userID, creatorID, control)
