@@ -269,16 +269,20 @@ connected.** That is the fake plugins seeding a throwaway dev token at startup s
 the lifecycle reaches `ready` (`plugins/github/index.ts:52`). It is not a real
 credential and the rows still say `mode: fake`.
 
-**Who may do this.** `GET /connections` is readable by any signed-in user.
-Connect and disconnect require a **human admin or owner** — a credential here is
-process-wide, so rotating it changes what every invocation uses, for every
-tenant. Agents are always refused. Expect `403` from anything less than an owner.
+**Who may do this.** `GET /connections` is readable by any signed-in user and is
+scoped to the caller's workspace. Connect and disconnect require a **human admin
+or owner in that workspace** — a credential is workspace-scoped (ADR-1), so
+rotating it changes what every invocation in *that workspace* uses and never
+another. Agents are always refused. Expect `403` from anything less than a
+workspace admin/owner.
 
-**Disconnect and env fallback.** If a connector's env var is set
-(`MCP_GITHUB_TOKEN`, `NOTION_TOKEN`, …), the plugin re-seeds the vault from it at
-startup. Disconnect therefore reports `envFallback: true` — the credential is
-gone now but returns on the next restart. To remove it for good, unset the env
-var and restart.
+**Disconnect and env fallback.** Environment tokens are **bootstrap-only**
+(ADR-3), not a runtime fallback. A connector is re-seeded from env only when the
+operator sets `MCP_CREDENTIAL_BOOTSTRAP=import`; the import emits
+`credential_bootstrap_used` telemetry and is marked deprecated. With that flag
+unset, disconnect is permanent and a missing credential fails closed with a
+`credential_missing` DENY. To remove a legacy token for good: unset the env var
+(removal milestone `2026-12-31`).
 
 ---
 
@@ -367,22 +371,24 @@ the browser sends. If a request body carries an `actor`, it is ignored.
 - **Credential durability.** `MCP_STORE=file` uses an in-memory vault, so
   anything connected is gone after a restart. Durable credentials need
   `MCP_STORE=postgres` + `MCP_SECRET_KEY`.
-- **Per-tenant credential isolation.** Credentials are stored per *plugin*, not
-  per workspace — the connectors are process-wide singletons registered once at
-  boot, so a per-workspace credential could not be routed to the right connector
-  anyway. This is why the connect routes are owner/admin-only. Threading the
-  vault handle through `MCPClient.invoke` is the prerequisite for multi-tenant
-  credentials, and is not done.
+- **Per-workspace credential isolation — DONE.** Credentials are stored in the
+  canonical workspace lane (`secrets://ws/<workspaceId>/<plugin>/`); the vault
+  handle is threaded through bind/invoke so a real API resolves the acting
+  workspace's credential. Two workspaces never share one (see
+  `tests/workspace-credentials.test.ts`). Legacy env tokens are bootstrap-only.
 - **Approval durability.** Same reason as credentials — pending approvals are in
   memory.
 - **Production readiness.** The production contract
   (`validateProductionConfig`) still fails closed: it requires
   `MCP_STORE=postgres`, forbids stub connectors and demo seeding, and requires
-  `<NAME>_CONNECTOR_MODE=real` plus per-connector tokens. Booting dev proves none
-  of that.
+  `<NAME>_CONNECTOR_MODE=real`. It no longer requires env tokens at boot — the
+  workspace vault is the source of truth (a legacy env token present is warned
+  about, not required).
 
-**GitHub OAuth scope note.** Both the connect surface and the trust surface now
-request one shared scope set (`repo read:user user:email`, in
+**GitHub OAuth scope note.** The connect surface and the trust surface share one
+callback but request **purpose-scoped** sets (`GITHUB_OAUTH_SCOPES_CONNECT` =
+`repo read:user user:email`; `GITHUB_OAUTH_SCOPES_TRUST` = `read:user user:email`,
+in
 `src/config/github.js`) against a single callback. The *granted* scope is
 recorded on the connection and surfaced by `GET /api/github/status` as `scopes`,
 `repoAccess`, and `repoEnrichmentSkipped`, so a partial grant is visible instead
@@ -460,4 +466,3 @@ so it was clearly the intended pin. Vitest is test-only.
 
 Current state: `npx tsc -b --noEmit` → 0 errors; `npx vitest run` → **54 files,
 187 tests, all passing**; `npm install` needs no flags.
-

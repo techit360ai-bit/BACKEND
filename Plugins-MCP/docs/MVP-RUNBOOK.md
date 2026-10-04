@@ -237,10 +237,12 @@ them into the repository. GitHub currently remains fake-only in this MVP.
 3. ai-router: inject incubation context into agent prompts (task #8).
 4. Frontend: workspace connectors on the live registry + incubation-context card
    (task #9). The connect/disconnect flow itself now exists (§9).
-5. **Per-tenant connector credentials.** Credentials live per *plugin*, not per
-   workspace, because the connectors are process-wide singletons registered once
-   at boot. Multi-tenant credentials need the vault handle threaded through
-   `MCPClient.invoke`; the connect routes are owner/admin-only until then.
+5. **Per-workspace connector credentials — DONE.** Credentials now live in the
+   canonical workspace vault lane (`secrets://ws/<workspaceId>/<plugin>/`); the
+   vault handle is threaded through bind/invoke so real APIs resolve the acting
+   workspace's credential. Legacy env tokens are bootstrap-only (ADR-3): imported
+   only via `MCP_CREDENTIAL_BOOTSTRAP=import`, with telemetry and a removal
+   milestone. See `docs/MCP-CONNECTOR-DECISIONS-ADR.md`.
 6. **Feed the platform's GitHub OAuth result into the MCP vault.** `/api/github/*`
    already completes a real OAuth dance with the shared scope set
    (`src/config/github.js`); the MCP connector currently takes a token supplied

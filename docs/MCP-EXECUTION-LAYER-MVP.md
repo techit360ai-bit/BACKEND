@@ -80,12 +80,15 @@ connector uniformly — no per-connector approval code.
   open **C10** decision in `CROSS-REPO-ALIGNMENT-PLAN.md` for the MVP: both paths, one governed executor.
 - **Identity is never self-declared.** `resolveActor` in `backend/src/app.js` verifies the platform JWT and
   derives actor id/role/workspace from claims (`mcpRoleFromClaim`). Body-supplied actors are dev-only.
-- **Connector credentials are operator-managed and write-only.** `GET/POST/DELETE /api/mcp/connections`
-  reports and manages per-connector credentials in the scoped vault. No route reads a credential back out;
-  connect/disconnect require a human admin or owner, because a credential here is process-wide.
-  A stored credential does **not** by itself select the live API — `<NAME>_CONNECTOR_MODE=real` does.
+- **Connector credentials are workspace-scoped and write-only.** `GET/POST/DELETE /api/mcp/connections`
+  reports and manages credentials in the canonical **workspace** vault lane (`secrets://ws/<workspaceId>/<plugin>/`,
+  ADR-1/ADR-2). No route reads a credential back out; connect/disconnect require a human admin or owner in the
+  acting workspace. A stored credential does **not** by itself select the live API — `<NAME>_CONNECTOR_MODE=real` does.
+  Legacy env tokens (`MCP_*_TOKEN`) are **bootstrap-only** and deprecated (ADR-3): imported only via
+  `MCP_CREDENTIAL_BOOTSTRAP=import`, with telemetry and a removal milestone. A missing workspace credential is a
+  clean `credential_missing` DENY — never an env/global fallback.
 - **State is durable.** Audit log, approvals, contributions, and connector secrets live in Postgres.
-  Secrets are AES-256-GCM encrypted at rest, scoped per plugin (`secrets://<plugin>/*`). With
+  Secrets are AES-256-GCM encrypted at rest, scoped per workspace + plugin (`secrets://ws/<workspaceId>/<plugin>/`). With
   `MCP_STORE=file` the vault is in-process instead: connections are lost on restart (see the runbook §8).
   Credentials stored without an explicit TTL do not expire, in either store.
 
