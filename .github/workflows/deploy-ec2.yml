@@ -18,10 +18,18 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          # RS256 signing material. The box ran pre-RS256 code until the deploy
+          # fix rolled it forward to a main that requires RS256, so these must be
+          # provisioned or every token is rejected. The private key stays on the
+          # backend (it signs); the public key is shared with the verifiers.
+          JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
+          JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY
           # Stop the whole script on the first failure. Historically this
           # defaulted to false, so a blocked `git pull` was followed by
           # `pm2 restart` + "✅ Backend deployed" and the job reported success
@@ -63,6 +71,29 @@ jobs:
               fs.writeFileSync(p, s);
             ' "$DEPLOYED_SHA"
 
+            # Ensure the RS256 signing/verification material is present. Written
+            # only when the deploy secrets are configured, and idempotent so the
+            # box env never accumulates duplicate entries.
+            node -e '
+              const fs = require("fs");
+              const priv = process.env.JWT_PRIVATE_KEY;
+              const pub = process.env.JWT_PUBLIC_KEY;
+              if (!priv || !pub) { console.log("JWT secrets not provided; leaving env unchanged"); process.exit(0); }
+              const p = "backend/.env";
+              let s = "";
+              try { s = fs.readFileSync(p, "utf8"); } catch {}
+              const upsert = (k, v) => {
+                const re = new RegExp("^" + k + "=.*$", "m");
+                s = re.test(s) ? s.replace(re, () => k + "=" + v) : s.replace(/\s*$/, "") + "\n" + k + "=" + v + "\n";
+              };
+              upsert("JWT_PRIVATE_KEY", priv);
+              upsert("JWT_PUBLIC_KEY", pub);
+              upsert("JWT_ALGORITHM", "RS256");
+              fs.writeFileSync(p, s);
+              fs.chmodSync(p, 0o600);
+              console.log("jwt RS256 material ensured");
+            '
+
             npm install --workspaces --if-present
             GIT_SHA="$DEPLOYED_SHA" pm2 restart techit-backend --update-env
 
@@ -78,6 +109,14 @@ jobs:
             elif ! echo "$HEALTH" | grep -q "\"sha\":\"$DEPLOYED_SHA\""; then
               echo "❌ /health sha does not match the deployed commit $DEPLOYED_SHA"
               exit 1
+            fi
+
+            READY_STATUS="$(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/ready || true)"
+            echo "/ready status: $READY_STATUS"
+            if [ "$READY_STATUS" != "200" ]; then
+              echo "⚠️ /ready is $READY_STATUS:"
+              curl -s https://backend.techitnetwork.com/ready || true
+              echo
             fi
 
             # MCP boundary: when the mount is on, every route is auth-gated, so
