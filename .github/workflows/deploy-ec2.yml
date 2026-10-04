@@ -3,6 +3,13 @@ name: TECHIT Backend — Deploy to EC2
 on:
   push:
     branches: [main]
+  # Manual re-deploy so ops can reconcile the box without an empty commit.
+  workflow_dispatch:
+
+# Never let two deployments race the same working tree.
+concurrency:
+  group: backend-ec2-deploy
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -15,9 +22,75 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
+          # Stop the whole script on the first failure. Historically this
+          # defaulted to false, so a blocked `git pull` was followed by
+          # `pm2 restart` + "✅ Backend deployed" and the job reported success
+          # while the box silently kept running old code (which is why the
+          # /health, /ready and /api/mcp probes were never actually live).
+          script_stop: true
           script: |
+            set -e
             cd ~/BACKEND
-            git pull https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+
+            # --- reconcile the working tree ----------------------------------
+            # In-flight edits on the box (messaging hotfixes, a package-lock
+            # rewritten by `npm install`, …) make `git pull` abort with
+            # "local changes would be overwritten". Preserve them in a stash so
+            # nothing is lost, then force the checkout to exactly the commit CI
+            # validated.
+            git fetch https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              git stash push --include-untracked -m "autostash pre-deploy $(date -u +%FT%TZ)" || true
+            fi
+            git checkout main
+            git reset --hard FETCH_HEAD
+            DEPLOYED_SHA="$(git rev-parse HEAD)"
+            echo "deploying $DEPLOYED_SHA"
+
+            # --- build identity ----------------------------------------------
+            # /health, /ready and the platform drift gate read GIT_SHA so the
+            # deployed commit is verifiable rather than assumed. Record it in
+            # the app env file and pass it to the process.
+            node -e '
+              const fs = require("fs");
+              const p = "backend/.env";
+              let s = "";
+              try { s = fs.readFileSync(p, "utf8"); } catch {}
+              const line = "GIT_SHA=" + process.argv[1];
+              s = /^GIT_SHA=.*$/m.test(s)
+                ? s.replace(/^GIT_SHA=.*$/m, line)
+                : s.replace(/\s*$/, "") + "\n" + line + "\n";
+              fs.writeFileSync(p, s);
+            ' "$DEPLOYED_SHA"
+
             npm install --workspaces --if-present
-            pm2 restart techit-backend
-            echo "✅ Backend deployed"
+            GIT_SHA="$DEPLOYED_SHA" pm2 restart techit-backend --update-env
+
+            # --- verify the deploy actually landed ---------------------------
+            for _ in $(seq 1 15); do
+              if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
+              sleep 2
+            done
+            HEALTH="$(curl -fsS https://backend.techitnetwork.com/health)"
+            echo "health: $HEALTH"
+            if echo "$HEALTH" | grep -q "\"sha\":\"unknown\""; then
+              echo "⚠️ /health reports sha=unknown; build-identity drift cannot be enforced on this host"
+            elif ! echo "$HEALTH" | grep -q "\"sha\":\"$DEPLOYED_SHA\""; then
+              echo "❌ /health sha does not match the deployed commit $DEPLOYED_SHA"
+              exit 1
+            fi
+
+            # MCP boundary: when the mount is on, every route is auth-gated, so
+            # an anonymous probe must be 401 (/health) — that is the security
+            # boundary the platform smoke asserts. If MCP is intentionally off
+            # the route is absent (404); surface the state instead of failing.
+            MCP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/api/mcp/health || true)"
+            echo "mcp /api/mcp/health status: $MCP_STATUS"
+            if [ "$MCP_STATUS" = "404" ]; then
+              echo "⚠️ MCP mount is disabled (MCP_ENABLED != true). Set the production MCP contract to activate it."
+            elif [ "$MCP_STATUS" != "401" ] && [ "$MCP_STATUS" != "200" ]; then
+              echo "❌ MCP boundary returned $MCP_STATUS; expected 401 (anonymous) or 200"
+              exit 1
+            fi
+
+            echo "✅ Backend deployed $DEPLOYED_SHA"
