@@ -16,6 +16,7 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { FigmaConnector } from './connector.js';
@@ -65,7 +66,9 @@ export class FigmaPlugin extends BasePlugin {
     const real = process.env.FIGMA_CONNECTOR_MODE === 'real' && !!process.env.FIGMA_TOKEN;
     if (real) {
       return new RealFigmaApi(async () => {
-        return (await this.creds.value(FIGMA_TOKEN_KEY)) ?? '';
+        const token = await this.creds.value(FIGMA_TOKEN_KEY);
+        if (!token) throw new CredentialMissingError('figma');
+        return token;
       });
     }
     return new FakeFigmaApi();

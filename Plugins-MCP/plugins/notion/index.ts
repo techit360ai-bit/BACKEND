@@ -18,6 +18,7 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { NotionConnector } from './connector.js';
@@ -70,7 +71,9 @@ export class NotionPlugin extends BasePlugin {
     const real = process.env.NOTION_CONNECTOR_MODE === 'real' && !!process.env.NOTION_TOKEN;
     if (real) {
       return new RealNotionApi(async () => {
-        return (await this.creds.value(NOTION_TOKEN_KEY)) ?? '';
+        const token = await this.creds.value(NOTION_TOKEN_KEY);
+        if (!token) throw new CredentialMissingError('notion');
+        return token;
       });
     }
     return new FakeNotionApi();

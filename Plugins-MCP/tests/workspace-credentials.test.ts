@@ -20,6 +20,7 @@ afterEach(() => {
   delete process.env.MCP_DATA_FILE;
   delete process.env.MCP_CREDENTIAL_BOOTSTRAP;
   delete process.env.MCP_GITHUB_TOKEN;
+  delete process.env.GITHUB_CONNECTOR_MODE;
   if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true });
 });
 
@@ -118,5 +119,28 @@ describe('environment tokens are bootstrap-only (ADR-3)', () => {
     // The token may have been seeded into the legacy lane at boot from env, so
     // either legacy source is correct; what matters is it is deprecated.
     expect(['env', 'legacy-vault']).toContain(events[0].source);
+  });
+});
+
+describe('missing credential is a clean DENY (no fallback)', () => {
+  test('real mode with no workspace credential returns credential_missing', async () => {
+    process.env.GITHUB_CONNECTOR_MODE = 'real';
+    delete process.env.MCP_CREDENTIAL_BOOTSTRAP;
+    delete process.env.MCP_GITHUB_TOKEN;
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+
+    const res = await svc.invoke('github', 'list_repositories', {}, {
+      id: 'u1',
+      kind: 'human',
+      role: 'editor',
+      workspaceId: 'ws-nocred',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('credential_missing');
+      // Actionable: the message tells the workspace to connect the provider.
+      expect(res.error.error).toMatch(/Connect github/i);
+    }
   });
 });

@@ -16,6 +16,7 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { Web3Connector } from './connector.js';
@@ -75,7 +76,9 @@ export class Web3Plugin extends BasePlugin {
     const real = process.env.WEB3_CONNECTOR_MODE === 'real' && !!url;
     if (real) {
       return new RealWeb3Api(async () => {
-        return (await this.creds.value(WEB3_RPC_KEY)) ?? url ?? '';
+        const value = (await this.creds.value(WEB3_RPC_KEY)) ?? url ?? '';
+        if (!value) throw new CredentialMissingError('web3');
+        return value;
       });
     }
     return new FakeWeb3Api();

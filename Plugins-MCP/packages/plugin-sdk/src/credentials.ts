@@ -14,6 +14,21 @@
 
 import type { ScopedSecrets, SecretVault } from '@techit/infra-secrets';
 
+/**
+ * Thrown by a real-API credential resolver when the acting workspace has no
+ * credential. `BaseMCPServer` maps it to a `credential_missing` DENY — never a
+ * fallback, never a generic upstream error.
+ */
+export class CredentialMissingError extends Error {
+  constructor(
+    public readonly plugin: string,
+    detail?: string,
+  ) {
+    super(`connect_required: ${plugin} has no credential for this workspace${detail ? ` (${detail})` : ''}`);
+    this.name = 'CredentialMissingError';
+  }
+}
+
 export class WorkspaceCredentialHandle {
   private workspaceId: string | undefined;
 

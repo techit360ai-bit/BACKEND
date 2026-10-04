@@ -31,6 +31,11 @@ export type PluginErrorCode =
   | 'not_found'
   | 'invalid_input'
   | 'auth_failed'
+  // Clean DENY when the acting workspace has no credential for a connector:
+  // the caller must connect the provider for that workspace (ADR-1/ADR-3). It is
+  // deliberately distinct from auth_failed so a missing credential never looks
+  // like a bad token, and never triggers any fallback.
+  | 'credential_missing'
   | 'upstream_error'
   | 'internal_error';
 

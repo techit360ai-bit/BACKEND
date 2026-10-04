@@ -17,6 +17,7 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { AiHarnessConnector } from './connector.js';
@@ -77,7 +78,11 @@ export class AiPlugin extends BasePlugin {
     const real = process.env.AI_HARNESS_CONNECTOR_MODE === 'real' && !!url;
     if (real) {
       return new RealAiHarnessApi(
-        async () => (await this.creds.value(AI_BASE_URL_KEY)) ?? url ?? '',
+        async () => {
+          const value = (await this.creds.value(AI_BASE_URL_KEY)) ?? url ?? '';
+          if (!value) throw new CredentialMissingError('ai', 'missing ai-router base URL');
+          return value;
+        },
         async () => (await this.creds.value(AI_TOKEN_KEY)) ?? '',
       );
     }

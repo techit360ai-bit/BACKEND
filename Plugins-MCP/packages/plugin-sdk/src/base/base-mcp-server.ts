@@ -22,7 +22,7 @@ import {
 } from '../contract/types.js';
 import type { ManifestMCPTool } from '../manifest/schema.js';
 import type { SdkRuntime } from '../runtime.js';
-import type { WorkspaceCredentialHandle } from '../credentials.js';
+import { CredentialMissingError, type WorkspaceCredentialHandle } from '../credentials.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
 import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
@@ -157,6 +157,15 @@ export abstract class BaseMCPServer implements MCPAdapter {
       });
       return ok(data);
     } catch (e) {
+      // A missing workspace credential is a clean DENY, not an upstream error.
+      // This is the "Credential missing? → DENY → ask the workspace to connect"
+      // edge (ADR-1/ADR-3). No fallback is attempted anywhere above.
+      if (e instanceof CredentialMissingError) {
+        await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'denied', undefined, {
+          reason: 'credential_missing',
+        });
+        return err('credential_missing', `Connect ${this.sourceTool} for this workspace to use this tool`, e.message);
+      }
       await recordAudit(this.runtime, this.ctx, this.sourceTool, tool, 'failure', undefined, {
         message: (e as Error).message,
       });

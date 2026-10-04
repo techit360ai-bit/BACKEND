@@ -17,6 +17,7 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
+  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { GitHubConnector } from './connector.js';
@@ -53,20 +54,16 @@ export class GitHubPlugin extends BasePlugin {
   }
 
   protected override async authenticateImpl(secrets: ScopedSecrets): Promise<AuthToken> {
-    // Dev/reference convenience: if no token is stored yet, run the (stub) OAuth
-    // exchange once so the lifecycle reaches `ready`. Production supplies a real
-    // exchange and an explicit connect step.
-    const existing = await secrets.get('oauth_access_token');
-    if (!existing) {
-      if (process.env.MCP_GITHUB_TOKEN) {
-        await secrets.set('oauth_access_token', process.env.MCP_GITHUB_TOKEN);
-      } else if (['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase())) {
-        throw new Error('MCP_GITHUB_TOKEN is required for the production GitHub connector.');
-      } else {
-        await storeToken(secrets, this.oauth, 'devcode');
-      }
+    // Boot MUST NOT require a credential: credentials are per-workspace (ADR-1)
+    // and resolved lazily at invoke time from the canonical vault lane. Dev
+    // convenience only: seed a throwaway token so a local lifecycle reaches
+    // `ready`. Production boots with an empty vault and fails closed per request.
+    const existing = await secrets.get(GITHUB_TOKEN_KEY);
+    if (!existing && !['production', 'staging'].includes((process.env.NODE_ENV || '').toLowerCase())) {
+      await storeToken(secrets, this.oauth, 'devcode');
     }
-    return resolveToken(secrets);
+    const lease = await secrets.get(GITHUB_TOKEN_KEY);
+    return { accessToken: lease?.value ?? '', tokenType: 'bearer', scopes: [], expiresAt: lease?.expiresAt };
   }
 
   /** Build connector + MCP server once secrets are bound. */
@@ -85,7 +82,7 @@ export class GitHubPlugin extends BasePlugin {
       opts.api ?? (process.env.GITHUB_CONNECTOR_MODE === 'real'
         ? new RealGitHubApi(async () => {
             const token = await creds.value(GITHUB_TOKEN_KEY);
-            if (!token) throw new Error('github: connector_not_connected (no credential for this workspace)');
+            if (!token) throw new CredentialMissingError('github');
             return token;
           })
         : new FakeGitHubApi()),
