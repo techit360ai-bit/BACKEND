@@ -90,22 +90,57 @@ export const CONNECTOR_CREDENTIALS: Record<ConnectorName, ConnectorCredential> =
   ai: { key: 'ai_router_token', label: 'ai-router token', kind: 'api_key', modeVar: 'AI_HARNESS_CONNECTOR_MODE', envVar: 'AI_ROUTER_TOKEN', optional: true },
 };
 
+/**
+ * Legacy / bootstrap credential mechanism — NOT production architecture
+ * (ADR-3). Environment connector tokens are imported into the canonical
+ * workspace vault only when `MCP_CREDENTIAL_BOOTSTRAP=import` is set, with
+ * telemetry; there is no dynamic per-request fallback to env for agents or
+ * user-facing requests. Removal milestone: ENV_CREDENTIAL_REMOVAL_MILESTONE.
+ */
+export const ENV_CREDENTIAL_REMOVAL_MILESTONE = '2026-12-31';
+export const LEGACY_ENV_CREDENTIAL_DEPRECATED = true;
+
+/** Structured, greppable telemetry for the (temporary) bootstrap path. */
+export interface CredentialTelemetryEvent {
+  event: 'credential_bootstrap_used';
+  plugin: string;
+  workspaceId: string;
+  source: 'legacy-vault' | 'env';
+  deprecated: true;
+  removalMilestone: string;
+  at: string;
+}
+const credentialTelemetryLog: CredentialTelemetryEvent[] = [];
+/** Exposed for tests / ops dashboards. */
+export function credentialTelemetry(): readonly CredentialTelemetryEvent[] {
+  return credentialTelemetryLog;
+}
+
 /** What a connector looks like from outside — never includes the secret itself. */
 export interface ConnectionStatus {
   plugin: string;
   label: string;
   kind: ConnectorCredential['kind'];
-  /** True when a credential is stored in the vault. */
+  /** True when a credential is stored in THIS workspace's canonical vault lane. */
   connected: boolean;
-  /** Where the credential came from: the vault, the environment, or nowhere. */
-  source: 'vault' | 'env' | 'none';
+  /**
+   * Where the ACTIVE credential comes from. Only `vault` (the workspace lane) is
+   * ever used at invoke time. `legacy-bootstrap` means a legacy store exists but
+   * is not imported; `none` means there is no credential.
+   */
+  source: 'vault' | 'legacy-bootstrap' | 'none';
   /** ISO expiry, or NEVER_EXPIRES when it does not expire. Absent when unconnected. */
   expiresAt?: string;
   /** Whether invocation hits the live provider or the deterministic fake. */
   mode: 'real' | 'fake';
   /** True when the connector works without a credential. */
   optional: boolean;
-  /** Set by disconnect when the env var will re-seed this credential on restart. */
+  /**
+   * True when a legacy env var / legacy lane credential still exists for this
+   * connector. Deprecated: signal to remove it (ADR-3).
+   */
+  deprecatedEnv?: boolean;
+  /** Set by disconnect when a legacy env var could re-seed this credential. */
   envFallback?: boolean;
 }
 
@@ -128,12 +163,12 @@ export interface TechitService {
    * workspace, so it is cheap enough to call on every request.
    */
   ensureDemoActivity(workspaceId?: string): Promise<void>;
-  /** Per-connector credential status. Never returns secret material. */
-  connections(): Promise<ConnectionStatus[]>;
-  /** Store a connector credential in its scoped vault namespace. */
-  connect(plugin: string, credential: string, ttlSeconds?: number): Promise<ConnectResult>;
-  /** Remove a connector credential from its scoped vault namespace. */
-  disconnect(plugin: string): Promise<DisconnectResult>;
+  /** Per-connector credential status for ONE workspace. Never returns secret material. */
+  connections(workspaceId: string): Promise<ConnectionStatus[]>;
+  /** Store a connector credential in the workspace's canonical vault lane. */
+  connect(workspaceId: string, plugin: string, credential: string, ttlSeconds?: number, actorId?: string): Promise<ConnectResult>;
+  /** Remove a connector credential from the workspace's canonical vault lane. */
+  disconnect(workspaceId: string, plugin: string): Promise<DisconnectResult>;
 }
 
 export type ConnectResult =
@@ -258,7 +293,15 @@ async function build(): Promise<TechitService> {
       ? await approvals.listForWorkspace(workspaceId)
       : await approvals.allApprovals(),
     healthCheck,
-    invoke: (plugin, tool, params, actor) => client.invoke(plugin, tool, params, toContext(actor)),
+    invoke: async (plugin, tool, params, actor) => {
+      const ctx = toContext(actor);
+      // ADR-3: the ONLY path a legacy env credential can enter the canonical
+      // workspace lane. It is gated by MCP_CREDENTIAL_BOOTSTRAP=import and emits
+      // telemetry; there is deliberately NO dynamic per-request env fallback, so
+      // agents and user-facing requests fail closed when the vault is empty.
+      await maybeImportLegacyCredential(vault, plugin, ctx.actor.workspaceId);
+      return client.invoke(plugin, tool, params, ctx);
+    },
     approve: async (requestId, actor = { id: 'founder', role: 'owner', kind: 'human', workspaceId: WS }) => {
       const req = await approvals.get(requestId);
       if (!req) return { approved: false, reason: 'not_found' };
@@ -287,17 +330,18 @@ async function build(): Promise<TechitService> {
       if ((await audit.entriesForWorkspace(ws)).length > 0) return;
       await seedDemoActivity(service, ws);
     },
-    connections: async () => {
+    connections: async (workspaceId) => {
       const enabled = enabledConnectors();
       return Promise.all(
         CONNECTOR_NAMES.filter((name) => enabled.has(name))
-          .map((name) => connectionStatusFor(vault, name)),
+          .map((name) => connectionStatusFor(vault, name, workspaceId)),
       );
     },
-    connect: async (plugin, credential, ttlSeconds) => {
+    connect: async (workspaceId, plugin, credential, ttlSeconds, actorId) => {
       const name = asConnector(plugin);
       if (!name) return { ok: false, error: 'unknown_connector' };
       if (!enabledConnectors().has(name)) return { ok: false, error: 'connector_not_enabled' };
+      if (!workspaceId) return { ok: false, error: 'workspace_required' };
       const spec = CONNECTOR_CREDENTIALS[name];
       const value = typeof credential === 'string' ? credential.trim() : '';
       if (!value) return { ok: false, error: 'credential_required' };
@@ -317,19 +361,31 @@ async function build(): Promise<TechitService> {
         if (isProductionLike() && parsed.protocol !== 'https:') return { ok: false, error: 'rpc_url_requires_https' };
       }
       const ttl = Number.isFinite(ttlSeconds) && (ttlSeconds as number) > 0 ? Number(ttlSeconds) : 0;
-      await vault.scopeTo(name).set(spec.key, value, ttl);
-      return { ok: true, connection: await connectionStatusFor(vault, name) };
+      // CANONICAL workspace lane only (ADR-1/ADR-2). The secret value is written
+      // here and never returned; only presence/expiry leave this function.
+      await vault.scopeTo(name, workspaceId).set(spec.key, value, ttl);
+      // Non-secret telemetry for the connection record (ADR-1 model fields).
+      console.log(JSON.stringify({
+        event: 'connector_connected',
+        plugin: name,
+        workspaceId,
+        createdBy: actorId ?? null,
+        ttlSeconds: ttl,
+        scopes: [],
+        at: new Date().toISOString(),
+      }));
+      return { ok: true, connection: await connectionStatusFor(vault, name, workspaceId) };
     },
-    disconnect: async (plugin) => {
+    disconnect: async (workspaceId, plugin) => {
       const name = asConnector(plugin);
       if (!name) return { ok: false, error: 'unknown_connector' };
+      if (!workspaceId) return { ok: false, error: 'workspace_required' };
       const spec = CONNECTOR_CREDENTIALS[name];
-      const removed = await vault.scopeTo(name).delete(spec.key);
-      const connection = await connectionStatusFor(vault, name);
-      // The env var is read at authenticate() time, so a restart re-seeds it.
-      // Saying so is the difference between "disconnected" and "disconnected
-      // until the next boot, then silently back" — the operator needs to know.
-      const envFallback = Boolean(spec.envVar && process.env[spec.envVar]);
+      const removed = await vault.scopeTo(name, workspaceId).delete(spec.key);
+      const connection = await connectionStatusFor(vault, name, workspaceId);
+      // A legacy env var re-seeds ONLY through an explicit bootstrap import. The
+      // caller must know a "disconnect" is not permanent while that is enabled.
+      const envFallback = bootstrapImportEnabled() && Boolean(spec.envVar && process.env[spec.envVar]);
       return {
         ok: true,
         connection: { ...connection, envFallback },
@@ -374,30 +430,44 @@ function validateProductionConfig(): void {
   }
   const connectors = enabledConnectors();
   if (connectors.size === 0) throw new Error('MCP_ENABLED_CONNECTORS must enable at least one production connector.');
-  const requirements: Record<ConnectorName, { mode: string; vars: string[] }> = {
-    github: { mode: 'GITHUB_CONNECTOR_MODE', vars: ['MCP_GITHUB_TOKEN'] },
-    gitlab: { mode: 'GITLAB_CONNECTOR_MODE', vars: ['MCP_GITLAB_TOKEN'] },
-    bitbucket: { mode: 'BITBUCKET_CONNECTOR_MODE', vars: ['MCP_BITBUCKET_TOKEN'] },
-    notion: { mode: 'NOTION_CONNECTOR_MODE', vars: ['NOTION_TOKEN'] },
-    figma: { mode: 'FIGMA_CONNECTOR_MODE', vars: ['FIGMA_TOKEN'] },
-    web3: { mode: 'WEB3_CONNECTOR_MODE', vars: ['SIWE_EXPECTED_DOMAIN', 'SIWE_EXPECTED_URI', 'SIWE_EXPECTED_CHAIN_ID'] },
-    ai: { mode: 'AI_HARNESS_CONNECTOR_MODE', vars: ['AI_ROUTER_URL', 'AI_ROUTER_TOKEN'] },
+  // Per ADR-1/ADR-2/ADR-3 the canonical credential store is the WORKSPACE VAULT,
+  // filled by the connect API (and, temporarily, by a gated bootstrap import of
+  // legacy env tokens). Production therefore does NOT require env tokens at
+  // boot — requiring them would re-establish env as the architecture. Only the
+  // connector *mode* and the shared service endpoints remain boot requirements.
+  const modes: Record<ConnectorName, string> = {
+    github: 'GITHUB_CONNECTOR_MODE',
+    gitlab: 'GITLAB_CONNECTOR_MODE',
+    bitbucket: 'BITBUCKET_CONNECTOR_MODE',
+    notion: 'NOTION_CONNECTOR_MODE',
+    figma: 'FIGMA_CONNECTOR_MODE',
+    web3: 'WEB3_CONNECTOR_MODE',
+    ai: 'AI_HARNESS_CONNECTOR_MODE',
   };
   for (const connector of connectors) {
-    const requirement = requirements[connector];
-    if (process.env[requirement.mode] !== 'real') {
-      throw new Error(`${requirement.mode}=real is required for enabled production connector ${connector}.`);
-    }
-    for (const name of requirement.vars) {
-      if (!process.env[name]) throw new Error(`${name} is required for enabled production connector ${connector}.`);
+    if (process.env[modes[connector]] !== 'real') {
+      throw new Error(`${modes[connector]}=real is required for enabled production connector ${connector}.`);
     }
   }
-  if (connectors.has('web3') && !process.env.WEB3_RPC_URL && !process.env.ALCHEMY_API_KEY) {
-    throw new Error('WEB3_RPC_URL or ALCHEMY_API_KEY is required for the production web3 connector.');
+  // Shared service endpoints (not per-tenant secrets) still need to be present.
+  if (connectors.has('ai') && !process.env.AI_ROUTER_URL) {
+    throw new Error('AI_ROUTER_URL is required for the production ai connector.');
   }
-  for (const name of ['AI_ROUTER_URL', 'WEB3_RPC_URL']) {
-    const value = process.env[name];
-    if (value && new URL(value).protocol !== 'https:') throw new Error(`${name} must use https in production/staging.`);
+  if (process.env.AI_ROUTER_URL && new URL(process.env.AI_ROUTER_URL).protocol !== 'https:') {
+    throw new Error('AI_ROUTER_URL must use https in production/staging.');
+  }
+  // Warn (do not fail) when a legacy env token is still present. Tokens are
+  // bootstrap-only; the operator should import then remove them (ADR-3).
+  const legacyTokens = Object.values(CONNECTOR_CREDENTIALS)
+    .map((spec) => spec.envVar)
+    .filter((name): name is string => Boolean(name && process.env[name]));
+  if (legacyTokens.length > 0) {
+    console.warn(JSON.stringify({
+      event: 'legacy_env_credential_present',
+      vars: legacyTokens,
+      removalMilestone: ENV_CREDENTIAL_REMOVAL_MILESTONE,
+      note: 'Deprecated: import into the workspace vault (MCP_CREDENTIAL_BOOTSTRAP=import) then remove.',
+    }));
   }
 }
 
@@ -430,20 +500,77 @@ function asConnector(value: unknown): ConnectorName | undefined {
  * credentials server-side at invoke time, so a leaked browser session cannot
  * exfiltrate a provider token through this API.
  */
-async function connectionStatusFor(vault: SecretVault, name: ConnectorName): Promise<ConnectionStatus> {
+/** True only when the operator explicitly enabled the migration bootstrap. */
+function bootstrapImportEnabled(): boolean {
+  return process.env.MCP_CREDENTIAL_BOOTSTRAP === 'import';
+}
+
+/** Does a deprecated legacy (env) credential exist for this connector? */
+function legacyEnvPresent(name: ConnectorName): boolean {
   const spec = CONNECTOR_CREDENTIALS[name];
-  const lease = await vault.scopeTo(name).get(spec.key);
+  return Boolean(spec.envVar && process.env[spec.envVar]);
+}
+
+/**
+ * Copy a legacy credential (legacy vault lane, else env var) into the canonical
+ * workspace lane, ONCE, when bootstrap import is explicitly enabled. Emits
+ * telemetry and never overwrites a real workspace credential.
+ *
+ * This is the whole of the "keep temporarily" phase (ADR-3). It is not a
+ * runtime fallback: with `MCP_CREDENTIAL_BOOTSTRAP` unset, an empty workspace
+ * vault simply fails closed.
+ */
+async function maybeImportLegacyCredential(
+  vault: SecretVault,
+  plugin: string,
+  workspaceId?: string,
+): Promise<boolean> {
+  if (!bootstrapImportEnabled() || !workspaceId) return false;
+  const name = asConnector(plugin);
+  if (!name) return false;
+  const spec = CONNECTOR_CREDENTIALS[name];
+  // The vault is the source of truth: never clobber an existing credential.
+  if (await vault.scopeTo(name, workspaceId).get(spec.key)) return false;
+
+  const legacyLease = await vault.scopeTo(name).get(spec.key);
+  const envValue = spec.envVar ? process.env[spec.envVar] : undefined;
+  const value = legacyLease?.value ?? envValue;
+  if (!value) return false;
+
+  await vault.scopeTo(name, workspaceId).set(spec.key, value, 0);
+  const event: CredentialTelemetryEvent = {
+    event: 'credential_bootstrap_used',
+    plugin: name,
+    workspaceId,
+    source: legacyLease ? 'legacy-vault' : 'env',
+    deprecated: true,
+    removalMilestone: ENV_CREDENTIAL_REMOVAL_MILESTONE,
+    at: new Date().toISOString(),
+  };
+  credentialTelemetryLog.push(event);
+  console.warn(JSON.stringify(event));
+  return true;
+}
+
+async function connectionStatusFor(vault: SecretVault, name: ConnectorName, workspaceId: string): Promise<ConnectionStatus> {
+  const spec = CONNECTOR_CREDENTIALS[name];
+  // If bootstrap import is enabled, reflect a pending migration in status.
+  await maybeImportLegacyCredential(vault, name, workspaceId);
+  const lease = await vault.scopeTo(name, workspaceId).get(spec.key);
   const mode: ConnectionStatus['mode'] = process.env[spec.modeVar] === 'real' ? 'real' : 'fake';
   const base = { plugin: name, label: spec.label, kind: spec.kind, mode, optional: spec.optional };
   if (lease) {
-    return { ...base, connected: true, source: 'vault', expiresAt: lease.expiresAt };
+    // `deprecatedEnv` tells ops the legacy var is still set and should be removed
+    // once the workspace lane holds the credential (ADR-3 removal milestone).
+    return {
+      ...base,
+      connected: true,
+      source: 'vault',
+      expiresAt: lease.expiresAt,
+      ...(legacyEnvPresent(name) ? { deprecatedEnv: true } : {}),
+    };
   }
-  // No vault entry, but the environment supplies one: the connector re-seeds it
-  // from that var at authenticate() time, so this reads as provisioned — it
-  // just is not in the vault *right now* (fresh boot, or after a disconnect).
-  return {
-    ...base,
-    connected: false,
-    source: spec.envVar && process.env[spec.envVar] ? 'env' : 'none',
-  };
+  // No workspace credential. A legacy env var is NOT the active source — it is
+  // reported only so ops can see migration work remains.
+  return { ...base, connected: false, source: legacyEnvPresent(name) ? 'legacy-bootstrap' : 'none' };
 }

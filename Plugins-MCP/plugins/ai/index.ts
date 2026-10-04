@@ -16,6 +16,7 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { AiHarnessConnector } from './connector.js';
@@ -47,6 +48,7 @@ export class AiPlugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: AiHarnessApi | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -67,7 +69,7 @@ export class AiPlugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new AiHarnessConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new AiHarnessMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new AiHarnessMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): AiHarnessApi {
@@ -75,8 +77,8 @@ export class AiPlugin extends BasePlugin {
     const real = process.env.AI_HARNESS_CONNECTOR_MODE === 'real' && !!url;
     if (real) {
       return new RealAiHarnessApi(
-        async () => (await this.secrets.get(AI_BASE_URL_KEY))?.value ?? url ?? '',
-        async () => (await this.secrets.get(AI_TOKEN_KEY))?.value ?? '',
+        async () => (await this.creds.value(AI_BASE_URL_KEY)) ?? url ?? '',
+        async () => (await this.creds.value(AI_TOKEN_KEY)) ?? '',
       );
     }
     return new FakeAiHarnessApi();
@@ -84,7 +86,8 @@ export class AiPlugin extends BasePlugin {
 
   static async install(opts: AiPluginOptions): Promise<AiPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new AiPlugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'ai');
+    const plugin = new AiPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);

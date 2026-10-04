@@ -16,12 +16,14 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { GitHubConnector } from './connector.js';
 import { GitHubMCPServer } from './mcp.js';
 import { FakeGitHubApi, RealGitHubApi, type GitHubApi } from './github-api.js';
 import { StubOAuthExchange, resolveToken, storeToken, type OAuthExchange } from './auth.js';
+import { GITHUB_TOKEN_KEY } from './auth.js';
 
 const MANIFEST_PATH = fileURLToPath(new URL('./techit.plugin.yaml', import.meta.url));
 
@@ -45,6 +47,7 @@ export class GitHubPlugin extends BasePlugin {
     private readonly api: GitHubApi,
     private readonly oauth: OAuthExchange,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -69,28 +72,32 @@ export class GitHubPlugin extends BasePlugin {
   /** Build connector + MCP server once secrets are bound. */
   private buildComponents(): void {
     this.connector = new GitHubConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new GitHubMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new GitHubMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   static async install(opts: GithubPluginOptions): Promise<GitHubPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
+    // Workspace-scoped credential handle (ADR-1): the acting workspace is set
+    // on bind() and the real API resolves the CANONICAL lane from it.
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'github');
     const plugin = new GitHubPlugin(
       manifest,
       opts.api ?? (process.env.GITHUB_CONNECTOR_MODE === 'real'
-        ? new RealGitHubApi(async () => (await pluginTokenFromRuntime(opts.runtime)) ?? '')
+        ? new RealGitHubApi(async () => {
+            const token = await creds.value(GITHUB_TOKEN_KEY);
+            if (!token) throw new Error('github: connector_not_connected (no credential for this workspace)');
+            return token;
+          })
         : new FakeGitHubApi()),
       opts.oauth ?? new StubOAuthExchange(),
       opts.workspaceId,
+      creds,
     );
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);
     return plugin;
   }
-}
-
-async function pluginTokenFromRuntime(runtime: SdkRuntime): Promise<string | undefined> {
-  return (await runtime.vault.scopeTo('github').get('oauth_access_token'))?.value;
 }
 
 export async function registerGithubPlugin(opts: GithubPluginOptions): Promise<GitHubPlugin> {

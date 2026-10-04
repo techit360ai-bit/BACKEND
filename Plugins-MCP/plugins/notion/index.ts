@@ -17,6 +17,7 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { NotionConnector } from './connector.js';
@@ -44,6 +45,7 @@ export class NotionPlugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: NotionApi | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -61,15 +63,14 @@ export class NotionPlugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new NotionConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new NotionMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new NotionMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): NotionApi {
     const real = process.env.NOTION_CONNECTOR_MODE === 'real' && !!process.env.NOTION_TOKEN;
     if (real) {
       return new RealNotionApi(async () => {
-        const lease = await this.secrets.get(NOTION_TOKEN_KEY);
-        return lease?.value ?? process.env.NOTION_TOKEN ?? '';
+        return (await this.creds.value(NOTION_TOKEN_KEY)) ?? '';
       });
     }
     return new FakeNotionApi();
@@ -77,7 +78,8 @@ export class NotionPlugin extends BasePlugin {
 
   static async install(opts: NotionPluginOptions): Promise<NotionPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new NotionPlugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'notion');
+    const plugin = new NotionPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);

@@ -1,12 +1,12 @@
-import { BaseMCPServer, type ManifestMCPTool, type SdkRuntime } from '@techit/plugin-sdk'
+import { BaseMCPServer, type ManifestMCPTool, type SdkRuntime, type WorkspaceCredentialHandle } from '@techit/plugin-sdk'
 import type { GitHostApi } from './git-host-api.js'
 
 const BLOCKED = /(^|\/)(\.env($|\.)|\.git(?:\/|$)|node_modules(?:\/|$)|\.ssh(?:\/|$)|secrets?(?:\/|$)|credentials?(?:\/|$)|[^/]*(?:credential|secret|private[-_]?key)[^/]*\.(?:json|pem|key|txt)$)/i
 const safePath = (value: unknown) => { const path = String(value || '').trim().replaceAll('\\', '/').replace(/^\.\//, ''); return path && !path.startsWith('/') && !path.includes('\0') && !path.split('/').includes('..') && !BLOCKED.test(path) ? path : null }
 
 export class GitHostMCPServer extends BaseMCPServer {
-  constructor(name: string, runtime: SdkRuntime, tools: ManifestMCPTool[], api: GitHostApi) {
-    super(name, runtime, tools)
+  constructor(name: string, runtime: SdkRuntime, tools: ManifestMCPTool[], api: GitHostApi, creds?: WorkspaceCredentialHandle) {
+    super(name, runtime, tools, creds)
     this.handle('get_repository_state', p => api.getRepositoryState(String(p.repo), String(p.branch || 'main')))
     this.handle('read_file', p => { const path = safePath(p.path); if (!path) throw new Error('unsafe or sensitive path'); return api.readFile(String(p.repo), path, String(p.ref || 'main')) })
     this.handle('get_commit_checks', p => api.getCommitChecks(String(p.repo), String(p.commitSha)))

@@ -15,6 +15,7 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { Web3Connector } from './connector.js';
@@ -47,6 +48,7 @@ export class Web3Plugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: Web3Api | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -65,7 +67,7 @@ export class Web3Plugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new Web3Connector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new Web3MCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new Web3MCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): Web3Api {
@@ -73,8 +75,7 @@ export class Web3Plugin extends BasePlugin {
     const real = process.env.WEB3_CONNECTOR_MODE === 'real' && !!url;
     if (real) {
       return new RealWeb3Api(async () => {
-        const lease = await this.secrets.get(WEB3_RPC_KEY);
-        return lease?.value ?? url ?? '';
+        return (await this.creds.value(WEB3_RPC_KEY)) ?? url ?? '';
       });
     }
     return new FakeWeb3Api();
@@ -82,7 +83,8 @@ export class Web3Plugin extends BasePlugin {
 
   static async install(opts: Web3PluginOptions): Promise<Web3Plugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new Web3Plugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'web3');
+    const plugin = new Web3Plugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);

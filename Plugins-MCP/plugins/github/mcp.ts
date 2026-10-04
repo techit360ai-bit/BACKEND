@@ -9,6 +9,7 @@ import {
   BaseMCPServer,
   type ManifestMCPTool,
   type SdkRuntime,
+  type WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { GitHubApi } from './github-api.js';
 
@@ -21,8 +22,13 @@ function safeCodePath(value: unknown): string | null {
 }
 
 export class GitHubMCPServer extends BaseMCPServer {
-  constructor(runtime: SdkRuntime, toolSpecs: ManifestMCPTool[], private readonly api: GitHubApi) {
-    super('github', runtime, toolSpecs);
+  constructor(
+    runtime: SdkRuntime,
+    toolSpecs: ManifestMCPTool[],
+    private readonly api: GitHubApi,
+    creds?: WorkspaceCredentialHandle,
+  ) {
+    super('github', runtime, toolSpecs, creds);
 
     this.handle('list_repositories', async (p) =>
       this.api.listRepositories(p.org ? String(p.org) : undefined),

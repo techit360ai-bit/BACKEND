@@ -31,8 +31,38 @@ export interface ScopedSecrets {
 
 /** Full vault interface — only infra/SDK hold this, never plugins. */
 export interface SecretVault {
-  /** Returns a handle confined to `secrets://<plugin>/*`. */
-  scopeTo(plugin: string): ScopedSecrets;
+  /**
+   * Returns a handle confined to a single namespace.
+   *
+   *  - `scopeTo(plugin)`            → legacy/bootstrap lane `secrets://<plugin>/`
+   *  - `scopeTo(plugin, workspaceId)` → workspace lane `secrets://ws/<workspaceId>/<plugin>/`
+   *
+   * The workspace lane is the canonical store (ADR-1/ADR-2). The legacy lane
+   * exists only so a one-time bootstrap import can read what used to live in
+   * env vars; it MUST NOT be the long-term read path.
+   */
+  scopeTo(plugin: string, owner?: string): ScopedSecrets;
+}
+
+/** Characters allowed in a workspace/owner segment of a namespace. */
+const OWNER_RE = /^[A-Za-z0-9._-]+$/;
+/** Characters allowed in a plugin segment (matches the Postgres store). */
+const PLUGIN_RE = /^[a-z0-9_-]+$/i;
+
+/**
+ * Build the vault namespace for a plugin within an optional workspace owner.
+ * Centralised so the in-memory and Postgres vaults cannot drift.
+ */
+export function vaultNamespace(plugin: string, owner?: string): string {
+  if (!plugin || !PLUGIN_RE.test(plugin)) throw new Error(`invalid plugin namespace: ${plugin}`);
+  if (owner === undefined) return `secrets://${plugin}/`;
+  if (!owner || !OWNER_RE.test(owner)) throw new Error(`invalid workspace namespace: ${owner}`);
+  return `secrets://ws/${owner}/${plugin}/`;
+}
+
+/** True when a namespace is the canonical workspace lane (not legacy/bootstrap). */
+export function isWorkspaceNamespace(namespace: string): boolean {
+  return namespace.startsWith('secrets://ws/');
 }
 
 /**
@@ -69,11 +99,8 @@ function leaseExpiry(ttlSeconds: number): string {
 export class InMemorySecretVault implements SecretVault {
   private readonly store = new Map<string, SecretLease>();
 
-  scopeTo(plugin: string): ScopedSecrets {
-    if (!plugin || plugin.includes('/')) {
-      throw new Error(`invalid plugin namespace: ${plugin}`);
-    }
-    const prefix = `secrets://${plugin}/`;
+  scopeTo(plugin: string, owner?: string): ScopedSecrets {
+    const prefix = vaultNamespace(plugin, owner);
     const store = this.store;
 
     return {

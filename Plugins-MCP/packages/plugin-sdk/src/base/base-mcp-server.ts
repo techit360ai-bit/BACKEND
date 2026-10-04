@@ -22,6 +22,7 @@ import {
 } from '../contract/types.js';
 import type { ManifestMCPTool } from '../manifest/schema.js';
 import type { SdkRuntime } from '../runtime.js';
+import type { WorkspaceCredentialHandle } from '../credentials.js';
 import { recordAudit } from '../hooks/audit.js';
 import { checkPermission } from '../hooks/permission.js';
 import { consumeApproval, requestApproval, validateApproval } from '../hooks/approval.js';
@@ -49,12 +50,19 @@ export abstract class BaseMCPServer implements MCPAdapter {
     protected readonly sourceTool: string,
     protected readonly runtime: SdkRuntime,
     toolSpecs: ManifestMCPTool[],
+    /**
+     * Workspace-scoped credential handle. When supplied, `bind(ctx)` points it
+     * at the acting workspace so real-API resolvers read the CANONICAL lane for
+     * that workspace (ADR-1), never a process-wide credential.
+     */
+    protected readonly creds?: WorkspaceCredentialHandle,
   ) {
     for (const spec of toolSpecs) this.tools.set(spec.name, { spec, handler: notImplemented(spec.name) });
   }
 
   bind(ctx: CallContext): this {
     this.ctx = ctx;
+    this.creds?.use(ctx.resourceWorkspaceId);
     return this;
   }
 

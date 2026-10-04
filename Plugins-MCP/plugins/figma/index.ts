@@ -15,6 +15,7 @@ import {
   type AuthToken,
   type PluginManifest,
   type SdkRuntime,
+  WorkspaceCredentialHandle,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { FigmaConnector } from './connector.js';
@@ -41,6 +42,7 @@ export class FigmaPlugin extends BasePlugin {
     manifest: PluginManifest,
     private readonly apiOverride: FigmaApi | undefined,
     private readonly workspaceId: string,
+    private readonly creds: WorkspaceCredentialHandle,
   ) {
     super(manifest);
   }
@@ -56,15 +58,14 @@ export class FigmaPlugin extends BasePlugin {
   private buildComponents(): void {
     this.api = this.apiOverride ?? this.selectApi();
     this.connector = new FigmaConnector(this.runtime, this.secrets, this.api, this.workspaceId);
-    this.mcp = new FigmaMCPServer(this.runtime, this.manifest.mcp.tools, this.api);
+    this.mcp = new FigmaMCPServer(this.runtime, this.manifest.mcp.tools, this.api, this.creds);
   }
 
   private selectApi(): FigmaApi {
     const real = process.env.FIGMA_CONNECTOR_MODE === 'real' && !!process.env.FIGMA_TOKEN;
     if (real) {
       return new RealFigmaApi(async () => {
-        const lease = await this.secrets.get(FIGMA_TOKEN_KEY);
-        return lease?.value ?? process.env.FIGMA_TOKEN ?? '';
+        return (await this.creds.value(FIGMA_TOKEN_KEY)) ?? '';
       });
     }
     return new FakeFigmaApi();
@@ -72,7 +73,8 @@ export class FigmaPlugin extends BasePlugin {
 
   static async install(opts: FigmaPluginOptions): Promise<FigmaPlugin> {
     const manifest = loadManifest(opts.manifestPath ?? MANIFEST_PATH);
-    const plugin = new FigmaPlugin(manifest, opts.api, opts.workspaceId);
+    const creds = new WorkspaceCredentialHandle(opts.runtime.vault, 'figma');
+    const plugin = new FigmaPlugin(manifest, opts.api, opts.workspaceId, creds);
     await plugin.register(opts.runtime);
     plugin.buildComponents();
     opts.registry.register(manifest.name, plugin.mcp);
