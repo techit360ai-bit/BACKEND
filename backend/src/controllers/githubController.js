@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypt
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { addVerifiedSkill, appendTrustProof } from '../services/trustVerificationAuthority.js'
-import { GITHUB_OAUTH_SCOPES, hasScopes, parseGrantedScopes } from '../config/github.js'
+import { GITHUB_OAUTH_SCOPES_CONNECT, hasScopes, parseGrantedScopes } from '../config/github.js'
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'test-github-client-id'
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || 'test-github-client-secret'
@@ -57,11 +57,10 @@ export function githubAuthorize(req, res) {
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
     redirect_uri: GITHUB_REDIRECT_URI,
-    // Shared with the trust surface (services/trustVerificationAuthority.js).
-    // They previously requested different scopes against this same callback,
-    // so entering via trust granted no `repo` and the language enrichment
-    // silently recorded nothing.
-    scope: GITHUB_OAUTH_SCOPES,
+    // The connect flow needs repo access; the trust surface requests a narrower
+    // set against the same callback (services/trustVerificationAuthority.js).
+    // Purpose-scoping is what prevents asking a trust-only user for `repo`.
+    scope: GITHUB_OAUTH_SCOPES_CONNECT,
     state,
   })
   return res.json({ url: `https://github.com/login/oauth/authorize?${params}` })
@@ -133,29 +132,38 @@ export async function githubCallback(req, res) {
     }
     const languages = [...new Set((Array.isArray(repos) ? repos : []).map(repo => repo.language).filter(Boolean))].slice(0, 20)
 
-    const encryptedToken = encryptToken(tokenData.access_token)
-    if (!encryptedToken) return res.status(503).json({ error: 'GitHub token encryption is not configured' })
-    const connection = {
-      id: createId('ghconn'),
-      userId: stateEntry.userId,
-      provider: 'github',
-      accessTokenEncrypted: encryptedToken,
-      username: githubUser.login || '',
-      avatarUrl: githubUser.avatar_url || '',
-      profileUrl: githubUser.html_url || '',
-      repoCount: githubUser.public_repos || 0,
-      scopes,
-      // True when we could not read repos because `repo` was not granted. The
-      // proof is still valid — it is built from /user — but it carries no
-      // language evidence, and that distinction is now visible.
-      repoEnrichmentSkipped: !canReadRepos,
-      connectedVia: stateEntry.purpose || 'connect',
-      connectedAt: nowIso(),
+    // A trust-purpose flow produces a *verification proof*, not a connector.
+    // The two surfaces share this callback, and the trust surface now requests
+    // only identity scopes (no `repo`), so writing it as a connection would
+    // DOWNGRADE a user's existing repo-scoped connect to a repo-less one. The
+    // report's recommendation is explicit: the trust route stops at a proof and
+    // never mints a connector token.
+    const connectPurpose = (stateEntry.purpose || 'connect') !== 'trust'
+    if (connectPurpose) {
+      const encryptedToken = encryptToken(tokenData.access_token)
+      if (!encryptedToken) return res.status(503).json({ error: 'GitHub token encryption is not configured' })
+      const connection = {
+        id: createId('ghconn'),
+        userId: stateEntry.userId,
+        provider: 'github',
+        accessTokenEncrypted: encryptedToken,
+        username: githubUser.login || '',
+        avatarUrl: githubUser.avatar_url || '',
+        profileUrl: githubUser.html_url || '',
+        repoCount: githubUser.public_repos || 0,
+        scopes,
+        // True when we could not read repos because `repo` was not granted. The
+        // proof is still valid — it is built from /user — but it carries no
+        // language evidence, and that distinction is now visible.
+        repoEnrichmentSkipped: !canReadRepos,
+        connectedVia: stateEntry.purpose || 'connect',
+        connectedAt: nowIso(),
+      }
+      if (!db.githubConnections) db.githubConnections = []
+      db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
+      db.githubConnections.push(connection)
+      writeAuthorityDb(db)
     }
-    if (!db.githubConnections) db.githubConnections = []
-    db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-    db.githubConnections.push(connection)
-    writeAuthorityDb(db)
     const proof = appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth', status: 'verified', providerSubjectId: String(githubUser.id || githubUser.node_id || githubUser.login || ''), confidence: 0.98, metadata: { providerSubjectId: String(githubUser.id || githubUser.node_id || ''), username: githubUser.login || '', profileUrl: githubUser.html_url || '', repoCount: Number(githubUser.public_repos || 0), languages, sourceProjectId: null, scopes, repoEnrichmentSkipped: !canReadRepos } })
     for (const language of languages) addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.82 })
 
