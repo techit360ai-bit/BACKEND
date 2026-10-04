@@ -217,8 +217,23 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
     if (!resolved) return;
     if (!requireOperator(resolved, res)) return;
     const workspaceId = resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId;
-    const { credential, ttlSeconds } = req.body as { credential?: unknown; ttlSeconds?: unknown };
-    const out = await svc.connect(workspaceId, req.params.plugin ?? '', credential as string, Number(ttlSeconds), resolved.actor.id);
+    const { credential, ttlSeconds, scopes } = req.body as {
+      credential?: unknown;
+      ttlSeconds?: unknown;
+      scopes?: unknown;
+    };
+    // Optional declared scopes. When present they are recorded with the
+    // credential and enforced at resolve time (ADR-1 step 3); when absent the
+    // set is unknown and the provider is the backstop (status.scopesVerified=false).
+    const declaredScopes = Array.isArray(scopes) ? scopes.map(String) : undefined;
+    const out = await svc.connect(
+      workspaceId,
+      req.params.plugin ?? '',
+      credential as string,
+      Number(ttlSeconds),
+      resolved.actor.id,
+      declaredScopes,
+    );
     if (!out.ok) {
       res.status(out.error === 'unknown_connector' ? 404 : 400).json(out);
       return;
