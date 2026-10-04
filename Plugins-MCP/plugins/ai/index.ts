@@ -17,7 +17,6 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
-  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { AiHarnessConnector } from './connector.js';
@@ -74,15 +73,14 @@ export class AiPlugin extends BasePlugin {
   }
 
   private selectApi(): AiHarnessApi {
-    const url = envBaseUrl();
-    const real = process.env.AI_HARNESS_CONNECTOR_MODE === 'real' && !!url;
+    // Real mode is selected by the connector mode alone (ADR-3): the base URL is
+    // resolved from the canonical vault lane at call time.
+    const real = process.env.AI_HARNESS_CONNECTOR_MODE === 'real';
     if (real) {
       return new RealAiHarnessApi(
-        async () => {
-          const value = (await this.creds.value(AI_BASE_URL_KEY)) ?? url ?? '';
-          if (!value) throw new CredentialMissingError('ai', 'missing ai-router base URL');
-          return value;
-        },
+        // Base URL is required → token() denies cleanly when it is absent.
+        async () => this.creds.token(AI_BASE_URL_KEY),
+        // ai-router token is optional for this connector → value() may be empty.
         async () => (await this.creds.value(AI_TOKEN_KEY)) ?? '',
       );
     }

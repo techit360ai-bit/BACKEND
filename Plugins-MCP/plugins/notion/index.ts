@@ -68,13 +68,13 @@ export class NotionPlugin extends BasePlugin {
   }
 
   private selectApi(): NotionApi {
-    const real = process.env.NOTION_CONNECTOR_MODE === 'real' && !!process.env.NOTION_TOKEN;
+    // Real mode is selected by the connector mode alone (ADR-3): credentials are
+    // per-workspace and resolved from the canonical vault lane at call time, so
+    // the presence of a legacy env token must not decide the API.
+    const real = process.env.NOTION_CONNECTOR_MODE === 'real';
     if (real) {
-      return new RealNotionApi(async () => {
-        const token = await this.creds.value(NOTION_TOKEN_KEY);
-        if (!token) throw new CredentialMissingError('notion');
-        return token;
-      });
+      // token() enforces provider + scope at resolve time (ADR-1 step 3).
+      return new RealNotionApi(async () => this.creds.token(NOTION_TOKEN_KEY));
     }
     return new FakeNotionApi();
   }

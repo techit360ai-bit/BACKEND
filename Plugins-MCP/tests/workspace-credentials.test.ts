@@ -209,4 +209,40 @@ describe('provider + scope verification at resolve time (ADR-1 step 3)', () => {
     expect(status?.connected).toBe(true);
     expect(status?.scopesVerified).toBe(true);
   });
+
+  test('a platform GitHub connection whose recorded scopes are insufficient is DENIED at call time', async () => {
+    process.env.GITHUB_CONNECTOR_MODE = 'real';
+    delete process.env.MCP_CREDENTIAL_BOOTSTRAP;
+    delete process.env.MCP_GITHUB_TOKEN;
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+
+    // Simulate the WS-J4 bridge importing a trust-purpose OAuth result: identity
+    // scopes only, no `repo`. The scope IS recorded on the platform connection —
+    // this asserts it is actually checked against the vault credential before any
+    // GitHub tool runs (ADR-1 step 3), not merely stored.
+    await svc.importCredential('ws-trust', 'github', 'ghp_trust_only', ['read:user', 'user:email']);
+
+    const res = await svc.invoke('github', 'list_repositories', {}, {
+      id: 'u1',
+      kind: 'human',
+      role: 'editor',
+      workspaceId: 'ws-trust',
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('scope_insufficient');
+      expect(res.error.error).toMatch(/Reconnect github/i);
+    }
+  });
+
+  test('a credential is never readable through another provider (provider isolation)', async () => {
+    const vault = new InMemorySecretVault();
+    await vault.scopeTo('github', 'ws-1').set('oauth_access_token', 'ghp_github_only');
+
+    // Same workspace, different provider → must not resolve the GitHub secret.
+    const gitlab = new WorkspaceCredentialHandle(vault, 'gitlab', ['api', 'read_repository']);
+    gitlab.use('ws-1');
+    await expect(gitlab.token('access_token')).rejects.toBeInstanceOf(CredentialMissingError);
+  });
 });

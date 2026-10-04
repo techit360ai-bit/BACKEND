@@ -63,13 +63,12 @@ export class FigmaPlugin extends BasePlugin {
   }
 
   private selectApi(): FigmaApi {
-    const real = process.env.FIGMA_CONNECTOR_MODE === 'real' && !!process.env.FIGMA_TOKEN;
+    // Real mode is selected by the connector mode alone (ADR-3): credentials are
+    // per-workspace and resolved from the canonical vault lane at call time.
+    const real = process.env.FIGMA_CONNECTOR_MODE === 'real';
     if (real) {
-      return new RealFigmaApi(async () => {
-        const token = await this.creds.value(FIGMA_TOKEN_KEY);
-        if (!token) throw new CredentialMissingError('figma');
-        return token;
-      });
+      // token() enforces provider + scope at resolve time (ADR-1 step 3).
+      return new RealFigmaApi(async () => this.creds.token(FIGMA_TOKEN_KEY));
     }
     return new FakeFigmaApi();
   }

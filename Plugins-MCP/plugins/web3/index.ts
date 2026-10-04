@@ -16,7 +16,6 @@ import {
   type PluginManifest,
   type SdkRuntime,
   WorkspaceCredentialHandle,
-  CredentialMissingError,
 } from '@techit/plugin-sdk';
 import type { ScopedSecrets } from '@techit/infra-secrets';
 import { Web3Connector } from './connector.js';
@@ -72,14 +71,12 @@ export class Web3Plugin extends BasePlugin {
   }
 
   private selectApi(): Web3Api {
-    const url = envRpcUrl();
-    const real = process.env.WEB3_CONNECTOR_MODE === 'real' && !!url;
+    // Real mode is selected by the connector mode alone (ADR-3): the RPC URL is
+    // a per-workspace vault entry resolved at call time, not an env prerequisite.
+    const real = process.env.WEB3_CONNECTOR_MODE === 'real';
     if (real) {
-      return new RealWeb3Api(async () => {
-        const value = (await this.creds.value(WEB3_RPC_KEY)) ?? url ?? '';
-        if (!value) throw new CredentialMissingError('web3');
-        return value;
-      });
+      // token() enforces provider + scope at resolve time (ADR-1 step 3).
+      return new RealWeb3Api(async () => this.creds.token(WEB3_RPC_KEY));
     }
     return new FakeWeb3Api();
   }
