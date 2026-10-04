@@ -7,6 +7,7 @@
  *   GET  /api/tools           → MCP catalogue (what agents can call)
  *   GET  /api/audit           → immutable audit log
  *   GET  /api/contributions   → execution-intelligence feed
+ *   GET  /api/execution-intelligence → scope/role-aware execution view (WS-H)
  *   GET  /api/approvals       → approval requests (pending/approved/rejected)
  *   GET  /api/connections     → connector credential status (never the secret)
  *   POST /api/invoke          → { plugin, tool, params } → structured Result
@@ -30,6 +31,7 @@ import { getTechitService } from './techit-service.js';
 interface Req {
   body: Record<string, unknown>;
   params: Record<string, string>;
+  query?: Record<string, unknown>;
   headers?: Record<string, string | string[] | undefined>;
 }
 interface Res {
@@ -148,6 +150,27 @@ export async function mountTechitApi(app: App, base = '/api', opts: MountOptions
     const resolved = await gate(req, res);
     if (!resolved) return;
     res.json(await svc.contributions(resolved.workspaceId ?? resolved.actor.workspaceId));
+  });
+  // WS-H: canonical execution-intelligence view. The acting workspace comes from
+  // the verified JWT; project/org/program/hackathon/actor filters are optional
+  // query params, so EVERY surface (workspace, founder, collaborator, investor,
+  // organization, hackathon) reads the same projection and none grows its own.
+  app.get(`${base}/execution-intelligence`, async (req, res) => {
+    const resolved = await gate(req, res);
+    if (!resolved) return;
+    const q = req.query as Record<string, unknown>;
+    const str = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
+    res.json(await svc.executionIntelligence({
+      workspaceId: resolved.workspaceId ?? resolved.actor.workspaceId ?? svc.workspaceId,
+      role: str(q.role) ?? resolved.actor.role,
+      actorId: str(q.actorId),
+      projectId: str(q.projectId),
+      organizationId: str(q.organizationId),
+      programId: str(q.programId),
+      cohortId: str(q.cohortId),
+      hackathonId: str(q.hackathonId),
+      sinceHours: q.sinceHours !== undefined ? Number(q.sinceHours) : undefined,
+    }));
   });
   app.get(`${base}/approvals`, async (req, res) => {
     const resolved = await gate(req, res);

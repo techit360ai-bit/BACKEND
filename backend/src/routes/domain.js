@@ -73,6 +73,7 @@ import {
   walletSummaryGet,
   applicationsList,
   incubationPublish,
+  executionIntelligence,
   opportunityApply,
   watchlist,
   watchlistAdd,
@@ -205,6 +206,8 @@ router.post('/incubation/intakes', intakeCreate)
 router.get('/incubation/intakes/:intakeId', intakeGet)
 router.post('/incubation/intakes/:intakeId/promote', intakePromote)
 router.post('/incubation/publish', incubationPublish)
+// WS-H: one canonical execution-intelligence view for every consumer surface.
+router.get('/execution-intelligence', executionIntelligence)
 router.get('/incubation/analyses', analyses)
 router.post('/incubation/analyses', analysisCreate)
 router.get('/incubation/analyses/:analysisId', analysisGet)

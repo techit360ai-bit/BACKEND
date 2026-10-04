@@ -1,13 +1,13 @@
 # MCP Connector Plan — Implementation Status
 
-**Date:** 2026-10-04
-**Branches (local, not pushed):**
+**Date:** 2026-10-04 (updated)
+**Branches (pushed, PRs open):**
 
-| Repo | Branch | Head |
+| Repo | Branch | PR |
 |---|---|---|
-| BACKEND | `feat/mcp-workspace-credentials` | M0/M2/F6/clean-DENY/docs commits |
-| new-frontend | `feat/mcp-connections-panel` | Connections panel + client |
-| ai-router | `feat/mcp-connections-context` | connections passthrough + DENY mapping |
+| BACKEND | `feat/mcp-workspace-credentials` | #147 |
+| new-frontend | `feat/mcp-connections-panel` | #179 |
+| ai-router | `feat/mcp-connections-context` | #88 |
 
 Decisions implemented: **per-workspace credentials**, **one canonical workspace vault**,
 **env = bootstrap-only (keep → deprecate → remove)**, **trust engine canonical**, **X deferred**.
@@ -66,19 +66,56 @@ See `docs/MCP-CONNECTOR-DECISIONS-ADR.md`.
 
 ---
 
-## Remaining (larger, cross-cutting — not yet implemented)
+## Landed after the initial status (same branches)
 
-| Workstream | What remains | Why deferred |
-|---|---|---|
-| **WS-E — consolidate connector surfaces** | Repoint `/workspaces/connectors` (seeded mock incl. `ml`, missing gitlab/bitbucket/ai) onto the live `/api/mcp/*` registry; unify `ConnectorId`. | Large frontend refactor of the Workspace module; best done as its own PR with the workspace owner. |
-| **WS-H — Workspace ↔ Incubation Hub continuity** | Stamp incubation project/stage/goal onto `CallContext` + contribution events; make tool results appear in the Hub. | Spans BACKEND services + ai-router + Hub data flow; needs the Hub context-pack contract agreed. |
-| **WS-J4 — GitHub OAuth → MCP vault bridge** | After a connect-purpose `/api/github/callback`, write the token into the workspace MCP vault so one connect powers GitHub tools. | Introduces backend→MCP-service coupling; do after WS-A migration settles. |
+### Resolve-time provider + scope enforcement (ADR-1 step 3)
+- Every one of the 7 connectors resolves via `creds.token()`: missing credential →
+  `credential_missing`; recorded-but-insufficient scopes → `scope_insufficient`.
+- Real-API selection is `<NAME>_CONNECTOR_MODE=real` alone — the presence of a
+  legacy env token no longer decides the API (ADR-3). The git-host per-call
+  `MCP_*_TOKEN` fallback was removed.
+- The connect route accepts declared `scopes`; unknowns stay `scopesVerified:false`.
+- Tests: platform-GitHub-connection scopes recorded → checked against the vault
+  credential → DENIED at call time; provider isolation.
+
+### WS-E — consolidate connector surfaces (new-frontend + BACKEND)
+- The workspace `/connectors` surface now reads the live MCP registry
+  (`/api/mcp/tools` + `/api/mcp/connections` + `/api/mcp/audit`) through
+  `lib/api/connectors.ts`. `ConnectorId` drops the seeded `ml` pseudo-connector
+  and adds `gitlab`/`bitbucket`/`ai`; `authType` gains `rpc_url`.
+- The GitHub page no longer posts a fake connector into the seeded store.
+- The legacy `workspaceConnectors` collection is deprecated (`Deprecation: true`
+  + successor Link to `/api/mcp/connections`), retained until the 2026-12-31
+  bootstrap-credential milestone.
+
+### WS-H — workspace ↔ hub continuity + canonical execution intelligence
+- `IncubationContext` (project/stage/GSIS/goal/org/program/cohort/hackathon) is
+  threaded onto `CallContext` and stamped onto every audit + contribution event.
+  Resolved server-side in `resolveActor` from the workspace → project mapping —
+  never from the client.
+- One canonical, scope/role-aware view, `executionIntelligence`:
+  - `GET /api/mcp/execution-intelligence` (MCP) and
+    `GET /api/domain/execution-intelligence` (composes canonical trust).
+  - It is a VIEW, not a scorer: `trustSubjects` points at the canonical Trust
+    Engine (`publicTrustFor`); no second engine, no global score.
+  - The SAME envelope serves **founder, collaborator, investor, organization and
+    hackathon** consumers; roles differ only in `roleFocus`.
+- Frontend: `lib/api/executionIntelligence.ts` + `useExecutionIntelligence` +
+  `_shared/ExecutionIntelligencePanel`, wired into the founder, collaborator,
+  investor and organization dashboards. ai-router exposes
+  `MCPClient.execution_intelligence` / `list_execution_intelligence`.
+
+### WS-J4 — GitHub OAuth → MCP vault bridge
+- A connect-purpose `/api/github/callback` imports the token + granted scopes
+  into the workspace MCP vault (`importCredential`); one connect powers both the
+  platform and the GitHub MCP tools. Best-effort (never breaks the redirect).
+- Bridge failure is logged (`mcp_vault_bridge_failed`) and swallowed.
 
 ---
 
 ## Rollout notes
 
-- Nothing was pushed; all three branches are local. Review, then open PRs.
+- Pushed; PRs #147 / #179 / #88 are open.
 - Migration: existing process-wide/legacy credentials are imported into the workspace lane once
   (`MCP_CREDENTIAL_BOOTSTRAP=import`); unset it (and remove `MCP_*_TOKEN`) before the removal milestone.
 - The backend HTTP supertest suite (`backend/src/__tests__/mcp.test.js`) could not run in this sandbox

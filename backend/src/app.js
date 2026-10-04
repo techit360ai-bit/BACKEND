@@ -204,6 +204,26 @@ if (MCP_ENABLED) {
           ? profile.workspaceId
           : testMode && typeof claims.workspaceId === 'string' ? claims.workspaceId : `user-${claims.sub}`
         const persistedRole = testMode ? String(claims.role || profile?.role || 'explorer') : profile?.role || 'explorer'
+        // WS-H: resolve the workspace's incubation project server-side (never from
+        // the client) and stamp it so MCP audit + contribution events are
+        // attributed to the same project the hub and every surface read.
+        const workspaceRow = (db.workspaces || []).find(row => row.id === workspaceId)
+        const projectId = typeof workspaceRow?.projectId === 'string' ? workspaceRow.projectId : undefined
+        const project = projectId ? (db.projects || []).find(row => row.id === projectId) : undefined
+        const incubation = project
+          ? {
+              projectId: project.id,
+              stage: project.stage || project.status || undefined,
+              gsis: Number(project.gsisScore ?? project.gsis ?? project.liScore ?? 0) || undefined,
+              goal: typeof project.goal === 'string' ? project.goal : undefined,
+              organizationId: project.organizationId || undefined,
+              programId: project.programId || undefined,
+              cohortId: project.cohortId || undefined,
+              hackathonId: project.hackathonId || undefined,
+            }
+          : projectId
+            ? { projectId }
+            : undefined
         return {
           actor: {
             id: String(claims.sub ?? 'unknown'),
@@ -213,6 +233,7 @@ if (MCP_ENABLED) {
             // Plumb workspaceId onto the actor so techit-service.toContext() can
             // scope the invocation per-tenant instead of the seed 'ws-acme' (#9).
             workspaceId,
+            ...(incubation ? { incubation } : {}),
           },
           workspaceId,
         }

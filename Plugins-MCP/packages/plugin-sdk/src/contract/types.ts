@@ -73,6 +73,29 @@ export interface MCPTool {
 }
 
 /**
+ * Workspace execution coordinates for a call (WS-H).
+ *
+ * A workspace is where execution happens; the incubation hub owns the project it
+ * belongs to. Threading these onto `CallContext` lets every audit + contribution
+ * event be attributed to the right project/stage/goal so ANY consumer surface
+ * (workspace dashboard, incubation hub, investor, organization, hackathon)
+ * reads one canonical execution stream instead of building its own.
+ */
+export interface IncubationContext {
+  readonly projectId?: string;
+  /** Incubation stage, e.g. idea | validating | building_mvp | beta_testing | launched | scaling. */
+  readonly stage?: string;
+  /** Composite startup-intelligence score for the project at call time. */
+  readonly gsis?: number;
+  /** Active goal for the project. */
+  readonly goal?: string;
+  readonly organizationId?: string;
+  readonly programId?: string;
+  readonly cohortId?: string;
+  readonly hackathonId?: string;
+}
+
+/**
  * Execution context threaded through every call: who is acting, in which
  * workspace, and (for agents) their definition for permission minimisation.
  */
@@ -81,4 +104,6 @@ export interface CallContext {
   readonly agent?: AgentDefinition;
   /** Workspace of the resource being touched (isolation check). */
   readonly resourceWorkspaceId: string;
+  /** Incubation/campaign coordinates for this call, resolved server-side (WS-H). */
+  readonly incubation?: IncubationContext;
 }

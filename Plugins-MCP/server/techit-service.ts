@@ -6,7 +6,7 @@
  */
 
 import type { Actor, AgentDefinition, Role } from '@techit/core';
-import { createRuntime, type CallContext, type Result } from '@techit/plugin-sdk';
+import { createRuntime, type CallContext, type IncubationContext, type Result } from '@techit/plugin-sdk';
 import { InMemorySecretVault, type SecretVault } from '@techit/infra-secrets';
 import { CREDENTIAL_SCOPES_KEY } from '@techit/plugin-sdk';
 import { MCPClient, MCPRegistry } from '@techit/mcp-client';
@@ -47,6 +47,12 @@ export interface ActorInput {
   workspaceId?: string;
   /** For agents: explicit tool allow-list (`<plugin>.<tool>`). */
   toolsAllowed?: string[];
+  /**
+   * Incubation/campaign coordinates for this call (WS-H). Resolved server-side
+   * from the workspace → project mapping and stamped onto every contribution so
+   * the hub and every downstream surface share one execution stream.
+   */
+  incubation?: IncubationContext;
 }
 
 /**
@@ -169,6 +175,16 @@ export interface TechitService {
   listTools(): { plugin: string; tool: unknown }[];
   audit(workspaceId?: string): Promise<unknown[]>;
   contributions(workspaceId?: string): Promise<unknown[]>;
+  /**
+   * Canonical execution-intelligence VIEW over workspace execution data (WS-H).
+   *
+   * This is deliberately NOT a scorer and NOT a second trust engine: it is a
+   * scope- and role-aware projection of contribution events that every consumer
+   * surface (workspace, incubation hub, investor, organization, hackathon) reads
+   * the same way. Trust is owned by the canonical Trust Engine; the view only
+   * points at the subjects to combine it with (`trustSubjects`).
+   */
+  executionIntelligence(scope: ExecutionIntelligenceScope): Promise<ExecutionIntelligence>;
   approvals(workspaceId?: string): Promise<unknown[]>;
   healthCheck(): Promise<void>;
   invoke(plugin: string, tool: string, params: unknown, actor?: ActorInput): Promise<Result>;
@@ -197,6 +213,76 @@ export interface TechitService {
   disconnect(workspaceId: string, plugin: string): Promise<DisconnectResult>;
 }
 
+/** Scope filters for an execution-intelligence view (any consumer can use it). */
+export interface ExecutionIntelligenceScope {
+  workspaceId: string;
+  /**
+   * Consumer role shaping the view. Every role reads the same envelope:
+   * founder | collaborator | investor | organisation | organisation_admin |
+   * hackathon | workspace. Roles differ only in `roleFocus`.
+   */
+  role?: string;
+  /** Narrow to one actor's own execution (e.g. a collaborator's contribution view). */
+  actorId?: string;
+  projectId?: string;
+  organizationId?: string;
+  programId?: string;
+  cohortId?: string;
+  hackathonId?: string;
+  /** Look-back window. Clamped to [1h, 90d]. Defaults to 30d. */
+  sinceHours?: number;
+}
+
+/**
+ * A scope-scoped reading of execution activity. Same envelope for every role —
+ * roles differ only in `roleFocus`, so no surface gets a private formula.
+ */
+export interface ExecutionIntelligence {
+  scope: {
+    workspaceId: string;
+    projectId?: string;
+    organizationId?: string;
+    programId?: string;
+    cohortId?: string;
+    hackathonId?: string;
+  };
+  role: string;
+  /** Which signal groups this role cares about. Presentation hint, not a score. */
+  roleFocus: string[];
+  generatedAt: string;
+  window: { sinceHours: number; from: string; to: string };
+  /** Provenance: a view over execution, with trust owned by the Trust Engine. */
+  canonical: { executesFrom: 'workspace'; trustEngine: 'canonical'; graphView: 'execution-reputation' };
+  signals: {
+    events: number;
+    weight: number;
+    activeActors: number;
+    activeTools: string[];
+    projects: string[];
+    artifacts: number;
+    byKind: Record<string, number>;
+    byTool: Record<string, number>;
+    byActor: Array<{ actorId: string; actorKind: string; events: number; weight: number }>;
+  };
+  velocity: { eventsPerDay: number; weightPerDay: number };
+  /** Most recent events, newest first — the "what changed" feed for any surface. */
+  highlights: Array<{
+    id: string;
+    kind: string;
+    summary: string;
+    at: string;
+    sourceTool: string;
+    actorId: string;
+    projectId?: string;
+    artifactId?: string;
+  }>;
+  /**
+   * Subjects to combine with the canonical Trust Engine (`publicTrustFor`).
+   * This view never computes trust itself.
+   */
+  trustSubjects: Array<{ kind: 'actor' | 'project'; id: string }>;
+}
+
 export type ConnectResult =
   | { ok: true; connection: ConnectionStatus }
   | { ok: false; error: string };
@@ -211,6 +297,9 @@ function toContext(input: ActorInput | undefined): CallContext {
   const kind = input?.kind ?? 'human';
   const id = input?.id ?? (kind === 'agent' ? 'coding-agent' : 'founder');
   const workspaceId = input?.workspaceId ?? WS;
+  // WS-H: incubation coordinates are resolved by the caller (server-side, from
+  // the workspace → project mapping) and threaded onto every contextual event.
+  const incubation = input?.incubation;
   const actor: Actor = { id, kind, workspaceId, role };
   if (kind === 'agent') {
     const agent: AgentDefinition = {
@@ -220,9 +309,34 @@ function toContext(input: ActorInput | undefined): CallContext {
       toolsAllowed: input?.toolsAllowed ?? [],
       maxRole: role,
     };
-    return { actor, agent, resourceWorkspaceId: workspaceId };
+    return { actor, agent, resourceWorkspaceId: workspaceId, ...(incubation ? { incubation } : {}) };
   }
-  return { actor, resourceWorkspaceId: workspaceId };
+  return { actor, resourceWorkspaceId: workspaceId, ...(incubation ? { incubation } : {}) };
+}
+
+/** Read the incubation stamp off a contribution event's metadata (WS-H). */
+function incubationOf(event: { metadata?: Record<string, unknown> }): Record<string, string | number> {
+  const raw = event.metadata && typeof event.metadata === 'object'
+    ? (event.metadata as Record<string, unknown>).incubation
+    : undefined;
+  return raw && typeof raw === 'object' ? (raw as Record<string, string | number>) : {};
+}
+
+/** Presentation hint: which signal groups a role cares about. Not a score. */
+function roleFocusFor(role: string): string[] {
+  switch (role.toLowerCase()) {
+    case 'founder': return ['velocity', 'projects', 'artifacts', 'goals', 'stage'];
+    case 'collaborator': return ['artifacts', 'tools', 'trust', 'reviews'];
+    case 'investor': return ['velocity', 'artifacts', 'trust', 'projects'];
+    case 'organisation':
+    case 'organization':
+    case 'organisation_admin':
+    case 'organization_admin': return ['cohorts', 'teams', 'velocity', 'projects'];
+    case 'hackathon':
+    case 'organizer':
+    case 'organiser': return ['submissions', 'teams', 'velocity', 'projects'];
+    default: return ['velocity', 'tools', 'projects'];
+  }
 }
 
 /** Opt-in local demo data. validateProductionConfig() forbids this in prod. */
@@ -315,6 +429,99 @@ async function build(): Promise<TechitService> {
     contributions: async (workspaceId) => workspaceId
       ? [...await contributions.eventsForWorkspace(workspaceId)]
       : [...await contributions.allEvents()],
+    // WS-H: one scope/role-aware reading of workspace execution for EVERY
+    // consumer surface. It does not score trust — `trustSubjects` points at the
+    // canonical Trust Engine instead, so no surface grows its own formula.
+    executionIntelligence: async (scope) => {
+      const sinceHours = Math.max(1, Math.min(24 * 90, Math.round(Number(scope.sinceHours) || 24 * 30)));
+      const from = Date.now() - sinceHours * 3600_000;
+      const events = scope.workspaceId
+        ? await contributions.eventsForWorkspace(scope.workspaceId)
+        : await contributions.allEvents();
+      const rows = events.filter((event) => {
+        const at = new Date(event.timestamp).getTime();
+        if (!Number.isFinite(at) || at < from) return false;
+        if (scope.actorId && event.actorId !== scope.actorId) return false;
+        const incubation = incubationOf(event);
+        if (scope.projectId && (event.projectId ?? incubation.projectId) !== scope.projectId) return false;
+        if (scope.organizationId && incubation.organizationId !== scope.organizationId) return false;
+        if (scope.programId && incubation.programId !== scope.programId) return false;
+        if (scope.cohortId && incubation.cohortId !== scope.cohortId) return false;
+        if (scope.hackathonId && incubation.hackathonId !== scope.hackathonId) return false;
+        return true;
+      });
+      const role = String(scope.role || 'workspace');
+      const byKind: Record<string, number> = {};
+      const byTool: Record<string, number> = {};
+      const byActorMap = new Map<string, { actorId: string; actorKind: string; events: number; weight: number }>();
+      const tools = new Set<string>();
+      const projects = new Set<string>();
+      let weight = 0;
+      let artifacts = 0;
+      for (const event of rows) {
+        const eventWeight = Number(event.weight || 0);
+        weight += eventWeight;
+        if (event.artifactId) artifacts += 1;
+        byKind[event.kind] = (byKind[event.kind] ?? 0) + 1;
+        byTool[event.sourceTool] = (byTool[event.sourceTool] ?? 0) + 1;
+        tools.add(event.sourceTool);
+        const projectId = event.projectId ?? incubationOf(event).projectId;
+        if (typeof projectId === 'string' && projectId) projects.add(projectId);
+        const actor = byActorMap.get(event.actorId)
+          ?? { actorId: event.actorId, actorKind: event.actorKind, events: 0, weight: 0 };
+        actor.events += 1;
+        actor.weight += eventWeight;
+        byActorMap.set(event.actorId, actor);
+      }
+      const days = Math.max(1, sinceHours / 24);
+      const highlights = [...rows]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 20)
+        .map((event) => {
+          const projectId = event.projectId ?? incubationOf(event).projectId;
+          return {
+            id: event.id,
+            kind: event.kind,
+            sourceTool: event.sourceTool,
+            actorId: event.actorId,
+            at: event.timestamp,
+            ...(typeof projectId === 'string' && projectId ? { projectId } : {}),
+            ...(event.artifactId ? { artifactId: event.artifactId } : {}),
+            summary: `${event.actorId} · ${event.sourceTool} · ${event.kind}${event.artifactId ? ` · ${event.artifactId}` : ''}`,
+          };
+        });
+      const byActor = [...byActorMap.values()].sort((a, b) => b.weight - a.weight);
+      const searchable = Object.fromEntries(
+        (['projectId', 'organizationId', 'programId', 'cohortId', 'hackathonId'] as const)
+          .filter((key) => scope[key])
+          .map((key) => [key, scope[key] as string]),
+      );
+      return {
+        scope: { workspaceId: scope.workspaceId, ...searchable },
+        role,
+        roleFocus: roleFocusFor(role),
+        generatedAt: new Date().toISOString(),
+        window: { sinceHours, from: new Date(from).toISOString(), to: new Date().toISOString() },
+        canonical: { executesFrom: 'workspace', trustEngine: 'canonical', graphView: 'execution-reputation' },
+        signals: {
+          events: rows.length,
+          weight,
+          activeActors: byActorMap.size,
+          activeTools: [...tools].sort(),
+          projects: [...projects].sort(),
+          artifacts,
+          byKind,
+          byTool,
+          byActor,
+        },
+        velocity: { eventsPerDay: rows.length / days, weightPerDay: weight / days },
+        highlights,
+        trustSubjects: [
+          ...byActor.slice(0, 10).map((row) => ({ kind: 'actor' as const, id: row.actorId })),
+          ...[...projects].slice(0, 10).map((id) => ({ kind: 'project' as const, id })),
+        ],
+      };
+    },
     approvals: async (workspaceId) => workspaceId
       ? await approvals.listForWorkspace(workspaceId)
       : await approvals.allApprovals(),

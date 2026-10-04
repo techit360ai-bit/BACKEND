@@ -96,6 +96,7 @@ import {
 import { attachHackathonProject, getHackathonProjectEntry } from '../services/workspaceCapabilityService.js'
 import { recordGsisRecommendationOutcome } from '../services/aiRouterClient.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
+import { executionIntelligenceFor } from '../services/executionIntelligenceService.js'
 
 function created(res, body) {
   return res.status(201).json(body)
@@ -646,4 +647,12 @@ export function incubationPublish(req, res) {
   const result = publishProject(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
+}
+
+// WS-H: canonical, scope/role-aware execution-intelligence view. Founder
+// dashboard, collaborator workspace, investor section, organization dashboard
+// and hackathon console read this same projection.
+export async function executionIntelligence(req, res) {
+  const result = await executionIntelligenceFor(req.user, req.query || {})
+  return res.status(result.ok ? 200 : 503).json(result)
 }
