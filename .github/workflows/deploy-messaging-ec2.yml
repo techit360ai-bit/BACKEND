@@ -7,11 +7,11 @@ name: TECHIT Messaging — Deploy to EC2
 # provisions the RDS/Redis/JWT env, rebuilds, and verifies the probes.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "messaging-backend/**"
-      - ".github/workflows/deploy-messaging-ec2.yml"
+  # Gate the production deploy on a green CI run rather than a raw push, so the
+  # messaging container can never roll forward ahead of the security gates.
+  workflow_run:
+    workflows: ["TECHIT Backend Services"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
@@ -21,6 +21,10 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to EC2
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
