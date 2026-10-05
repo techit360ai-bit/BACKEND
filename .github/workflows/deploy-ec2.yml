@@ -86,6 +86,11 @@ jobs:
             # PLATFORM_DB_DRIVER unset it defaults to sqlite and the box keeps
             # serving from SQLite while the RDS URL is staged.
             if [ -n "$PLATFORM_DATABASE_URL" ]; then
+              # MCP mounts at boot and validates its encryption key immediately;
+              # an empty key crashes the whole backend, so fail the deploy first.
+              if [ -z "$MCP_SECRET_KEY" ]; then
+                echo "❌ MCP_SECRET_KEY secret is not set but MCP_ENABLED=true"; exit 1
+              fi
               DB_DRIVER="${DB_DRIVER:-sqlite}" node ops/ec2/sync-env.mjs \
                 --template ops/ec2/platform.env --target backend/.env
             else
