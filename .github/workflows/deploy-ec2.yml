@@ -120,6 +120,31 @@ jobs:
               console.log("jwt RS256 material ensured");
             '
 
+            # --- diagnostic: what URL did the box actually receive? -----------
+            node -e '
+              const fs = require("fs");
+              const t = fs.readFileSync("backend/.env", "utf8");
+              const m = t.match(/^PLATFORM_DATABASE_URL=(.*)$/m);
+              if (!m) { console.log("no PLATFORM_DATABASE_URL in .env"); process.exit(0); }
+              const raw = m[1].replace(/^"|"$/g, "");
+              try {
+                const u = new URL(raw);
+                const pw = decodeURIComponent(u.password);
+                console.log(JSON.stringify({ env_url: { user: u.username, host: u.hostname, port: u.port, db: u.pathname.slice(1), pwLen: pw.length, lastCode: pw.codePointAt(pw.length - 1), bang: "!".codePointAt(0), sslmode: u.searchParams.get("sslmode") } }));
+              } catch (e) { console.log(JSON.stringify({ env_url_parse_error: e.message, rawLen: raw.length })); }
+            '
+            node -e '
+              const fs = require("fs");
+              const t = fs.readFileSync("backend/.env", "utf8");
+              const url = t.match(/^PLATFORM_DATABASE_URL=(.*)$/m)[1].replace(/^"|"$/g, "");
+              const pg = require("pg");
+              (async () => {
+                const c = new pg.Client({ connectionString: url, ssl: { rejectUnauthorized: false } });
+                try { await c.connect(); const r = await c.query("select current_user, current_database()"); console.log(JSON.stringify({ pg_ok: true, row: r.rows[0] })); await c.end(); }
+                catch (e) { console.log(JSON.stringify({ pg_ok: false, code: e.code, message: e.message })); }
+              })();
+            '
+
             npm install --workspaces --if-present
             GIT_SHA="$DEPLOYED_SHA" pm2 restart techit-backend --update-env
 
