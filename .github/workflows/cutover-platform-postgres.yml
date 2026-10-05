@@ -1,0 +1,123 @@
+name: TECHIT Backend — PostgreSQL Cutover (RDS)
+
+# One-time data cutover from the legacy SQLite authority to the shared RDS
+# PostgreSQL database. Safe to re-run: every migration is IF NOT EXISTS and the
+# backfill upserts by (collection, id) with an idempotency key.
+#
+#   plan  — inventory + connectivity + a verify diff (no writes)
+#   apply — schema migrations on every domain, then backfill, then verify
+#
+# After `apply` reports consistent, flip the repository variable
+# PLATFORM_DB_DRIVER=postgres and run the normal EC2 deploy to move request
+# authority onto Postgres.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: plan (read-only) or apply (migrate + backfill + verify)
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply]
+
+concurrency:
+  group: backend-postgres-cutover
+  cancel-in-progress: false
+
+jobs:
+  cutover:
+    name: Cutover (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cutover via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          MODE: ${{ inputs.mode }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PLATFORM_DATABASE_URL,REDIS_URL,MODE
+          script_stop: true
+          script: |
+            set -e
+            cd ~/BACKEND
+            git fetch https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              git stash push --include-untracked -m "autostash pre-cutover $(date -u +%FT%TZ)" || true
+            fi
+            git checkout main
+            git reset --hard FETCH_HEAD
+            echo "cutover code: $(git rev-parse --short HEAD)  mode: $MODE"
+
+            if [ -z "$PLATFORM_DATABASE_URL" ]; then
+              echo "❌ PLATFORM_DATABASE_URL secret is not set"; exit 1
+            fi
+
+            # All domains share the one RDS database; table names are prefixed.
+            export DB_DRIVER=postgres
+            export LEGACY_DB_DRIVER=sqlite
+            export SQLITE_DB_PATH="${SQLITE_DB_PATH:-/var/lib/techit/backend/techit.sqlite}"
+            export PLATFORM_DATABASE_URL DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export MCP_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export IDENTITY_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export WORKSPACE_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export CONTENT_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export INVESTOR_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export ORGANIZATION_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export FINANCE_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export TRUST_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            export DISCOVERY_DATABASE_URL="$PLATFORM_DATABASE_URL"
+            # sslmode=require (encrypted, no CA pin) for the AWS RDS CA.
+            export PLATFORM_DB_SSL_REJECT_UNAUTHORIZED=false
+            export TRUST_DB_SSL_REJECT_UNAUTHORIZED=false
+            export DB_SSL_REJECT_UNAUTHORIZED=false
+
+            node -e '
+              const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              console.log(JSON.stringify({ event: "rds_target", host: u.hostname, port: u.port, database: u.pathname.slice(1) }));
+            '
+
+            echo "--- legacy SQLite authority ---"
+            ls -l "$SQLITE_DB_PATH" || { echo "❌ legacy sqlite not found at $SQLITE_DB_PATH"; exit 1; }
+
+            npm install --workspaces --if-present
+
+            echo "--- static authority inventory ---"
+            npm run platform:db:inventory --prefix backend
+
+            if [ "$MODE" != "apply" ]; then
+              echo "--- plan mode: connectivity + verify diff (no writes) ---"
+              node -e '
+                const pg = require("pg");
+                (async () => {
+                  const c = new pg.Client({ connectionString: process.env.PLATFORM_DATABASE_URL, ssl: { rejectUnauthorized: false } });
+                  await c.connect();
+                  const r = await c.query("select count(*)::int as tables from information_schema.tables where table_schema=$1", ["public"]);
+                  console.log(JSON.stringify({ event: "rds_connectivity", ok: true, publicTables: r.rows[0].tables }));
+                  await c.end();
+                })().catch((e) => { console.error("❌ cannot reach RDS:", e.message); process.exit(1); });
+              '
+              npm run platform:db:verify --prefix backend || echo "⚠️ verify diff above is expected before backfill"
+              echo "✅ plan complete — re-run with mode=apply to migrate + backfill"
+              exit 0
+            fi
+
+            echo "--- schema migrations (idempotent) ---"
+            npm run platform:db:migrate --prefix backend
+            npm run core:db:migrate --prefix backend
+            npm run trust:db:migrate --prefix backend
+            npm run discovery:db:migrate --prefix backend
+            npm run investor-deal-room:db:migrate --prefix backend
+            npm run organization-intelligence:db:migrate --prefix backend
+
+            echo "--- backfill legacy SQLite -> RDS ---"
+            npm run platform:db:backfill --prefix backend
+
+            echo "--- verify ---"
+            npm run platform:db:verify --prefix backend
+
+            echo "✅ cutover apply complete. Flip repository variable PLATFORM_DB_DRIVER=postgres and deploy."

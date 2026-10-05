@@ -1,0 +1,145 @@
+name: TECHIT Messaging — Deploy to EC2
+
+# Production for the Go messaging service is the AWS EC2 host (docker compose),
+# not Render. It previously only had a Render hook, so the EC2 container ran
+# stale code (no /ready, no JWT_PUBLIC_KEY -> every platform RS256 token was
+# rejected and ENABLE_DEV_TOKEN was live). This workflow reconciles the box,
+# provisions the RDS/Redis/JWT env, rebuilds, and verifies the probes.
+
+on:
+  # Gate the production deploy on a green CI run rather than a raw push, so the
+  # messaging container can never roll forward ahead of the security gates.
+  workflow_run:
+    workflows: ["TECHIT Backend Services"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: messaging-ec2-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PLATFORM_DATABASE_URL,REDIS_URL,JWT_PUBLIC_KEY
+          script_stop: true
+          script: |
+            set -e
+            cd ~/BACKEND
+
+            git fetch https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              git stash push --include-untracked -m "autostash pre-deploy $(date -u +%FT%TZ)" || true
+            fi
+            git checkout main
+            git reset --hard FETCH_HEAD
+            DEPLOYED_SHA="$(git rev-parse HEAD)"
+            echo "deploying messaging $DEPLOYED_SHA"
+
+            if [ -z "$PLATFORM_DATABASE_URL" ]; then
+              echo "❌ PLATFORM_DATABASE_URL secret is not set"; exit 1
+            fi
+
+            # The messaging service uses its OWN database (techit_msg) on the
+            # shared RDS instance: its `users` table collides with ai-router's
+            # schema in techit_db. Derive the URL, then create the database once.
+            MESSAGING_DATABASE_URL="$(node -e '
+              const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              u.pathname = "/techit_msg";
+              process.stdout.write(u.toString());
+            ')"
+            export MESSAGING_DATABASE_URL
+            npm install --workspaces --if-present
+            node -e '
+              const pg = require("pg");
+              const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              (async () => {
+                const c = new pg.Client({ connectionString: u.toString(), ssl: { rejectUnauthorized: false } });
+                await c.connect();
+                const { rows } = await c.query("select 1 from pg_database where datname = $1", ["techit_msg"]);
+                if (!rows.length) {
+                  await c.query("CREATE DATABASE techit_msg");
+                  console.log(JSON.stringify({ event: "messaging_db_created", database: "techit_msg" }));
+                } else {
+                  console.log(JSON.stringify({ event: "messaging_db_present", database: "techit_msg" }));
+                }
+                await c.end();
+              })().catch((e) => { console.error("❌ messaging db provisioning failed:", e.message); process.exit(1); });
+            '
+
+            cd messaging-backend
+
+            # JWT_SECRET must match the platform. Read the one already on the box
+            # rather than re-prompting for it (only the RS256 public key is used
+            # for production verification, but config.Load still requires it).
+            JWT_SECRET="$(node -e '
+              const fs = require("fs");
+              try {
+                const t = fs.readFileSync("../backend/.env", "utf8");
+                const m = t.match(/^JWT_SECRET=(.*)$/m);
+                process.stdout.write(m ? m[1].replace(/^"|"$/g, "") : "");
+              } catch { process.stdout.write(""); }
+            ')"
+            if [ -z "$JWT_SECRET" ]; then
+              echo "❌ JWT_SECRET missing from ../backend/.env; deploy the backend first"; exit 1
+            fi
+            export JWT_SECRET
+
+            # NOTE: unset PLATFORM_DATABASE_URL for the sync — the messaging
+            # template must keep its own techit_msg URL, not the techit_db URL
+            # that PLATFORM_DATABASE_URL would otherwise derive.
+            env -u PLATFORM_DATABASE_URL \
+              DATABASE_URL="$MESSAGING_DATABASE_URL" \
+              REDIS_URL="$REDIS_URL" \
+              JWT_PUBLIC_KEY="$JWT_PUBLIC_KEY" \
+              JWT_SECRET="$JWT_SECRET" \
+              node ../ops/ec2/sync-env.mjs --template ops/production.env --target .env
+            # sync-env only manages its template keys; stamp the build identity
+            # directly so the probe reports the exact commit CI built.
+            node -e '
+              const fs = require("fs");
+              let s = fs.readFileSync(".env", "utf8");
+              const upsert = (k, v) => { const re = new RegExp("^" + k + "=.*$", "m"); s = re.test(s) ? s.replace(re, () => k + "=" + v) : s.replace(/\s*$/, "") + "\n" + k + "=" + v + "\n"; };
+              upsert("GIT_SHA", process.argv[1]);
+              upsert("BUILD_TIME", process.argv[2]);
+              upsert("SERVICE_NAME", "messaging-backend");
+              fs.writeFileSync(".env", s);
+            ' "$DEPLOYED_SHA" "$(date -u +%FT%TZ)"
+
+            docker compose up -d --no-deps --build server
+            docker compose ps
+
+            for _ in $(seq 1 20); do
+              if curl -fsS https://messaging.techitnetwork.com/health >/dev/null 2>&1; then break; fi
+              sleep 3
+            done
+            HEALTH="$(curl -fsS https://messaging.techitnetwork.com/health)"
+            echo "health: $HEALTH"
+            if ! echo "$HEALTH" | grep -q "$DEPLOYED_SHA"; then
+              echo "⚠️ /health does not report the deployed commit $DEPLOYED_SHA"
+            fi
+            READY_STATUS="$(curl -s -o /dev/null -w '%{http_code}' https://messaging.techitnetwork.com/ready || true)"
+            echo "/ready status: $READY_STATUS"
+            if [ "$READY_STATUS" != "200" ]; then
+              curl -s https://messaging.techitnetwork.com/ready || true
+              echo
+              echo "❌ messaging /ready is $READY_STATUS"
+              exit 1
+            fi
+            echo "✅ Messaging deployed $DEPLOYED_SHA"

@@ -48,7 +48,13 @@ OTP_HASH_SECRET=<different 32+ random bytes>
 NODE_ENV=production
 PORT=3000
 CORS_ORIGINS=https://app.<domain>        # comma-separated browser origins
-DB_DRIVER=sqlite
+DB_DRIVER=postgres                        # see docs/AWS-RDS-CUTOVER.md
+PLATFORM_DATABASE_URL=postgresql://…@<rds-host>:5432/techit_db?sslmode=require
+PLATFORM_REQUEST_AUTHORITY=postgres
+PLATFORM_AUTHORITY_FALLBACK_SQLITE=false
+REDIS_URL=redis://<elasticache-host>:6379
+# Legacy SQLite is retained for the one-time backfill only:
+LEGACY_DB_DRIVER=sqlite
 SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite
 RESEND_API_KEY=<resend key>              # optional at boot; required for /auth/send-otp
 FROM_EMAIL="TechIT <noreply@yourdomain.com>"
