@@ -128,6 +128,14 @@ jobs:
               if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
               sleep 2
             done
+            # If the app is not serving, dump the pm2 log so the crash is
+            # diagnosable from CI instead of requiring box access.
+            if ! curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then
+              echo "--- pm2 logs (last 120 lines) ---"
+              pm2 logs techit-backend --lines 120 --nostream || true
+              echo "--- pm2 describe ---"
+              pm2 describe techit-backend | sed -n '1,40p' || true
+            fi
             HEALTH="$(curl -fsS https://backend.techitnetwork.com/health)"
             echo "health: $HEALTH"
             if echo "$HEALTH" | grep -q "\"sha\":\"unknown\""; then
