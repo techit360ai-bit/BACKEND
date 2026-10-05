@@ -209,23 +209,7 @@ jobs:
           MCP_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:55433/techit_mcp
           MCP_SECRET_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
 
-  deploy:
-    name: Deploy Messaging to Render
-    runs-on: ubuntu-latest
-    needs: [node-backend, go-messaging-unit, go-messaging-integration, plugins-mcp]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Verify merged PR provenance
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-        run: |
-          case "$COMMIT_MESSAGE" in Merge\ pull\ request\ \#*) exit 0;; esac
-          count="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" --jq '[.[] | select(.merged_at != null)] | length')"
-          test "$count" -gt 0
-
-      - name: Trigger Render deploy
-        run: |
-          curl -s -X POST "${{ secrets.RENDER_MESSAGING_DEPLOY_HOOK }}" \
-            -o /dev/null -w "HTTP %{http_code}\n"
-          echo "Messaging backend deploy triggered"
+  # Messaging production is the AWS EC2 host now, not Render. Deployment is
+  # owned by deploy-messaging-ec2.yml (which provisions the RDS/Redis/JWT env
+  # and verifies /health + /ready). The Render hook is intentionally retired so
+  # the two paths cannot drift back into the stale-container failure mode.

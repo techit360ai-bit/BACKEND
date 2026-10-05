@@ -26,9 +26,11 @@ services:
       - .env
     environment:
       PORT: "${PORT:-8080}"
-      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/techit_msg?sslmode=disable"
-      REDIS_URL: "redis://redis:6379"
-      DISCOVERY_API_URL: "http://host.docker.internal:3000"
+      # Production points these at RDS/ElastiCache via `.env`; the defaults keep
+      # local `docker compose up` working against the bundled containers below.
+      DATABASE_URL: "${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/techit_msg?sslmode=disable}"
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+      DISCOVERY_API_URL: "${DISCOVERY_API_URL:-http://host.docker.internal:3000}"
       ENABLE_DEV_TOKEN: "${ENABLE_DEV_TOKEN:-0}"
     ports: ["8080:8080"]
     depends_on:

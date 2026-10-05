@@ -25,11 +25,19 @@ jobs:
           # backend (it signs); the public key is shared with the verifiers.
           JWT_PRIVATE_KEY: ${{ secrets.JWT_PRIVATE_KEY }}
           JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
+          # PostgreSQL request authority (AWS RDS), shared Redis (ElastiCache),
+          # and the Plugins-MCP Postgres store + encryption key. The DB driver is
+          # a repo variable so the sqlite -> postgres cutover is an explicit,
+          # reversible switch rather than an implicit side effect of a deploy.
+          PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY
+          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER
           # Stop the whole script on the first failure. Historically this
           # defaulted to false, so a blocked `git pull` was followed by
           # `pm2 restart` + "✅ Backend deployed" and the job reported success
@@ -70,6 +78,19 @@ jobs:
                 : s.replace(/\s*$/, "") + "\n" + line + "\n";
               fs.writeFileSync(p, s);
             ' "$DEPLOYED_SHA"
+
+            # --- platform env (PostgreSQL + Redis + MCP) ---------------------
+            # Merge the committed, secret-free production template with the
+            # secrets injected above. DB_DRIVER drives every read/write source
+            # switch, so this is safe to run before the data cutover: with
+            # PLATFORM_DB_DRIVER unset it defaults to sqlite and the box keeps
+            # serving from SQLite while the RDS URL is staged.
+            if [ -n "$PLATFORM_DATABASE_URL" ]; then
+              DB_DRIVER="${DB_DRIVER:-sqlite}" node ops/ec2/sync-env.mjs \
+                --template ops/ec2/platform.env --target backend/.env
+            else
+              echo "⚠️ PLATFORM_DATABASE_URL secret not set; leaving platform env unchanged"
+            fi
 
             # Ensure the RS256 signing/verification material is present. Written
             # only when the deploy secrets are configured, and idempotent so the
@@ -126,7 +147,11 @@ jobs:
             MCP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/api/mcp/health || true)"
             echo "mcp /api/mcp/health status: $MCP_STATUS"
             if [ "$MCP_STATUS" = "404" ]; then
-              echo "⚠️ MCP mount is disabled (MCP_ENABLED != true). Set the production MCP contract to activate it."
+              echo "❌ MCP mount is disabled (MCP_ENABLED != true)."
+              echo "   The platform env template provisions MCP_ENABLED=true; a 404 means the"
+              echo "   env sync did not apply or the app booted without it. Investigate before"
+              echo "   reporting a successful deploy — the platform smoke gate asserts 401 here."
+              exit 1
             elif [ "$MCP_STATUS" != "401" ] && [ "$MCP_STATUS" != "200" ]; then
               echo "❌ MCP boundary returned $MCP_STATUS; expected 401 (anonymous) or 200"
               exit 1
