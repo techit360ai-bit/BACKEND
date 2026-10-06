@@ -135,7 +135,18 @@ jobs:
             '
 
             npm install --workspaces --if-present
-            GIT_SHA="$DEPLOYED_SHA" pm2 restart techit-backend --update-env
+
+            # The app must read backend/.env: a pm2 restart keeps the process's
+            # stored environment, and env vars shadow `node --env-file`, so the
+            # MCP contract was silently dropped and NODE_ENV stayed `staging`
+            # while the probes expected production. Recreate the process with
+            # the env file authoritative; the SSH-injected secrets still
+            # override it through the process environment.
+            pm2 delete techit-backend >/dev/null 2>&1 || true
+            GIT_SHA="$DEPLOYED_SHA" pm2 start /usr/bin/node \
+              --name techit-backend --cwd /home/ubuntu/BACKEND --interpreter none \
+              -- --env-file-if-exists=backend/.env --import tsx backend/src/index.js
+            pm2 save >/dev/null 2>&1 || true
 
             # --- verify the deploy actually landed ---------------------------
             for _ in $(seq 1 15); do
