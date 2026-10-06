@@ -9,14 +9,19 @@ const url = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
 // explicit read flag has not yet been updated in a deployment.
 const postgresReads = () => process.env.IDENTITY_READ_SOURCE === 'postgres' || process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 
+// The request-authority snapshot is sparse: any collection with no rows is
+// absent, not an empty array. Read defensively (same convention as the other
+// services) so a missing collection is a miss, never a TypeError.
+const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
+
 function localById(userId) {
-  const db = readAuthorityDb(); const user = db.users.find(row => row.id === userId) || null
+  const db = readAuthorityDb(); const user = collection(db, 'users').find(row => row.id === userId) || null
   if (!user) return null
-  return { user, profile: db.profiles.find(row => row.id === userId) || null, roles: (db.userRoles || []).filter(row => row.userId === userId), activeContext: (db.activeContexts || []).find(row => row.userId === userId && row.status === 'active') || null }
+  return { user, profile: collection(db, 'profiles').find(row => row.id === userId) || null, roles: collection(db, 'userRoles').filter(row => row.userId === userId), activeContext: collection(db, 'activeContexts').find(row => row.userId === userId && row.status === 'active') || null }
 }
 
 function localByEmail(email) {
-  const db = readAuthorityDb(); const user = db.users.find(row => row.email === email) || null
+  const db = readAuthorityDb(); const user = collection(db, 'users').find(row => row.email === email) || null
   return user ? localById(user.id) : null
 }
 
@@ -40,13 +45,25 @@ async function postgresBundle(where, value) {
   return bundle(result.rows)
 }
 
+// The legacy read is only a cutover comparison shadow. It must never be able to
+// fail the primary (PostgreSQL-authoritative) read path.
+function safeShadowRead(localCall) {
+  try { return localCall() } catch (error) {
+    console.error(JSON.stringify({ event: 'identity_shadow_read_failed', error: error.message }))
+    return null
+  }
+}
+
 async function withRollbackFallback(postgresCall, localCall) {
   if (!postgresReads()) return localCall()
-  try { const primary = await postgresCall(); const shadow = localCall(); recordCutoverComparison('identity', primary?.user?.id || primary?.user?.email || 'missing', primary, shadow); return primary } catch (error) {
+  let primary
+  try { primary = await postgresCall() } catch (error) {
     console.error(JSON.stringify({ event: 'identity_postgres_read_failed', error: error.message }))
     if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'true') return localCall()
     throw error
   }
+  recordCutoverComparison('identity', primary?.user?.id || primary?.user?.email || 'missing', primary, safeShadowRead(localCall))
+  return primary
 }
 
 export const findIdentityById = userId => withRollbackFallback(() => postgresBundle('u.id', userId), () => localById(userId))
