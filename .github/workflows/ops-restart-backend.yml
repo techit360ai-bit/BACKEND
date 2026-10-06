@@ -1,0 +1,72 @@
+name: TECHIT Backend — Restart (no fetch)
+
+# Emergency bridge: recreate the pm2 process from the code already checked out
+# on the box, WITHOUT `git fetch`. Use when box egress to GitHub is broken but
+# the local tree is already at the intended commit (the normal deploy still
+# fetches first, so it cannot recover in that window). Also provisions swap.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ec2-restart
+  cancel-in-progress: false
+
+jobs:
+  restart:
+    name: Restart via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restart via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
+          SQLITE_DB_PATH: /home/ubuntu/backend-data/techit.db
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
+          command_timeout: 15m
+          script: |
+            set -e
+            cd ~/BACKEND
+            echo "restarting from local tree: $(git rev-parse HEAD)"
+
+            # --- ensure swap (idempotent) -----------------------------------
+            if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then
+              if [ ! -f /swapfile ]; then
+                sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+              fi
+              sudo swapon /swapfile || true
+            fi
+            swapon --show || true
+            free -m || true
+
+            pm2 delete techit-backend >/dev/null 2>&1 || true
+            GIT_SHA="$(git rev-parse HEAD)" pm2 start /usr/bin/node \
+              --name techit-backend --cwd /home/ubuntu/BACKEND --interpreter none \
+              -- --env-file-if-exists=backend/.env --import tsx backend/src/index.js
+            pm2 save >/dev/null 2>&1 || true
+
+            for _ in $(seq 1 40); do
+              if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
+              sleep 3
+            done
+            if ! curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then
+              echo "--- pm2 status ---"; pm2 describe techit-backend || true
+              echo "--- techit-backend error log (last 150 lines) ---"
+              timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-error.log" || true
+              echo "--- techit-backend out log (last 150 lines) ---"
+              timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-out.log" || true
+              exit 1
+            fi
+            echo "health: $(curl -fsS https://backend.techitnetwork.com/health)"
+            echo "ready: $(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/ready)"
+            echo "mcp: $(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/api/mcp/health)"
+            pm2 describe techit-backend | grep -E "status|restarts" || true
