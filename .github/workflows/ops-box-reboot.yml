@@ -26,13 +26,23 @@ jobs:
           script: |
             set +e
             echo "=== before reboot ==="; uptime; free -m
-            INSTANCE_ID="$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id)"
-            echo "instance: $INSTANCE_ID"
-            if timeout 20 sudo -n reboot; then
-              echo "reboot issued via sudo"
-              exit 0
+            # IMDSv1 is disabled; get a token for the instance id/region.
+            TOKEN="$(curl -s --max-time 5 -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 120')"
+            echo "imds token length: ${#TOKEN}"
+            md() { curl -s --max-time 5 -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }
+            INSTANCE_ID="$(md instance-id)"
+            REGION="$(md placement/region)"
+            echo "instance=[$INSTANCE_ID] region=[$REGION]"
+
+            echo "=== aws cli ==="; command -v aws || echo "aws not installed"
+            echo "=== caller identity ==="; timeout 25 aws sts get-caller-identity 2>&1 | head -8
+
+            echo "=== attempt: sudo -n reboot ==="
+            if timeout 20 sudo -n reboot; then echo "reboot issued via sudo"; exit 0; fi
+
+            echo "=== attempt: EC2 API with box credentials ==="
+            if [ -n "$INSTANCE_ID" ]; then
+              timeout 90 aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" --region "${REGION:-eu-west-1}" 2>&1 | head -8 \
+                && echo "reboot issued via EC2 API"
             fi
-            echo "sudo reboot unavailable; using the EC2 API"
-            timeout 90 aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" --region eu-west-1 \
-              || timeout 90 aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" \
-              || echo "reboot command failed"
+            echo "reboot not issued"
