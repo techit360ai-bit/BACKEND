@@ -4,7 +4,7 @@ on:
     branches: [fix/rds-ssl-mode-and-diag]
 jobs:
   diag:
-    name: Bootstrap canonical DB credential
+    name: Inspect pm2 env
     runs-on: ubuntu-latest
     steps:
       - name: SSH
@@ -15,20 +15,11 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set +e
-            mkdir -p "$HOME/.techit"
-            CF="$HOME/.techit/platform-database-url"
-            if [ -s "$CF" ]; then
-              echo "canonical credential already present"
-            else
-              W="$(grep -aE '^DATABASE_URL=' /home/ubuntu/BACKEND/messaging-backend/.env | head -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']$//")"
-              if [ -n "$W" ]; then
-                B="$W" node -e 'const u=new URL(process.env.B); u.searchParams.delete("sslmode"); process.stdout.write(u.toString())' > "$CF"
-                chmod 600 "$CF"
-                echo "bootstrapped canonical credential"
-              else
-                echo "ERROR: no working messaging credential found"
-              fi
-            fi
-            echo "canonical bytes: $(wc -c < "$CF") sha256: $(sha256sum "$CF" | cut -c1-16)"
-            T="$(B="$(cat "$CF")" node -e 'const u=new URL(process.env.B); u.searchParams.set("sslmode","require"); process.stdout.write(u.toString())')"
-            psql "$T" -tAc "select 'CANON_OK user='||current_user||' db='||current_database()" 2>&1 | head -1
+            echo "=== pm2 describe (script/cwd/args) ==="
+            pm2 describe techit-backend 2>&1 | sed -n '1,45p'
+            echo "=== pm2 process env (keys of interest) ==="
+            pm2 env 0 2>/dev/null | grep -aE "^(NODE_ENV|MCP_ENABLED|MCP_STORE|DB_DRIVER|PLATFORM_DB_DRIVER|PLATFORM_DATABASE_URL|DATABASE_URL|MCP_DATABASE_URL|MCP_ENABLED_CONNECTORS|PLATFORM_REQUEST_AUTHORITY|PORT|REDIS_URL)=" | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
+            echo "=== backend/.env (keys of interest) ==="
+            grep -aE "^(NODE_ENV|MCP_ENABLED|MCP_STORE|DB_DRIVER|PLATFORM_DB_DRIVER|PLATFORM_DATABASE_URL|DATABASE_URL|MCP_DATABASE_URL|MCP_ENABLED_CONNECTORS|PLATFORM_REQUEST_AUTHORITY|PORT)=" /home/ubuntu/BACKEND/backend/.env | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
+            echo "=== app log grep (mcp/error/validate) ==="
+            pm2 logs techit-backend --lines 120 --nostream 2>&1 | grep -aiE "mcp|error|throw|validate|connector|refused" | tail -40
