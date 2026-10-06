@@ -1,0 +1,21 @@
+name: "TECHIT Box — Legacy data hunt (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: hunt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hunt
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 6m
+          script: |
+            set +e
+            printf '%s' "c2V0ICtlCmVjaG8gIj09PSB0b3AtbGV2ZWwgL2hvbWUvdWJ1bnR1ID09PSIKbHMgLWxhIC9ob21lL3VidW50dSB8IGhlYWQgLTQwCmVjaG8gIj09PSBkaXJzIG5hbWVkIGRhdGEgPT09IgpmaW5kIC9ob21lL3VidW50dSAtbWF4ZGVwdGggNCAtdHlwZSBkIC1uYW1lIGRhdGEgMj4vZGV2L251bGwgfCBncmVwIC12IG5vZGVfbW9kdWxlcyB8IGhlYWQKZWNobyAiPT09IGpzb24gZmlsZXMgPjJrIGNvbnRhaW5pbmcgcGFzc3dvcmRIYXNoID09PSIKZmluZCAvaG9tZS91YnVudHUgLW1heGRlcHRoIDUgLXR5cGUgZiAtbmFtZSAnKi5qc29uJyAtc2l6ZSArMmsgMj4vZGV2L251bGwgfCBncmVwIC12IG5vZGVfbW9kdWxlcyB8IHdoaWxlIHJlYWQgZjsgZG8KICBpZiBncmVwIC1xYSAnInBhc3N3b3JkSGFzaCInICIkZiI7IHRoZW4gZWNobyAiSElUICRmIHNpemU9JChzdGF0IC1jJXMgIiRmIikiOyBmaQpkb25lIHwgaGVhZCAtMjAKZWNobyAiPT09IGFueSBmaWxlIHdpdGggYSBiY3J5cHQgaGFzaCBcJDJhXCQvXFwkMmJcJCB1bmRlciBiYWNrZW5kIGRpcnMgPT09IgpncmVwIC1ybGEgJ1wkMlthYnldXCQnIC9ob21lL3VidW50dS9CQUNLRU5EL2JhY2tlbmQvZGF0YSAvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhIDI+L2Rldi9udWxsIHwgaGVhZAplY2hvICI9PT0gZGIuanNvbiBjb250ZW50IChtYXNrZWQpID09PSIKbm9kZSAtZSAnY29uc3Qgaj1yZXF1aXJlKCIvaG9tZS91YnVudHUvQkFDS0VORC9iYWNrZW5kL2RhdGEvZGIuanNvbiIpOyBjb25zdCB1PShqLnVzZXJzfHxbXSlbMF07IGNvbnNvbGUubG9nKCJ1c2VycyIsKGoudXNlcnN8fFtdKS5sZW5ndGgsInByb2ZpbGVzIiwoai5wcm9maWxlc3x8W10pLmxlbmd0aCwgdT8gKCJlbWFpbD0iK1N0cmluZyh1LmVtYWlsKS5yZXBsYWNlKC8oXi4pLiooQC4qKSQvLCIkMSoqKiQyIikrIiBoYXNoTGVuPSIrKHUucGFzc3dvcmRIYXNofHwiIikubGVuZ3RoKToiKG5vbmUpIiknCg==" | base64 -d > /tmp/hunt.sh
+            bash /tmp/hunt.sh
