@@ -41,12 +41,11 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
-          # Stop the whole script on the first failure. Historically this
-          # defaulted to false, so a blocked `git pull` was followed by
-          # `pm2 restart` + "✅ Backend deployed" and the job reported success
-          # while the box silently kept running old code (which is why the
-          # /health, /ready and /api/mcp probes were never actually live).
-          script_stop: true
+          # `set -e` at the top of the script aborts on the first failure.
+          # appleboy/ssh-action v1 no longer declares `script_stop` (it was
+          # being ignored with an "unexpected input" warning), and the default
+          # 10m command timeout cut the job off while it dumped a boot crash.
+          command_timeout: 20m
           script: |
             set -e
             cd ~/BACKEND
@@ -152,15 +151,22 @@ jobs:
             pm2 save >/dev/null 2>&1 || true
 
             # --- verify the deploy actually landed ---------------------------
-            for _ in $(seq 1 15); do
+            for _ in $(seq 1 40); do
               if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
-              sleep 2
+              sleep 3
             done
             # If the app is not serving, dump the pm2 log so a boot crash is
             # diagnosable from CI instead of requiring box access.
             if ! curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then
-              echo "--- pm2 logs (last 120 lines) ---"
-              pm2 logs techit-backend --lines 120 --nostream || true
+              # `pm2 logs --nostream` is unsupported on this box's pm2 and
+              # streams forever (it hung the deploy until the command timeout),
+              # so read the rotated log files directly instead.
+              echo "--- pm2 status ---"
+              pm2 describe techit-backend || true
+              echo "--- techit-backend error log (last 150 lines) ---"
+              timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-error.log" || true
+              echo "--- techit-backend out log (last 150 lines) ---"
+              timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-out.log" || true
             fi
             HEALTH="$(curl -fsS https://backend.techitnetwork.com/health)"
             echo "health: $HEALTH"
