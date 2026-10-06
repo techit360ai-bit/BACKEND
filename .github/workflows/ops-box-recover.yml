@@ -1,0 +1,75 @@
+name: TECHIT Box — Recover
+
+# Fetch-free recovery for a memory-thrashed box: kill stuck docker builds left
+# by failed deploys, reclaim the build cache, then restart the backend.
+# The normal deploy cannot help because its `git fetch` hangs under the thrash.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ec2-recover
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recover via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
+          SQLITE_DB_PATH: /home/ubuntu/backend-data/techit.db
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
+          command_timeout: 20m
+          script: |
+            set +e
+            echo "=== before ==="; uptime; free -m
+
+            # Stuck docker-compose builds from failed deploys are the memory/CPU
+            # hogs. Bracket the pattern so pkill does not match this script line.
+            echo "=== killing stuck docker compose/build processes ==="
+            pkill -f 'docke[r] compose' || true
+            pkill -f 'docke[r]-compose' || true
+            pkill -f 'docke[r] build' || true
+            pkill -f 'git-remote-http[s]' || true
+            sleep 5
+            echo "=== building processes (should be empty) ==="
+            pgrep -a -f 'docke[r] compose|docke[r] build' || true
+
+            echo "=== reclaiming docker build cache ==="
+            timeout 180 docker builder prune -f || true
+
+            echo "=== after ==="; uptime; free -m
+
+            echo "=== restart backend from local tree ($(cd ~/BACKEND && git rev-parse --short HEAD)) ==="
+            cd ~/BACKEND
+            pm2 delete techit-backend >/dev/null 2>&1 || true
+            GIT_SHA="$(git rev-parse HEAD)" pm2 start /usr/bin/node \
+              --name techit-backend --cwd /home/ubuntu/BACKEND --interpreter none \
+              -- --env-file-if-exists=backend/.env --import tsx backend/src/index.js
+            pm2 save >/dev/null 2>&1 || true
+
+            for _ in $(seq 1 40); do
+              if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
+              sleep 3
+            done
+            if ! curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then
+              echo "--- pm2 status ---"; pm2 describe techit-backend || true
+              echo "--- error log ---"; timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-error.log" || true
+              echo "--- out log ---"; timeout 15 tail -n 150 "$HOME/.pm2/logs/techit-backend-out.log" || true
+              echo "=== final ==="; uptime; free -m
+              exit 1
+            fi
+            echo "health: $(curl -fsS https://backend.techitnetwork.com/health)"
+            echo "ready: $(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/ready)"
+            echo "mcp: $(curl -s -o /dev/null -w '%{http_code}' https://backend.techitnetwork.com/api/mcp/health)"
+            echo "=== final ==="; uptime; free -m
