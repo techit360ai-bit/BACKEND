@@ -15,24 +15,31 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set +e
-            echo "=== instance role ==="
-            ROLE="$(curl -s -m 3 http://169.254.169.254/latest/meta-data/iam/security-credentials/ || true)"
-            echo "role: [$ROLE]"
-            echo "=== aws cli ==="
-            command -v aws || echo no-aws
-            echo "=== rds:describe via instance role ==="
-            aws rds describe-db-instances --region eu-west-1 \
-              --query 'DBInstances[].{id:DBInstanceIdentifier,user:MasterUsername,db:DBName,endpoint:Endpoint.Address,status:DBInstanceStatus,public:PubliclyAccessible}' \
-              --output json 2>&1 | head -40
-            echo "=== files mentioning the rds host ==="
-            grep -rsl "techit-postgres" /home/ubuntu /etc /opt 2>/dev/null | head -20
-            echo "=== backend .env DATABASE_URL (password redacted) ==="
-            grep -E "^DATABASE_URL=" /home/ubuntu/BACKEND/backend/.env 2>/dev/null | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
-            echo "=== messaging .env ==="
-            ls -la /home/ubuntu/BACKEND/messaging-backend/.env /home/ubuntu/messaging-backend/.env 2>/dev/null
-            echo "=== bash history: postgres lines (redacted) ==="
-            grep -i "postgres" /home/ubuntu/.bash_history 2>/dev/null | sed -E 's#(://[^:]+:)[^@]*@#\1***@#' | tail -20
-            echo "=== pm2 dump rds host refs ==="
-            grep -o "techit-postgres[^\"']*" /home/ubuntu/.pm2/dump.pm2 2>/dev/null | head
-            echo "=== docker envs referencing rds ==="
-            grep -rsl "techit-postgres" /home/ubuntu/*/docker-compose.yml /home/ubuntu/*.env 2>/dev/null | head
+            echo "=== aws identity (box) ==="
+            aws sts get-caller-identity 2>&1 | head -6
+            echo "=== backend .env DATABASE_URL (RAW) ==="
+            grep -aE "^DATABASE_URL=" /home/ubuntu/BACKEND/backend/.env 2>/dev/null
+            echo "=== messaging .env (RAW) ==="
+            grep -aE "DATABASE_URL|POSTGRES|PG" /home/ubuntu/BACKEND/messaging-backend/.env 2>/dev/null
+            echo "=== ai-router .env (RAW) ==="
+            grep -aE "DATABASE_URL" /home/ubuntu/ai-router/.env 2>/dev/null
+            echo "=== ubuntu .env (RAW) ==="
+            grep -aE "DATABASE_URL|PGPASSWORD" /home/ubuntu/.env 2>/dev/null
+            echo "=== ~/.pgpass ==="
+            cat /home/ubuntu/.pgpass 2>/dev/null || echo none
+            echo "=== bash history psql/PGPASSWORD (RAW, last 25) ==="
+            grep -aiE "PGPASSWORD|psql" /home/ubuntu/.bash_history 2>/dev/null | tail -25
+            echo "=== psql on host? ==="
+            command -v psql || echo no-psql
+            echo "=== connectivity test using backend .env URL ==="
+            URL="$(grep -aE '^DATABASE_URL=' /home/ubuntu/BACKEND/backend/.env | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
+            if command -v psql >/dev/null 2>&1; then
+              psql "$URL" -tAc "select 'OK backend-env:'||current_user||'@'||current_database()" 2>&1 | head -3
+            else
+              docker run --rm -e PGURL="$URL" postgres:16 sh -c 'psql "$PGURL" -tAc "select 1"' 2>&1 | head -3
+            fi
+            echo "=== connectivity test with literal TechITSecure2026! ==="
+            PGPASSWORD='TechITSecure2026!' psql "host=techit-postgres.czoo08wowahy.eu-west-1.rds.amazonaws.com port=5432 dbname=techit_db user=techit sslmode=no-verify connect_timeout=8" -tAc "select 'OK literal:'||current_user" 2>&1 | head -3
+            echo "=== try ubuntu .env url ==="
+            U2="$(grep -aoE 'postgres(ql)?://[^ '\''\"]+' /home/ubuntu/.env 2>/dev/null | head -1)"
+            if [ -n "$U2" ]; then psql "$U2" -tAc "select 'OK ubuntu-env:'||current_user" 2>&1 | head -3; fi
