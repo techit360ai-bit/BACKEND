@@ -1,0 +1,23 @@
+name: "TECHIT Box — JSON store probe (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: JSON store probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            cd "$HOME/BACKEND"
+            printf '%s' "aW1wb3J0IGZzIGZyb20gJ25vZGU6ZnMnCmltcG9ydCB7IERhdGFiYXNlU3luYyB9IGZyb20gJ25vZGU6c3FsaXRlJwpjb25zdCBwPScvaG9tZS91YnVudHUvQkFDS0VORC9iYWNrZW5kL2RhdGEvZGIuanNvbicKdHJ5IHsKICBjb25zdCBqID0gSlNPTi5wYXJzZShmcy5yZWFkRmlsZVN5bmMocCwndXRmOCcpKQogIGNvbnN0IGtzID0gT2JqZWN0LmtleXMoaikKICBjb25zb2xlLmxvZygnZGIuanNvbiBzaXplOicsIGZzLnN0YXRTeW5jKHApLnNpemUsICdrZXlzOicsIGtzLmxlbmd0aCkKICBjb25zdCBpbnRlcmVzdGluZyA9IGtzLmZpbHRlcihrPT4vdXNlcnxwcm9maWxlfHJvbGV8Y29udGV4dHxzZXNzaW9ufG90cHxyZXNldC9pLnRlc3QoaykpCiAgY29uc29sZS5sb2coJ2lkZW50aXR5LWlzaDonLCBpbnRlcmVzdGluZy5tYXAoaz0+aysnPScrKEFycmF5LmlzQXJyYXkoaltrXSk/altrXS5sZW5ndGg6J29iaicpKS5qb2luKCcsICcpIHx8ICcobm9uZSknKQogIGNvbnNvbGUubG9nKCdhbGwgY29sbGVjdGlvbiBzaXplczonLCBrcy5tYXAoaz0+aysnPScrKEFycmF5LmlzQXJyYXkoaltrXSk/altrXS5sZW5ndGg6J29iaicpKS5qb2luKCcsICcpKQp9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygnZGIuanNvbiBFUlJPUjonLCBlLm1lc3NhZ2UpIH0KdHJ5IHsKICBjb25zdCBkYiA9IG5ldyBEYXRhYmFzZVN5bmMoJy9ob21lL3VidW50dS9iYWNrZW5kLWRhdGEvdGVjaGl0LmRiJyx7cmVhZE9ubHk6dHJ1ZX0pCiAgY29uc3QgdCA9IGRiLnByZXBhcmUoIlNFTEVDVCBuYW1lIEZST00gc3FsaXRlX21hc3RlciBXSEVSRSB0eXBlPSd0YWJsZScgT1JERVIgQlkgbmFtZSIpLmFsbCgpCiAgY29uc29sZS5sb2coJ3RlY2hpdC5kYiB0YWJsZXM6JywgdC5tYXAocj0+ci5uYW1lKS5qb2luKCcsICcpIHx8ICcobm9uZSknKQogIGRiLmNsb3NlKCkKfSBjYXRjaChlKXsgY29uc29sZS5sb2coJ3RlY2hpdC5kYiBFUlJPUjonLCBlLm1lc3NhZ2UpIH0K" | base64 -d > .tmp-json.mjs
+            node .tmp-json.mjs
+            rm -f .tmp-json.mjs
