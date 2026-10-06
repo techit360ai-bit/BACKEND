@@ -1,0 +1,38 @@
+name: TECHIT Box — Reboot
+
+# Last-resort recovery: reboot the EC2 host when it is thrashing (swap full,
+# load 15+, nginx and pm2 unresponsive). Uses passwordless sudo, falling back
+# to the EC2 API with the box's configured AWS credentials.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: backend-ec2-reboot
+  cancel-in-progress: false
+
+jobs:
+  reboot:
+    name: Reboot via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reboot via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== before reboot ==="; uptime; free -m
+            INSTANCE_ID="$(curl -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-id)"
+            echo "instance: $INSTANCE_ID"
+            if timeout 20 sudo -n reboot; then
+              echo "reboot issued via sudo"
+              exit 0
+            fi
+            echo "sudo reboot unavailable; using the EC2 API"
+            timeout 90 aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" --region eu-west-1 \
+              || timeout 90 aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" \
+              || echo "reboot command failed"
