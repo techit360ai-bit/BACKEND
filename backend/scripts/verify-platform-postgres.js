@@ -11,7 +11,10 @@ const pool = getPlatformPool()
 const result = await pool.query('SELECT collection_name,count(*)::int AS count FROM platform_collection_records WHERE deleted_at IS NULL GROUP BY collection_name')
 const actual = Object.fromEntries(result.rows.map(row => [row.collection_name, Number(row.count)]))
 const expected = Object.fromEntries(Object.entries(db).filter(([, value]) => Array.isArray(value)).map(([key, value]) => [key, value.filter(record => record && record.id).length]))
-const mismatches = Object.fromEntries([...new Set([...Object.keys(actual), ...Object.keys(expected)])].filter(key => actual[key] !== expected[key]).map(key => [key, { expected: expected[key] || 0, actual: actual[key] || 0 }]))
+// Collections with zero rows are absent from the Postgres GROUP BY result, so a
+// missing key means "0 records", not a mismatch. Normalize both sides before
+// comparing so empty legacy collections do not read as false positives.
+const mismatches = Object.fromEntries([...new Set([...Object.keys(actual), ...Object.keys(expected)])].filter(key => (actual[key] || 0) !== (expected[key] || 0)).map(key => [key, { expected: expected[key] || 0, actual: actual[key] || 0 }]))
 const report = { event: 'platform_postgres_verification', consistent: Object.keys(mismatches).length === 0, mismatches, expectedCollections: Object.keys(expected).length, actualCollections: Object.keys(actual).length, expectedRecords: Object.values(expected).reduce((sum, value) => sum + value, 0), actualRecords: Object.values(actual).reduce((sum, value) => sum + value, 0), generatedAt: new Date().toISOString(), checksumAlgorithm: 'sha256' }
 console.log(JSON.stringify(report))
 await pool.end()
