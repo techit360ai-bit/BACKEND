@@ -1,0 +1,31 @@
+name: TECHIT Box — Probe Privileges
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Probe via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            set +e
+            echo "=== uptime ==="; uptime
+            echo "=== sudo -n -l ==="; timeout 20 sudo -n -l 2>&1 | head -40
+            echo "=== aws cli locations ==="
+            ls -l /usr/local/bin/aws /snap/bin/aws /usr/bin/aws ~/.local/bin/aws 2>&1 | head
+            echo "=== aws config ==="; ls -la ~/.aws 2>&1 | head
+            echo "=== aws env ==="; env | grep -i '^AWS_' | sed 's/=.*/=<set>/'
+            echo "=== boto3 ==="; timeout 20 python3 -c "import boto3; print('boto3', boto3.__version__)" 2>&1 | head -3
+            echo "=== reboot attempts ==="
+            timeout 15 sudo -n systemctl reboot && echo "REBOOT systemctl"
+            timeout 15 sudo -n shutdown -r now && echo "REBOOT shutdown"
+            timeout 15 sudo -n /sbin/reboot && echo "REBOOT /sbin/reboot"
+            echo "done"
