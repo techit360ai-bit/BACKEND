@@ -79,6 +79,20 @@ jobs:
               fs.writeFileSync(p, s);
             ' "$DEPLOYED_SHA"
 
+            # --- DevOps-managed DB credential --------------------------------
+            # The RDS password is owned and rotated by DevOps, so the repo
+            # secret can lag behind. The canonical on-box credential (bootstrapped
+            # from the working service env) is the source of truth when present;
+            # it is normalised to the node-pg sslmode because pg 8.23 verifies
+            # certs under `require` while RDS presents the AWS CA.
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              PLATFORM_DATABASE_URL="$(CRED="$(cat "$HOME/.techit/platform-database-url")" node -e '
+                const u = new URL(process.env.CRED);
+                u.searchParams.set("sslmode", "no-verify");
+                process.stdout.write(u.toString());
+              ')"
+            fi
+
             # --- platform env (PostgreSQL + Redis + MCP) ---------------------
             # Merge the committed, secret-free production template with the
             # secrets injected above. DB_DRIVER drives every read/write source

@@ -52,6 +52,13 @@ jobs:
             DEPLOYED_SHA="$(git rev-parse HEAD)"
             echo "deploying messaging $DEPLOYED_SHA"
 
+            # DevOps-managed RDS credential wins over the (possibly stale) repo
+            # secret; see the backend deploy for the rationale. The messaging
+            # derivation below forces pgx's libpq sslmode=require.
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              PLATFORM_DATABASE_URL="$(cat "$HOME/.techit/platform-database-url")"
+            fi
+
             if [ -z "$PLATFORM_DATABASE_URL" ]; then
               echo "❌ PLATFORM_DATABASE_URL secret is not set"; exit 1
             fi

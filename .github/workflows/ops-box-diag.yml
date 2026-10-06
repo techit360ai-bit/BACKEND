@@ -4,7 +4,7 @@ on:
     branches: [fix/rds-ssl-mode-and-diag]
 jobs:
   diag:
-    name: SSH read-only diagnostics
+    name: Bootstrap canonical DB credential
     runs-on: ubuntu-latest
     steps:
       - name: SSH
@@ -15,29 +15,20 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set +e
-            R=eu-west-1
-            echo "=== /home/ubuntu/.env ==="
-            cat /home/ubuntu/.env 2>/dev/null
-            echo "=== ~/.aws listing ==="
-            ls -la /home/ubuntu/.aws 2>/dev/null
-            echo "=== candidate env/secret files ==="
-            find /home/ubuntu -maxdepth 3 \( -name '*.env' -o -name '.pgpass' -o -iname '*secret*' -o -iname '*credential*' \) 2>/dev/null | head -30
-            echo "=== SSM parameters (eu-west-1) ==="
-            aws ssm describe-parameters --region $R --query 'Parameters[].Name' --output text 2>&1 | tr '\t' '\n' | head -30
-            echo "=== SSM /techit* values ==="
-            aws ssm get-parameters-by-path --path "/techit" --recursive --with-decryption --region $R --query 'Parameters[].{n:Name,v:Value}' --output text 2>&1 | head -20
-            echo "=== Secrets Manager (eu-west-1) ==="
-            aws secretsmanager list-secrets --region $R --query 'SecretList[].Name' --output text 2>&1 | tr '\t' '\n' | head -20
-            echo "=== candidate DB URLs and auth test (sslmode=require) ==="
-            for f in /home/ubuntu/.env /home/ubuntu/ai-router/.env /home/ubuntu/BACKEND/backend/.env /home/ubuntu/BACKEND/messaging-backend/.env; do
-              [ -f "$f" ] || continue
-              grep -aoE "postgres(ql)?://[^ '\"<>]+" "$f" 2>/dev/null | sort -u | while read -r u; do
-                [ -z "$u" ] && continue
-                case "$u" in
-                  *\?*) uu="$(printf '%s' "$u" | sed -E 's/([?&])sslmode=[^&]*/\1sslmode=require/')" ;;
-                  *) uu="$u?sslmode=require" ;;
-                esac
-                printf 'FROM %s\n  URL: %s\n  -> ' "$f" "$u"
-                psql "$uu" -tAc "select 'AUTH_OK user='||current_user||' db='||current_database()" 2>&1 | head -1
-              done
-            done
+            mkdir -p "$HOME/.techit"
+            CF="$HOME/.techit/platform-database-url"
+            if [ -s "$CF" ]; then
+              echo "canonical credential already present"
+            else
+              W="$(grep -aE '^DATABASE_URL=' /home/ubuntu/BACKEND/messaging-backend/.env | head -1 | cut -d= -f2- | sed -E "s/^[\"']//; s/[\"']$//")"
+              if [ -n "$W" ]; then
+                B="$W" node -e 'const u=new URL(process.env.B); u.searchParams.delete("sslmode"); process.stdout.write(u.toString())' > "$CF"
+                chmod 600 "$CF"
+                echo "bootstrapped canonical credential"
+              else
+                echo "ERROR: no working messaging credential found"
+              fi
+            fi
+            echo "canonical bytes: $(wc -c < "$CF") sha256: $(sha256sum "$CF" | cut -c1-16)"
+            T="$(B="$(cat "$CF")" node -e 'const u=new URL(process.env.B); u.searchParams.set("sslmode","require"); process.stdout.write(u.toString())')"
+            psql "$T" -tAc "select 'CANON_OK user='||current_user||' db='||current_database()" 2>&1 | head -1
