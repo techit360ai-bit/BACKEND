@@ -35,15 +35,17 @@ jobs:
             echo "=== before ==="; uptime; free -m
 
             # Stuck docker-compose builds from failed deploys are the memory/CPU
-            # hogs. Bracket the pattern so pkill does not match this script line.
-            echo "=== killing stuck docker compose/build processes ==="
-            pkill -f 'docke[r] compose' || true
-            pkill -f 'docke[r]-compose' || true
-            pkill -f 'docke[r] build' || true
-            pkill -f 'git-remote-http[s]' || true
-            sleep 5
-            echo "=== building processes (should be empty) ==="
-            pgrep -a -f 'docke[r] compose|docke[r] build' || true
+            # hogs. Match by EXACT process name (-x) because this script's own
+            # shell command line contains those words, and `pkill -f` would then
+            # kill the script itself (it did: exit 143).
+            echo "=== killing stuck container-build clients ==="
+            pkill -x docker-compose || true
+            pkill -x docker || true
+            pkill -x git-remote-https || true
+            sleep 8
+            echo "=== remaining build clients ==="
+            pgrep -x docker-compose || echo "no compose clients"
+            pgrep -x docker || echo "no docker clients"
 
             echo "=== reclaiming docker build cache ==="
             timeout 180 docker builder prune -f || true
