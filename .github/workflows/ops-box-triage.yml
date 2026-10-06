@@ -1,0 +1,33 @@
+name: TECHIT Box — Triage
+
+# Lightweight, fetch-free triage for when the box is memory-starved and the
+# normal deploy hangs. Read-only: reports memory, swap, top processes, pm2,
+# docker, and any stray build/install processes.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  triage:
+    name: Triage via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== uptime / load ==="; uptime
+            echo "=== memory ==="; free -m
+            echo "=== swap ==="; swapon --show
+            echo "=== top memory ==="; ps aux --sort=-%mem | head -18
+            echo "=== pm2 ==="; pm2 list
+            echo "=== docker ps ==="; docker ps --format '{{.Names}} | {{.Status}}' 2>/dev/null || echo "no docker"
+            echo "=== docker images count ==="; docker images -q 2>/dev/null | wc -l
+            echo "=== stray installs/builds ==="; pgrep -a -f 'npm|git-remote|docker build|dd ' | head -20
+            echo "=== nginx upstream ==="; ss -ltnp 2>/dev/null | grep -E ':(3000|3001|8000|8080|80|443)\b' || true
+            echo "=== dmesg oom (last) ==="; sudo dmesg 2>/dev/null | grep -iE 'oom|killed process' | tail -5 || echo "dmesg unavailable"
