@@ -136,7 +136,26 @@ jobs:
               console.log("jwt RS256 material ensured");
             '
 
-            npm install --workspaces --if-present
+            # --- ensure swap --------------------------------------------------
+            # This box is memory-tight: `npm install --workspaces` for the
+            # monorepo was OOM-killed (exit 137) and the kernel then killed the
+            # running backend. Provision a swapfile once so installs and the
+            # app survive memory spikes. Idempotent.
+            if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then
+              if [ ! -f /swapfile ]; then
+                sudo fallocate -l 4G /swapfile 2>/dev/null || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+              fi
+              sudo swapon /swapfile || true
+            fi
+            swapon --show || true
+            free -m || true
+
+            # Non-fatal: node_modules is already on the box, so a failed install
+            # (e.g. a memory spike) must not leave the service down.
+            npm install --workspaces --if-present --no-audit --no-fund \
+              || echo "⚠️ npm install failed; continuing with the existing node_modules"
 
             # The app must read backend/.env: a pm2 restart keeps the process's
             # stored environment, and env vars shadow `node --env-file`, so the
