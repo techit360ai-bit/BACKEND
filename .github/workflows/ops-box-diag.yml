@@ -1,0 +1,38 @@
+name: "Ops — EC2 box diagnostic (temporary)"
+on:
+  push:
+    branches: [fix/rds-ssl-mode-and-diag]
+jobs:
+  diag:
+    name: SSH read-only diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set +e
+            echo "=== instance role ==="
+            ROLE="$(curl -s -m 3 http://169.254.169.254/latest/meta-data/iam/security-credentials/ || true)"
+            echo "role: [$ROLE]"
+            echo "=== aws cli ==="
+            command -v aws || echo no-aws
+            echo "=== rds:describe via instance role ==="
+            aws rds describe-db-instances --region eu-west-1 \
+              --query 'DBInstances[].{id:DBInstanceIdentifier,user:MasterUsername,db:DBName,endpoint:Endpoint.Address,status:DBInstanceStatus,public:PubliclyAccessible}' \
+              --output json 2>&1 | head -40
+            echo "=== files mentioning the rds host ==="
+            grep -rsl "techit-postgres" /home/ubuntu /etc /opt 2>/dev/null | head -20
+            echo "=== backend .env DATABASE_URL (password redacted) ==="
+            grep -E "^DATABASE_URL=" /home/ubuntu/BACKEND/backend/.env 2>/dev/null | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
+            echo "=== messaging .env ==="
+            ls -la /home/ubuntu/BACKEND/messaging-backend/.env /home/ubuntu/messaging-backend/.env 2>/dev/null
+            echo "=== bash history: postgres lines (redacted) ==="
+            grep -i "postgres" /home/ubuntu/.bash_history 2>/dev/null | sed -E 's#(://[^:]+:)[^@]*@#\1***@#' | tail -20
+            echo "=== pm2 dump rds host refs ==="
+            grep -o "techit-postgres[^\"']*" /home/ubuntu/.pm2/dump.pm2 2>/dev/null | head
+            echo "=== docker envs referencing rds ==="
+            grep -rsl "techit-postgres" /home/ubuntu/*/docker-compose.yml /home/ubuntu/*.env 2>/dev/null | head
