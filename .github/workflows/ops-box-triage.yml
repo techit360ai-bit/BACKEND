@@ -31,3 +31,29 @@ jobs:
             echo "=== stray installs/builds ==="; pgrep -a -f 'npm|git-remote|docker build|dd ' | head -20
             echo "=== nginx upstream ==="; ss -ltnp 2>/dev/null | grep -E ':(3000|3001|8000|8080|80|443)\b' || true
             echo "=== dmesg oom (last) ==="; sudo dmesg 2>/dev/null | grep -iE 'oom|killed process' | tail -5 || echo "dmesg unavailable"
+            echo "=== signin 500: identity_postgres_read_failed (last 10) ==="
+            grep -a "identity_postgres_read_failed" "$HOME/.pm2/logs/techit-backend-error.log" | tail -10
+            echo "=== backend error log (last 40) ==="
+            tail -n 40 "$HOME/.pm2/logs/techit-backend-error.log"
+            echo "=== core_* schema probe ==="
+            cd "$HOME/BACKEND"
+            node --input-type=module - <<'JS'
+import fs from 'node:fs'
+import pg from 'pg'
+const env = fs.readFileSync('backend/.env','utf8')
+const m = env.match(/^DATABASE_URL=(.*)$/m)
+const url = m ? m[1].replace(/^"|"$/g,'') : ''
+if (!url) { console.log('no DATABASE_URL'); process.exit(0) }
+const c = new pg.Client({ connectionString: url, ssl: /sslmode=require/.test(url) ? { rejectUnauthorized:false } : undefined })
+try {
+  await c.connect()
+  const t = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'core\\_%' ORDER BY table_name")
+  console.log('core_* tables:', t.rows.map(r=>r.table_name).join(', ') || '(none)')
+  for (const n of ['core_users','core_profiles','core_user_roles','core_active_contexts']) {
+    try { const r = await c.query('SELECT count(*)::int AS n FROM ' + n); console.log(n, 'rows=', r.rows[0].n) }
+    catch(e){ console.log(n, 'ERROR:', e.message) }
+  }
+  const e2 = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE '%user%' ORDER BY table_name")
+  console.log('user-ish tables:', e2.rows.map(r=>r.table_name).join(', ') || '(none)')
+} catch(e) { console.log('connect_error:', e.message) } finally { await c.end().catch(()=>{}) }
+JS
