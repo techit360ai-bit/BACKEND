@@ -62,6 +62,10 @@ jobs:
             MESSAGING_DATABASE_URL="$(node -e '
               const u = new URL(process.env.PLATFORM_DATABASE_URL);
               u.pathname = "/techit_msg";
+              // The Node side needs sslmode=no-verify (pg 8.23 verifies certs
+              // under 'require'); pgx/libpq keep libpq semantics, so force
+              // 'require' for the Go service.
+              u.searchParams.set("sslmode", "require");
               process.stdout.write(u.toString());
             ')"
             export MESSAGING_DATABASE_URL
