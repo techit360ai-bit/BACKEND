@@ -1,0 +1,36 @@
+name: "TECHIT Box — Provider key diagnostic (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Provider keys via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnostic via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== ai-router .env provider keys (masked) ==="
+            for k in OPENAI_API_KEY OPENAI_API_KEY_2 OPENAI_API_KEY_3 OPENAI_API_KEY_4 ANTHROPIC_API_KEY ANTHROPIC_API_KEY_2 ANTHROPIC_API_KEY_3 ANTHROPIC_API_KEY_4; do
+              v="$(grep -m1 "^$k=" "$HOME/ai-router/.env" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//')"
+              if [ -n "$v" ]; then echo "$k len=${#v} sha8=$(printf %s "$v" | sha256sum | cut -c1-8) pfx=$(printf %s "$v" | cut -c1-3)"; else echo "$k (absent)"; fi
+            done
+            echo "=== worker container presence ==="
+            docker exec ai-router-worker-1 sh -c 'for k in OPENAI_API_KEY ANTHROPIC_API_KEY AI_ROUTER_MODE ENVIRONMENT REQUIRE_AI_EXECUTION_GRANT; do eval "v=\$$k"; if [ -n "$v" ]; then echo "$k=set"; else echo "$k=unset"; fi; done' 2>&1 | head
+            ok="$(grep -m1 '^OPENAI_API_KEY=' "$HOME/ai-router/.env" | cut -d= -f2- | sed 's/^"//; s/"$//')"
+            ak="$(grep -m1 '^ANTHROPIC_API_KEY=' "$HOME/ai-router/.env" | cut -d= -f2- | sed 's/^"//; s/"$//')"
+            echo "=== live OpenAI test (/v1/models) ==="
+            curl -s -o /tmp/oai.json -w 'openai_http=%{http_code}\n' --max-time 25 https://api.openai.com/v1/models -H "Authorization: Bearer $ok"
+            head -c 260 /tmp/oai.json; echo
+            echo "=== live Anthropic test (/v1/messages) ==="
+            curl -s -o /tmp/ant.json -w 'anthropic_http=%{http_code}\n' --max-time 25 https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $ak" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+              -d '{"model":"claude-3-5-haiku-20241022","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}'
+            head -c 260 /tmp/ant.json; echo
