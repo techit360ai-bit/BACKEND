@@ -1,0 +1,25 @@
+name: TECHIT Box — Force Reboot
+
+# The box can wedge mid-shutdown ("There's already a shutdown or sleep
+# operation in progress"). ubuntu has NOPASSWD sudo, so force it through.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  reboot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Force reboot via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 3m
+          script: |
+            set +e
+            echo "=== state ==="; uptime
+            sudo -n systemctl reboot -ff && echo "FORCED systemctl reboot -ff"
+            sudo -n reboot -f && echo "FORCED reboot -f"
+            echo "done"
