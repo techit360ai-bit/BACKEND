@@ -4,7 +4,7 @@ on:
     branches: [fix/rds-ssl-mode-and-diag]
 jobs:
   diag:
-    name: Inspect pm2 + .env keys
+    name: Locate legacy sqlite stores
     runs-on: ubuntu-latest
     steps:
       - name: SSH
@@ -15,16 +15,13 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set +e
-            echo "=== backend/.env key count ==="
-            grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' /home/ubuntu/BACKEND/backend/.env
-            echo "=== backend/.env key names ==="
-            grep -aoE '^[A-Za-z_][A-Za-z0-9_]*=' /home/ubuntu/BACKEND/backend/.env | tr -d '=' | tr '\n' ' '
-            echo
-            echo "=== pm2 env: MCP/NODE/DB/JWT/REDIS keys ==="
-            pm2 env 0 2>/dev/null | grep -aiE "MCP_|NODE_ENV|PLATFORM_|DB_DRIVER|DATABASE_URL|JWT_SECRET|REDIS_URL" | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
-            echo "=== pm2 env: total key count ==="
-            pm2 env 0 2>/dev/null | grep -acE '^[A-Za-z_][A-Za-z0-9_]*:'
-            echo "=== does .env have key secrets? ==="
-            for k in JWT_SECRET RESEND_API_KEY EVIDENCE_STORAGE_ACCESS_KEY GITHUB_TOKEN_ENCRYPTION_KEY OTP_HASH_SECRET CORS_ORIGINS NODE_ENV MCP_ENABLED; do
-              if grep -qE "^$k=" /home/ubuntu/BACKEND/backend/.env; then echo "$k: present"; else echo "$k: MISSING"; fi
-            done
+            echo "=== sudo available? ==="
+            sudo -n true 2>/dev/null && echo "sudo: yes" || echo "sudo: no"
+            echo "=== /home/ubuntu/backend-data ==="
+            ls -la /home/ubuntu/backend-data 2>/dev/null
+            echo "=== /var/lib/techit ==="
+            ls -la /var/lib/techit 2>/dev/null || echo "absent"
+            echo "=== sqlite/db files under /home/ubuntu (maxdepth 4) ==="
+            find /home/ubuntu -maxdepth 4 \( -name '*.sqlite' -o -name '*.db' -o -name '*.sqlite3' \) -printf '%s\t%p\n' 2>/dev/null | sort -rn | head -20
+            echo "=== BACKEND sqlite refs in code defaults ==="
+            grep -rhoaE "backend-data/[a-z0-9_.-]+|/var/lib/techit/[a-z0-9_./-]+" /home/ubuntu/BACKEND/backend/src 2>/dev/null | sort -u | head
