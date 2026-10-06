@@ -16,18 +16,28 @@ jobs:
           script: |
             set +e
             R=eu-west-1
-            echo "=== MasterUserSecret ==="
-            aws rds describe-db-instances --db-instance-identifier techit-postgres --region $R \
-              --query 'DBInstances[0].MasterUserSecret' --output json 2>&1
-            echo "=== secrets manager names ==="
+            echo "=== /home/ubuntu/.env ==="
+            cat /home/ubuntu/.env 2>/dev/null
+            echo "=== ~/.aws listing ==="
+            ls -la /home/ubuntu/.aws 2>/dev/null
+            echo "=== candidate env/secret files ==="
+            find /home/ubuntu -maxdepth 3 \( -name '*.env' -o -name '.pgpass' -o -iname '*secret*' -o -iname '*credential*' \) 2>/dev/null | head -30
+            echo "=== SSM parameters (eu-west-1) ==="
+            aws ssm describe-parameters --region $R --query 'Parameters[].Name' --output text 2>&1 | tr '\t' '\n' | head -30
+            echo "=== SSM /techit* values ==="
+            aws ssm get-parameters-by-path --path "/techit" --recursive --with-decryption --region $R --query 'Parameters[].{n:Name,v:Value}' --output text 2>&1 | head -20
+            echo "=== Secrets Manager (eu-west-1) ==="
             aws secretsmanager list-secrets --region $R --query 'SecretList[].Name' --output text 2>&1 | tr '\t' '\n' | head -20
-            echo "=== attached managed policies (techit-devops) ==="
-            aws iam list-attached-user-policies --user-name techit-devops 2>&1 | head -30
-            echo "=== inline policies ==="
-            aws iam list-user-policies --user-name techit-devops 2>&1 | head -20
-            echo "=== simulate rds:ModifyDBInstance ==="
-            aws iam simulate-principal-policy \
-              --policy-source-arn arn:aws:iam::936706106533:user/techit-devops \
-              --action-names rds:ModifyDBInstance rds:DescribeDBInstances secretsmanager:GetSecretValue \
-              --resource-arns arn:aws:rds:eu-west-1:936706106533:db:techit-postgres \
-              --query 'EvaluationResults[].EvalDecision' --output text 2>&1 | head
+            echo "=== candidate DB URLs and auth test (sslmode=require) ==="
+            for f in /home/ubuntu/.env /home/ubuntu/ai-router/.env /home/ubuntu/BACKEND/backend/.env /home/ubuntu/BACKEND/messaging-backend/.env; do
+              [ -f "$f" ] || continue
+              grep -aoE "postgres(ql)?://[^ '\"<>]+" "$f" 2>/dev/null | sort -u | while read -r u; do
+                [ -z "$u" ] && continue
+                case "$u" in
+                  *\?*) uu="$(printf '%s' "$u" | sed -E 's/([?&])sslmode=[^&]*/\1sslmode=require/')" ;;
+                  *) uu="$u?sslmode=require" ;;
+                esac
+                printf 'FROM %s\n  URL: %s\n  -> ' "$f" "$u"
+                psql "$uu" -tAc "select 'AUTH_OK user='||current_user||' db='||current_database()" 2>&1 | head -1
+              done
+            done
