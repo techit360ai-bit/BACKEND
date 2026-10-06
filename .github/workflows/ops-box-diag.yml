@@ -4,7 +4,7 @@ on:
     branches: [fix/rds-ssl-mode-and-diag]
 jobs:
   diag:
-    name: Inspect pm2 env
+    name: Inspect pm2 + .env keys
     runs-on: ubuntu-latest
     steps:
       - name: SSH
@@ -15,11 +15,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set +e
-            echo "=== pm2 describe (script/cwd/args) ==="
-            pm2 describe techit-backend 2>&1 | sed -n '1,45p'
-            echo "=== pm2 process env (keys of interest) ==="
-            pm2 env 0 2>/dev/null | grep -aE "^(NODE_ENV|MCP_ENABLED|MCP_STORE|DB_DRIVER|PLATFORM_DB_DRIVER|PLATFORM_DATABASE_URL|DATABASE_URL|MCP_DATABASE_URL|MCP_ENABLED_CONNECTORS|PLATFORM_REQUEST_AUTHORITY|PORT|REDIS_URL)=" | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
-            echo "=== backend/.env (keys of interest) ==="
-            grep -aE "^(NODE_ENV|MCP_ENABLED|MCP_STORE|DB_DRIVER|PLATFORM_DB_DRIVER|PLATFORM_DATABASE_URL|DATABASE_URL|MCP_DATABASE_URL|MCP_ENABLED_CONNECTORS|PLATFORM_REQUEST_AUTHORITY|PORT)=" /home/ubuntu/BACKEND/backend/.env | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
-            echo "=== app log grep (mcp/error/validate) ==="
-            pm2 logs techit-backend --lines 120 --nostream 2>&1 | grep -aiE "mcp|error|throw|validate|connector|refused" | tail -40
+            echo "=== backend/.env key count ==="
+            grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' /home/ubuntu/BACKEND/backend/.env
+            echo "=== backend/.env key names ==="
+            grep -aoE '^[A-Za-z_][A-Za-z0-9_]*=' /home/ubuntu/BACKEND/backend/.env | tr -d '=' | tr '\n' ' '
+            echo
+            echo "=== pm2 env: MCP/NODE/DB/JWT/REDIS keys ==="
+            pm2 env 0 2>/dev/null | grep -aiE "MCP_|NODE_ENV|PLATFORM_|DB_DRIVER|DATABASE_URL|JWT_SECRET|REDIS_URL" | sed -E 's#(://[^:]+:)[^@]*@#\1***@#'
+            echo "=== pm2 env: total key count ==="
+            pm2 env 0 2>/dev/null | grep -acE '^[A-Za-z_][A-Za-z0-9_]*:'
+            echo "=== does .env have key secrets? ==="
+            for k in JWT_SECRET RESEND_API_KEY EVIDENCE_STORAGE_ACCESS_KEY GITHUB_TOKEN_ENCRYPTION_KEY OTP_HASH_SECRET CORS_ORIGINS NODE_ENV MCP_ENABLED; do
+              if grep -qE "^$k=" /home/ubuntu/BACKEND/backend/.env; then echo "$k: present"; else echo "$k: MISSING"; fi
+            done
