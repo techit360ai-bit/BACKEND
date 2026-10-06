@@ -135,7 +135,7 @@ curl -s https://messaging.techitnetwork.com/ready   # 200
 ## 9. Rollback + follow-ups
 
 - **Instant rollback:** set `PLATFORM_DB_DRIVER=sqlite` and re-run the backend
-  deploy. SQLite is retained at `SQLITE_DB_PATH=/var/lib/techit/backend/techit.sqlite`
+  deploy. SQLite is retained at `SQLITE_DB_PATH=/home/ubuntu/backend-data/techit.db`
   and no data is destroyed by the backfill (it only upserts into RDS).
 - **Hardening — pin the RDS CA (verify-full).** Today the platform uses
   `sslmode=require` (encrypted, no certificate pin), matching libpq/RDS defaults.

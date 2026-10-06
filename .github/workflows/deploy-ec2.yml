@@ -33,11 +33,14 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
           MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
           DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
+          # The box's real legacy SQLite store (the committed template path is
+          # the generic /var/lib location, which does not exist here).
+          SQLITE_DB_PATH: /home/ubuntu/backend-data/techit.db
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER
+          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
           # Stop the whole script on the first failure. Historically this
           # defaulted to false, so a blocked `git pull` was followed by
           # `pm2 restart` + "✅ Backend deployed" and the job reported success
@@ -78,6 +81,20 @@ jobs:
                 : s.replace(/\s*$/, "") + "\n" + line + "\n";
               fs.writeFileSync(p, s);
             ' "$DEPLOYED_SHA"
+
+            # --- DevOps-managed DB credential --------------------------------
+            # The RDS password is owned and rotated by DevOps, so the repo
+            # secret can lag behind. The canonical on-box credential (bootstrapped
+            # from the working service env) is the source of truth when present;
+            # it is normalised to the node-pg sslmode because pg 8.23 verifies
+            # certs under `require` while RDS presents the AWS CA.
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              PLATFORM_DATABASE_URL="$(CRED="$(cat "$HOME/.techit/platform-database-url")" node -e '
+                const u = new URL(process.env.CRED);
+                u.searchParams.set("sslmode", "no-verify");
+                process.stdout.write(u.toString());
+              ')"
+            fi
 
             # --- platform env (PostgreSQL + Redis + MCP) ---------------------
             # Merge the committed, secret-free production template with the
@@ -121,13 +138,30 @@ jobs:
             '
 
             npm install --workspaces --if-present
-            GIT_SHA="$DEPLOYED_SHA" pm2 restart techit-backend --update-env
+
+            # The app must read backend/.env: a pm2 restart keeps the process's
+            # stored environment, and env vars shadow `node --env-file`, so the
+            # MCP contract was silently dropped and NODE_ENV stayed `staging`
+            # while the probes expected production. Recreate the process with
+            # the env file authoritative; the SSH-injected secrets still
+            # override it through the process environment.
+            pm2 delete techit-backend >/dev/null 2>&1 || true
+            GIT_SHA="$DEPLOYED_SHA" pm2 start /usr/bin/node \
+              --name techit-backend --cwd /home/ubuntu/BACKEND --interpreter none \
+              -- --env-file-if-exists=backend/.env --import tsx backend/src/index.js
+            pm2 save >/dev/null 2>&1 || true
 
             # --- verify the deploy actually landed ---------------------------
             for _ in $(seq 1 15); do
               if curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then break; fi
               sleep 2
             done
+            # If the app is not serving, dump the pm2 log so a boot crash is
+            # diagnosable from CI instead of requiring box access.
+            if ! curl -fsS https://backend.techitnetwork.com/health >/dev/null 2>&1; then
+              echo "--- pm2 logs (last 120 lines) ---"
+              pm2 logs techit-backend --lines 120 --nostream || true
+            fi
             HEALTH="$(curl -fsS https://backend.techitnetwork.com/health)"
             echo "health: $HEALTH"
             if echo "$HEALTH" | grep -q "\"sha\":\"unknown\""; then

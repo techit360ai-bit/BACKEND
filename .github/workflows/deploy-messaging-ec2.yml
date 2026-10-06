@@ -52,6 +52,13 @@ jobs:
             DEPLOYED_SHA="$(git rev-parse HEAD)"
             echo "deploying messaging $DEPLOYED_SHA"
 
+            # DevOps-managed RDS credential wins over the (possibly stale) repo
+            # secret; see the backend deploy for the rationale. The messaging
+            # derivation below forces pgx's libpq sslmode=require.
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              PLATFORM_DATABASE_URL="$(cat "$HOME/.techit/platform-database-url")"
+            fi
+
             if [ -z "$PLATFORM_DATABASE_URL" ]; then
               echo "❌ PLATFORM_DATABASE_URL secret is not set"; exit 1
             fi
@@ -62,6 +69,10 @@ jobs:
             MESSAGING_DATABASE_URL="$(node -e '
               const u = new URL(process.env.PLATFORM_DATABASE_URL);
               u.pathname = "/techit_msg";
+              // The Node side needs sslmode=no-verify (pg 8.23 verifies certs
+              // under 'require'); pgx/libpq keep libpq semantics, so force
+              // 'require' for the Go service.
+              u.searchParams.set("sslmode", "require");
               process.stdout.write(u.toString());
             ')"
             export MESSAGING_DATABASE_URL
