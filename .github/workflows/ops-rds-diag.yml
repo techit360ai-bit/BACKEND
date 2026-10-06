@@ -1,6 +1,8 @@
 name: "Ops — RDS diagnostic (temporary)"
 
 on:
+  push:
+    branches: [fix/rds-ssl-mode-and-diag]
   workflow_dispatch:
 
 jobs:
