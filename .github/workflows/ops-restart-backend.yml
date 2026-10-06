@@ -36,6 +36,21 @@ jobs:
             cd ~/BACKEND
             echo "restarting from local tree: $(git rev-parse HEAD)"
 
+            # --- DevOps-managed DB credential --------------------------------
+            # The SSH-injected PLATFORM_DATABASE_URL secret can lag the RDS
+            # rotation DevOps owns. The canonical on-box credential is the
+            # source of truth (same precedence as deploy-ec2); without this the
+            # stale secret shadows backend/.env and boot dies with
+            # "password authentication failed for user \"techit\"". Env vars
+            # shadow `node --env-file`, so normalise it in the process env.
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              PLATFORM_DATABASE_URL="$(CRED="$(cat "$HOME/.techit/platform-database-url")" node -e '
+                const u = new URL(process.env.CRED);
+                u.searchParams.set("sslmode", "no-verify");
+                process.stdout.write(u.toString());
+              ')"
+            fi
+
             # --- ensure swap (idempotent) -----------------------------------
             if ! swapon --show 2>/dev/null | grep -q '/swapfile'; then
               if [ ! -f /swapfile ]; then
