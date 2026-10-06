@@ -1,0 +1,47 @@
+name: TECHIT EC2 — Reboot via API
+
+# Reboot the backend host from the GitHub runner using the repo's AWS
+# credentials. Reliable even when the box is thrashing and cannot run sudo,
+# reach GitHub, or exec the AWS CLI itself.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ec2-reboot
+  cancel-in-progress: false
+
+jobs:
+  reboot:
+    name: Reboot backend host
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      - name: Reboot the backend host
+        run: |
+          set -euo pipefail
+          aws sts get-caller-identity
+          HOST="${{ secrets.EC2_HOST }}"
+          echo "looking up instance for host: $HOST"
+          ID=""
+          for FILTER in "ip-address" "public-ip-address" "dns-name"; do
+            ID="$(aws ec2 describe-instances --filters "Name=$FILTER,Values=$HOST" \
+              --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || true)"
+            if [ -n "$ID" ] && [ "$ID" != "None" ]; then
+              echo "matched by $FILTER: $ID"
+              break
+            fi
+            ID=""
+          done
+          if [ -z "$ID" ]; then
+            echo "❌ could not resolve an instance for $HOST"
+            aws ec2 describe-instances --query 'Reservations[].Instances[].{id:InstanceId,ip:PublicIpAddress,state:State.Name}' --output table | head -40
+            exit 1
+          fi
+          aws ec2 reboot-instances --instance-ids "$ID"
+          echo "✅ reboot issued for $ID"
