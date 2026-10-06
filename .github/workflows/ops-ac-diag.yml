@@ -1,0 +1,23 @@
+name: "TECHIT Box — app_collections probe (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: app_collections probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            cd "$HOME/BACKEND"
+            printf '%s' "aW1wb3J0IHsgRGF0YWJhc2VTeW5jIH0gZnJvbSAnbm9kZTpzcWxpdGUnCmltcG9ydCBmcyBmcm9tICdub2RlOmZzJwpjb25zdCBwPScvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhL3RlY2hpdC5kYicKY29uc3QgZGI9bmV3IERhdGFiYXNlU3luYyhwLHtyZWFkT25seTp0cnVlfSkKY29uc3Qgcm93cz1kYi5wcmVwYXJlKCdTRUxFQ1QgbmFtZSwgbGVuZ3RoKHZhbHVlKSBBUyBsZW4sIHZhbHVlIEZST00gYXBwX2NvbGxlY3Rpb25zIE9SREVSIEJZIG5hbWUnKS5hbGwoKQpjb25zb2xlLmxvZygnYXBwX2NvbGxlY3Rpb25zIHJvd3M6Jywgcm93cy5sZW5ndGgpCmNvbnNvbGUubG9nKCdjb2xsZWN0aW9uczonLCByb3dzLm1hcChyPT5yLm5hbWUrJygnK3IubGVuKydiKScpLmpvaW4oJywgJykgfHwgJyhub25lKScpCmZvciAoY29uc3QgciBvZiByb3dzKSB7CiAgdHJ5IHsKICAgIGNvbnN0IHY9SlNPTi5wYXJzZShyLnZhbHVlfHwnW10nKQogICAgaWYgKEFycmF5LmlzQXJyYXkodikpIGNvbnNvbGUubG9nKCcgICcrci5uYW1lKyc6ICcrdi5sZW5ndGgrJyByZWNvcmRzJykKICB9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygnICAnK3IubmFtZSsnOiB1bnBhcnNhYmxlJykgfQp9CmNvbnN0IHU9cm93cy5maW5kKHI9PnIubmFtZT09PSd1c2VycycpCmlmICh1KSB7IHRyeSB7IGNvbnN0IHY9SlNPTi5wYXJzZSh1LnZhbHVlKTsgY29uc29sZS5sb2coJ3VzZXJzIHNhbXBsZSBrZXlzOicsIHYubGVuZ3RoP09iamVjdC5rZXlzKHZbMF0pLmpvaW4oJywnKTonKGVtcHR5KScpIH0gY2F0Y2goZSl7fSB9CmRiLmNsb3NlKCkK" | base64 -d > .tmp-ac.mjs
+            node .tmp-ac.mjs
+            rm -f .tmp-ac.mjs
