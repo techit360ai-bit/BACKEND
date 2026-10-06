@@ -19,25 +19,10 @@ jobs:
             set +e
             echo "=== identity_postgres_read_failed (last 10) ==="
             grep -a "identity_postgres_read_failed" "$HOME/.pm2/logs/techit-backend-error.log" | tail -10
-            echo "=== recent error log (last 50) ==="
-            tail -n 50 "$HOME/.pm2/logs/techit-backend-error.log"
-            echo "=== DB probe: core_* schema ==="
+            echo "=== backend error log (last 60) ==="
+            tail -n 60 "$HOME/.pm2/logs/techit-backend-error.log"
+            echo "=== core_* schema probe ==="
+            printf '%s' "aW1wb3J0IGZzIGZyb20gJ25vZGU6ZnMnCmltcG9ydCBwZyBmcm9tICdwZycKY29uc3QgZW52ID0gZnMucmVhZEZpbGVTeW5jKCdiYWNrZW5kLy5lbnYnLCd1dGY4JykKY29uc3QgbSA9IGVudi5tYXRjaCgvXkRBVEFCQVNFX1VSTD0oLiopJC9tKQpjb25zdCB1cmwgPSBtID8gbVsxXS5yZXBsYWNlKC9eInwiJC9nLCcnKSA6ICcnCmlmICghdXJsKSB7IGNvbnNvbGUubG9nKCdubyBEQVRBQkFTRV9VUkwnKTsgcHJvY2Vzcy5leGl0KDApIH0KY29uc3QgYyA9IG5ldyBwZy5DbGllbnQoeyBjb25uZWN0aW9uU3RyaW5nOiB1cmwsIHNzbDogL3NzbG1vZGU9cmVxdWlyZS8udGVzdCh1cmwpID8geyByZWplY3RVbmF1dGhvcml6ZWQ6ZmFsc2UgfSA6IHVuZGVmaW5lZCB9KQp0cnkgewogIGF3YWl0IGMuY29ubmVjdCgpCiAgY29uc3QgdCA9IGF3YWl0IGMucXVlcnkoIlNFTEVDVCB0YWJsZV9uYW1lIEZST00gaW5mb3JtYXRpb25fc2NoZW1hLnRhYmxlcyBXSEVSRSB0YWJsZV9zY2hlbWE9J3B1YmxpYycgQU5EIHRhYmxlX25hbWUgTElLRSAnY29yZVxcXyUnIE9SREVSIEJZIHRhYmxlX25hbWUiKQogIGNvbnNvbGUubG9nKCdjb3JlXyogdGFibGVzOicsIHQucm93cy5tYXAocj0+ci50YWJsZV9uYW1lKS5qb2luKCcsICcpIHx8ICcobm9uZSknKQogIGZvciAoY29uc3QgbiBvZiBbJ2NvcmVfdXNlcnMnLCdjb3JlX3Byb2ZpbGVzJywnY29yZV91c2VyX3JvbGVzJywnY29yZV9hY3RpdmVfY29udGV4dHMnXSkgewogICAgdHJ5IHsgY29uc3QgciA9IGF3YWl0IGMucXVlcnkoJ1NFTEVDVCBjb3VudCgqKTo6aW50IEFTIG4gRlJPTSAnICsgbik7IGNvbnNvbGUubG9nKG4sICdyb3dzPScsIHIucm93c1swXS5uKSB9CiAgICBjYXRjaChlKXsgY29uc29sZS5sb2cobiwgJ0VSUk9SOicsIGUubWVzc2FnZSkgfQogIH0KICBjb25zdCBlMiA9IGF3YWl0IGMucXVlcnkoIlNFTEVDVCB0YWJsZV9uYW1lIEZST00gaW5mb3JtYXRpb25fc2NoZW1hLnRhYmxlcyBXSEVSRSB0YWJsZV9zY2hlbWE9J3B1YmxpYycgQU5EIHRhYmxlX25hbWUgTElLRSAnJXVzZXIlJyBPUkRFUiBCWSB0YWJsZV9uYW1lIikKICBjb25zb2xlLmxvZygndXNlci1pc2ggdGFibGVzOicsIGUyLnJvd3MubWFwKHI9PnIudGFibGVfbmFtZSkuam9pbignLCAnKSB8fCAnKG5vbmUpJykKfSBjYXRjaChlKSB7IGNvbnNvbGUubG9nKCdjb25uZWN0X2Vycm9yOicsIGUubWVzc2FnZSkgfSBmaW5hbGx5IHsgYXdhaXQgYy5lbmQoKS5jYXRjaCgoKT0+e30pIH0K" | base64 -d > "$HOME/BACKEND/.tmp-signin-diag.mjs"
             cd "$HOME/BACKEND"
-            node --input-type=module - <<'JS'
-import fs from 'node:fs'
-import pg from 'pg'
-const env = fs.readFileSync('backend/.env','utf8')
-const m = env.match(/^DATABASE_URL=(.*)$/m)
-const url = m ? m[1].replace(/^"|"$/g,'') : ''
-if (!url) { console.log('no DATABASE_URL'); process.exit(0) }
-const c = new pg.Client({ connectionString: url, ssl: /sslmode=require/.test(url) ? { rejectUnauthorized:false } : undefined })
-try {
-  await c.connect()
-  const t = await c.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'core\\_%' ORDER BY table_name")
-  console.log('core_* tables:', t.rows.map(r=>r.table_name).join(', ') || '(none)')
-  for (const n of ['core_users','core_profiles','core_user_roles','core_active_contexts']) {
-    try { const r = await c.query('SELECT count(*)::int AS n FROM ' + n); console.log(n, 'rows=', r.rows[0].n) }
-    catch(e){ console.log(n, 'ERROR:', e.message) }
-  }
-} catch(e) { console.log('connect_error:', e.message) } finally { await c.end().catch(()=>{}) }
-JS
+            node .tmp-signin-diag.mjs
+            rm -f .tmp-signin-diag.mjs
