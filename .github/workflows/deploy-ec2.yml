@@ -33,11 +33,14 @@ jobs:
           REDIS_URL: ${{ secrets.REDIS_URL }}
           MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
           DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
+          # The box's real legacy SQLite store (the committed template path is
+          # the generic /var/lib location, which does not exist here).
+          SQLITE_DB_PATH: /home/ubuntu/backend-data/techit.db
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER
+          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
           # Stop the whole script on the first failure. Historically this
           # defaulted to false, so a blocked `git pull` was followed by
           # `pm2 restart` + "✅ Backend deployed" and the job reported success
