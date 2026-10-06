@@ -1,0 +1,25 @@
+name: "TECHIT Box — Legacy data locator (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Legacy data locator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Locate legacy data
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 6m
+          script: |
+            set +e
+            echo "=== candidate db files ==="
+            find /home/ubuntu -maxdepth 4 \( -name "*.db" -o -name "*.sqlite" -o -name "db.json" \) 2>/dev/null | head -20
+            cd "$HOME/BACKEND"
+            printf '%s' "aW1wb3J0IGZzIGZyb20gJ25vZGU6ZnMnCmltcG9ydCBwZyBmcm9tICdwZycKaW1wb3J0IHsgRGF0YWJhc2VTeW5jIH0gZnJvbSAnbm9kZTpzcWxpdGUnCmNvbnN0IGVudiA9IGZzLnJlYWRGaWxlU3luYygnYmFja2VuZC8uZW52JywndXRmOCcpCmNvbnN0IGcgPSBrID0+IHsgY29uc3QgbSA9IGVudi5tYXRjaChuZXcgUmVnRXhwKCdeJytrKyc9KC4qKSQnLCdtJykpOyByZXR1cm4gbSA/IG1bMV0ucmVwbGFjZSgvXiJ8IiQvZywnJykgOiAnJyB9CmNvbnN0IHVybCA9IGcoJ1BMQVRGT1JNX0RBVEFCQVNFX1VSTCcpIHx8IGcoJ0RBVEFCQVNFX1VSTCcpCmNvbnN0IGMgPSBuZXcgcGcuQ2xpZW50KHsgY29ubmVjdGlvblN0cmluZzogdXJsLCBzc2w6IC9zc2xtb2RlPXJlcXVpcmUvLnRlc3QodXJsKSA/IHsgcmVqZWN0VW5hdXRob3JpemVkOmZhbHNlIH0gOiB1bmRlZmluZWQgfSkKYXdhaXQgYy5jb25uZWN0KCkKdHJ5IHsKICBjb25zdCBjb2xzID0gYXdhaXQgYy5xdWVyeSgiU0VMRUNUIGNvbHVtbl9uYW1lIEZST00gaW5mb3JtYXRpb25fc2NoZW1hLmNvbHVtbnMgV0hFUkUgdGFibGVfbmFtZT0ndXNlcnMnIE9SREVSIEJZIG9yZGluYWxfcG9zaXRpb24iKQogIGNvbnNvbGUubG9nKCdyZHMudXNlcnMgY29sczonLCBjb2xzLnJvd3MubWFwKHI9PnIuY29sdW1uX25hbWUpLmpvaW4oJywnKSkKICBjb25zdCBlbSA9IGF3YWl0IGMucXVlcnkoIlNFTEVDVCBlbWFpbCBGUk9NIHVzZXJzIE9SREVSIEJZIGVtYWlsIikKICBjb25zb2xlLmxvZygncmRzLnVzZXJzIGVtYWlscyhtYXNrZWQpOicsIGVtLnJvd3MubWFwKHI9PlN0cmluZyhyLmVtYWlsKS5yZXBsYWNlKC8oXi4pLiooQC4qKSQvLCckMSoqKiQyJykpLmpvaW4oJywgJykpCiAgZm9yIChjb25zdCB0IG9mIFsndXNlcl9zZXNzaW9ucycsJ3RydXN0X3VzZXJfcm9sZXMnLCdjb3JlX3VzZXJzJ10pIHsKICAgIHRyeSB7IGNvbnN0IHIgPSBhd2FpdCBjLnF1ZXJ5KCdTRUxFQ1QgY291bnQoKik6OmludCBuIEZST00gJyt0KTsgY29uc29sZS5sb2codCsnLmNvdW50OicsIHIucm93c1swXS5uKSB9IGNhdGNoKGUpeyBjb25zb2xlLmxvZyh0KycgRVJST1I6JywgZS5tZXNzYWdlKSB9CiAgfQogIGNvbnN0IGN1ID0gYXdhaXQgYy5xdWVyeSgiU0VMRUNUIGNvbHVtbl9uYW1lIEZST00gaW5mb3JtYXRpb25fc2NoZW1hLmNvbHVtbnMgV0hFUkUgdGFibGVfbmFtZT0nY29yZV91c2VycycgT1JERVIgQlkgb3JkaW5hbF9wb3NpdGlvbiIpCiAgY29uc29sZS5sb2coJ2NvcmVfdXNlcnMgY29sczonLCBjdS5yb3dzLm1hcChyPT5yLmNvbHVtbl9uYW1lKS5qb2luKCcsJykpCn0gZmluYWxseSB7IGF3YWl0IGMuZW5kKCkgfQpmb3IgKGNvbnN0IHAgb2YgWycvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhL3RlY2hpdC5kYicsJy9ob21lL3VidW50dS9CQUNLRU5EL2JhY2tlbmQvZGF0YS9kYi5qc29uJywnL2hvbWUvdWJ1bnR1L0JBQ0tFTkQvYmFja2VuZC9kYXRhL3RlY2hpdC5zcWxpdGUnLCcvaG9tZS91YnVudHUvQkFDS0VORC9kYXRhL2RiLmpzb24nXSkgewogIHRyeSB7IGNvbnNvbGUubG9nKCdmaWxlJywgcCwgJ3NpemU9Jytmcy5zdGF0U3luYyhwKS5zaXplKSB9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygnZmlsZScsIHAsICdNSVNTSU5HJykgfQp9CnRyeSB7CiAgY29uc3QgZGIgPSBuZXcgRGF0YWJhc2VTeW5jKCcvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhL3RlY2hpdC5kYicsIHsgcmVhZE9ubHk6IHRydWUgfSkKICBjb25zdCB0ID0gZGIucHJlcGFyZSgiU0VMRUNUIG5hbWUgRlJPTSBzcWxpdGVfbWFzdGVyIFdIRVJFIHR5cGU9J3RhYmxlJyBPUkRFUiBCWSBuYW1lIikuYWxsKCkKICBjb25zb2xlLmxvZygnc3FsaXRlIHRhYmxlczonLCB0Lm1hcChyPT5yLm5hbWUpLmpvaW4oJywgJykgfHwgJyhub25lKScpCiAgZGIuY2xvc2UoKQp9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygnc3FsaXRlIHRhYmxlcyBFUlJPUjonLCBlLm1lc3NhZ2UpIH0KZm9yIChjb25zdCBwIG9mIFsnL2hvbWUvdWJ1bnR1L0JBQ0tFTkQvYmFja2VuZC9kYXRhL2RiLmpzb24nLCcvaG9tZS91YnVudHUvQkFDS0VORC9kYXRhL2RiLmpzb24nXSkgewogIHRyeSB7IGNvbnN0IGogPSBKU09OLnBhcnNlKGZzLnJlYWRGaWxlU3luYyhwLCd1dGY4JykpOyBjb25zb2xlLmxvZygnanNvbicsIHAsIE9iamVjdC5lbnRyaWVzKGopLm1hcCgoW2ssdl0pPT5rKyc9JysoQXJyYXkuaXNBcnJheSh2KT92Lmxlbmd0aDonb2JqJykpLmpvaW4oJywgJykpIH0gY2F0Y2goZSl7IGNvbnNvbGUubG9nKCdqc29uJywgcCwgJ3VucmVhZGFibGU6JywgZS5tZXNzYWdlKSB9Cn0K" | base64 -d > .tmp-loc.mjs
+            node .tmp-loc.mjs
+            rm -f .tmp-loc.mjs
