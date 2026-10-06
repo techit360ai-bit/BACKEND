@@ -1,0 +1,24 @@
+name: "TECHIT Box — Data picture (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Data picture via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Diagnostic via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 6m
+          script: |
+            set +e
+            grep -a "identity_postgres_read_failed" "$HOME/.pm2/logs/techit-backend-error.log" | tail -3
+            cd "$HOME/BACKEND"
+            printf '%s' "aW1wb3J0IGZzIGZyb20gJ25vZGU6ZnMnCmltcG9ydCBwZyBmcm9tICdwZycKaW1wb3J0IHsgRGF0YWJhc2VTeW5jIH0gZnJvbSAnbm9kZTpzcWxpdGUnCmNvbnN0IGVudiA9IGZzLnJlYWRGaWxlU3luYygnYmFja2VuZC8uZW52JywndXRmOCcpCmNvbnN0IGcgPSBrID0+IHsgY29uc3QgbSA9IGVudi5tYXRjaChuZXcgUmVnRXhwKCdeJytrKyc9KC4qKSQnLCdtJykpOyByZXR1cm4gbSA/IG1bMV0ucmVwbGFjZSgvXiJ8IiQvZywnJykgOiAnJyB9CmNvbnN0IHVybCA9IGcoJ1BMQVRGT1JNX0RBVEFCQVNFX1VSTCcpIHx8IGcoJ0RBVEFCQVNFX1VSTCcpCmNvbnNvbGUubG9nKCdoYXNfZGJfdXJsOicsICEhdXJsKQpjb25zdCBjID0gbmV3IHBnLkNsaWVudCh7IGNvbm5lY3Rpb25TdHJpbmc6IHVybCwgc3NsOiAvc3NsbW9kZT1yZXF1aXJlLy50ZXN0KHVybCkgPyB7IHJlamVjdFVuYXV0aG9yaXplZDpmYWxzZSB9IDogdW5kZWZpbmVkIH0pCmF3YWl0IGMuY29ubmVjdCgpCmNvbnN0IGNvbHMgPSBhd2FpdCBjLnF1ZXJ5KCJTRUxFQ1QgY29sbGVjdGlvbl9uYW1lLCBjb3VudCgqKTo6aW50IG4gRlJPTSBwbGF0Zm9ybV9jb2xsZWN0aW9uX3JlY29yZHMgV0hFUkUgZGVsZXRlZF9hdCBJUyBOVUxMIEdST1VQIEJZIDEgT1JERVIgQlkgMSIpCmNvbnNvbGUubG9nKCdwbGF0Zm9ybV9jb2xsZWN0aW9uX3JlY29yZHM6JywgY29scy5yb3dzLm1hcChyPT5yLmNvbGxlY3Rpb25fbmFtZSsnPScrci5uKS5qb2luKCcsICcpIHx8ICcobm9uZSknKQpmb3IgKGNvbnN0IHQgb2YgWyd1c2VycycsJ3Byb2ZpbGVzJywndXNlcl9yb2xlcycsJ2FjdGl2ZV9jb250ZXh0cyddKSB7CiAgdHJ5IHsgY29uc3QgciA9IGF3YWl0IGMucXVlcnkoJ1NFTEVDVCBjb3VudCgqKTo6aW50IG4gRlJPTSAnK3QpOyBjb25zb2xlLmxvZygncmRzLicrdCsnOicsIHIucm93c1swXS5uKSB9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygncmRzLicrdCsnIEVSUk9SOicsIGUubWVzc2FnZSkgfQp9CnRyeSB7IGNvbnN0IGIgPSBhd2FpdCBjLnF1ZXJ5KCJTRUxFQ1Qgc3RhdHVzLCByZWNvcmRfY291bnQsIGNvbGxlY3Rpb25fY291bnQsIHN0YXJ0ZWRfYXQgRlJPTSBwbGF0Zm9ybV9iYWNrZmlsbF9ydW5zIE9SREVSIEJZIHN0YXJ0ZWRfYXQgREVTQyBMSU1JVCAzIik7IGNvbnNvbGUubG9nKCdiYWNrZmlsbF9ydW5zOicsIEpTT04uc3RyaW5naWZ5KGIucm93cykpIH0gY2F0Y2goZSl7IGNvbnNvbGUubG9nKCdiYWNrZmlsbF9ydW5zIEVSUk9SOicsIGUubWVzc2FnZSkgfQphd2FpdCBjLmVuZCgpCmNvbnN0IHAgPSBnKCdTUUxJVEVfREJfUEFUSCcpIHx8ICcvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhL3RlY2hpdC5kYicKY29uc29sZS5sb2coJ3NxbGl0ZSBwYXRoOicsIHApCnRyeSB7CiAgY29uc3QgZGIgPSBuZXcgRGF0YWJhc2VTeW5jKHAsIHsgcmVhZE9ubHk6IHRydWUgfSkKICBmb3IgKGNvbnN0IHQgb2YgWyd1c2VycycsJ3Byb2ZpbGVzJywndXNlcl9yb2xlcycsJ2FjdGl2ZV9jb250ZXh0cycsJ3VzZXJfc2Vzc2lvbnMnXSkgewogICAgdHJ5IHsgY29uc3QgciA9IGRiLnByZXBhcmUoJ1NFTEVDVCBjb3VudCgqKSBBUyBuIEZST00gJyt0KS5nZXQoKTsgY29uc29sZS5sb2coJ3NxbGl0ZS4nK3QrJzonLCByLm4pIH0gY2F0Y2goZSl7IGNvbnNvbGUubG9nKCdzcWxpdGUuJyt0KycgRVJST1I6JywgZS5tZXNzYWdlKSB9CiAgfQogIGRiLmNsb3NlKCkKfSBjYXRjaChlKXsgY29uc29sZS5sb2coJ3NxbGl0ZSBvcGVuIEVSUk9SOicsIGUubWVzc2FnZSkgfQo=" | base64 -d > .tmp-data-diag.mjs
+            node .tmp-data-diag.mjs
+            rm -f .tmp-data-diag.mjs
