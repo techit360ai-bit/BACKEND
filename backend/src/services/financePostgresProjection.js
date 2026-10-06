@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { loadAuthoritySnapshot } from '../config/database.js'
 
 let pool = null
 let timer = null
@@ -10,7 +10,7 @@ const json = value => JSON.stringify(value || {})
 
 export async function syncFinanceProjection() {
   if (!pool) return { enabled: false }
-  const db = readAuthorityDb(); const client = await pool.connect()
+  const db = await loadAuthoritySnapshot(); const client = await pool.connect()
   const sets = { wallets: db.walletAccounts || [], ledger: db.creditLedger || [], reservations: db.usageReservations || [], payments: db.paymentIntents || [], subscriptions: db.subscriptions || [], webhooks: db.billingWebhookEvents || [] }
   try {
     await client.query('BEGIN')

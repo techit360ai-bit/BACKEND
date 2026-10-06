@@ -602,6 +602,21 @@ export function readAuthorityDb() {
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
 }
 
+// Async-friendly authority read for code that runs OUTSIDE an HTTP request
+// (boot-time projection init, CLI migration scripts, projection timers). In a
+// request the AsyncLocalStorage snapshot is used; under DB_DRIVER=postgres with
+// no request context the snapshot is loaded from the platform database so the
+// legacy projections can run without throwing. Pre-cutover it reads SQLite.
+export async function loadAuthoritySnapshot() {
+  const authority = authorityStorage.getStore()
+  if (authority?.snapshot) return authority.snapshot
+  if (currentDriver() === 'postgres') {
+    const { loadPlatformDatabase } = await import('../repositories/platformDatabaseRepository.js')
+    return loadPlatformDatabase()
+  }
+  return readAuthorityDb()
+}
+
 export function writeAuthorityDb(data) {
   const authority = authorityStorage.getStore()
   if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
