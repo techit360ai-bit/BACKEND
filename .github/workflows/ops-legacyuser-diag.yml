@@ -1,0 +1,24 @@
+name: "TECHIT Box — Legacy user + backups (temporary)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: Legacy user probe
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            set +e
+            echo "=== pm2 env DB paths ==="; pm2 env 0 2>/dev/null | grep -E "SQLITE_DB_PATH|JSON_DB_PATH|DB_DRIVER|LEGACY_DB_DRIVER" | head
+            cd "$HOME/BACKEND"
+            printf '%s' "aW1wb3J0IGZzIGZyb20gJ25vZGU6ZnMnCmNvbnN0IG1hc2sgPSBlID0+IFN0cmluZyhlfHwnJykucmVwbGFjZSgvKF4uKS4qKEAuKikkLywnJDEqKiokMicpCnRyeSB7CiAgY29uc3QgaiA9IEpTT04ucGFyc2UoZnMucmVhZEZpbGVTeW5jKCcvaG9tZS91YnVudHUvQkFDS0VORC9iYWNrZW5kL2RhdGEvZGIuanNvbicsJ3V0ZjgnKSkKICBjb25zdCB1ID0gKGoudXNlcnN8fFtdKVswXQogIGNvbnNvbGUubG9nKCdkYi5qc29uIHVzZXI6JywgdSA/IEpTT04uc3RyaW5naWZ5KHtlbWFpbDptYXNrKHUuZW1haWwpLCBpZDp1LmlkLCBjcmVhdGVkQXQ6dS5jcmVhdGVkQXQsIGhhc0hhc2g6ICEhdS5wYXNzd29yZEhhc2gsIGhhc2hMZW46ICh1LnBhc3N3b3JkSGFzaHx8JycpLmxlbmd0aH0pIDogJyhub25lKScpCiAgY29uc3QgcCA9IChqLnByb2ZpbGVzfHxbXSlbMF0KICBjb25zb2xlLmxvZygnZGIuanNvbiBwcm9maWxlIGtleXM6JywgcCA/IE9iamVjdC5rZXlzKHApLmpvaW4oJywnKSA6ICcobm9uZSknKQp9IGNhdGNoKGUpeyBjb25zb2xlLmxvZygnZGIuanNvbiBFUlJPUjonLCBlLm1lc3NhZ2UpIH0KY29uc29sZS5sb2coJy0tLSBiYWNrZW5kLWRhdGEgZGlyIC0tLScpCmZvciAoY29uc3QgZiBvZiBmcy5yZWFkZGlyU3luYygnL2hvbWUvdWJ1bnR1L2JhY2tlbmQtZGF0YScpKSB7CiAgdHJ5IHsgY29uc3Qgcz1mcy5zdGF0U3luYygnL2hvbWUvdWJ1bnR1L2JhY2tlbmQtZGF0YS8nK2YpOyBjb25zb2xlLmxvZyhmLCBzLnNpemUpIH0gY2F0Y2goZSl7fQp9CmNvbnN0IHN0PWZzLnN0YXRTeW5jKCcvaG9tZS91YnVudHUvYmFja2VuZC1kYXRhL3RlY2hpdC5kYicpCmNvbnNvbGUubG9nKCd0ZWNoaXQuZGIgc2l6ZTonLCBzdC5zaXplLCAnbXRpbWU6Jywgc3QubXRpbWUudG9JU09TdHJpbmcoKSkK" | base64 -d > .tmp-lu.mjs
+            node .tmp-lu.mjs
+            rm -f .tmp-lu.mjs
