@@ -291,7 +291,7 @@ export function runDatabaseAuthority(snapshot, callback) {
   return authorityStorage.run({ snapshot, dirty: false }, callback)
 }
 
-function currentDriver() {
+export function currentDriver() {
   const configured = process.env.DB_DRIVER?.trim().toLowerCase()
   if (configured) return configured
   return process.env.NODE_ENV === 'production' ? 'postgres' : 'json'

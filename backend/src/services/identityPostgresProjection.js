@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import pg from 'pg'
-import { loadAuthoritySnapshot } from '../config/database.js'
+import { loadAuthoritySnapshot, currentDatabaseAuthority, runDatabaseAuthority, currentDriver } from '../config/database.js'
 import { pendingMigrationEvents, markMigrationEvent } from './migrationOutboxService.js'
 
 let pool = null
@@ -79,6 +79,13 @@ export async function syncIdentityProjection() {
 
 export async function syncMigrationOutbox() {
   if (!pool) return { enabled: false, processed: 0 }
+  // This sync both reads and marks events on the authority store; outside a
+  // request under postgres there is no snapshot, so seed one (post-cutover the
+  // legacy outbox is empty, making this a no-op).
+  if (!currentDatabaseAuthority() && currentDriver() === 'postgres') {
+    const snapshot = await loadAuthoritySnapshot()
+    return runDatabaseAuthority(snapshot, () => syncMigrationOutbox())
+  }
   const events = pendingMigrationEvents({ limit: Number(process.env.MIGRATION_OUTBOX_BATCH_SIZE || 100) })
   if (!events.length) return { enabled: true, processed: 0 }
   const client = await pool.connect()
