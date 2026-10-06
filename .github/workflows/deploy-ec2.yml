@@ -56,7 +56,21 @@ jobs:
             # "local changes would be overwritten". Preserve them in a stash so
             # nothing is lost, then force the checkout to exactly the commit CI
             # validated.
-            git fetch https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            # Egress to GitHub is occasionally flaky on this box (SSL handshake
+            # resets/timeouts, and once a 17-minute hang). Retry with a hard
+            # per-attempt timeout so the deploy self-heals instead of hanging
+            # until the SSH command timeout and never reaching the pm2 restart.
+            git config --global http.version HTTP/1.1 || true
+            fetch_ok=0
+            for attempt in 1 2 3 4 5; do
+              if timeout 180 git fetch --no-tags https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main; then
+                fetch_ok=1
+                break
+              fi
+              echo "⚠️ git fetch attempt $attempt failed; retrying in 10s"
+              sleep 10
+            done
+            if [ "$fetch_ok" != "1" ]; then echo "❌ git fetch failed after 5 attempts"; exit 1; fi
             if ! git diff --quiet || ! git diff --cached --quiet; then
               git stash push --include-untracked -m "autostash pre-deploy $(date -u +%FT%TZ)" || true
             fi
