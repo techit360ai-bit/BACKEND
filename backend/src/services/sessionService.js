@@ -42,8 +42,15 @@ function hashToken(value) { return crypto.createHash('sha256').update(value).dig
 function browserRequest(req) { return !req.headers.authorization && Boolean(req.headers.cookie || req.headers['x-techit-client'] === 'web') }
 function cookieOptions(maxAge) { return { ...cookieBase(), maxAge: maxAge * 1000 } }
 // The CSRF cookie must stay readable by the SPA (double-submit pattern), so it
-// is deliberately not HttpOnly, but it must share the session cookie's domain.
-function csrfCookieOptions(maxAge) { return { httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: cookieSameSite(), path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}), maxAge: maxAge * 1000 } }
+// is deliberately not HttpOnly. When the SPA and the API are served from
+// sibling subdomains (e.g. beta.techitnetwork.com -> backend.techitnetwork.com)
+// a host-only cookie is invisible to the SPA's `document.cookie`, so it could
+// never echo the token and every cookie-authenticated mutation would 403 with
+// csrf_token_invalid. Share *only* this non-sensitive token on the registrable
+// domain via AUTH_CSRF_COOKIE_DOMAIN; the HttpOnly access/refresh cookies stay
+// host-only.
+const csrfCookieDomain = () => process.env.AUTH_CSRF_COOKIE_DOMAIN || process.env.AUTH_COOKIE_DOMAIN || undefined
+function csrfCookieOptions(maxAge) { return { httpOnly: false, secure: process.env.NODE_ENV === 'production', sameSite: cookieSameSite(), path: '/', ...(csrfCookieDomain() ? { domain: csrfCookieDomain() } : {}), maxAge: maxAge * 1000 } }
 function sessionFromDb(db, identifier) { return (db.userSessions || []).find(row => row.sessionIdentifier === identifier) }
 const postgresWrites = () => process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 const writeFallbackEnabled = () => process.env.IDENTITY_WRITE_FALLBACK_SQLITE !== 'false'
@@ -105,7 +112,7 @@ export async function issueSessionAsync(user, profile, req, options = {}) {
 }
 
 export function setSessionCookies(res, credentials) { const csrfMaxAge = credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400; res.cookie(ACCESS_COOKIE, credentials.accessToken, cookieOptions(ACCESS_TTL_SECONDS)); res.cookie(REFRESH_COOKIE, credentials.refreshToken, cookieOptions(credentials.session.rememberMe ? REFRESH_TTL_SECONDS : 86400)); res.cookie(CSRF_COOKIE, randomToken(), csrfCookieOptions(csrfMaxAge)) }
-export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options); res.clearCookie(CSRF_COOKIE, { httpOnly: false, secure: options.secure, sameSite: options.sameSite, path: '/', ...(cookieDomain() ? { domain: cookieDomain() } : {}) }) }
+export function clearSessionCookies(res) { const options = cookieBase(); res.clearCookie(ACCESS_COOKIE, options); res.clearCookie(REFRESH_COOKIE, options); res.clearCookie(CSRF_COOKIE, { httpOnly: false, secure: options.secure, sameSite: options.sameSite, path: '/', ...(csrfCookieDomain() ? { domain: csrfCookieDomain() } : {}) }) }
 export function accessTokenFromRequest(req) { const header = req.headers.authorization; if (header?.startsWith('Bearer ')) return { token: header.slice(7), source: 'bearer' }; const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${ACCESS_COOKIE}=`)); return match ? { token: decodeURIComponent(match.slice(ACCESS_COOKIE.length + 1)), source: 'cookie' } : null }
 export function refreshTokenFromRequest(req) { const match = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith(`${REFRESH_COOKIE}=`)); return match ? decodeURIComponent(match.slice(REFRESH_COOKIE.length + 1)) : String(req.body?.refreshToken || '') || null }
 
