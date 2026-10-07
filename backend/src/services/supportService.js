@@ -336,8 +336,8 @@ export function configureSupport(adminId, body = {}) {
         rows(db, 'supportSlaPolicies').push(next)
       }
     }
-    if (typeof body.businessHoursEnabled === 'boolean') rows(db, 'supportSettings').push({ key: 'businessHoursEnabled', value: body.businessHoursEnabled, updatedBy: adminId, updatedAt: nowIso() })
-    for (const key of ['duplicateCooldownHours', 'resolutionGraceHours', 'retentionDays', 'incidentThreshold']) if (body[key] !== undefined) rows(db, 'supportSettings').push({ key, value: Math.max(1, Number(body[key]) || 1), updatedBy: adminId, updatedAt: nowIso() })
+    if (typeof body.businessHoursEnabled === 'boolean') rows(db, 'supportSettings').push({ id: createId('support_setting'), key: 'businessHoursEnabled', value: body.businessHoursEnabled, updatedBy: adminId, updatedAt: nowIso() })
+    for (const key of ['duplicateCooldownHours', 'resolutionGraceHours', 'retentionDays', 'incidentThreshold']) if (body[key] !== undefined) rows(db, 'supportSettings').push({ id: createId('support_setting'), key, value: Math.max(1, Number(body[key]) || 1), updatedBy: adminId, updatedAt: nowIso() })
     if (Array.isArray(body.categories)) for (const item of body.categories) { const key = text(item.key, 40).toLowerCase(); if (!key) continue; const current = rows(db, 'supportCategories').find(row => row.key === key); const next = { id: current?.id || createId('support_category'), key, label: text(item.label, 100) || key, exemptFromCooldown: item.exemptFromCooldown === true, active: item.active !== false, updatedBy: adminId, updatedAt: nowIso() }; if (current) Object.assign(current, next); else rows(db, 'supportCategories').push(next) }
     if (Array.isArray(body.teams)) for (const item of body.teams) {
       const name = text(item.name, 80); if (!name) continue

@@ -171,7 +171,10 @@ export async function sendOtp(req, res) {
 
   // Never persist the six-digit OTP itself. A database read must not be
   // sufficient to complete email verification.
-  db.otps.push({ email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
+  // The platform authority store only persists rows with a stable id (the
+  // flush upserts by record_id and drops id-less rows). Without an id the OTP
+  // is never written, so verify-otp always answers "Code expired or not found".
+  db.otps.push({ id: randomUUID(), email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
   writeAuthorityDb(db)
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })

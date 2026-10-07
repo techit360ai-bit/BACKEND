@@ -51,7 +51,8 @@ export function githubAuthorize(req, res) {
   // `purpose` records which surface started the flow. Both surfaces share this
   // one array and this one callback, so without it the callback cannot tell a
   // connect attempt from a trust attempt and must guess at what to enrich.
-  db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso(), purpose: 'connect' })
+  // Must carry a stable id: the platform authority flush drops id-less rows.
+  db.githubOauthStates.push({ id: state, state, userId: req.user.id, createdAt: nowIso(), purpose: 'connect' })
   writeAuthorityDb(db)
 
   const params = new URLSearchParams({
