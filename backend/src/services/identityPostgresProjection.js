@@ -32,33 +32,43 @@ export async function compareIdentityProjection(userId, localUser, localProfile)
 export async function syncIdentityProjection() {
   if (!pool) return { enabled: false, users: 0, profiles: 0, roles: 0, contexts: 0 }
   const db = await loadAuthoritySnapshot()
+  // The platform snapshot can carry identity sub-collections for users that are
+  // absent from `users` (e.g. a user removed out-of-band). Those rows violate
+  // the core_* foreign keys, which aborts the whole projection - and at boot
+  // that crash-loops the process. Only project rows whose user actually exists.
+  const authUserIds = new Set((db.users || []).map(row => row.id))
+  const profiles = (db.profiles || []).filter(row => authUserIds.has(row.id))
+  const roles = (db.userRoles || []).filter(row => authUserIds.has(row.userId))
+  const contexts = (db.activeContexts || []).filter(row => authUserIds.has(row.userId))
+  const sessions = (db.userSessions || []).filter(row => authUserIds.has(row.userId))
+  const securityEvents = (db.authSecurityEvents || []).filter(row => !row.userId || authUserIds.has(row.userId))
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     for (const user of db.users || []) {
       await client.query(`INSERT INTO core_users(id,email,password_hash,created_at,updated_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(id) DO UPDATE SET email=EXCLUDED.email,password_hash=EXCLUDED.password_hash,updated_at=EXCLUDED.updated_at`, [user.id, user.email, user.passwordHash, date(user.createdAt), date(user.updatedAt)])
     }
-    for (const profile of db.profiles || []) {
+    for (const profile of profiles) {
       await client.query(`INSERT INTO core_profiles(id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO UPDATE SET email=EXCLUDED.email,first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,username=EXCLUDED.username,role=EXCLUDED.role,workspace_id=EXCLUDED.workspace_id,is_verified=EXCLUDED.is_verified,is_onboarded=EXCLUDED.is_onboarded,payload=EXCLUDED.payload,updated_at=EXCLUDED.updated_at`, [profile.id, profile.email, profile.firstName || null, profile.lastName || null, profile.username || null, profile.role || 'explorer', profile.workspaceId || null, Boolean(profile.isVerified), Boolean(profile.isOnboarded), json(profile), date(profile.createdAt), date(profile.updatedAt)])
     }
-    for (const role of db.userRoles || []) {
+    for (const role of roles) {
       await client.query(`INSERT INTO core_user_roles(id,user_id,role,status,active,assurance,is_primary,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(user_id,role) DO UPDATE SET status=EXCLUDED.status,active=EXCLUDED.active,assurance=EXCLUDED.assurance,is_primary=EXCLUDED.is_primary,updated_at=EXCLUDED.updated_at`, [role.id, role.userId, role.role, role.status || 'active', role.active !== false, role.assurance || null, Boolean(role.isPrimary), date(role.createdAt), date(role.updatedAt)])
     }
-    for (const context of db.activeContexts || []) {
+    for (const context of contexts) {
       await client.query(`INSERT INTO core_active_contexts(id,user_id,role,role_assignment_id,organization_id,workspace_id,resource_type,resource_id,status,started_at,last_active_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(user_id) DO UPDATE SET role=EXCLUDED.role,role_assignment_id=EXCLUDED.role_assignment_id,organization_id=EXCLUDED.organization_id,workspace_id=EXCLUDED.workspace_id,resource_type=EXCLUDED.resource_type,resource_id=EXCLUDED.resource_id,status=EXCLUDED.status,last_active_at=EXCLUDED.last_active_at,updated_at=EXCLUDED.updated_at`, [context.id, context.userId, context.role, context.roleAssignmentId || null, context.organizationId || null, context.workspaceId || null, context.resourceType || null, context.resourceId || null, context.status || 'active', date(context.startedAt), date(context.lastActiveAt), date(context.updatedAt)])
     }
-    for (const session of db.userSessions || []) {
+    for (const session of sessions) {
       await client.query(`INSERT INTO user_sessions(id,user_id,session_identifier,refresh_token_hash,previous_refresh_token_hash,device_identifier,device_name,platform,browser,ip_address,user_agent,created_at,last_active_at,expires_at,last_refreshed_at,revoked_at,remember_me,rotation_counter) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(id) DO UPDATE SET previous_refresh_token_hash=EXCLUDED.previous_refresh_token_hash,refresh_token_hash=EXCLUDED.refresh_token_hash,last_active_at=EXCLUDED.last_active_at,last_refreshed_at=EXCLUDED.last_refreshed_at,revoked_at=EXCLUDED.revoked_at,rotation_counter=EXCLUDED.rotation_counter`, [session.id, session.userId, session.sessionIdentifier, session.refreshTokenHash, session.previousRefreshTokenHash || null, session.deviceIdentifier || null, session.deviceName || null, session.platform || null, session.browser || null, session.ipAddress || null, session.userAgent || null, date(session.createdAt), date(session.lastActiveAt), date(session.expiresAt), session.lastRefreshedAt || null, session.revokedAt || null, session.rememberMe !== false, Number(session.rotationCounter || 0)])
     }
-    for (const securityEvent of db.authSecurityEvents || []) {
+    for (const securityEvent of securityEvents) {
       await client.query(`INSERT INTO auth_security_events(id,user_id,session_identifier,event_type,ip_address,user_agent,metadata,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`, [securityEvent.id, securityEvent.userId || null, securityEvent.sessionIdentifier || null, securityEvent.eventType, securityEvent.ipAddress || null, securityEvent.userAgent || null, json(securityEvent.metadata), date(securityEvent.createdAt)])
     }
     const userIds = (db.users || []).map(row => row.id)
-    const profileIds = (db.profiles || []).map(row => row.id)
-    const roleIds = (db.userRoles || []).map(row => row.id)
-    const contextIds = (db.activeContexts || []).map(row => row.id)
-    const sessionIds = (db.userSessions || []).map(row => row.id)
-    const securityEventIds = (db.authSecurityEvents || []).map(row => row.id)
+    const profileIds = profiles.map(row => row.id)
+    const roleIds = roles.map(row => row.id)
+    const contextIds = contexts.map(row => row.id)
+    const sessionIds = sessions.map(row => row.id)
+    const securityEventIds = securityEvents.map(row => row.id)
     await client.query('DELETE FROM core_profiles WHERE id <> ALL($1::text[])', [profileIds])
     await client.query('DELETE FROM core_user_roles WHERE id <> ALL($1::text[])', [roleIds])
     await client.query('DELETE FROM core_active_contexts WHERE id <> ALL($1::text[])', [contextIds])
