@@ -33,6 +33,10 @@ export async function flushPlatformDatabase(before, after, { userId = null } = {
       }
       const previousRows = Array.isArray(before?.[name]) ? before[name] : []
       const nextRows = Array.isArray(after?.[name]) ? after[name] : []
+      // The store is keyed by record_id, so a row without an id is silently
+      // lost. Surface it instead: an id-less write is always a bug (it is how
+      // the signup OTP failed to persist after the Postgres cutover).
+      if (nextRows.some(row => !row?.id)) console.error(JSON.stringify({ event: 'platform_row_missing_id', collection: name, dropped: nextRows.filter(row => !row?.id).length }))
       const previous = new Map(previousRows.filter(row => row?.id).map(row => [String(row.id), row]))
       const next = new Map(nextRows.filter(row => row?.id).map(row => [String(row.id), row]))
       for (const [recordId, row] of next) {

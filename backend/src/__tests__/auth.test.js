@@ -369,6 +369,9 @@ describe('POST /api/auth/send-otp', () => {
     expect(writeDb).toHaveBeenCalledOnce()
     const written = writeDb.mock.calls[0][0]
     expect(written.otps).toHaveLength(1)
+    // The platform authority store only persists rows with a stable id; an
+    // id-less OTP is dropped on flush and every verify then says "not found".
+    expect(written.otps[0].id).toBeTruthy()
     expect(written.otps[0].email).toBe('otp@example.com')
     expect(written.otps[0].code).toBeUndefined()
     expect(written.otps[0].codeHmac).toMatch(/^[a-f0-9]{64}$/)
