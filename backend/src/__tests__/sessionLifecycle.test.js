@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken'
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn(), writeDb: vi.fn() }))
 import { readDb, updateDb, writeDb } from '../config/database.js'
-import { issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, rotateSession, validateSessionBinding } from '../services/sessionService.js'
+import { issueSession, listSessions, mobileClient, refreshTokenFromRequest, revokeAllSessions, rotateSession, setSessionCookies, validateSessionBinding } from '../services/sessionService.js'
 
 function req() { return { ip: '127.0.0.1', get(name) { return name === 'user-agent' ? 'Mozilla/5.0 Chrome Windows' : name === 'x-techit-client' ? 'web' : null }, headers: {} } }
 
@@ -22,5 +22,17 @@ describe('persistent session lifecycle', () => {
   it('accepts native refresh transport only when explicitly supplied by the client', () => {
     const mobileReq = { body: { refreshToken: 'native-token' }, headers: {}, get(name) { return name === 'x-techit-client' ? 'mobile' : null } }
     expect(mobileClient(mobileReq)).toBe(true); expect(refreshTokenFromRequest(mobileReq)).toBe('native-token')
+  })
+  it('scopes the readable CSRF cookie to the registrable domain so a sibling-subdomain SPA can echo it', () => {
+    process.env.AUTH_CSRF_COOKIE_DOMAIN = '.techitnetwork.com'
+    const cookies = {}
+    const res = { cookie: (name, value, options) => { cookies[name] = { value, options } }, clearCookie: () => {} }
+    setSessionCookies(res, { accessToken: 'access', refreshToken: 'refresh', session: { rememberMe: false } })
+    expect(cookies.techit_csrf.options.domain).toBe('.techitnetwork.com')
+    expect(cookies.techit_csrf.options.httpOnly).toBe(false)
+    // The HttpOnly session cookies must NOT be widened to the shared domain.
+    expect(cookies.techit_access.options.domain).toBeUndefined()
+    expect(cookies.techit_refresh.options.domain).toBeUndefined()
+    delete process.env.AUTH_CSRF_COOKIE_DOMAIN
   })
 })
