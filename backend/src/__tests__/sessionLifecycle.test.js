@@ -26,13 +26,16 @@ describe('persistent session lifecycle', () => {
   it('scopes the readable CSRF cookie to the registrable domain so a sibling-subdomain SPA can echo it', () => {
     process.env.AUTH_CSRF_COOKIE_DOMAIN = '.techitnetwork.com'
     const cookies = {}
-    const res = { cookie: (name, value, options) => { cookies[name] = { value, options } }, clearCookie: () => {} }
+    const cleared = []
+    const res = { cookie: (name, value, options) => { cookies[name] = { value, options } }, clearCookie: (name, options) => { cleared.push({ name, options }) } }
     setSessionCookies(res, { accessToken: 'access', refreshToken: 'refresh', session: { rememberMe: false } })
     expect(cookies.techit_csrf.options.domain).toBe('.techitnetwork.com')
     expect(cookies.techit_csrf.options.httpOnly).toBe(false)
     // The HttpOnly session cookies must NOT be widened to the shared domain.
     expect(cookies.techit_access.options.domain).toBeUndefined()
     expect(cookies.techit_refresh.options.domain).toBeUndefined()
+    // The pre-fix host-only CSRF cookie is cleared so it cannot shadow the new token.
+    expect(cleared.some(c => c.name === 'techit_csrf' && !c.options.domain)).toBe(true)
     delete process.env.AUTH_CSRF_COOKIE_DOMAIN
   })
 })
