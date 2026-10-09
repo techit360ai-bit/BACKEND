@@ -38,7 +38,16 @@ function connectionOptions() {
 }
 
 export function getPlatformPool() {
-  pool ||= new pg.Pool(connectionOptions())
+  if (!pool) {
+    pool = new pg.Pool(connectionOptions())
+    // A pool with no `error` listener crashes the whole process when an idle
+    // server connection drops (RDS/PgBouncer recycle them, and a brief network
+    // blip does the same). Log it and let pg evict + replace the dead client
+    // instead of taking down every in-flight request with the process.
+    pool.on('error', (error) => {
+      console.error(JSON.stringify({ event: 'platform_pool_client_error', error: error?.message || String(error) }))
+    })
+  }
   return pool
 }
 

@@ -56,7 +56,12 @@ fi
 # shell metacharacters can never corrupt the rendered files.
 TMP_INI="$(mktemp)"; TMP_USERLIST="$(mktemp)"
 trap 'rm -f "$TMP_INI" "$TMP_USERLIST"' EXIT
-RDS_URL="$RDS_URL" TEMPLATE="$TEMPLATE" OUT_INI="$TMP_INI" OUT_LIST="$TMP_USERLIST" node -e '
+# The containerised ai-router and Go messaging services reach the host over
+# their docker bridge gateway, so PgBouncer must also listen there. Collect
+# every non-loopback IPv4 gateway (172.17.0.1, 172.18.0.1, ...) so both share
+# this one pool; the instance's public interface is never used.
+DOCKER_GATEWAYS="$(for n in $(docker network ls -q 2>/dev/null || true); do docker network inspect "$n" --format '{{range .IPAM.Config}}{{.Gateway}}{{"\n"}}{{end}}' 2>/dev/null; done | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -vE '^127\.' | sort -u | paste -sd, - || true)"
+RDS_URL="$RDS_URL" TEMPLATE="$TEMPLATE" OUT_INI="$TMP_INI" OUT_LIST="$TMP_USERLIST" DOCKER_GATEWAYS="$DOCKER_GATEWAYS" node -e '
   const fs = require("fs");
   const u = new URL(process.env.RDS_URL);
   const host = u.hostname || "127.0.0.1";
@@ -64,10 +69,13 @@ RDS_URL="$RDS_URL" TEMPLATE="$TEMPLATE" OUT_INI="$TMP_INI" OUT_LIST="$TMP_USERLI
   const user = decodeURIComponent(u.username || "");
   const password = decodeURIComponent(u.password || "");
   if (!user) { console.error("pgbouncer: RDS url has no user"); process.exit(1); }
+  const gateways = (process.env.DOCKER_GATEWAYS || "").split(",").map((value) => value.trim()).filter(Boolean);
+  const listenAddr = ["127.0.0.1", ...gateways].join(",");
   const ini = fs.readFileSync(process.env.TEMPLATE, "utf8")
     .replaceAll("{{DB_HOST}}", host)
     .replaceAll("{{DB_PORT}}", port)
-    .replaceAll("{{DB_USER}}", user);
+    .replaceAll("{{DB_USER}}", user)
+    .replaceAll("{{LISTEN_ADDR}}", listenAddr);
   fs.writeFileSync(process.env.OUT_INI, ini);
   fs.writeFileSync(process.env.OUT_LIST, `"${user}" "${password}"\n`);
 '

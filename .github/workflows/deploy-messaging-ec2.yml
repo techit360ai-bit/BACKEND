@@ -80,7 +80,10 @@ jobs:
               const u = new URL(process.env.PLATFORM_DATABASE_URL);
               u.pathname = "/techit_msg";
               if (process.env.PGB_UP === "1") {
-                u.hostname = "127.0.0.1";
+                // Container-side URL: the messaging server runs on the docker
+                // bridge, so it reaches the host PgBouncer through the bridge
+                // gateway (host.docker.internal -> host-gateway), not loopback.
+                u.hostname = "host.docker.internal";
                 u.port = "6432";
                 u.searchParams.set("sslmode", "disable");
               } else {

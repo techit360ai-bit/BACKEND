@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { getPlatformPool, upsertRecord, deleteRecord } from './platformCollectionRepository.js'
+import { runDatabaseAuthority, currentDatabaseAuthority } from '../config/database.js'
 
 const CONFIG_COLLECTIONS = new Set(['tvceConfig'])
 const stable = value => JSON.stringify(value, Object.keys(value || {}).sort())
@@ -57,7 +58,14 @@ export async function flushPlatformDatabase(before, after, { userId = null } = {
 export async function runWithPlatformDatabase(callback, { userId = null } = {}) {
   const before = await loadPlatformDatabase()
   const snapshot = structuredClone(before)
-  const result = await callback(snapshot)
-  await flushPlatformDatabase(before, snapshot, { userId })
+  // Run the callback INSIDE the request-authority context. Without it,
+  // readAuthorityDb()/writeAuthorityDb() throw "PostgreSQL request authority
+  // context is required" for every background job (support maintenance,
+  // session cleanup, deal-room / org-intelligence timers) that runs outside an
+  // HTTP request. Flush whatever the authority store ended up holding so a
+  // writeDb() inside the job is persisted too.
+  const result = await runDatabaseAuthority(snapshot, () => callback(snapshot))
+  const after = currentDatabaseAuthority()?.snapshot || snapshot
+  await flushPlatformDatabase(before, after, { userId })
   return result
 }

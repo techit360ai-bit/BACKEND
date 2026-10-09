@@ -32,6 +32,10 @@ services:
       REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
       DISCOVERY_API_URL: "${DISCOVERY_API_URL:-http://host.docker.internal:3000}"
       ENABLE_DEV_TOKEN: "${ENABLE_DEV_TOKEN:-0}"
+    # host.docker.internal is not resolvable on Linux docker by default; map it
+    # to the bridge gateway so the container reaches the host PgBouncer proxy.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
