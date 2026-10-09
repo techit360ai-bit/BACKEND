@@ -14,7 +14,11 @@
 * = host={{DB_HOST}} port={{DB_PORT}}
 
 [pgbouncer]
-listen_addr = 127.0.0.1
+; Loopback for the host Node backend plus every docker bridge gateway, so the
+; containerised ai-router and Go messaging services reach this same pool
+; without exposing PgBouncer on the instance's public interface. The address
+; list is rendered by setup.sh from the live docker networks.
+listen_addr = {{LISTEN_ADDR}}
 listen_port = 6432
 unix_socket_dir = /tmp
 
@@ -29,7 +33,10 @@ stats_users = {{DB_USER}}
 
 pool_mode = transaction
 max_client_conn = 500
-default_pool_size = 30
+; RDS max_connections is 81 and two databases (techit_db, techit_msg) share
+; this instance. 15 server connections each + reserve keeps the whole platform
+; well under the ceiling while remaining far more than the app ever needs.
+default_pool_size = 15
 min_pool_size = 4
 reserve_pool_size = 5
 reserve_pool_timeout = 3
