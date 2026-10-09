@@ -1,8 +1,7 @@
-import pg from 'pg'
 import { readDb as readAuthorityDb } from '../config/database.js'
 import { recordCutoverComparison } from '../services/postgresCutoverMonitor.js'
+import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
-let pool = null
 const url = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
 // A PostgreSQL-authoritative write mode must read the same authority. This
 // prevents a newly-created session or identity from disappearing when the
@@ -27,8 +26,7 @@ function localByEmail(email) {
 
 function getPool() {
   if (!url()) throw new Error('IDENTITY_DATABASE_URL or DATABASE_URL is required for PostgreSQL identity reads')
-  pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.IDENTITY_READ_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.IDENTITY_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.IDENTITY_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  return pool
+  return getPlatformPool()
 }
 
 function bundle(rows) {
@@ -119,4 +117,4 @@ export async function validateSessionBindingAsync(payload) {
   if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now() || row.userId !== payload.sub) return { valid: false, error: 'session_invalid' }
   return { valid: true, session: row }
 }
-export async function closeIdentityRepository() { if (pool) await pool.end(); pool = null }
+export async function closeIdentityRepository() { await closePlatformPool() }

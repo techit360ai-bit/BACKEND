@@ -38,8 +38,14 @@ function requireUrl(env, name, protocols = ["https:"]) {
   if (!protocols.includes(parsed.protocol)) {
     fail(`${name} must use ${protocols.join(" or ")}`);
   }
-  if (PROD_ENVS.has(currentEnvironment(env)) && parsed.hostname === "localhost") {
-    fail(`${name} cannot point at localhost in production/staging`);
+  // The platform's production topology puts one PgBouncer transaction proxy on
+  // the box loopback (sslmode=disable on the local hop, TLS to RDS from the
+  // proxy). A bare localhost URL is still rejected, so this can never silently
+  // accept a local dev database in production.
+  const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname);
+  const loopbackProxy = parsed.searchParams.get("sslmode") === "disable";
+  if (PROD_ENVS.has(currentEnvironment(env)) && isLoopback && !loopbackProxy) {
+    fail(`${name} cannot point at localhost in production/staging (use sslmode=disable only for the in-box PgBouncer proxy)`);
   }
   return parsed;
 }

@@ -1,20 +1,18 @@
 import fs from 'node:fs/promises'
-import pg from 'pg'
 import { loadAuthoritySnapshot, currentDatabaseAuthority, runDatabaseAuthority, currentDriver } from '../config/database.js'
 import { pendingMigrationEvents, markMigrationEvent } from './migrationOutboxService.js'
+import { getPlatformPool, hasPlatformDatabaseUrl, closePlatformPool } from '../repositories/platformCollectionRepository.js'
 
-let pool = null
 let timer = null
-const connectionUrl = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
 const date = value => value || new Date().toISOString()
 const json = value => JSON.stringify(value || {})
 
-export function identityProjectionEnabled() { return Boolean(connectionUrl()) }
+export function identityProjectionEnabled() { return hasPlatformDatabaseUrl() }
 
 export async function compareIdentityProjection(userId, localUser, localProfile) {
-  if (!pool || process.env.IDENTITY_SHADOW_READS !== 'true') return { enabled: false, consistent: true }
+  if (!hasPlatformDatabaseUrl() || process.env.IDENTITY_SHADOW_READS !== 'true') return { enabled: false, consistent: true }
   try {
-    const result = await pool.query(`SELECT u.email AS user_email, p.email AS profile_email, p.role AS profile_role FROM core_users u LEFT JOIN core_profiles p ON p.id = u.id WHERE u.id = $1`, [userId])
+    const result = await getPlatformPool().query(`SELECT u.email AS user_email, p.email AS profile_email, p.role AS profile_role FROM core_users u LEFT JOIN core_profiles p ON p.id = u.id WHERE u.id = $1`, [userId])
     const row = result.rows[0]
     const consistent = Boolean(row)
       && row.user_email === localUser?.email
@@ -30,7 +28,7 @@ export async function compareIdentityProjection(userId, localUser, localProfile)
 }
 
 export async function syncIdentityProjection() {
-  if (!pool) return { enabled: false, users: 0, profiles: 0, roles: 0, contexts: 0 }
+  if (!hasPlatformDatabaseUrl()) return { enabled: false, users: 0, profiles: 0, roles: 0, contexts: 0 }
   const db = await loadAuthoritySnapshot()
   // The platform snapshot can carry identity sub-collections for users that are
   // absent from `users` (e.g. a user removed out-of-band). Those rows violate
@@ -42,7 +40,7 @@ export async function syncIdentityProjection() {
   const contexts = (db.activeContexts || []).filter(row => authUserIds.has(row.userId))
   const sessions = (db.userSessions || []).filter(row => authUserIds.has(row.userId))
   const securityEvents = (db.authSecurityEvents || []).filter(row => !row.userId || authUserIds.has(row.userId))
-  const client = await pool.connect()
+  const client = await getPlatformPool().connect()
   try {
     await client.query('BEGIN')
     for (const user of db.users || []) {
@@ -88,7 +86,7 @@ export async function syncIdentityProjection() {
 }
 
 export async function syncMigrationOutbox() {
-  if (!pool) return { enabled: false, processed: 0 }
+  if (!hasPlatformDatabaseUrl()) return { enabled: false, processed: 0 }
   // This sync both reads and marks events on the authority store; outside a
   // request under postgres there is no snapshot, so seed one (post-cutover the
   // legacy outbox is empty, making this a no-op).
@@ -98,7 +96,7 @@ export async function syncMigrationOutbox() {
   }
   const events = pendingMigrationEvents({ limit: Number(process.env.MIGRATION_OUTBOX_BATCH_SIZE || 100) })
   if (!events.length) return { enabled: true, processed: 0 }
-  const client = await pool.connect()
+  const client = await getPlatformPool().connect()
   let processed = 0
   try {
     await client.query('BEGIN')
@@ -117,14 +115,13 @@ export async function syncMigrationOutbox() {
 }
 
 export async function initializeIdentityPostgresProjection() {
-  if (!connectionUrl()) return { enabled: false }
-  pool = new pg.Pool({ connectionString: connectionUrl(), max: Math.max(1, Number(process.env.IDENTITY_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.IDENTITY_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(connectionUrl()) ? { rejectUnauthorized: process.env.IDENTITY_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
   const [sessionSql, identitySql, outboxSql] = await Promise.all([
     fs.readFile(new URL('../../migrations/postgres/003_auth_sessions.sql', import.meta.url), 'utf8'),
     fs.readFile(new URL('../../migrations/postgres/009_core_identity_projection.sql', import.meta.url), 'utf8'),
     fs.readFile(new URL('../../migrations/postgres/010_core_migration_outbox.sql', import.meta.url), 'utf8'),
   ])
-  await pool.query(`${sessionSql}\n${identitySql}\n${outboxSql}`)
+  await getPlatformPool().query(`${sessionSql}\n${identitySql}\n${outboxSql}`)
   const initial = await syncIdentityProjection()
   const interval = Math.max(5000, Number(process.env.IDENTITY_PROJECTION_INTERVAL_MS || 30000))
   timer = setInterval(() => Promise.all([syncIdentityProjection(), syncMigrationOutbox()]).catch(error => console.error(JSON.stringify({ event: 'identity_projection_failed', error: error.message }))), interval)
@@ -135,6 +132,5 @@ export async function initializeIdentityPostgresProjection() {
 export async function closeIdentityPostgresProjection() {
   if (timer) clearInterval(timer)
   timer = null
-  if (pool) await pool.end()
-  pool = null
+  await closePlatformPool()
 }

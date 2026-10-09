@@ -1,16 +1,14 @@
 import fs from 'node:fs/promises'
-import pg from 'pg'
 import { loadAuthoritySnapshot } from '../config/database.js'
+import { getPlatformPool, hasPlatformDatabaseUrl, closePlatformPool } from '../repositories/platformCollectionRepository.js'
 
-let pool = null
 let timer = null
-const url = () => process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL
 const date = value => value || new Date().toISOString()
 const json = value => JSON.stringify(value || {})
 
 export async function syncFinanceProjection() {
-  if (!pool) return { enabled: false }
-  const db = await loadAuthoritySnapshot(); const client = await pool.connect()
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
+  const db = await loadAuthoritySnapshot(); const client = await getPlatformPool().connect()
   const sets = { wallets: db.walletAccounts || [], ledger: db.creditLedger || [], reservations: db.usageReservations || [], payments: db.paymentIntents || [], subscriptions: db.subscriptions || [], webhooks: db.billingWebhookEvents || [] }
   try {
     await client.query('BEGIN')
@@ -30,12 +28,11 @@ export async function syncFinanceProjection() {
 }
 
 export async function initializeFinancePostgresProjection() {
-  if (!url()) return { enabled: false }
-  pool = new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.FINANCE_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.FINANCE_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.FINANCE_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  await pool.query(await fs.readFile(new URL('../../migrations/postgres/013_core_finance_projection.sql', import.meta.url), 'utf8'))
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
+  await getPlatformPool().query(await fs.readFile(new URL('../../migrations/postgres/013_core_finance_projection.sql', import.meta.url), 'utf8'))
   const initial = await syncFinanceProjection(); const interval = Math.max(5000, Number(process.env.FINANCE_PROJECTION_INTERVAL_MS || 30000))
   timer = setInterval(() => syncFinanceProjection().catch(error => console.error(JSON.stringify({ event: 'finance_projection_failed', error: error.message }))), interval); timer.unref?.()
   return { enabled: true, ...initial }
 }
 
-export async function closeFinancePostgresProjection() { if (timer) clearInterval(timer); timer = null; if (pool) await pool.end(); pool = null }
+export async function closeFinancePostgresProjection() { if (timer) clearInterval(timer); timer = null; await closePlatformPool() }

@@ -1,17 +1,15 @@
 import fs from 'node:fs/promises'
-import pg from 'pg'
 import { loadAuthoritySnapshot } from '../config/database.js'
+import { getPlatformPool, hasPlatformDatabaseUrl, closePlatformPool } from '../repositories/platformCollectionRepository.js'
 
-let pool = null
 let timer = null
-const url = () => process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL
 const date = value => value || new Date().toISOString()
 const json = value => JSON.stringify(value || {})
 
 export async function syncWorkspaceProjectProjection() {
-  if (!pool) return { enabled: false }
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
   const db = await loadAuthoritySnapshot()
-  const client = await pool.connect()
+  const client = await getPlatformPool().connect()
   try {
     await client.query('BEGIN')
     for (const row of db.projects || []) await client.query(`INSERT INTO core_projects(id,owner_id,organization_id,title,stage,visibility,payload,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET owner_id=EXCLUDED.owner_id,organization_id=EXCLUDED.organization_id,title=EXCLUDED.title,stage=EXCLUDED.stage,visibility=EXCLUDED.visibility,payload=EXCLUDED.payload,updated_at=EXCLUDED.updated_at`, [row.id, row.ownerId || row.userId || null, row.organizationId || null, row.title || row.name || null, row.stage || null, row.visibility || null, json(row), date(row.createdAt), date(row.updatedAt)])
@@ -33,10 +31,9 @@ export async function syncWorkspaceProjectProjection() {
 }
 
 export async function initializeWorkspaceProjectProjection() {
-  if (!url()) return { enabled: false }
-  pool = new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.WORKSPACE_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.WORKSPACE_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.WORKSPACE_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
   const sql = await fs.readFile(new URL('../../migrations/postgres/011_core_workspace_project_projection.sql', import.meta.url), 'utf8')
-  await pool.query(sql)
+  await getPlatformPool().query(sql)
   const initial = await syncWorkspaceProjectProjection()
   const interval = Math.max(5000, Number(process.env.WORKSPACE_PROJECTION_INTERVAL_MS || 30000))
   timer = setInterval(() => syncWorkspaceProjectProjection().catch(error => console.error(JSON.stringify({ event: 'workspace_project_projection_failed', error: error.message }))), interval)
@@ -47,6 +44,5 @@ export async function initializeWorkspaceProjectProjection() {
 export async function closeWorkspaceProjectProjection() {
   if (timer) clearInterval(timer)
   timer = null
-  if (pool) await pool.end()
-  pool = null
+  await closePlatformPool()
 }

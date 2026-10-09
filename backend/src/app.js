@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import { verifyJwt, assertJwtConfigured } from './services/jwtKeyService.js'
+import { platformPoolStats } from './repositories/platformCollectionRepository.js'
 import { randomUUID } from 'crypto'
 import authRoutes from './routes/auth.js'
 import fileRoutes from './routes/files.js'
@@ -146,6 +147,22 @@ app.get('/ready', (_req, res) => {
   const checks = []
   const database = databaseConfigStatus()
   checks.push({ name: 'database.config', ...database })
+
+  // Connection-budget guard. The backend now shares one pg.Pool, so saturation
+  // is a single number instead of fourteen. Report it always; fail readiness
+  // only when the pool is actually exhausted and requests are queuing (the
+  // condition that silently broke onboarding writes under the old per-domain
+  // pools). Before the app first touches the DB the pool is null -> not_ready
+  // is not implied, the check simply reports "not_initialized".
+  const poolStats = platformPoolStats()
+  const poolExhausted = Boolean(poolStats && poolStats.waitingCount > 0 && poolStats.totalCount >= poolStats.max)
+  checks.push({
+    name: 'database.pool',
+    ok: !poolExhausted,
+    detail: poolStats
+      ? `total=${poolStats.totalCount} idle=${poolStats.idleCount} waiting=${poolStats.waitingCount} max=${poolStats.max} app=${poolStats.applicationName}`
+      : 'not_initialized',
+  })
 
   try {
     checks.push({ name: 'jwt.keys', ok: true, detail: assertJwtConfigured() })

@@ -1,14 +1,12 @@
-import pg from 'pg'
+import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
-let pool = null
 const url = () => process.env.CONTENT_DATABASE_URL || process.env.DATABASE_URL
 const enabled = () => process.env.CONTENT_READ_SOURCE === 'postgres'
 const fallback = () => process.env.CONTENT_READ_FALLBACK_SQLITE !== 'false'
 
 function getPool() {
   if (!url()) throw new Error('CONTENT_DATABASE_URL or DATABASE_URL is required for PostgreSQL content reads')
-  pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.CONTENT_WRITE_POOL_SIZE || process.env.CONTENT_READ_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.CONTENT_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.CONTENT_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  return pool
+  return getPlatformPool()
 }
 
 const merged = row => {
@@ -60,4 +58,4 @@ export function contentReadEnabled() { return enabled() }
 export function contentReadFallbackEnabled() { return fallback() }
 export function contentWriteEnabled() { return process.env.CONTENT_WRITE_SOURCE === 'postgres' }
 export function contentWriteFallbackEnabled() { return process.env.CONTENT_WRITE_FALLBACK_SQLITE !== 'false' }
-export async function closeContentRepository() { if (pool) await pool.end(); pool = null }
+export async function closeContentRepository() { await closePlatformPool() }

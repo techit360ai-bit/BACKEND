@@ -1,0 +1,52 @@
+; =============================================================================
+; TechIT PgBouncer - transaction pooling in front of the platform RDS instance.
+;
+; Rendered by ops/ec2/pgbouncer/setup.sh; never edit the copy on the box.
+; One proxy serves every client (Node backend, ai-router/uvicorn, Celery
+; workers, Go messaging), so RDS sees a fixed, small number of server
+; connections regardless of how many app processes exist.
+; =============================================================================
+
+[databases]
+; Wildcard: forward the client's requested database name unchanged. This covers
+; techit_db (backend + ai-router) and techit_msg (messaging) with one entry, so
+; a new database never needs a PgBouncer edit.
+* = host={{DB_HOST}} port={{DB_PORT}}
+
+[pgbouncer]
+listen_addr = 127.0.0.1
+listen_port = 6432
+unix_socket_dir = /tmp
+
+; Clients authenticate to PgBouncer over the loopback; PgBouncer then logs in to
+; RDS with the same credential over TLS. The userlist holds the plaintext
+; password and is root/node owned 0600 - the same trust boundary as the
+; existing /home/ubuntu/.techit/platform-database-url file.
+auth_type = scram-sha-256
+auth_file = /etc/pgbouncer/userlist.txt
+admin_users = {{DB_USER}}
+stats_users = {{DB_USER}}
+
+pool_mode = transaction
+max_client_conn = 500
+default_pool_size = 30
+min_pool_size = 4
+reserve_pool_size = 5
+reserve_pool_timeout = 3
+
+; The platform relies on TRANSACTION-scoped state only:
+;   - set_config('app.user_id', $1, true)  (is_local => cleared at COMMIT)
+;   - pg_advisory_xact_lock(...)           (released at COMMIT)
+; so no server session state can leak between pooled clients. server_reset_query
+; is intentionally left at its default rather than forcing DISCARD ALL on every
+; transaction (that would also wipe the application_name tag below).
+ignore_startup_parameters = extra_float_digits,options
+application_name_add_host = 1
+
+; RDS requires TLS. The client hop is loopback-only, so it is left plain.
+; (verify-full would need the AWS CA bundle distributed to the box; tracked.)
+server_tls_sslmode = require
+
+log_connections = 0
+log_disconnections = 0
+stats_period = 60

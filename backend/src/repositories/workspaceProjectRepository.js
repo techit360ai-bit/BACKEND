@@ -1,16 +1,13 @@
-import pg from 'pg'
 import { readDb as readAuthorityDb } from '../config/database.js'
-import { withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
+import { withPlatformTransaction, upsertRecord, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
-let pool = null
 const url = () => process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL
 const enabled = () => process.env.WORKSPACE_READ_SOURCE === 'postgres'
 const fallback = () => process.env.WORKSPACE_READ_FALLBACK_SQLITE !== 'false'
 
 function getPool() {
   if (!url()) throw new Error('WORKSPACE_DATABASE_URL or DATABASE_URL is required for PostgreSQL workspace reads')
-  pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.WORKSPACE_READ_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.WORKSPACE_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.WORKSPACE_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  return pool
+  return getPlatformPool()
 }
 
 const payload = row => {
@@ -54,6 +51,6 @@ export async function syncWorkspaceProjectAggregate(actorId, workspaceId = null,
   }, { userId: actorId })
 }
 
-export async function closeWorkspaceProjectRepository() { if (pool) await pool.end(); pool = null }
+export async function closeWorkspaceProjectRepository() { await closePlatformPool() }
 export function workspaceReadEnabled() { return enabled() }
 export function workspaceReadFallbackEnabled() { return fallback() }

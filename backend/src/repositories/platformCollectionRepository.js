@@ -6,8 +6,21 @@ let pool = null
 
 const source = () => process.env.PLATFORM_DATABASE_URL || process.env.DATABASE_URL || process.env.IDENTITY_DATABASE_URL || process.env.WORKSPACE_DATABASE_URL || process.env.CONTENT_DATABASE_URL || process.env.FINANCE_DATABASE_URL
 const poolSize = () => Math.max(1, Number(process.env.PLATFORM_DB_POOL_SIZE || 10))
+// Every domain URL aliases the same RDS database (see ops/ec2/sync-env.mjs), so
+// the whole backend shares a single pg.Pool. `statement_timeout` bounds a stuck
+// query and `application_name` makes each server connection attributable in
+// pg_stat_activity instead of an anonymous blob.
+const applicationName = () => process.env.PLATFORM_DB_APP_NAME || 'techit-backend'
 const now = () => new Date().toISOString()
 const id = prefix => `${prefix}_${crypto.randomUUID()}`
+
+// Domain repositories used to each construct their own pg.Pool to the same
+// database, so fourteen pools competed for the RDS connection limit. They now
+// forward here; this flag lets them report "postgres disabled" without
+// throwing when no URL is configured (sqlite/test runs).
+export function hasPlatformDatabaseUrl() {
+  return Boolean(source())
+}
 
 function connectionOptions() {
   const connectionString = source()
@@ -15,6 +28,8 @@ function connectionOptions() {
   return {
     connectionString,
     max: poolSize(),
+    application_name: applicationName(),
+    idleTimeoutMillis: Number(process.env.PLATFORM_DB_IDLE_TIMEOUT_MS || 30000),
     connectionTimeoutMillis: Number(process.env.PLATFORM_DB_CONNECTION_TIMEOUT_MS || 5000),
     ssl: /sslmode=require/.test(connectionString)
       ? { rejectUnauthorized: process.env.PLATFORM_DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
@@ -25,6 +40,19 @@ function connectionOptions() {
 export function getPlatformPool() {
   pool ||= new pg.Pool(connectionOptions())
   return pool
+}
+
+// Non-creating introspection for probes and metrics: never opens the pool just
+// to report on it, and never throws before the app has touched the database.
+export function platformPoolStats() {
+  if (!pool) return null
+  return {
+    totalCount: pool.totalCount,
+    idleCount: pool.idleCount,
+    waitingCount: pool.waitingCount,
+    max: Number(pool.options?.max || 0),
+    applicationName: pool.options?.application_name || null,
+  }
 }
 
 export async function initializePlatformCollectionSchema() {
@@ -150,6 +178,10 @@ export async function deleteRecord(client, collectionName, recordId, { expectedV
 }
 
 export async function closePlatformPool() {
-  if (pool) await pool.end()
+  // Idempotent and race-free: the reference is cleared synchronously before the
+  // first await, so concurrent callers (the migration CLIs close several
+  // repositories in Promise.all) can never double-end the shared pool.
+  const current = pool
   pool = null
+  if (current) await current.end().catch(() => {})
 }
