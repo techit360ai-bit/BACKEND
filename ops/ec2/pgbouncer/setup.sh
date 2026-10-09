@@ -72,6 +72,17 @@ RDS_URL="$RDS_URL" TEMPLATE="$TEMPLATE" OUT_INI="$TMP_INI" OUT_LIST="$TMP_USERLI
   fs.writeFileSync(process.env.OUT_LIST, `"${user}" "${password}"\n`);
 '
 
+# Restarting PgBouncer drops every live connection for a moment. A deploy that
+# did not change the config must not do that (it raced an ai-router deploy whose
+# fresh connection was refused mid-restart), so only restart when the rendered
+# config actually differs or the service is not running.
+CHANGED=1
+if sudo test -f /etc/pgbouncer/pgbouncer.ini && sudo test -f /etc/pgbouncer/userlist.txt \
+   && sudo cmp -s "$TMP_INI" /etc/pgbouncer/pgbouncer.ini \
+   && sudo cmp -s "$TMP_USERLIST" /etc/pgbouncer/userlist.txt; then
+  CHANGED=0
+fi
+
 sudo install -d -m 0755 /etc/pgbouncer
 sudo install -m 0640 "$TMP_INI" /etc/pgbouncer/pgbouncer.ini
 sudo install -m 0640 "$TMP_USERLIST" /etc/pgbouncer/userlist.txt
@@ -87,7 +98,11 @@ else
 fi
 
 sudo systemctl enable pgbouncer >/dev/null 2>&1 || true
-sudo systemctl restart pgbouncer
+if [ "$CHANGED" = "0" ] && systemctl is-active --quiet pgbouncer; then
+  echo "pgbouncer: config unchanged and service already active; not restarting"
+else
+  sudo systemctl restart pgbouncer
+fi
 
 # Readiness: a bare TCP accept on the loopback port is enough to know PgBouncer
 # is listening (no psql needed on a box that only talks to RDS).
