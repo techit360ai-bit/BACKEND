@@ -36,6 +36,59 @@ describe('proof-bound trust authority', () => {
     expect(challenge.challenge.tokenHash).toBeUndefined()
   })
 
+  it('scales provider-observed analytics but never self-reported numbers', () => {
+    const observed = appendTrustProof('u1', { source: 'product_analytics', status: 'verified', method: 'posthog_readonly', metadata: { provider: 'posthog', mau: 1000, dau: 400 } })
+    expect(observed.proof.attestationLevel).toBe('provider_observed')
+    expect(observed.proof.metadata.mau).toBe(1000)
+
+    db.profiles.push({ id: 'u2', role: 'founder' })
+    const selfReported = appendTrustProof('u2', { source: 'product_analytics', status: 'verified', method: 'manual_upload', metadata: { mau: 100000, dau: 90000 } })
+    expect(selfReported.proof.attestationLevel).toBe('self')
+    // Claimed engagement metrics are dropped, and the score is a fixed reduced weight.
+    expect(selfReported.proof.metadata.mau).toBeUndefined()
+    expect(selfReported.profile.trust_score).toBeLessThan(observed.profile.trust_score)
+  })
+
+  it('awards the deployment_activity bonus only for provider-observed cadence', () => {
+    const observed = appendTrustProof('u1', { source: 'deployment', status: 'verified', method: 'vercel_readonly', attestationLevel: 'provider_observed', metadata: { provider: 'vercel', deploys30d: 6, deployments30d: 6 } })
+    expect(observed.proof.metadata.deployments30d).toBe(6)
+    expect(observed.profile.breakdown.deployment_activity).toBeGreaterThan(0)
+
+    db.profiles.push({ id: 'u2', role: 'founder' })
+    const selfReported = appendTrustProof('u2', { source: 'deployment', status: 'verified', method: 'manual_upload', metadata: { deployments30d: 100 } })
+    // Claimed counts are stripped, no continuity bonus is awarded.
+    expect(selfReported.proof.metadata.deployments30d).toBeUndefined()
+    expect(selfReported.profile.breakdown.deployment_activity).toBeUndefined()
+    expect(selfReported.profile.trust_score).toBeLessThan(observed.profile.trust_score)
+  })
+
+  it('scales team headcount only for provider-observed proofs', () => {
+    const observed = appendTrustProof('u1', { source: 'team', status: 'verified', method: 'gusto_hris', attestationLevel: 'provider_observed', metadata: { provider: 'gusto', headcount: 40, verifiedCount: 40 } })
+    expect(observed.proof.metadata.verifiedCount).toBe(40)
+    expect(observed.profile.breakdown.team).toBe(10)
+
+    db.profiles.push({ id: 'u2', role: 'founder' })
+    const selfReported = appendTrustProof('u2', { source: 'team', status: 'verified', method: 'manual_upload', metadata: { verifiedCount: 100, headcount: 100 } })
+    expect(selfReported.proof.attestationLevel).toBe('self')
+    // Claimed headcount is stripped and never scales: only the reduced self-attested weight applies.
+    expect(selfReported.proof.metadata.verifiedCount).toBeUndefined()
+    expect(selfReported.profile.breakdown.team).toBeCloseTo(3.5, 4)
+    expect(selfReported.profile.trust_score).toBeLessThan(observed.profile.trust_score)
+  })
+
+  it('awards milestone full weight only for third-party attestation', () => {
+    const attested = appendTrustProof('u1', { source: 'milestone', status: 'verified', method: 'docusign_attested_milestone', attestationLevel: 'third_party_attested', metadata: { milestoneType: 'funding' } })
+    expect(attested.proof.attestationLevel).toBe('third_party_attested')
+    expect(attested.profile.breakdown.milestone).toBe(5)
+
+    db.profiles.push({ id: 'u2', role: 'founder' })
+    const self = appendTrustProof('u2', { source: 'milestone', status: 'verified', method: 'milestone_funding', metadata: { milestoneType: 'funding' } })
+    expect(self.proof.attestationLevel).toBe('self')
+    // Founder's own word is capped at the reduced self-attested weight.
+    expect(self.profile.breakdown.milestone).toBeCloseTo(1.75, 4)
+    expect(self.profile.trust_score).toBeLessThan(attested.profile.trust_score)
+  })
+
   it('recomputes trust and invalidates proof-backed skills after admin rejection', () => {
     const proof = appendTrustProof('u1', { source: 'github', status: 'verified', method: 'github_oauth', metadata: { repoCount: 2 } })
     addVerifiedSkill('u1', { skill: 'TypeScript', proofId: proof.proof.id, source: 'github' })

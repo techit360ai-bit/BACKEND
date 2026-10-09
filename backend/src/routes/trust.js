@@ -1,11 +1,26 @@
 import { Router } from 'express'
+import crypto from 'node:crypto'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin } from '../utils/roleGuards.js'
-import { badges, disconnect, domainChallenge, domainVerify, history, integrations, linkedinCallback, notificationsPreview, operations, profile, proofReview, proofSubmit, refresh, verify } from '../controllers/trustSurfaceController.js'
+import { adapterConnect, analyticsConnect, analyticsCredentials, analyticsDisconnect, analyticsRefreshWorker, analyticsVerify, badges, continuousVerification, disconnect, domainChallenge, domainVerify, history, integrations, internalAdapterIngest, linkedinCallback, milestoneEvidenceFinalize, milestoneEvidenceUpload, milestoneList, milestoneReview, milestoneSubmit, notificationsPreview, operations, profile, proofReview, proofSubmit, refresh, refreshPlan, revenueConnect, revenueCredentials, revenueDisconnect, revenueRefreshWorker, revenueVerify, shareProfilePreview, shippingConnect, shippingCredentials, shippingDisconnect, shippingRefreshWorker, shippingVerify, teamConnect, teamCredentials, teamDisconnect, teamHrisVerify, teamInvite, teamRefreshWorker, teamRegistryVerify, teamVerify, teamWorkEmailChallenge, teamWorkEmailVerify, verify } from '../controllers/trustSurfaceController.js'
+
+// Trusted verification workers only. Fails closed when no secret is configured.
+function requireTrustIngestSecret(req, res, next) {
+  const expected = Buffer.from(process.env.TRUST_INGEST_SECRET || '')
+  const actual = Buffer.from(String(req.get('x-techit-internal-secret') || ''))
+  if (!expected.length) return res.status(503).json({ error: 'trust_ingest_not_configured' })
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) return res.status(401).json({ error: 'trust_ingest_unauthorized' })
+  return next()
+}
 
 const router = Router()
 router.get('/linkedin/callback', linkedinCallback)
+router.post('/internal/adapters/:provider/ingest', requireTrustIngestSecret, internalAdapterIngest)
+router.post('/internal/revenue/refresh', requireTrustIngestSecret, revenueRefreshWorker)
+router.post('/internal/analytics/refresh', requireTrustIngestSecret, analyticsRefreshWorker)
+router.post('/internal/shipping/refresh', requireTrustIngestSecret, shippingRefreshWorker)
+router.post('/internal/team/refresh', requireTrustIngestSecret, teamRefreshWorker)
 router.use(requireAuth)
 router.get('/profile', profile)
 router.get('/badges', badges)
@@ -18,6 +33,47 @@ router.post('/notifications/preview', notificationsPreview)
 router.post('/domain/challenge', domainChallenge)
 router.post('/domain/challenge/:challengeId/verify', domainVerify)
 router.post('/proofs', proofSubmit)
+router.post('/adapters/:provider/verify', adapterConnect)
+router.post('/refresh-plan', refreshPlan)
+router.post('/continuous-verification/run', requireAdminAuth, requireAdmin, continuousVerification)
+router.get('/milestone', milestoneList)
+router.post('/milestone', milestoneSubmit)
+router.post('/milestone/evidence', milestoneEvidenceUpload)
+router.post('/milestone/evidence/:evidenceId/finalize', milestoneEvidenceFinalize)
+router.post('/milestone/review', requireAdminAuth, requireAdmin, milestoneReview)
+router.post('/team/invite', teamInvite)
+router.post('/team/verify', teamVerify)
+// Team verification (WS6). Work-email, registry, and HRIS paths are node-local;
+// only provider-observed results mint a verified team/organization proof.
+router.get('/team/credentials', teamCredentials)
+router.post('/team/connect', teamConnect)
+router.post('/team/work-email/challenge', teamWorkEmailChallenge)
+router.post('/team/work-email/verify', teamWorkEmailVerify)
+router.post('/team/registry/verify', teamRegistryVerify)
+router.post('/team/registry/:provider/verify', teamRegistryVerify)
+router.post('/team/hris/verify', teamHrisVerify)
+router.post('/team/hris/:provider/verify', teamHrisVerify)
+router.delete('/team/credential/:provider', teamDisconnect)
+router.post('/share-profile/preview', shareProfilePreview)
+// Revenue verification (WS3). Connect stores an encrypted read-only credential;
+// verify is the only route that mints a verified revenue proof.
+router.get('/revenue/credentials', revenueCredentials)
+router.post('/revenue/connect', revenueConnect)
+router.post('/revenue/verify', revenueVerify)
+router.post('/revenue/:provider/verify', revenueVerify)
+router.delete('/revenue/:provider', revenueDisconnect)
+// Product analytics verification (WS4).
+router.get('/analytics/credentials', analyticsCredentials)
+router.post('/analytics/connect', analyticsConnect)
+router.post('/analytics/verify', analyticsVerify)
+router.post('/analytics/:provider/verify', analyticsVerify)
+router.delete('/analytics/:provider', analyticsDisconnect)
+// Shipping / deployment cadence verification (WS5).
+router.get('/shipping/credentials', shippingCredentials)
+router.post('/shipping/connect', shippingConnect)
+router.post('/shipping/verify', shippingVerify)
+router.post('/shipping/:provider/verify', shippingVerify)
+router.delete('/shipping/:provider', shippingDisconnect)
 router.get('/admin/operations', requireAdminAuth, requireAdmin, operations)
 router.post('/admin/proofs/:proofId/review', requireAdminAuth, requireAdmin, proofReview)
 export default router

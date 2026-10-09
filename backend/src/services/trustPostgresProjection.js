@@ -8,6 +8,10 @@ const json = value => JSON.stringify(value || {})
 const timestamp = value => value || new Date().toISOString()
 
 export async function syncTrustProjection() {
+  // When the row-level repository is the trust write authority, the legacy
+  // snapshot -> Postgres projection must not run: it would copy stale snapshot
+  // state over newer repository writes.
+  if (process.env.TRUST_WRITE_SOURCE === 'postgres') return { enabled: true, skipped: 'repository_is_authority' }
   if (!pool) return { enabled: false }
   const db = await loadAuthoritySnapshot(); const client = await pool.connect()
   try {

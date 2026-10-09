@@ -2,6 +2,10 @@ import app from './app.js'
 import { validateDatabaseConfig } from './config/database.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
 import { generateReverificationNotifications } from './services/trustVerificationService.js'
+import { runRevenueRefresh } from './services/trustRevenueService.js'
+import { runAnalyticsRefresh } from './services/trustAnalyticsService.js'
+import { runShippingRefresh } from './services/trustShippingService.js'
+import { runTeamRefresh } from './services/trustTeamService.js'
 import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
 import { initializeIdentityPostgresProjection } from './services/identityPostgresProjection.js'
 import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
@@ -35,6 +39,7 @@ function validateSecurityConfig() {
     'VERIFICATION_AUDIT_HMAC_KEY',
     'MFA_ENCRYPTION_KEY',
     'MFA_ASSERTION_SECRET',
+    'TRUST_CREDENTIAL_ENCRYPTION_KEY',
   ]) {
     if (!process.env[name]) throw new Error(`${name} is required in production`)
   }
@@ -58,6 +63,7 @@ function validateSecurityConfig() {
     'VERIFICATION_AUDIT_HMAC_KEY',
     'MFA_ENCRYPTION_KEY',
     'MFA_ASSERTION_SECRET',
+    'TRUST_CREDENTIAL_ENCRYPTION_KEY',
   ]) {
     if ((process.env[name] || '').length < 32) throw new Error(`${name} must be at least 32 characters`)
   }
@@ -88,6 +94,42 @@ const organizationIntelligenceTimer = setInterval(() => { runMaintenance(() => r
 organizationIntelligenceTimer.unref?.()
 const supportMaintenanceTimer = setInterval(() => { runMaintenance(() => runSupportMaintenance()).catch(error => console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message }))) }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
 supportMaintenanceTimer.unref?.()
+// WS3 revenue refresh worker. Off by default so only one replica (or a scheduler)
+// runs it; enable with TRUST_REVENUE_REFRESH_ENABLED=true on a single instance.
+if (String(process.env.TRUST_REVENUE_REFRESH_ENABLED || '').toLowerCase() === 'true') {
+  const revenueRefreshIntervalMs = Math.max(3600_000, Number(process.env.TRUST_REVENUE_SYNC_INTERVAL_MS || 24 * 3600_000))
+  const revenueRefreshTimer = setInterval(() => {
+    runRevenueRefresh().catch(error => console.error(JSON.stringify({ event: 'revenue_refresh_failed', error: error.message })))
+  }, revenueRefreshIntervalMs)
+  revenueRefreshTimer.unref?.()
+}
+// WS4 product analytics refresh worker (daily). Off by default; enable on one
+// replica with TRUST_ANALYTICS_REFRESH_ENABLED=true.
+if (String(process.env.TRUST_ANALYTICS_REFRESH_ENABLED || '').toLowerCase() === 'true') {
+  const analyticsRefreshIntervalMs = Math.max(3600_000, Number(process.env.TRUST_ANALYTICS_SYNC_INTERVAL_MS || 24 * 3600_000))
+  const analyticsRefreshTimer = setInterval(() => {
+    runAnalyticsRefresh().catch(error => console.error(JSON.stringify({ event: 'analytics_refresh_failed', error: error.message })))
+  }, analyticsRefreshIntervalMs)
+  analyticsRefreshTimer.unref?.()
+}
+// WS5 shipping / deployment cadence refresh worker (daily). Off by default;
+// enable on one replica with TRUST_SHIPPING_REFRESH_ENABLED=true.
+if (String(process.env.TRUST_SHIPPING_REFRESH_ENABLED || '').toLowerCase() === 'true') {
+  const shippingRefreshIntervalMs = Math.max(3600_000, Number(process.env.TRUST_SHIPPING_SYNC_INTERVAL_MS || 24 * 3600_000))
+  const shippingRefreshTimer = setInterval(() => {
+    runShippingRefresh().catch(error => console.error(JSON.stringify({ event: 'shipping_refresh_failed', error: error.message })))
+  }, shippingRefreshIntervalMs)
+  shippingRefreshTimer.unref?.()
+}
+// WS6 team / registry / HRIS refresh worker (daily). Off by default; enable on
+// one replica with TRUST_TEAM_REFRESH_ENABLED=true.
+if (String(process.env.TRUST_TEAM_REFRESH_ENABLED || '').toLowerCase() === 'true') {
+  const teamRefreshIntervalMs = Math.max(3600_000, Number(process.env.TRUST_TEAM_SYNC_INTERVAL_MS || 24 * 3600_000))
+  const teamRefreshTimer = setInterval(() => {
+    runTeamRefresh().catch(error => console.error(JSON.stringify({ event: 'team_refresh_failed', error: error.message })))
+  }, teamRefreshIntervalMs)
+  teamRefreshTimer.unref?.()
+}
 
 app.listen(PORT, () => {
   console.log(`TechIT API running on PORT ${PORT}`)
