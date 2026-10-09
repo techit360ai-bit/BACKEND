@@ -1,13 +1,12 @@
-import pg from 'pg'
 import { readDb as readAuthorityDb } from '../config/database.js'
 import fs from 'node:fs/promises'
+import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
-let pool = null
 const url = () => process.env.ORGANIZATION_DATABASE_URL || process.env.DATABASE_URL
 const readEnabled = () => process.env.ORGANIZATION_READ_SOURCE === 'postgres'
 const writeEnabled = () => process.env.ORGANIZATION_WRITE_SOURCE === 'postgres'
 const fallback = kind => process.env[`ORGANIZATION_${kind}_FALLBACK_SQLITE`] !== 'false'
-function getPool() { if (!url()) throw new Error('ORGANIZATION_DATABASE_URL or DATABASE_URL is required'); pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.ORGANIZATION_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.ORGANIZATION_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.ORGANIZATION_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined }); return pool }
+function getPool() { if (!url()) throw new Error('ORGANIZATION_DATABASE_URL or DATABASE_URL is required'); return getPlatformPool() }
 export async function initializeOrganizationCommercialProjection() { if (!url()) return { enabled: false }; await getPool().query(await fs.readFile(new URL('../../migrations/postgres/006_organization_intelligence_operations.sql', import.meta.url), 'utf8')); await getPool().query(await fs.readFile(new URL('../../migrations/postgres/017_organization_commercialization.sql', import.meta.url), 'utf8')); return { enabled: true } }
 const j = value => JSON.stringify(value || {})
 export async function listActions(organizationId, filters = {}) { const clauses = ['organization_id=$1']; const values = [organizationId]; for (const key of ['status','priority','owner_id','source_type']) if (filters[key] !== undefined) { values.push(filters[key]); clauses.push(`${key}=$${values.length}`) } const result = await getPool().query(`SELECT * FROM organization_actions WHERE ${clauses.join(' AND ')} ORDER BY due_date NULLS LAST,created_at DESC`, values); return result.rows.map(row => ({ id: row.id, organizationId: row.organization_id, title: row.title, reason: row.reason, evidence: row.evidence, sourceType: row.source_type, sourceId: row.source_id, ownerId: row.owner_id, priority: row.priority, dueDate: row.due_date, status: row.status, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at })) }
@@ -47,4 +46,4 @@ export async function syncOrganizationCommercial(organizationId = null) {
 export function organizationReadEnabled() { return readEnabled() }
 export function organizationWriteEnabled() { return writeEnabled() }
 export function organizationFallbackEnabled(kind) { return fallback(kind) }
-export async function closeOrganizationOperationsRepository() { if (pool) await pool.end(); pool = null }
+export async function closeOrganizationOperationsRepository() { await closePlatformPool() }

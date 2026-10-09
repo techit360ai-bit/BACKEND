@@ -1,15 +1,14 @@
 import fs from 'node:fs/promises'
-import pg from 'pg'
 import { loadAuthoritySnapshot } from '../config/database.js'
+import { getPlatformPool, hasPlatformDatabaseUrl } from '../repositories/platformCollectionRepository.js'
 
-let pool = null; let timer = null
-const url = () => process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL
+let timer = null
 const json = value => JSON.stringify(value || {})
 const timestamp = value => value || new Date().toISOString()
 
 export async function syncTrustProjection() {
-  if (!pool) return { enabled: false }
-  const db = await loadAuthoritySnapshot(); const client = await pool.connect()
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
+  const db = await loadAuthoritySnapshot(); const client = await getPlatformPool().connect()
   try {
     await client.query('BEGIN')
     for (const row of db.userRoles || []) await client.query(`INSERT INTO trust_user_roles(id,user_id,role,status,assurance,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id,role) DO UPDATE SET status=EXCLUDED.status,assurance=EXCLUDED.assurance,updated_at=EXCLUDED.updated_at`, [row.id, row.userId, row.role, row.status || 'active', row.assurance || 'CLAIMED', timestamp(row.createdAt), timestamp(row.updatedAt)])
@@ -31,9 +30,8 @@ export async function syncTrustProjection() {
 }
 
 export async function initializeTrustPostgresProjection() {
-  if (!url()) return { enabled: false }
-  pool = new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.TRUST_DB_POOL_SIZE || 5)), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.TRUST_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  const sql = await fs.readFile(new URL('../../migrations/postgres/002_trust_capability_authorization.sql', import.meta.url), 'utf8'); const proofSql = await fs.readFile(new URL('../../migrations/postgres/018_trust_proof_authority.sql', import.meta.url), 'utf8'); await pool.query(sql); await pool.query(proofSql); await syncTrustProjection()
+  if (!hasPlatformDatabaseUrl()) return { enabled: false }
+  const sql = await fs.readFile(new URL('../../migrations/postgres/002_trust_capability_authorization.sql', import.meta.url), 'utf8'); const proofSql = await fs.readFile(new URL('../../migrations/postgres/018_trust_proof_authority.sql', import.meta.url), 'utf8'); await getPlatformPool().query(sql); await getPlatformPool().query(proofSql); await syncTrustProjection()
   timer = setInterval(() => { syncTrustProjection().catch(error => console.error(JSON.stringify({ event: 'trust_projection_failed', error: error.message }))) }, Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))); timer.unref?.()
   return { enabled: true }
 }

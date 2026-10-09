@@ -66,13 +66,28 @@ jobs:
             # The messaging service uses its OWN database (techit_msg) on the
             # shared RDS instance: its `users` table collides with ai-router's
             # schema in techit_db. Derive the URL, then create the database once.
-            MESSAGING_DATABASE_URL="$(node -e '
+            # Prefer the in-box PgBouncer transaction proxy (provisioned by the
+            # backend deploy) when it is listening; otherwise connect to RDS
+            # directly.
+            PGBOUNCER_UP=0
+            if node -e 'const n=require("net");const s=n.connect(6432,"127.0.0.1");s.on("connect",()=>{s.end();process.exit(0)});s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(1),2000)'; then
+              PGBOUNCER_UP=1
+              echo "ℹ️ Messaging using in-box PgBouncer proxy 127.0.0.1:6432"
+            else
+              echo "ℹ️ PgBouncer not listening; Messaging using direct RDS"
+            fi
+            MESSAGING_DATABASE_URL="$(PGB_UP="$PGBOUNCER_UP" node -e '
               const u = new URL(process.env.PLATFORM_DATABASE_URL);
               u.pathname = "/techit_msg";
-              // The Node side needs sslmode=no-verify (pg 8.23 verifies certs
-              // under 'require'); pgx/libpq keep libpq semantics, so force
-              // 'require' for the Go service.
-              u.searchParams.set("sslmode", "require");
+              if (process.env.PGB_UP === "1") {
+                u.hostname = "127.0.0.1";
+                u.port = "6432";
+                u.searchParams.set("sslmode", "disable");
+              } else {
+                // pgx/libpq keep libpq semantics, so force 'require' for the
+                // direct-to-RDS fallback (node-pg uses no-verify separately).
+                u.searchParams.set("sslmode", "require");
+              }
               process.stdout.write(u.toString());
             ')"
             export MESSAGING_DATABASE_URL
@@ -80,8 +95,9 @@ jobs:
             node -e '
               const pg = require("pg");
               const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              const loopback = ["localhost", "127.0.0.1", "::1"].includes(u.hostname);
               (async () => {
-                const c = new pg.Client({ connectionString: u.toString(), ssl: { rejectUnauthorized: false } });
+                const c = new pg.Client({ connectionString: u.toString(), ...(loopback ? {} : { ssl: { rejectUnauthorized: false } }) });
                 await c.connect();
                 const { rows } = await c.query("select 1 from pg_database where datname = $1", ["techit_msg"]);
                 if (!rows.length) {

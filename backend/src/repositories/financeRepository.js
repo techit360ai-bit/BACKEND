@@ -1,18 +1,16 @@
 import { createId, nowIso } from '../utils/api.js'
 import { economicsForUsage } from '../services/unitEconomicsService.js'
-import { withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
+import { withPlatformTransaction, upsertRecord, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const enabled = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
 const readEnabled = () => process.env.FINANCE_READ_SOURCE === 'postgres'
 const readFallback = () => process.env.FINANCE_READ_FALLBACK_SQLITE !== 'false'
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback
-let financePool = null
 
 function getFinancePool() {
   const connectionString = process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL
   if (!connectionString) throw new Error('FINANCE_DATABASE_URL or DATABASE_URL is required')
-  financePool ||= new pg.Pool({ connectionString, max: Math.max(1, Number(process.env.FINANCE_READ_POOL_SIZE || process.env.FINANCE_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.FINANCE_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(connectionString) ? { rejectUnauthorized: process.env.FINANCE_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })
-  return financePool
+  return getPlatformPool()
 }
 
 const mapNormalized = row => ({ ...(row.payload || {}), id: row.id, userId: row.user_id, creditBalance: row.balance == null ? undefined : Number(row.balance), balance: row.balance == null ? undefined : Number(row.balance), currency: row.currency, deltaCredits: row.delta_credits == null ? undefined : Number(row.delta_credits), reservedCredits: row.reserved_credits == null ? undefined : Number(row.reserved_credits), status: row.status, amount: row.amount == null ? undefined : Number(row.amount), credits: row.credits == null ? undefined : Number(row.credits), createdAt: row.created_at, updatedAt: row.updated_at })
@@ -22,7 +20,7 @@ export async function walletCollection(userId, name) { const tables = { creditLe
 export async function walletSummary(userId) { const [account, ledger, reservations, payments] = await Promise.all([walletAccount(userId), walletCollection(userId, 'creditLedger'), walletCollection(userId, 'usageReservations'), walletCollection(userId, 'paymentIntents')]); const creditBalance = Number(account?.creditBalance || 0) + ledger.reduce((sum, row) => sum + Number(row.deltaCredits || row.credits || 0), 0); return { account: account || { userId, creditBalance, currency: 'USD' }, creditBalance, lifetimeCreditsUsed: Math.abs(ledger.filter(row => row.type === 'usage_settlement').reduce((sum, row) => sum + Number(row.deltaCredits || 0), 0)), pendingPayments: payments.filter(row => row.status === 'pending').length, pendingReservations: reservations.filter(row => row.status === 'reserved').length } }
 export function financeReadEnabled() { return readEnabled() }
 export function financeReadFallbackEnabled() { return readFallback() }
-export async function closeFinanceRepository() { if (financePool) await financePool.end(); financePool = null }
+export async function closeFinanceRepository() { await closePlatformPool() }
 
 async function findByPayload(client, collection, key, value, { forUpdate = false } = {}) {
   const lock = forUpdate ? ' FOR UPDATE' : ''

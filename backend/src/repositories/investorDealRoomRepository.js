@@ -1,12 +1,11 @@
-import pg from 'pg'
 import { readDb as readAuthorityDb } from '../config/database.js'
+import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
-let pool = null
 const url = () => process.env.INVESTOR_DATABASE_URL || process.env.DATABASE_URL
 const readEnabled = () => process.env.INVESTOR_READ_SOURCE === 'postgres'
 const writeEnabled = () => process.env.INVESTOR_WRITE_SOURCE === 'postgres'
 const fallback = kind => process.env[`INVESTOR_${kind}_FALLBACK_SQLITE`] !== 'false'
-function getPool() { if (!url()) throw new Error('INVESTOR_DATABASE_URL or DATABASE_URL is required'); pool ||= new pg.Pool({ connectionString: url(), max: Math.max(1, Number(process.env.INVESTOR_DB_POOL_SIZE || 5)), connectionTimeoutMillis: Number(process.env.INVESTOR_DB_CONNECTION_TIMEOUT_MS || 5000), ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.INVESTOR_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined }); return pool }
+function getPool() { if (!url()) throw new Error('INVESTOR_DATABASE_URL or DATABASE_URL is required'); return getPlatformPool() }
 async function scoped(userId, callback) { const client = await getPool().connect(); try { await client.query('BEGIN'); await client.query("SELECT set_config('app.user_id',$1,true)", [userId]); const value = await callback(client); await client.query('COMMIT'); return value } catch (error) { await client.query('ROLLBACK'); throw error } finally { client.release() } }
 
 const mapDeal = row => ({ id: row.id, projectId: row.project_id, investorId: row.investor_id, founderId: row.founder_id, state: row.state, ndaTemplateId: row.nda_template_id, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, ndaRequired: true, ndaSigned: Boolean(row.nda_signed), participantRole: row.participant_role || null, diligence: { total: Number(row.diligence_total || 0), completed: Number(row.diligence_completed || 0) } })
@@ -34,4 +33,4 @@ export async function syncDealAggregate(actorId, dealId) {
 export function investorReadEnabled() { return readEnabled() }
 export function investorWriteEnabled() { return writeEnabled() }
 export function investorFallbackEnabled(kind) { return fallback(kind) }
-export async function closeInvestorDealRoomRepository() { if (pool) await pool.end(); pool = null }
+export async function closeInvestorDealRoomRepository() { await closePlatformPool() }
