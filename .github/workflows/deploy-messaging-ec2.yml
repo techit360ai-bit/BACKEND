@@ -91,10 +91,28 @@ jobs:
               process.stdout.write(u.toString());
             ')"
             export MESSAGING_DATABASE_URL
+            # Provisioning connects to the EXISTING techit_db (the CREATE DATABASE
+            # target must not be the database being created), so reuse
+            # PLATFORM_DATABASE_URL but via the proxy when it is up. Going through
+            # PgBouncer reuses its already-open server connections instead of
+            # asking RDS for a fresh one - which is what failed while RDS was at
+            # its ceiling.
+            PROVISION_DATABASE_URL="$(PGB_UP="$PGBOUNCER_UP" node -e '
+              const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              if (process.env.PGB_UP === "1") {
+                u.hostname = "127.0.0.1";
+                u.port = "6432";
+                u.searchParams.set("sslmode", "disable");
+              } else {
+                u.searchParams.set("sslmode", "no-verify");
+              }
+              process.stdout.write(u.toString());
+            ')"
+            export PROVISION_DATABASE_URL
             npm install --workspaces --if-present
             node -e '
               const pg = require("pg");
-              const u = new URL(process.env.PLATFORM_DATABASE_URL);
+              const u = new URL(process.env.PROVISION_DATABASE_URL);
               const loopback = ["localhost", "127.0.0.1", "::1"].includes(u.hostname);
               (async () => {
                 const c = new pg.Client({ connectionString: u.toString(), ...(loopback ? {} : { ssl: { rejectUnauthorized: false } }) });
