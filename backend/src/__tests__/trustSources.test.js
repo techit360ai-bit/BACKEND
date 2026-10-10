@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findTrustSourceByProvider, listTrustSources, resolveSourceAvailability } from '../config/trustSources.js'
+import { findTrustSourceByProvider, listTrustSources, resolveSourceAvailability, trustRolloutSnapshot } from '../config/trustSources.js'
 
 describe('trust source availability', () => {
   it('marks the already-wired sources available without config', () => {
@@ -14,6 +14,14 @@ describe('trust source availability', () => {
     for (const source of ['revenue', 'product_analytics', 'deployment', 'team', 'milestone']) {
       expect(sources.find(item => item.source === source).availability).toBe('coming_soon')
     }
+  })
+
+  it('unlocks identity only when the compliance gate is fully configured', () => {
+    const env = { TRUST_IDENTITY_ENABLED: 'true', TRUST_KYC_ENABLED: 'true', TRUST_KYC_PROVIDER: 'persona', TRUST_DPIA_APPROVAL_REF: 'DPIA-1', TRUST_KYC_REGIONS: 'HU,DE' }
+    const identity = findTrustSourceByProvider('identity', env)
+    expect(identity.availability).toBe('available')
+    expect(identity.availability_reason).toBeNull()
+    expect(findTrustSourceByProvider('identity', { ...env, TRUST_IDENTITY_ENABLED: 'false' }).availability).toBe('coming_soon')
   })
 
   it('reports pending_dpia_approval for identity until compliance is configured', () => {
@@ -90,6 +98,24 @@ describe('trust source availability', () => {
     const approved = listTrustSources({ TRUST_REVENUE_ENABLED: 'true', TRUST_REVENUE_REQUIRE_DPIA: 'true', TRUST_REVENUE_DPIA_APPROVAL_REF: 'DPIA-1', STRIPE_SECRET_KEY: 'sk', TRUST_PRODUCT_ANALYTICS_ENABLED: 'true', TRUST_ANALYTICS_REQUIRE_DPIA: 'true', TRUST_ANALYTICS_DPIA_APPROVAL_REF: 'DPIA-2', POSTHOG_API_KEY: 'ph' })
     expect(approved.find(item => item.source === 'revenue').availability).toBe('available')
     expect(approved.find(item => item.source === 'product_analytics').availability).toBe('available')
+  })
+
+  it('exposes a per-source rollout view with the blocking flag or credentials', () => {
+    const snapshot = trustRolloutSnapshot(
+      { TRUST_REVENUE_ENABLED: 'false', TRUST_TEAM_ENABLED: 'true' },
+      { generatedAt: '2026-07-06T10:00:00.000Z' },
+    )
+    expect(snapshot.generatedAt).toBe('2026-07-06T10:00:00.000Z')
+    expect(snapshot.available).toEqual(expect.arrayContaining(['github', 'linkedin', 'domain', 'website']))
+
+    const revenue = snapshot.per_source.find(entry => entry.source === 'revenue')
+    expect(revenue.availability).toBe('coming_soon')
+    expect(revenue.gated_by).toBe('TRUST_REVENUE_ENABLED')
+    expect(revenue.flag_enabled).toBe(false)
+
+    const team = snapshot.per_source.find(entry => entry.source === 'team')
+    expect(team.flag_enabled).toBe(true)
+    expect(team.missing_credentials.length).toBeGreaterThan(0)
   })
 
   it('keeps sources coming_soon when the ai-router is not configured', () => {

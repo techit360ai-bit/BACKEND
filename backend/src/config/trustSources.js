@@ -66,6 +66,8 @@ export const TRUST_SOURCE_REGISTRY = Object.freeze([
     requireDpiaEnv: 'TRUST_MILESTONE_REQUIRE_DPIA',
     dpiaRefEnv: 'TRUST_MILESTONE_DPIA_APPROVAL_REF' },
   { source: 'identity', provider: 'identity', display_name: 'Founder identity', category: 'identity', auth_method: 'kyc', requiresDpia: true,
+    // Node-local: KYC/registry/screening reads happen in the backend; no AI-router.
+    nodeLocal: true,
     gatedBy: 'TRUST_IDENTITY_ENABLED' },
 ])
 
@@ -98,4 +100,28 @@ export function resolveSourceAvailability(entry, env = process.env) {
 
 export function listTrustSources(env = process.env) {
   return TRUST_SOURCE_REGISTRY.map(entry => ({ ...entry, ...resolveSourceAvailability(entry, env) }))
+}
+
+// WS11 per-source rollout view: the availability gate + the exact flag that is
+// holding a source back (or the credentials it is still missing). Read-only; it
+// never enables a source. Ops run it before a canary step to confirm the
+// intended blast radius.
+export function trustRolloutSnapshot(env = process.env, { generatedAt = new Date().toISOString() } = {}) {
+  const sources = listTrustSources(env)
+  return {
+    generatedAt,
+    available: sources.filter(entry => entry.availability === 'available').map(entry => entry.source),
+    coming_soon: sources.filter(entry => entry.availability !== 'available').map(entry => entry.source),
+    per_source: sources.map(entry => ({
+      source: entry.source,
+      provider: entry.provider,
+      availability: entry.availability,
+      availability_reason: entry.availability_reason,
+      gated_by: entry.gatedBy || null,
+      flag_enabled: entry.alwaysAvailable ? true : entry.gatedBy ? String(env[entry.gatedBy] || '').trim().toLowerCase() === 'true' : true,
+      missing_credentials: entry.missing_credentials || [],
+      node_local: Boolean(entry.nodeLocal),
+      requires_dpia: Boolean(entry.requiresDpia || entry.requireDpiaEnv),
+    })),
+  }
 }

@@ -9,6 +9,7 @@
 // Privacy: only normalized metadata, aggregates, and hashes live here.
 
 import pg from 'pg'
+import { incTrustMetric } from '../services/trustMetrics.js'
 
 let pool = null
 
@@ -153,6 +154,21 @@ const mapOutbox = row => ({
   deliveredAt: row.delivered_at,
 })
 
+const mapOverride = row => ({
+  id: row.id,
+  userId: row.user_id,
+  projectId: row.project_id,
+  source: row.source,
+  delta: Number(row.delta || 0),
+  reasonCode: row.reason_code,
+  note: row.note,
+  adminId: row.admin_id,
+  expiresAt: row.expires_at,
+  revokedAt: row.revoked_at,
+  revokedBy: row.revoked_by,
+  createdAt: row.created_at,
+})
+
 export async function withTrustTransaction(fn, { userId = null } = {}) {
   const client = await getTrustPool().connect()
   try {
@@ -172,7 +188,7 @@ export async function withTrustTransaction(fn, { userId = null } = {}) {
 // Bounded read: only this user's trust rows, so per-request cost no longer
 // scales with total platform size.
 export async function loadTrustScope(userId, { client } = {}) {
-  const [proofs, skills, history, challenges, profiles, snapshots, outbox] = await Promise.all([
+  const [proofs, skills, history, challenges, profiles, snapshots, outbox, overrides] = await Promise.all([
     run(client, 'SELECT * FROM trust_verification_proofs WHERE user_id=$1', [userId]),
     run(client, 'SELECT * FROM trust_verified_skills WHERE user_id=$1', [userId]),
     run(client, 'SELECT * FROM trust_verification_history WHERE user_id=$1 ORDER BY created_at DESC LIMIT 500', [userId]),
@@ -180,6 +196,7 @@ export async function loadTrustScope(userId, { client } = {}) {
     run(client, 'SELECT * FROM trust_profiles WHERE user_id=$1', [userId]),
     run(client, 'SELECT * FROM trust_score_snapshots WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100', [userId]),
     run(client, 'SELECT * FROM trust_projection_outbox WHERE user_id=$1 AND delivered_at IS NULL ORDER BY created_at DESC LIMIT 100', [userId]),
+    run(client, 'SELECT * FROM trust_score_overrides WHERE user_id=$1 AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 100', [userId]),
   ])
   return {
     users: [{ id: userId }],
@@ -191,6 +208,7 @@ export async function loadTrustScope(userId, { client } = {}) {
     trustProfiles: profiles.rows.map(mapProfile),
     trustScoreSnapshots: snapshots.rows.map(mapSnapshot),
     trustProjectionOutbox: outbox.rows.map(mapOutbox),
+    trustScoreOverrides: overrides.rows.map(mapOverride),
   }
 }
 
@@ -410,6 +428,8 @@ export async function recordAnomaly(entry, { client } = {}) {
   await run(client, `INSERT INTO trust_anomaly_events(id,user_id,kind,severity,detail,created_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING`, [
     entry.id, entry.userId, entry.kind, entry.severity || 'info', JSON.stringify(entry.detail || {}), entry.createdAt || nowIso(),
   ])
+  // WS11: anomaly rate is a first-class metric (kind/severity labeled).
+  incTrustMetric('trust_anomaly_events_total', { kind: entry.kind, severity: entry.severity || 'info' })
   return entry
 }
 
@@ -683,6 +703,151 @@ export async function updateMilestoneEvidence(id, patch = {}, { client } = {}) {
   push('updated_at', patch.updatedAt || nowIso())
   const result = await run(client, `UPDATE trust_milestone_evidence SET ${columns.join(', ')} WHERE id=$1 RETURNING *`, values)
   return result.rows[0] ? mapMilestoneEvidence(result.rows[0]) : null
+}
+
+// --- WS8: founder identity / KYC verification attempts ---
+
+const mapIdentityVerification = row => ({
+  id: row.id, userId: row.user_id, provider: row.provider, kind: row.kind, status: row.status,
+  providerReference: row.provider_reference, subject: row.subject, country: row.country,
+  resultHash: row.result_hash, checkedAt: row.checked_at, createdAt: row.created_at,
+})
+
+export async function insertIdentityVerification(entry, { client } = {}) {
+  await run(client, `INSERT INTO trust_identity_verifications
+    (id,user_id,provider,kind,status,provider_reference,subject,country,result_hash,checked_at,created_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(id) DO NOTHING`, [
+    entry.id, entry.userId, entry.provider, entry.kind, entry.status, entry.providerReference || null,
+    entry.subject || null, entry.country || null, entry.resultHash || null, entry.checkedAt || null, entry.createdAt || nowIso(),
+  ])
+  return entry
+}
+
+export async function listIdentityVerifications(userId, { client } = {}) {
+  const result = await run(client, `SELECT * FROM trust_identity_verifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50`, [userId])
+  return result.rows.map(mapIdentityVerification)
+}
+
+// --- WS8: sanctions / PEP screening (append-only) ---
+
+const mapScreeningResult = row => ({
+  id: row.id, userId: row.user_id, provider: row.provider, subjectHash: row.subject_hash,
+  status: row.status, matchCount: Number(row.match_count || 0), country: row.country,
+  resultHash: row.result_hash, screenedAt: row.screened_at, createdAt: row.created_at,
+})
+
+export async function insertScreeningResult(entry, { client } = {}) {
+  const result = await run(client, `INSERT INTO trust_screening_results
+    (id,user_id,provider,subject_hash,status,match_count,country,result_hash,screened_at,created_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`, [
+    entry.id, entry.userId, entry.provider, entry.subjectHash || null, entry.status,
+    Number(entry.matchCount || 0), entry.country || null, entry.resultHash || null,
+    entry.screenedAt || nowIso(), entry.createdAt || nowIso(),
+  ])
+  return result.rows[0] ? mapScreeningResult(result.rows[0]) : null
+}
+
+export async function listScreeningResults(userId, { client } = {}) {
+  const result = await run(client, `SELECT * FROM trust_screening_results WHERE user_id=$1 ORDER BY screened_at DESC LIMIT 50`, [userId])
+  return result.rows.map(mapScreeningResult)
+}
+
+export async function latestScreeningResult(userId, provider = null, { client } = {}) {
+  const result = provider
+    ? await run(client, `SELECT * FROM trust_screening_results WHERE user_id=$1 AND provider=$2 ORDER BY screened_at DESC LIMIT 1`, [userId, provider])
+    : await run(client, `SELECT * FROM trust_screening_results WHERE user_id=$1 ORDER BY screened_at DESC LIMIT 1`, [userId])
+  return result.rows[0] ? mapScreeningResult(result.rows[0]) : null
+}
+
+// --- WS9: reverification / decay scan + manual overrides ---
+
+// Bounded, cross-user scan used by the reverification scheduler. Only returns
+// proofs that are still "verified" but past their source TTL, so the job can
+// flip them to expired and recompute the affected profiles.
+export async function listExpiredProofs(now = nowIso(), limit = 200, { client } = {}) {
+  const capped = Math.min(1000, Math.max(1, Number(limit) || 200))
+  const result = await run(client, `SELECT * FROM trust_verification_proofs
+    WHERE status='verified' AND expires_at IS NOT NULL AND expires_at <= $1
+    ORDER BY expires_at ASC LIMIT $2`, [now, capped])
+  return result.rows.map(mapProof)
+}
+
+export async function expireProof(id, { client } = {}) {
+  const result = await run(client, `UPDATE trust_verification_proofs
+    SET status='expired', updated_at=$2 WHERE id=$1 AND status='verified' RETURNING *`, [id, nowIso()])
+  return result.rows[0] ? mapProof(result.rows[0]) : null
+}
+
+export async function listExpiredSkills(now = nowIso(), limit = 200, { client } = {}) {
+  const capped = Math.min(1000, Math.max(1, Number(limit) || 200))
+  const result = await run(client, `SELECT * FROM trust_verified_skills
+    WHERE status='verified' AND expires_at IS NOT NULL AND expires_at <= $1
+    ORDER BY expires_at ASC LIMIT $2`, [now, capped])
+  return result.rows.map(mapSkill)
+}
+
+export async function expireSkill(id, { client } = {}) {
+  const result = await run(client, `UPDATE trust_verified_skills
+    SET status='expired', updated_at=$2 WHERE id=$1 AND status='verified' RETURNING *`, [id, nowIso()])
+  return result.rows[0] ? mapSkill(result.rows[0]) : null
+}
+
+export async function listActiveOverrides(userId, { now = nowIso(), client } = {}) {
+  const result = await run(client, `SELECT * FROM trust_score_overrides
+    WHERE user_id=$1 AND revoked_at IS NULL AND expires_at > $2 ORDER BY created_at DESC LIMIT 100`, [userId, now])
+  return result.rows.map(mapOverride)
+}
+
+export async function listOverrides(userId, { client } = {}) {
+  const result = await run(client, `SELECT * FROM trust_score_overrides WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`, [userId])
+  return result.rows.map(mapOverride)
+}
+
+export async function insertOverride(entry, { client } = {}) {
+  const result = await run(client, `INSERT INTO trust_score_overrides
+    (id,user_id,project_id,source,delta,reason_code,note,admin_id,expires_at,revoked_at,revoked_by,created_at)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NULL,NULL,$10) ON CONFLICT(id) DO NOTHING RETURNING *`, [
+    entry.id, entry.userId, entry.projectId || null, entry.source || null, entry.delta,
+    entry.reasonCode, entry.note || null, entry.adminId, entry.expiresAt, entry.createdAt || nowIso(),
+  ])
+  return result.rows[0] ? mapOverride(result.rows[0]) : null
+}
+
+export async function revokeOverride(id, adminId, { client } = {}) {
+  const result = await run(client, `UPDATE trust_score_overrides
+    SET revoked_at=$3, revoked_by=$4 WHERE id=$1 AND revoked_at IS NULL AND user_id=$2 RETURNING *`, [id, adminId, nowIso(), adminId])
+  return result.rows[0] ? mapOverride(result.rows[0]) : null
+}
+
+// --- WS11 observability gauges (read-only, best-effort) ---
+
+export async function countPendingOutbox() {
+  const result = await run(null, 'SELECT COUNT(*)::int AS count FROM trust_projection_outbox WHERE delivered_at IS NULL')
+  return Number(result.rows[0]?.count || 0)
+}
+
+export async function countExpiredProofs() {
+  const result = await run(null, "SELECT COUNT(*)::int AS count FROM trust_verification_proofs WHERE status='expired'")
+  return Number(result.rows[0]?.count || 0)
+}
+
+export async function anomalyStats({ sinceHours = 24 } = {}) {
+  const hours = Math.min(24 * 30, Math.max(1, Number(sinceHours) || 24))
+  const since = new Date(Date.now() - hours * 3600 * 1000).toISOString()
+  const result = await run(null, `SELECT severity, COUNT(*)::int AS count FROM trust_anomaly_events WHERE created_at >= $1 GROUP BY severity`, [since])
+  const bySeverity = Object.fromEntries(result.rows.map(row => [row.severity, Number(row.count || 0)]))
+  return { window_hours: hours, total: Object.values(bySeverity).reduce((sum, value) => sum + value, 0), by_severity: bySeverity }
+}
+
+// Never creates a pool: saturation is only meaningful once traffic has opened one.
+export function trustPoolStats() {
+  if (!pool) return null
+  return {
+    total: pool.totalCount ?? null,
+    idle: pool.idleCount ?? null,
+    waiting: pool.waitingCount ?? null,
+    max: pool.options?.max ?? Number(process.env.TRUST_DB_POOL_SIZE || 5),
+  }
 }
 
 export async function closeTrustPool() {

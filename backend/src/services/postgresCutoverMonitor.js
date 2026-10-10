@@ -21,7 +21,7 @@ export function cutoverMonitorSnapshot() { return Object.fromEntries([...counter
 export function resetCutoverMonitor() { counters.clear() }
 
 export function rollbackDrillStatus() {
-  const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
+  const domains = ['TRUST', 'IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
   const checks = Object.fromEntries(domains.map(domain => [domain.toLowerCase(), { readSource: process.env[`${domain}_READ_SOURCE`] || 'sqlite', writeSource: process.env[`${domain}_WRITE_SOURCE`] || 'sqlite', fallbackRead: process.env[`${domain}_READ_FALLBACK_SQLITE`] !== 'false', fallbackWrite: process.env[`${domain}_WRITE_FALLBACK_SQLITE`] !== 'false' }]))
   return { ok: Object.values(checks).every(row => row.fallbackRead || row.readSource === 'sqlite') && Object.values(checks).every(row => row.fallbackWrite || row.writeSource === 'sqlite'), generatedAt: new Date().toISOString(), checks, metrics: cutoverMonitorSnapshot() }
 }

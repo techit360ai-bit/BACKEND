@@ -89,6 +89,17 @@ describe('proof-bound trust authority', () => {
     expect(self.profile.trust_score).toBeLessThan(attested.profile.trust_score)
   })
 
+  it('awards identity full weight only for provider-observed KYC', () => {
+    const observed = appendTrustProof('u1', { source: 'identity', status: 'verified', method: 'kyc_persona', attestationLevel: 'provider_observed', metadata: { identityKind: 'kyc', kycProvider: 'persona', kycStatus: 'verified', country: 'HU' } })
+    expect(observed.profile.breakdown.identity).toBe(18)
+
+    db.profiles.push({ id: 'u2', role: 'founder' })
+    const self = appendTrustProof('u2', { source: 'identity', status: 'verified', method: 'manual_review', metadata: { identityKind: 'kyc' } })
+    expect(self.proof.attestationLevel).toBe('self')
+    expect(self.profile.breakdown.identity).toBeCloseTo(6.3, 4)
+    expect(self.profile.trust_score).toBeLessThan(observed.profile.trust_score)
+  })
+
   it('recomputes trust and invalidates proof-backed skills after admin rejection', () => {
     const proof = appendTrustProof('u1', { source: 'github', status: 'verified', method: 'github_oauth', metadata: { repoCount: 2 } })
     addVerifiedSkill('u1', { skill: 'TypeScript', proofId: proof.proof.id, source: 'github' })

@@ -23,6 +23,10 @@ export function trustHistoryFor(userId, limit = 50) {
   return trustReadEnabled() ? asyncAuthority.getTrustHistory(userId, limit) : legacy.trustHistoryFor(userId, limit)
 }
 
+export function trustProofsFor(userId, projectId = null) {
+  return trustReadEnabled() ? asyncAuthority.getTrustProofs(userId, projectId) : legacy.trustProofsFor(userId, projectId)
+}
+
 export function trustOperations(options) {
   return trustReadEnabled() ? asyncAuthority.getOperations(options) : legacy.trustOperations()
 }

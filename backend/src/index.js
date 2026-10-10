@@ -6,6 +6,9 @@ import { runRevenueRefresh } from './services/trustRevenueService.js'
 import { runAnalyticsRefresh } from './services/trustAnalyticsService.js'
 import { runShippingRefresh } from './services/trustShippingService.js'
 import { runTeamRefresh } from './services/trustTeamService.js'
+import { runIdentityRefresh } from './services/trustIdentityService.js'
+import { runTrustReverificationTick } from './services/trustReverificationService.js'
+import { flushTrustProjectionOutboxFromRepository } from './services/trustProjectionOutboxWorker.js'
 import { initializeTrustPostgresProjection } from './services/trustPostgresProjection.js'
 import { initializeIdentityPostgresProjection } from './services/identityPostgresProjection.js'
 import { initializeWorkspaceProjectProjection } from './services/workspaceProjectPostgresProjection.js'
@@ -129,6 +132,38 @@ if (String(process.env.TRUST_TEAM_REFRESH_ENABLED || '').toLowerCase() === 'true
     runTeamRefresh().catch(error => console.error(JSON.stringify({ event: 'team_refresh_failed', error: error.message })))
   }, teamRefreshIntervalMs)
   teamRefreshTimer.unref?.()
+}
+
+// WS8 identity / KYC + sanctions rescreen worker. Off by default; enable on one
+// replica with TRUST_IDENTITY_REFRESH_ENABLED=true.
+if (String(process.env.TRUST_IDENTITY_REFRESH_ENABLED || '').toLowerCase() === 'true') {
+  const identityRefreshIntervalMs = Math.max(3600_000, Number(process.env.TRUST_IDENTITY_SYNC_INTERVAL_MS || 24 * 3600_000))
+  const identityRefreshTimer = setInterval(() => {
+    runIdentityRefresh().catch(error => console.error(JSON.stringify({ event: 'identity_refresh_failed', error: error.message })))
+  }, identityRefreshIntervalMs)
+  identityRefreshTimer.unref?.()
+}
+
+// WS9 continuous re-verification / decay scheduler. Off by default; enable on
+// exactly one replica with TRUST_REVERIFICATION_ENABLED=true. One tick flips
+// stale verified proofs/skills to expired, recomputes affected profiles, and
+// enqueues projection outbox rows.
+if (String(process.env.TRUST_REVERIFICATION_ENABLED || '').toLowerCase() === 'true') {
+  const reverificationIntervalMs = Math.max(60_000, Number(process.env.TRUST_REVERIFICATION_INTERVAL_MS || 6 * 3600_000))
+  const reverificationTimer = setInterval(() => {
+    runMaintenance(() => runTrustReverificationTick()).catch(error => console.error(JSON.stringify({ event: 'trust_reverification_failed', error: error.message })))
+  }, reverificationIntervalMs)
+  reverificationTimer.unref?.()
+}
+
+// WS9 repository-backed projection outbox worker. The request path only
+// enqueues rows; this drains them when the row-level authority is active.
+if (process.env.TRUST_PROJECTION_SECRET && process.env.TRUST_PROJECTION_URL && process.env.TRUST_WRITE_SOURCE === 'postgres') {
+  const trustOutboxIntervalMs = Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))
+  const trustOutboxTimer = setInterval(() => {
+    runMaintenance(() => flushTrustProjectionOutboxFromRepository()).catch(error => console.error(JSON.stringify({ event: 'trust_projection_outbox_failed', error: error.message })))
+  }, trustOutboxIntervalMs)
+  trustOutboxTimer.unref?.()
 }
 
 app.listen(PORT, () => {

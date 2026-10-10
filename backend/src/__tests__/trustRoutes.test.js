@@ -38,7 +38,13 @@ describe('trust route coverage', () => {
       '/team/verify',
       '/share-profile/preview',
       '/admin/operations',
+      '/admin/metrics',
       '/admin/proofs/:proofId/review',
+      '/admin/overrides',
+      '/admin/users/:userId/overrides',
+      '/admin/users/:userId/overrides/:overrideId',
+      '/reverification/due',
+      '/internal/reverification/run',
       '/internal/adapters/:provider/ingest',
       '/revenue/credentials',
       '/revenue/connect',
@@ -68,6 +74,14 @@ describe('trust route coverage', () => {
       '/team/hris/:provider/verify',
       '/team/credential/:provider',
       '/internal/team/refresh',
+      '/identity',
+      '/identity/connect',
+      '/identity/credentials',
+      '/identity/verify',
+      '/identity/registry/verify',
+      '/identity/screening',
+      '/identity/:provider',
+      '/internal/identity/refresh',
       '/milestone/evidence',
       '/milestone/evidence/:evidenceId/finalize',
     ]) {
@@ -76,10 +90,10 @@ describe('trust route coverage', () => {
   })
 
   it('keeps the frontend client and backend in sync on the advanced endpoints', () => {
-    const clientPath = fileURLToPath(new URL('../../../../new-frontend/frontend/src/lib/api/trust.ts', import.meta.url))
+    const clientPath = fileURLToPath(new URL('../../../../new-frontend/frontend/src/lib/api/trustRoutes.ts', import.meta.url))
     const source = readFileSync(clientPath, 'utf8')
-    for (const fragment of ['/trust/adapters/', '/trust/refresh-plan', '/trust/continuous-verification/run', '/trust/milestone', '/trust/milestone/review', '/trust/team/invite', '/trust/team/verify', '/trust/share-profile/preview', '/trust/revenue/connect', '/trust/revenue/verify', '/trust/revenue/credentials', '/trust/analytics/connect', '/trust/analytics/verify', '/trust/analytics/credentials', '/trust/shipping/connect', '/trust/shipping/verify', '/trust/shipping/credentials', '/trust/team/connect', '/trust/team/credentials', '/trust/team/work-email/challenge', '/trust/team/work-email/verify', '/trust/team/registry/verify', '/trust/team/hris/verify', '/trust/team/credential/', '/trust/milestone/evidence', '/trust/milestone/evidence/']) {
-      expect(source.includes(fragment), `frontend trust.ts no longer references ${fragment}`).toBe(true)
+    for (const fragment of ['/trust/adapters/', '/trust/refresh-plan', '/trust/continuous-verification/run', '/trust/milestone', '/trust/milestone/review', '/trust/team/invite', '/trust/team/verify', '/trust/share-profile/preview', '/trust/revenue/connect', '/trust/revenue/verify', '/trust/revenue/credentials', '/trust/analytics/connect', '/trust/analytics/verify', '/trust/analytics/credentials', '/trust/shipping/connect', '/trust/shipping/verify', '/trust/shipping/credentials', '/trust/team/connect', '/trust/team/credentials', '/trust/team/work-email/challenge', '/trust/team/work-email/verify', '/trust/team/registry/verify', '/trust/team/hris/verify', '/trust/team/credential/', '/trust/milestone/evidence', '/trust/milestone/evidence/', '/trust/identity/connect', '/trust/identity/credentials', '/trust/identity/verify', '/trust/identity/registry/verify', '/trust/identity/screening', '/trust/identity/']) {
+      expect(source.includes(fragment), `frontend trust route registry no longer declares ${fragment}`).toBe(true)
     }
   })
 })

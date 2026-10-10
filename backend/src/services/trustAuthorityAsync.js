@@ -14,7 +14,10 @@ import { safeFetch } from './outboundHttpService.js'
 import { trustCore, trustScoreFor } from './trustVerificationAuthority.js'
 import { resolveActivePolicy, computeTrustV3 } from './trustPolicy.js'
 import { evaluateAntiGaming } from './trustAntiGaming.js'
+import { applyScoreOverrides } from './trustScoreOverrides.js'
+import { expiryForSource } from '../config/trustSyncIntervals.js'
 import * as repo from '../repositories/trustRepository.js'
+import { incTrustMetric, observeTrustLatency } from './trustMetrics.js'
 
 const { sourceWeights, supportedSources, clean, hash, token, publicMetadata, normalizeDomain, attestationFromMethod } = trustCore
 
@@ -22,10 +25,12 @@ const clamp = (value, min, max) => Math.min(max, Math.max(min, value))
 
 function computeScore(scope, userId, projectId) {
   const policy = resolveActivePolicy()
-  if (policy.active === 'trust-v3') {
-    return computeTrustV3({ proofs: scope.trustVerificationProofs, skills: scope.verifiedSkills, policy: policy.policy })
-  }
-  return { ...trustScoreFor(scope, userId, projectId), policyVersion: 'trust-v2' }
+  const base = policy.active === 'trust-v3'
+    ? computeTrustV3({ proofs: scope.trustVerificationProofs, skills: scope.verifiedSkills, policy: policy.policy })
+    : { ...trustScoreFor(scope, userId, projectId), policyVersion: 'trust-v2' }
+  // WS9: admin overrides are applied last so they can never be silently erased
+  // by a recompute. They surface in the breakdown/signals and carry an expiry.
+  return applyScoreOverrides(base, scope.trustScoreOverrides, { userId, projectId })
 }
 
 function computeProfile(scope, userId, projectId) {
@@ -95,7 +100,6 @@ function buildProof(userId, input, policy) {
   const resolvedAttestation = status === 'verified' ? (input.attestationLevel || attestationFromMethod(input.method, status)) : 'self'
   const includeMetrics = status === 'verified' && (resolvedAttestation === 'provider_observed' || resolvedAttestation === 'third_party_attested')
   const metadata = publicMetadata(source, input.metadata, { includeMetrics })
-  const defaultTtlDays = source === 'github' ? 1 : source === 'linkedin' ? 30 : 90
   return {
     ok: true,
     proof: {
@@ -110,7 +114,7 @@ function buildProof(userId, input, policy) {
       points: Number(sourceWeights[source] || 0),
       metadata,
       evidenceHash: clean(input.evidenceHash, 128) || hash({ source, userId, metadata }),
-      expiresAt: input.expiresAt || new Date(Date.now() + defaultTtlDays * 86400000).toISOString(),
+      expiresAt: input.expiresAt || expiryForSource(source, now),
       verifiedAt: status === 'verified' ? now : null,
       attestationLevel: resolvedAttestation,
       correlationGroup: input.correlationGroup || policy.policy?.correlationGroups?.[source] || null,
@@ -149,9 +153,31 @@ async function writeProfileAndProjection(client, userId, projectId, now, policy)
   return computed
 }
 
+// WS9: recompute + persist a user's profile/snapshot/outbox from current rows.
+// Used by the reverification scheduler after expiring stale proofs/skills.
+export async function refreshTrustProfile(userId, projectId = null) {
+  const policy = resolveActivePolicy()
+  const now = nowIso()
+  return repo.withTrustTransaction(async client => {
+    const computed = await writeProfileAndProjection(client, userId, projectId, now, policy)
+    return {
+      trustScore: computed.trustScore,
+      tier: computed.tier,
+      verificationStatus: computed.verificationStatus,
+      breakdown: computed.breakdown,
+      signals: computed.signals,
+    }
+  })
+}
+
 export async function getPublicTrust(userId, projectId = null) {
   const scope = await repo.loadTrustScope(userId)
   return { ...toPublicProfile(computeProfile(scope, userId, projectId), userId, projectId), verifiedSkills: activeSkills(scope, userId, projectId) }
+}
+
+export async function getTrustProofs(userId, projectId = null) {
+  const proofs = await repo.listProofs(userId)
+  return projectId ? proofs.filter(proof => proof.projectId == null || proof.projectId === projectId) : proofs
 }
 
 export async function getTrustHistory(userId, limit = 50) {
@@ -160,9 +186,13 @@ export async function getTrustHistory(userId, limit = 50) {
 }
 
 export async function appendProof(userId, input = {}) {
+  const startedAt = Date.now()
   const policy = resolveActivePolicy()
   const built = buildProof(userId, input, policy)
-  if (!built.ok) return built
+  if (!built.ok) {
+    incTrustMetric('trust_proof_write_rejections_total', { reason: built.error || 'invalid' })
+    return built
+  }
   const proof = built.proof
   const now = nowIso()
   const outcome = await repo.withTrustTransaction(async client => {
@@ -205,6 +235,9 @@ export async function appendProof(userId, input = {}) {
     const computed = await writeProfileAndProjection(client, userId, proof.projectId, now, policy)
     return { computed, decision }
   })
+  // WS11: proof-write rate by source/status + write latency.
+  incTrustMetric('trust_proof_writes_total', { source: proof.source, status: proof.status })
+  observeTrustLatency('trust_write_ms', Date.now() - startedAt)
   return {
     ok: true,
     proof,
@@ -232,7 +265,7 @@ export async function addSkill(userId, input = {}) {
       confidence: clamp(Number(input.confidence ?? proof?.confidence ?? 0.75), 0, 1),
       evidenceHash: clean(input.evidenceHash || proof?.evidenceHash, 128) || hash({ userId, skill }),
       status: 'verified',
-      expiresAt: input.expiresAt || proof?.expiresAt || new Date(Date.now() + 180 * 86400000).toISOString(),
+      expiresAt: input.expiresAt || proof?.expiresAt || expiryForSource(proof?.source || input.source || 'email', now),
       policyVersion: policy.active,
       createdAt: now,
       updatedAt: now,

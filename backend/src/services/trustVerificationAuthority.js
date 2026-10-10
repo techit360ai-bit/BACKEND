@@ -4,6 +4,8 @@ import { createId, nowIso } from '../utils/api.js'
 import * as database from '../config/database.js'
 import { safeFetch } from './outboundHttpService.js'
 import { GITHUB_OAUTH_SCOPES_TRUST } from '../config/github.js'
+import { expiryForSource } from '../config/trustSyncIntervals.js'
+import { applyScoreOverrides } from './trustScoreOverrides.js'
 
 const readAuthorityDb = (...args) => database.readDb(...args)
 const updateAuthorityDb = mutator => {
@@ -21,7 +23,7 @@ const normalizeDomain = value => { try { return new URL(String(value).includes('
 // Canonical Trust Engine policy. The AI-router validates signed projections
 // against the same values, while the Node authority remains the source of
 // truth for proof lifecycle and score mutations.
-const sourceWeights = Object.freeze({ email: 10, phone: 10, github: 15, github_activity: 5, linkedin: 10, domain: 15, website: 15, organization: 10, deployment: 15, product_analytics: 10, revenue: 15, team: 10, milestone: 5 })
+const sourceWeights = Object.freeze({ email: 10, phone: 10, github: 15, github_activity: 5, linkedin: 10, domain: 15, website: 15, organization: 10, deployment: 15, product_analytics: 10, revenue: 15, team: 10, milestone: 5, identity: 18 })
 const supportedSources = new Set(Object.keys(sourceWeights))
 
 function actorOwnsProfile(db, userId) { return rows(db, 'profiles').some(row => row.id === userId) || rows(db, 'users').some(row => row.id === userId) }
@@ -46,7 +48,10 @@ const METRIC_METADATA_ALLOWED = ['provider', 'credentialSource', 'metricWindow',
   'companyNumber', 'jurisdiction', 'entityExists', 'officerVerified', 'roles',
   // WS7 milestone / attestation evidence.
   'milestoneType', 'count', 'evidenceObjectId', 'evidenceSha256', 'attestationProvider',
-  'envelopeId', 'issuer', 'contractId', 'revenueVerificationId']
+  'envelopeId', 'issuer', 'contractId', 'revenueVerificationId',
+  // WS8 founder identity / KYC + sanctions screening.
+  'identityKind', 'kycProvider', 'kycStatus', 'country', 'screeningStatus',
+  'screeningProvider', 'screenedAt', 'rescreenDays']
 
 function publicMetadata(source, metadata = {}, { includeMetrics = false } = {}) {
   const allowed = includeMetrics ? [...BASE_METADATA_ALLOWED, ...METRIC_METADATA_ALLOWED] : BASE_METADATA_ALLOWED
@@ -108,6 +113,13 @@ export function trustScoreFor(db, userId, projectId = null) {
       const observed = attested === 'provider_observed' || attested === 'third_party_attested'
       points = observed ? sourceWeights.milestone : sourceWeights.milestone * (Number(process.env.TRUST_ATTESTATION_SELF_WEIGHT) || 0.35)
     }
+    if (proof.source === 'identity') {
+      // A verified identity badge only carries full weight when a KYC/registry
+      // provider observed it; an admin-verified self claim is capped.
+      const attested = proof.attestationLevel || attestationFromMethod(proof.method, proof.status || 'verified')
+      const observed = attested === 'provider_observed' || attested === 'third_party_attested'
+      points = observed ? sourceWeights.identity : sourceWeights.identity * (Number(process.env.TRUST_ATTESTATION_SELF_WEIGHT) || 0.35)
+    }
     if (!points || breakdown[proof.source]) continue
     breakdown[proof.source] = points; score += points; signals.push(`${proof.source}_verified`)
     if (proof.source === 'github') { const activity = Math.min(sourceWeights.github_activity, Number(proof.metadata?.repoCount || 0) * 0.5 + Number(proof.metadata?.commitCount || 0) * 0.01 + Number(proof.metadata?.contributorCount || 0) * 0.25); if (activity > 0) { breakdown.github_activity = Math.round(activity * 100) / 100; score += activity; signals.push('github_activity') } }
@@ -126,7 +138,8 @@ export function trustScoreFor(db, userId, projectId = null) {
   if (skillPoints > 0) { breakdown.verified_skills = Math.round(skillPoints * 100) / 100; score += skillPoints; signals.push('verified_skills') }
   const trustScore = Math.min(100, Math.round(score * 100) / 100)
   const tier = trustScore >= 80 ? 'Highly Trusted' : trustScore >= 60 ? 'Verified' : trustScore >= 30 ? 'Building' : 'Claimed'
-  return { trustScore, tier, verificationStatus: trustScore > 0 ? 'verified' : 'unverified', breakdown, signals, proofCount: proofs.length, verifiedSkillCount: verifiedSkills.length }
+  const result = { trustScore, tier, verificationStatus: trustScore > 0 ? 'verified' : 'unverified', breakdown, signals, proofCount: proofs.length, verifiedSkillCount: verifiedSkills.length }
+  return applyScoreOverrides(result, rows(db, 'trustScoreOverrides'), { userId, projectId })
 }
 
 export function appendTrustProof(userId, input = {}) {
@@ -135,7 +148,7 @@ export function appendTrustProof(userId, input = {}) {
   const result = updateAuthorityDb(db => {
     if (!actorOwnsProfile(db, userId)) return { ok: false, error: 'profile_not_found' }
     const status = input.status === 'verified' ? 'verified' : input.status === 'failed' ? 'failed' : 'pending'
-    const now = nowIso(); const resolvedAttestation = status === 'verified' ? (input.attestationLevel || attestationFromMethod(input.method, status)) : 'self'; const includeMetrics = status === 'verified' && (resolvedAttestation === 'provider_observed' || resolvedAttestation === 'third_party_attested'); const proof = { id: createId('trust_proof'), userId, projectId: clean(input.projectId, 120) || null, source, method: clean(input.method || 'backend_adapter', 80), providerSubjectId: clean(input.providerSubjectId, 200) || null, status, confidence: Math.max(0, Math.min(1, Number(input.confidence ?? (status === 'verified' ? 0.95 : 0.5)))), points: Number(sourceWeights[source] || 0), metadata: publicMetadata(source, input.metadata, { includeMetrics }), evidenceHash: clean(input.evidenceHash, 128) || hash({ source, userId, metadata: publicMetadata(source, input.metadata, { includeMetrics }) }), attestationLevel: resolvedAttestation, expiresAt: input.expiresAt || new Date(Date.now() + (source === 'github' ? 86400000 : source === 'linkedin' ? 30 : 90) * 86400000).toISOString(), verifiedAt: status === 'verified' ? now : null, createdAt: now, updatedAt: now }
+    const now = nowIso(); const resolvedAttestation = status === 'verified' ? (input.attestationLevel || attestationFromMethod(input.method, status)) : 'self'; const includeMetrics = status === 'verified' && (resolvedAttestation === 'provider_observed' || resolvedAttestation === 'third_party_attested'); const proof = { id: createId('trust_proof'), userId, projectId: clean(input.projectId, 120) || null, source, method: clean(input.method || 'backend_adapter', 80), providerSubjectId: clean(input.providerSubjectId, 200) || null, status, confidence: Math.max(0, Math.min(1, Number(input.confidence ?? (status === 'verified' ? 0.95 : 0.5)))), points: Number(sourceWeights[source] || 0), metadata: publicMetadata(source, input.metadata, { includeMetrics }), evidenceHash: clean(input.evidenceHash, 128) || hash({ source, userId, metadata: publicMetadata(source, input.metadata, { includeMetrics }) }), attestationLevel: resolvedAttestation, expiresAt: input.expiresAt || expiryForSource(source, now), verifiedAt: status === 'verified' ? now : null, createdAt: now, updatedAt: now }
     rows(db, 'trustVerificationProofs').push(proof)
     rows(db, 'trustVerificationHistory').push({ id: createId('trust_event'), verificationId: proof.id, userId, projectId: proof.projectId, source, status, confidence: proof.confidence, metadataHash: proof.evidenceHash, eventType: `trust_${status}`, createdAt: now, expiresAt: proof.expiresAt })
     const score = trustScoreFor(db, userId, proof.projectId)
@@ -158,7 +171,7 @@ export function addVerifiedSkill(userId, input = {}) {
     if (!proof && input.source !== 'admin_review') return { ok: false, error: 'verified_proof_required' }
     const now = nowIso(); const existing = rows(db, 'verifiedSkills').find(row => row.userId === userId && row.skill === skill && row.status === 'verified')
     const row = existing || { id: createId('verified_skill'), userId, projectId: clean(input.projectId, 120) || null, skill, status: 'verified', createdAt: now }
-    Object.assign(row, { source: clean(input.source || proof?.source || 'admin_review', 80), proofId: proof?.id || input.proofId || null, confidence: Math.max(0, Math.min(1, Number(input.confidence ?? proof?.confidence ?? 0.75))), evidenceHash: clean(input.evidenceHash || proof?.evidenceHash, 128) || hash({ userId, skill }), expiresAt: input.expiresAt || proof?.expiresAt || new Date(Date.now() + 180 * 86400000).toISOString(), updatedAt: now })
+    Object.assign(row, { source: clean(input.source || proof?.source || 'admin_review', 80), proofId: proof?.id || input.proofId || null, confidence: Math.max(0, Math.min(1, Number(input.confidence ?? proof?.confidence ?? 0.75))), evidenceHash: clean(input.evidenceHash || proof?.evidenceHash, 128) || hash({ userId, skill }), expiresAt: input.expiresAt || proof?.expiresAt || expiryForSource(proof?.source || input.source || 'email', now), updatedAt: now })
     if (!existing) rows(db, 'verifiedSkills').push(row)
     return { ok: true, skill: row }
   })
@@ -172,6 +185,13 @@ export function trustProfileFor(db, userId, projectId = null) {
 }
 
 export function publicTrustFor(userId, projectId = null, sourceDb = null) { const db = sourceDb || readAuthorityDb(); const trust = trustProfileFor(db, userId, projectId); const activeProofIds = new Set(activeProofs(db, userId, projectId).map(row => row.id)); const skills = rows(db, 'verifiedSkills').filter(row => row.userId === userId && row.status === 'verified' && (!projectId || row.projectId == null || row.projectId === projectId) && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now()) && (row.source === 'admin_review' || (row.proofId && activeProofIds.has(row.proofId)))).map(row => ({ skill: row.skill, source: row.source, confidence: row.confidence, verifiedAt: row.updatedAt, expiresAt: row.expiresAt })); return { ...trust, verifiedSkills: skills } }
+
+export function trustProofsFor(userId, projectId = null) {
+  const db = readAuthorityDb()
+  return rows(db, 'trustVerificationProofs')
+    .filter(row => row.userId === userId && (!projectId || row.projectId == null || row.projectId === projectId))
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+}
 
 export function trustHistoryFor(userId, limit = 50) { const db = readAuthorityDb(); return rows(db, 'trustVerificationHistory').filter(row => row.userId === userId).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, Math.min(100, Math.max(1, Number(limit) || 50))) }
 
