@@ -1,21 +1,21 @@
 import { computeUserState, getSessionContext, createCheckpoint, clearCheckpoint } from '../services/contextService.js'
 import { availableContexts, getActiveContext, switchContext as switchActiveContext, touchContext } from '../services/multiRoleContextService.js'
 
-export function sessionContext(req, res) {
+export async function sessionContext(req, res) {
   const role = req.user.role === 'organization' ? 'organisation' : (req.user.role || 'explorer')
-  computeUserState(req.user.id, role)
-  const context = getSessionContext(req.user.id, role)
+  await computeUserState(req.user.id, role)
+  const context = await getSessionContext(req.user.id, role)
   return res.json(context)
 }
 
-export function postCheckpoint(req, res) {
-  const result = createCheckpoint(req.user.id, req.body)
+export async function postCheckpoint(req, res) {
+  const result = await createCheckpoint(req.user.id, req.body)
   return res.status(201).json(result)
 }
 
-export function deleteCheckpoint(req, res) {
+export async function deleteCheckpoint(req, res) {
   const { type, referenceId } = req.params
-  const result = clearCheckpoint(req.user.id, type, referenceId)
+  const result = await clearCheckpoint(req.user.id, type, referenceId)
   return res.json(result)
 }
 

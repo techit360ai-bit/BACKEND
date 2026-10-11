@@ -149,6 +149,32 @@ export async function deleteRecord(client, collectionName, recordId, { expectedV
   return true
 }
 
+// Scoped row reads for §5 domain cutovers: one bounded query per collection
+// instead of a whole-database snapshot. ownerFields close the gap where a row's
+// owner lives in a payload field other than owner_id (collaboratorId,
+// assigneeId, applicantId, ...).
+export async function listRecordsForOwner(client, collectionName, value, { ownerFields = [] } = {}) {
+  const clauses = ownerFields.map((field, index) => `payload->>'${field}'=$${index + 2}`)
+  const where = [`collection_name=$1`, 'deleted_at IS NULL', `(owner_id=$2${clauses.length ? ` OR ${clauses.join(' OR ')}` : ''})`]
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records WHERE ${where.join(' AND ')} ORDER BY updated_at DESC`,
+    [collectionName, value, ...ownerFields.map(() => value)],
+  )
+  return result.rows.map(mapRow)
+}
+
+// Soft-delete every row a subject owns in a collection (GDPR erasure).
+export async function deleteRecordsForOwner(client, collectionName, value, { ownerFields = [] } = {}) {
+  const clauses = ownerFields.map((field, index) => `payload->>'${field}'=$${index + 2}`)
+  const where = [`collection_name=$1`, 'deleted_at IS NULL', `(owner_id=$2${clauses.length ? ` OR ${clauses.join(' OR ')}` : ''})`]
+  const result = await client.query(
+    `UPDATE platform_collection_records SET deleted_at=now(), version=version+1, updated_at=now()
+     WHERE ${where.join(' AND ')}`,
+    [collectionName, value, ...ownerFields.map(() => value)],
+  )
+  return result.rowCount
+}
+
 export async function closePlatformPool() {
   if (pool) await pool.end()
   pool = null

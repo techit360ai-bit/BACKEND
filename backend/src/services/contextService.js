@@ -1,5 +1,6 @@
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
+import { contextStoreEnabled, loadContextSources, loadProfile, saveContextRow, deleteContextCheckpoint } from '../repositories/contextRepository.js'
 
 // State machines by role
 const FOUNDER_STATES = ['idea', 'validating', 'building_mvp', 'beta_testing', 'pre_launch', 'launched', 'scaling', 'fundraising']
@@ -56,16 +57,39 @@ function computeOrganisationState(db, userId) {
   return 'setup'
 }
 
-export function computeUserState(userId, role) {
-  const db = readAuthorityDb()
-  let currentState = 'exploring'
-
+function computeStateForRole(db, userId, role) {
   switch (role) {
-    case 'founder': currentState = computeFounderState(db, userId); break
-    case 'collaborator': currentState = computeCollaboratorState(db, userId); break
-    case 'investor': currentState = computeInvestorState(db, userId); break
-    case 'organisation': currentState = computeOrganisationState(db, userId); break
+    case 'founder': return computeFounderState(db, userId)
+    case 'collaborator': return computeCollaboratorState(db, userId)
+    case 'investor': return computeInvestorState(db, userId)
+    case 'organisation': return computeOrganisationState(db, userId)
+    default: return 'exploring'
   }
+}
+
+export async function computeUserState(userId, role) {
+  if (contextStoreEnabled()) {
+    const db = await loadContextSources(userId)
+    const currentState = computeStateForRole(db, userId, role)
+    const existing = (db.userStateMachine || []).find(s => s.userId === userId)
+    let row
+    if (existing) {
+      row = { ...existing }
+      if (existing.currentState !== currentState) {
+        row.previousState = existing.currentState
+        row.currentState = currentState
+        row.stateEnteredAt = nowIso()
+      }
+      row.updatedAt = nowIso()
+    } else {
+      row = { id: createId('state'), userId, role, currentState, previousState: null, stateEnteredAt: nowIso(), stuckSignals: [], updatedAt: nowIso() }
+    }
+    await saveContextRow('userStateMachine', row)
+    return { currentState, states: statesForRole(role) }
+  }
+
+  const db = readAuthorityDb()
+  const currentState = computeStateForRole(db, userId, role)
 
   // Persist state
   const existing = (db.userStateMachine || []).find(s => s.userId === userId)
@@ -94,9 +118,10 @@ export function computeUserState(userId, role) {
   return { currentState, states: statesForRole(role) }
 }
 
-export function getSessionContext(userId, role) {
-  const db = readAuthorityDb()
-
+// Pure builder: reads the already-loaded collections and returns the context
+// payload. The new session log is persisted by the caller AFTER this runs so
+// "last active" keeps reflecting the previous visit.
+function buildSessionContext(db, profile, userId, role) {
   // 1. Last activity
   const sessionLogs = (db.userSessionLogs || [])
     .filter(s => s.userId === userId)
@@ -123,18 +148,8 @@ export function getSessionContext(userId, role) {
     .filter(n => n.userId === userId && n.createdAt > lastActiveAt && !n.read)
 
   // 6. Decay factor (founders/orgs)
-  const profile = (db.profiles || []).find(p => p.id === userId)
   const decayFactor = profile?.decayFactor ?? profile?.decay_factor ?? 1.0
   const gsisScore = profile?.credibilityScore ?? profile?.gsis ?? 0
-
-  // Log this session
-  if (!db.userSessionLogs) db.userSessionLogs = []
-  db.userSessionLogs.push({
-    id: createId('sess'),
-    userId,
-    createdAt: nowIso(),
-  })
-  writeAuthorityDb(db)
 
   // Build response
   const greeting = buildGreeting(role, profile, daysSinceActive)
@@ -167,6 +182,30 @@ export function getSessionContext(userId, role) {
   }
 }
 
+export async function getSessionContext(userId, role) {
+  if (contextStoreEnabled()) {
+    const db = await loadContextSources(userId)
+    const profile = await loadProfile(userId)
+    const context = buildSessionContext(db, profile, userId, role)
+    await saveContextRow('userSessionLogs', { id: createId('sess'), userId, createdAt: nowIso() })
+    return context
+  }
+
+  const db = readAuthorityDb()
+  const profile = (db.profiles || []).find(p => p.id === userId)
+  const context = buildSessionContext(db, profile, userId, role)
+
+  // Log this session
+  if (!db.userSessionLogs) db.userSessionLogs = []
+  db.userSessionLogs.push({
+    id: createId('sess'),
+    userId,
+    createdAt: nowIso(),
+  })
+  writeAuthorityDb(db)
+  return context
+}
+
 function buildGreeting(role, profile, daysSinceActive) {
   const firstName = (profile?.firstName || profile?.name || '').split(' ')[0] || 'there'
   if (daysSinceActive === null || daysSinceActive === 0) {
@@ -178,7 +217,24 @@ function buildGreeting(role, profile, daysSinceActive) {
   return { text: `Welcome back, ${firstName}.` }
 }
 
-export function createCheckpoint(userId, body) {
+export async function createCheckpoint(userId, body) {
+  if (contextStoreEnabled()) {
+    const db = await loadContextSources(userId)
+    const existing = (db.userContextCheckpoints || []).find(c => c.userId === userId && c.checkpointType === body.checkpointType && c.referenceId === body.referenceId)
+    let row
+    if (existing) {
+      row = { ...existing, description: body.description || existing.description, nextStep: body.nextStep || existing.nextStep, actionUrl: body.actionUrl || existing.actionUrl, cta: body.cta || existing.cta, updatedAt: nowIso() }
+    } else {
+      row = {
+        id: createId('ckpt'), userId, checkpointType: body.checkpointType || 'general', referenceId: body.referenceId || createId('ref'),
+        description: body.description || '', nextStep: body.nextStep || '', actionUrl: body.actionUrl || null, cta: body.cta || 'Continue',
+        expiresAt: body.expiresAt || null, createdAt: nowIso(), updatedAt: nowIso(),
+      }
+    }
+    await saveContextRow('userContextCheckpoints', row)
+    return { ok: true }
+  }
+
   const db = readAuthorityDb()
   if (!db.userContextCheckpoints) db.userContextCheckpoints = []
 
@@ -212,7 +268,11 @@ export function createCheckpoint(userId, body) {
   return { ok: true }
 }
 
-export function clearCheckpoint(userId, checkpointType, referenceId) {
+export async function clearCheckpoint(userId, checkpointType, referenceId) {
+  if (contextStoreEnabled()) {
+    await deleteContextCheckpoint(userId, checkpointType, referenceId)
+    return { ok: true }
+  }
   const db = readAuthorityDb()
   if (!db.userContextCheckpoints) return { ok: true }
   db.userContextCheckpoints = db.userContextCheckpoints.filter(c =>
@@ -222,7 +282,19 @@ export function clearCheckpoint(userId, checkpointType, referenceId) {
   return { ok: true }
 }
 
-export function updateSuggestions(userId, suggestions) {
+export async function updateSuggestions(userId, suggestions) {
+  if (contextStoreEnabled()) {
+    const db = await loadContextSources(userId)
+    const existing = (db.userSuggestions || []).find(s => s.userId === userId)
+    let row
+    if (existing) {
+      row = { ...existing, doNow: suggestions.doNow || null, weeklyPriority: suggestions.weeklyPriority || null, updatedAt: nowIso() }
+    } else {
+      row = { id: createId('sugg'), userId, doNow: suggestions.doNow || null, weeklyPriority: suggestions.weeklyPriority || null, createdAt: nowIso(), updatedAt: nowIso() }
+    }
+    await saveContextRow('userSuggestions', row)
+    return { ok: true }
+  }
   const db = readAuthorityDb()
   if (!db.userSuggestions) db.userSuggestions = []
   const existing = db.userSuggestions.find(s => s.userId === userId)
