@@ -156,7 +156,7 @@ export async function adminAiRouterTelemetry(_req, res) {
   return res.json({ source: 'ai-router', telemetry: result.telemetry, generatedAt: new Date().toISOString() })
 }
 export function adminSecurityPosture(_req, res) { return res.json(securityPostureSnapshot()) }
-export function adminSecurityEvents(req, res) { return res.json({ events: listSecurityEvents(req.query.limit) }) }
+export async function adminSecurityEvents(req, res) { return res.json({ events: await listSecurityEvents(req.query.limit) }) }
 export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
 export function adminList(req, res) {
