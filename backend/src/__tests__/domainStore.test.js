@@ -105,3 +105,72 @@ describe('domain row-level store — endorsements + investor (§5 sub-slice 1)',
     expect(mocks.readDb).toHaveBeenCalled()
   })
 })
+
+const orgProject = { id: 'p1', organizationId: 'org1', title: 'FinPay', industry: 'FinTech', stage: 'launch', gsisScore: 82, marketReadyScore: 70, mrr: 500, progress: 60, memberCount: 4, hasWorkspace: true }
+
+describe('domain row-level store — organization intelligence (§5 sub-slice 2)', () => {
+  it('lists organization projects through the org scope', async () => {
+    usedBounded({ projects: [orgProject] })
+    const result = await svc.listOrganizationProjectsAsync('org1')
+    expect(result.projects).toHaveLength(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'org1', organization: true })
+  })
+
+  it('creates an organization project through the org-scoped mutation', async () => {
+    usedBounded({ projects: [] })
+    const result = await svc.createOrganizationProjectAsync('org1', { title: 'Acme', stage: 'idea' })
+    expect(result.project.title).toBe('Acme')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'org1', organization: true })
+  })
+
+  it('derives cohort health from the org projects', async () => {
+    usedBounded({ projects: [orgProject] })
+    const result = await svc.organizationCohortHealthAsync('org1')
+    expect(result.summary.total).toBe(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'org1', organization: true })
+  })
+
+  it('derives impact metrics from the org projects', async () => {
+    usedBounded({ projects: [orgProject] })
+    const result = await svc.organizationImpactAsync('org1', { template: 'quarterly' })
+    expect(result.metrics.startups).toBe(1)
+    expect(result.metrics.totalMrr).toBe(500)
+  })
+
+  it('persists an organization KPI target', async () => {
+    usedBounded({ orgKpiTargets: [] })
+    const result = await svc.saveOrganizationKpiTargetAsync('org1', { metric: 'mrr', target: 1000 })
+    expect(result.ok).toBe(true)
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'org1', organization: true })
+  })
+
+  it('publishes an organization project to deal flow', async () => {
+    usedBounded({ projects: [orgProject], dealFlowSnapshots: [] })
+    const result = await svc.publishOrganizationProjectAsync('org1', { projectId: 'p1' })
+    expect(result.ok).toBe(true)
+    expect(result.snapshotId).toBeTruthy()
+  })
+
+  it('reads the demo-day pipeline and analytics', async () => {
+    usedBounded({ projects: [orgProject], dealFlowSnapshots: [{ id: 's1', organizationId: 'org1', projectId: 'p1', startupName: 'FinPay' }], investorWatchlists: [{ id: 'w1', investorId: 'inv1', projectId: 'p1' }] })
+    const pipeline = await svc.demoDayPipelineAsync('org1')
+    expect(pipeline.pipeline).toHaveLength(1)
+    const analytics = await svc.organizationDemoDayAnalyticsAsync('org1')
+    expect(analytics.publishedCount).toBe(1)
+    expect(analytics.totalWatchlisted).toBe(1)
+  })
+
+  it('matches investors from the bounded investor profile window', async () => {
+    usedBounded({ projects: [orgProject], profiles: [{ id: 'inv1', role: 'investor', industries: ['FinTech'], stagePreference: 'launch', checkSize: 25000 }] })
+    const result = await svc.investorMatchesAsync('org1', 'p1')
+    expect(result.matches).toHaveLength(1)
+    expect(result.matches[0].investorId).toBe('inv1')
+  })
+
+  it('renders the organization dashboard from the owner-scoped fallback rows', async () => {
+    usedBounded({ organizationDashboards: [{ id: 'd1', ownerId: 'org1', metrics: { activePrograms: 2 } }], hackathons: [{ id: 'h1', ownerId: 'org1' }] })
+    const result = await svc.organizationDashboardAsync('org1')
+    expect(result.dashboard.id).toBe('d1')
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'org1', organization: true })
+  })
+})

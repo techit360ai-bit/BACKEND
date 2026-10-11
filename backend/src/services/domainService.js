@@ -489,6 +489,10 @@ function ruleBasedIntervention(row) {
  */
 export async function organizationInterventions(userId, token) {
   const { cohort } = organizationCohortHealth(userId)
+  return buildInterventions(cohort, token)
+}
+
+async function buildInterventions(cohort, token) {
   const atRisk = cohort.filter(r => r.band !== 'green').slice(0, 10)
 
   let aiUsed = false
@@ -2497,4 +2501,61 @@ export async function listWatchlistPreferencesAsync(userId) {
 }
 export async function updateWatchlistPreferencesAsync(userId, body = {}) {
   return domainWrite({ userId, investor: true }, () => updateWatchlistPreferences(userId, body), () => updateWatchlistPreferences(userId, body))
+}
+
+// Row-level (§5) wrappers — sub-slice: organization intelligence.
+const orgScope = userId => ({ userId, organization: true })
+
+export async function listOrganizationProjectsAsync(userId) {
+  return domainRead(orgScope(userId), () => listOrganizationProjects(userId), () => listOrganizationProjects(userId))
+}
+export async function createOrganizationProjectAsync(userId, body = {}) {
+  return domainWrite(orgScope(userId), () => createOrganizationProject(userId, body), () => createOrganizationProject(userId, body))
+}
+export async function updateOrganizationProjectAsync(userId, projectId, body = {}) {
+  return domainWrite(orgScope(userId), () => updateOrganizationProject(userId, projectId, body), () => updateOrganizationProject(userId, projectId, body))
+}
+export async function organizationCohortHealthAsync(userId, filters = {}) {
+  return domainRead(orgScope(userId), () => organizationCohortHealth(userId, filters), () => organizationCohortHealth(userId, filters))
+}
+export async function organizationInterventionsAsync(userId, token) {
+  if (!domainStoreEnabled()) return organizationInterventions(userId, token)
+  try {
+    const { cohort } = await runDomainRead(orgScope(userId), () => organizationCohortHealth(userId))
+    return await buildInterventions(cohort, token)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'domain_read_failed', slice: 'organization', error: error.message }))
+    if (!domainFallbackEnabled()) throw error
+    return organizationInterventions(userId, token)
+  }
+}
+export async function organizationImpactAsync(userId, options = {}) {
+  return domainRead(orgScope(userId), () => organizationImpact(userId, options), () => organizationImpact(userId, options))
+}
+export async function organizationKpiTargetsAsync(userId) {
+  return domainRead(orgScope(userId), () => organizationKpiTargets(userId), () => organizationKpiTargets(userId))
+}
+export async function saveOrganizationKpiTargetAsync(userId, body = {}) {
+  return domainWrite(orgScope(userId), () => saveOrganizationKpiTarget(userId, body), () => saveOrganizationKpiTarget(userId, body))
+}
+export async function demoDayPipelineAsync(userId, options = {}) {
+  return domainRead(orgScope(userId), () => demoDayPipeline(userId, options), () => demoDayPipeline(userId, options))
+}
+export async function publishOrganizationProjectAsync(userId, body = {}) {
+  return domainWrite(orgScope(userId), () => publishOrganizationProject(userId, body), () => publishOrganizationProject(userId, body))
+}
+export async function investorMatchesAsync(userId, projectId) {
+  return domainRead(orgScope(userId), () => investorMatches(userId, projectId), () => investorMatches(userId, projectId))
+}
+export async function organizationDemoDayEventsAsync(userId) {
+  return domainRead(orgScope(userId), () => organizationDemoDayEvents(userId), () => organizationDemoDayEvents(userId))
+}
+export async function createOrganizationDemoDayEventAsync(userId, body = {}) {
+  return domainWrite(orgScope(userId), () => createOrganizationDemoDayEvent(userId, body), () => createOrganizationDemoDayEvent(userId, body))
+}
+export async function organizationDemoDayAnalyticsAsync(userId) {
+  return domainRead(orgScope(userId), () => organizationDemoDayAnalytics(userId), () => organizationDemoDayAnalytics(userId))
+}
+export async function organizationDashboardAsync(userId) {
+  return domainRead(orgScope(userId), () => organizationDashboard(userId), () => organizationDashboard(userId))
 }

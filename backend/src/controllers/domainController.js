@@ -21,7 +21,7 @@ import {
   createEndorsementAsync,
   createIntake,
   createInvestorCollectionAsync,
-  createOrganizationProject,
+  createOrganizationProjectAsync,
   createPaymentIntent,
   createPaymentIntentAsync,
   createProject,
@@ -50,18 +50,18 @@ import {
   listHackathons,
   listHackathonRegistrations,
   listIntakes,
-  listOrganizationProjects,
-  organizationCohortHealth,
-  organizationInterventions,
-  organizationImpact,
-  organizationKpiTargets,
-  saveOrganizationKpiTarget,
-  demoDayPipeline,
-  publishOrganizationProject,
-  investorMatches,
-  organizationDemoDayEvents,
-  createOrganizationDemoDayEvent,
-  organizationDemoDayAnalytics,
+  listOrganizationProjectsAsync,
+  organizationCohortHealthAsync,
+  organizationInterventionsAsync,
+  organizationImpactAsync,
+  organizationKpiTargetsAsync,
+  saveOrganizationKpiTargetAsync,
+  demoDayPipelineAsync,
+  publishOrganizationProjectAsync,
+  investorMatchesAsync,
+  organizationDemoDayEventsAsync,
+  createOrganizationDemoDayEventAsync,
+  organizationDemoDayAnalyticsAsync,
   listProjects,
   listProjectsAsync,
   listWatchlistAsync,
@@ -76,7 +76,7 @@ import {
   listWorkspaces,
   listWorkspacesAsync,
   logHackathonCheckIn,
-  organizationDashboard,
+  organizationDashboardAsync,
   promoteIntake,
   provisionHackathonWorkspace,
   provisionWorkspace,
@@ -93,7 +93,7 @@ import {
   applyToOpportunity,
   listApplications,
   publishProject,
-  updateOrganizationProject,
+  updateOrganizationProjectAsync,
   updateProject,
   walletList,
   walletAnalyticsAsync,
@@ -358,75 +358,75 @@ export function collaboratorScores(req, res) {
   return res.json(getCollaboratorScores(req.user.id))
 }
 
-export function orgDashboard(req, res) {
-  return res.json(organizationDashboard(req.user.id))
+export async function orgDashboard(req, res) {
+  return res.json(await organizationDashboardAsync(req.user.id))
 }
 
-export function organizationProjects(req, res) {
-  return res.json(listOrganizationProjects(req.user.id))
+export async function organizationProjects(req, res) {
+  return res.json(await listOrganizationProjectsAsync(req.user.id))
 }
 
-export function organizationProjectCreate(req, res) {
+export async function organizationProjectCreate(req, res) {
   const title = requireTitle(req, res)
   if (!title) return
-  return created(res, createOrganizationProject(req.user.id, { ...req.body, title }))
+  return created(res, await createOrganizationProjectAsync(req.user.id, { ...req.body, title }))
 }
 
-export function organizationProjectPatch(req, res) {
-  const project = updateOrganizationProject(req.user.id, req.params.projectId, req.body)
+export async function organizationProjectPatch(req, res) {
+  const project = await updateOrganizationProjectAsync(req.user.id, req.params.projectId, req.body)
   if (!project) return notFound(res, 'Project not found')
   return res.json({ project })
 }
 
-export function orgCohortHealth(req, res) {
+export async function orgCohortHealth(req, res) {
   const { stage, riskLevel } = req.query
-  return res.json(organizationCohortHealth(req.user.id, { stage, riskLevel }))
+  return res.json(await organizationCohortHealthAsync(req.user.id, { stage, riskLevel }))
 }
 
 export async function orgInterventions(req, res) {
-  return res.json(await organizationInterventions(req.user.id, req.user.token))
+  return res.json(await organizationInterventionsAsync(req.user.id, req.user.token))
 }
 
-export function orgImpact(req, res) {
-  return res.json(organizationImpact(req.user.id, { template: req.query.template }))
+export async function orgImpact(req, res) {
+  return res.json(await organizationImpactAsync(req.user.id, { template: req.query.template }))
 }
 
-export function orgKpiTargets(req, res) {
-  return res.json(organizationKpiTargets(req.user.id))
+export async function orgKpiTargets(req, res) {
+  return res.json(await organizationKpiTargetsAsync(req.user.id))
 }
 
-export function orgKpiTargetSave(req, res) {
-  const result = saveOrganizationKpiTarget(req.user.id, req.body)
+export async function orgKpiTargetSave(req, res) {
+  const result = await saveOrganizationKpiTargetAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return res.json(result)
 }
 
-export function orgDemoDayPipeline(req, res) {
-  return res.json(demoDayPipeline(req.user.id, { threshold: req.query.threshold }))
+export async function orgDemoDayPipeline(req, res) {
+  return res.json(await demoDayPipelineAsync(req.user.id, { threshold: req.query.threshold }))
 }
 
-export function orgDemoDayPublish(req, res) {
-  const result = publishOrganizationProject(req.user.id, req.body)
+export async function orgDemoDayPublish(req, res) {
+  const result = await publishOrganizationProjectAsync(req.user.id, req.body)
   if (!result.ok) return res.status(result.error === 'project_not_found' ? 404 : 400).json(result)
   return res.json(result)
 }
 
-export function orgInvestorMatches(req, res) {
-  return res.json(investorMatches(req.user.id, req.params.projectId))
+export async function orgInvestorMatches(req, res) {
+  return res.json(await investorMatchesAsync(req.user.id, req.params.projectId))
 }
 
-export function orgDemoDayEvents(req, res) {
-  return res.json(organizationDemoDayEvents(req.user.id))
+export async function orgDemoDayEvents(req, res) {
+  return res.json(await organizationDemoDayEventsAsync(req.user.id))
 }
 
-export function orgDemoDayEventCreate(req, res) {
-  const result = createOrganizationDemoDayEvent(req.user.id, req.body)
+export async function orgDemoDayEventCreate(req, res) {
+  const result = await createOrganizationDemoDayEventAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
 
-export function orgDemoDayAnalytics(req, res) {
-  return res.json(organizationDemoDayAnalytics(req.user.id))
+export async function orgDemoDayAnalytics(req, res) {
+  return res.json(await organizationDemoDayAnalyticsAsync(req.user.id))
 }
 
 export async function dealFlow(req, res) {

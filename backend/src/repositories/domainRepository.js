@@ -31,6 +31,12 @@ const OWNER_FIELDS = {
   dealRooms: ['investorId', 'ownerId', 'userId'],
   dataRooms: ['investorId', 'ownerId', 'userId'],
   investorReputation: ['investorId', 'ownerId', 'userId'],
+  // Organization intelligence slice.
+  projects: ['organizationId', 'ownerId', 'userId'],
+  orgKpiTargets: ['organizationId', 'ownerId', 'userId'],
+  orgDemoDayEvents: ['organizationId', 'ownerId', 'userId'],
+  organizationDashboards: ['ownerId', 'userId', 'organizationId'],
+  hackathons: ['organizationId', 'ownerId', 'userId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 
@@ -49,7 +55,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
   for (const name of writeCollections) db[name] = []
@@ -73,6 +79,18 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     mergeById(db.dealFlowSnapshots, await listRecordsForOwner(client, 'dealFlowSnapshots', userId, { ownerFields: OWNER_FIELDS.dealFlowSnapshots }))
     mergeById(db.dealFlowSnapshots, await listRecordsLimited(client, 'dealFlowSnapshots', { limit: domainCandidateLimit(), payloadField: 'visibility', payloadValue: 'public' }))
     await loadByIds(client, 'projects', [...db.investorWatchlists.map(row => row.projectId), ...db.dealFlowSnapshots.map(row => row.projectId)], db.projects)
+  }
+
+  if (userId && organization) {
+    mergeById(db.projects, await listRecordsForOwner(client, 'projects', userId, { ownerFields: ['organizationId'] }))
+    mergeById(db.orgKpiTargets, await listRecordsForOwner(client, 'orgKpiTargets', userId, { ownerFields: ['organizationId'] }))
+    mergeById(db.dealFlowSnapshots, await listRecordsForOwner(client, 'dealFlowSnapshots', userId, { ownerFields: ['organizationId', 'ownerId', 'userId'] }))
+    mergeById(db.orgDemoDayEvents, await listRecordsForOwner(client, 'orgDemoDayEvents', userId, { ownerFields: ['organizationId'] }))
+    mergeById(db.organizationDashboards, await listRecordsForOwner(client, 'organizationDashboards', userId, { ownerFields: ['ownerId', 'userId'] }))
+    mergeById(db.hackathons, await listRecordsForOwner(client, 'hackathons', userId, { ownerFields: ['ownerId'] }))
+    // Investor matchmaking / demo-day reach read cross-org rows: bounded windows.
+    mergeById(db.profiles, await listRecordsLimited(client, 'profiles', { limit: domainCandidateLimit(), payloadField: 'role', payloadValue: 'investor' }))
+    mergeById(db.investorWatchlists, await listRecordsLimited(client, 'investorWatchlists', { limit: domainCandidateLimit() }))
   }
 
   for (const entry of collections) {
