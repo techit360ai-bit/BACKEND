@@ -1,0 +1,121 @@
+// Row-level domain store (§5 cutover) — endorsements + investor views.
+//
+// `domainService` is a large aggregate; this store is cut over sub-slice by
+// sub-slice. This first slice resolves the caller's own rows for:
+//   * endorsements (authored + received) plus the author/subject profiles,
+//     subject users and referenced projects, and
+//   * the investor surface (watchlist + preferences, the caller's deal-flow
+//     snapshots plus public snapshots, and the referenced projects), and
+//   * the investor collection endpoints (capital pools, deal/data rooms,
+//     reputation) which are owner-scoped by the bound collection name.
+// Only changed rows are written back. Enabled with DOMAIN_SOURCE=postgres; the
+// snapshot fallback stays in the service until the authority is deleted.
+import { withPlatformTransaction, getRecord, upsertRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds } from './platformCollectionRepository.js'
+import { runDatabaseAuthority } from '../config/database.js'
+import { createId } from '../utils/api.js'
+
+export function domainStoreEnabled() {
+  return ['DOMAIN_SOURCE', 'DOMAIN_READ_SOURCE', 'DOMAIN_WRITE_SOURCE'].some(key => process.env[key] === 'postgres')
+}
+export function domainFallbackEnabled() { return process.env.DOMAIN_FALLBACK_SQLITE !== 'false' }
+export function domainCandidateLimit() { return Math.max(50, Number(process.env.DOMAIN_CANDIDATE_LIMIT || 500)) }
+
+// Owner-scoped collections this slice reads/writes, with the payload fields that
+// may carry the owner id (insertOwned sets the caller-supplied owner field).
+const OWNER_FIELDS = {
+  endorsements: ['authorId', 'subjectId'],
+  investorWatchlists: ['investorId', 'ownerId', 'userId'],
+  investorWatchlistPreferences: ['investorId', 'ownerId', 'userId'],
+  dealFlowSnapshots: ['investorId', 'ownerId', 'userId'],
+  capitalPools: ['investorId', 'ownerId', 'userId'],
+  dealRooms: ['investorId', 'ownerId', 'userId'],
+  dataRooms: ['investorId', 'ownerId', 'userId'],
+  investorReputation: ['investorId', 'ownerId', 'userId'],
+}
+const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
+
+function mergeById(target, additions) {
+  for (const row of additions) {
+    if (!row) continue
+    const index = target.findIndex(item => item.id === row.id)
+    if (index >= 0) target[index] = row
+    else target.push(row)
+  }
+  return target
+}
+
+async function loadByIds(client, collectionName, ids, target) {
+  const unique = [...new Set(ids.filter(Boolean).map(String))]
+  if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
+}
+
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+  const db = {}
+  const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
+  for (const name of writeCollections) db[name] = []
+  db.profiles = []
+  db.users = []
+  db.projects = []
+
+  if (userId && endorsements) {
+    mergeById(db.endorsements, await listRecordsForOwner(client, 'endorsements', userId, { ownerFields: OWNER_FIELDS.endorsements }))
+    mergeById(db.profiles, [await getRecord(client, 'profiles', userId)])
+    const profileIds = [subjectUserId]
+    for (const row of db.endorsements) profileIds.push(row.authorId, row.subjectId)
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
+    await loadByIds(client, 'users', [subjectUserId], db.users)
+    await loadByIds(client, 'projects', [...db.endorsements.map(row => row.projectId), ...projectIds], db.projects)
+  }
+
+  if (userId && investor) {
+    mergeById(db.investorWatchlists, await listRecordsForOwner(client, 'investorWatchlists', userId, { ownerFields: OWNER_FIELDS.investorWatchlists }))
+    mergeById(db.investorWatchlistPreferences, await listRecordsForOwner(client, 'investorWatchlistPreferences', userId, { ownerFields: OWNER_FIELDS.investorWatchlistPreferences }))
+    mergeById(db.dealFlowSnapshots, await listRecordsForOwner(client, 'dealFlowSnapshots', userId, { ownerFields: OWNER_FIELDS.dealFlowSnapshots }))
+    mergeById(db.dealFlowSnapshots, await listRecordsLimited(client, 'dealFlowSnapshots', { limit: domainCandidateLimit(), payloadField: 'visibility', payloadValue: 'public' }))
+    await loadByIds(client, 'projects', [...db.investorWatchlists.map(row => row.projectId), ...db.dealFlowSnapshots.map(row => row.projectId)], db.projects)
+  }
+
+  for (const entry of collections) {
+    const name = typeof entry === 'string' ? entry : entry.name
+    if (!name) continue
+    const field = (typeof entry === 'object' && entry.field) || (OWNER_FIELDS[name] ? OWNER_FIELDS[name][0] : 'userId')
+    mergeById(db[name], await listRecordsForOwner(client, name, userId, { ownerFields: [field] }))
+  }
+  return db
+}
+
+async function persistChanges(client, db, originals, writeCollections) {
+  for (const name of writeCollections) {
+    for (const row of db[name] || []) {
+      if (!row) continue
+      if (!row.id) row.id = createId('domain_row')
+      const key = `${name}:${row.id}`
+      const next = JSON.stringify(row)
+      if (originals.get(key) === next) continue
+      await upsertRecord(client, name, row, { operation: originals.has(key) ? 'update' : 'insert', idempotencyKey: `${key}:${next.length}:${Date.now()}` })
+    }
+  }
+}
+
+function writeCollectionsFor(options) {
+  return new Set([...WRITE_COLLECTIONS, ...(options.collections || []).map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
+}
+
+export async function runDomainRead(options, read) {
+  return withPlatformTransaction(async client => {
+    const db = await buildDomainDb(client, options)
+    return runDatabaseAuthority(db, async () => read())
+  }, { userId: options.userId || null })
+}
+
+export async function applyDomainMutation(options, mutate) {
+  return withPlatformTransaction(async client => {
+    const db = await buildDomainDb(client, options)
+    const writeCollections = writeCollectionsFor(options)
+    const originals = new Map()
+    for (const name of writeCollections) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
+    const result = await runDatabaseAuthority(db, async () => mutate())
+    await persistChanges(client, db, originals, writeCollections)
+    return result
+  }, { userId: options.userId || null })
+}

@@ -6,10 +6,10 @@ import {
 } from '../services/livekitService.js'
 import { invalidateDiscoveryType } from '../services/discoveryInfrastructure.js'
 import {
-  addWatchlist,
-  removeWatchlist,
-  listWatchlistPreferences,
-  updateWatchlistPreferences,
+  addWatchlistAsync,
+  removeWatchlistAsync,
+  listWatchlistPreferencesAsync,
+  updateWatchlistPreferencesAsync,
   collaboratorEarnings,
   collaboratorEquity,
   countersignContract,
@@ -18,9 +18,9 @@ import {
   createContract,
   createHackathon,
   createHackathonInvitation,
-  createEndorsement,
+  createEndorsementAsync,
   createIntake,
-  createInvestorCollection,
+  createInvestorCollectionAsync,
   createOrganizationProject,
   createPaymentIntent,
   createPaymentIntentAsync,
@@ -41,12 +41,12 @@ import {
   getNotificationPreferences,
   hackathonAggregates,
   hackathonStatus,
-  investorCollection,
-  investorDealFlow,
+  investorCollectionAsync,
+  investorDealFlowAsync,
   listAnalyses,
   listContracts,
   listContributions,
-  listEndorsements,
+  listEndorsementsAsync,
   listHackathons,
   listHackathonRegistrations,
   listIntakes,
@@ -64,7 +64,7 @@ import {
   organizationDemoDayAnalytics,
   listProjects,
   listProjectsAsync,
-  listWatchlist,
+  listWatchlistAsync,
   listWorkspaceCollection,
   listWorkspaceMembers,
   listWorkspaceMembersAsync,
@@ -146,12 +146,12 @@ export async function founderProjectPatch(req, res) {
   return res.json({ project })
 }
 
-export function endorsements(req, res) {
-  return res.json(listEndorsements(req.user.id))
+export async function endorsements(req, res) {
+  return res.json(await listEndorsementsAsync(req.user.id))
 }
 
-export function endorsementCreate(req, res) {
-  const result = createEndorsement(req.user.id, req.body)
+export async function endorsementCreate(req, res) {
+  const result = await createEndorsementAsync(req.user.id, req.body)
   if (!result.ok) {
     const status = ['subject_user_not_found', 'project_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json(result)
@@ -429,33 +429,33 @@ export function orgDemoDayAnalytics(req, res) {
   return res.json(organizationDemoDayAnalytics(req.user.id))
 }
 
-export function dealFlow(req, res) {
-  return res.json(investorDealFlow(req.user.id))
+export async function dealFlow(req, res) {
+  return res.json(await investorDealFlowAsync(req.user.id))
 }
 
-export function watchlist(req, res) {
-  return res.json(listWatchlist(req.user.id))
+export async function watchlist(req, res) {
+  return res.json(await listWatchlistAsync(req.user.id))
 }
 
-export function watchlistAdd(req, res) {
-  const result = addWatchlist(req.user.id, req.body)
+export async function watchlistAdd(req, res) {
+  const result = await addWatchlistAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
 
-export function watchlistRemove(req, res) {
-  return res.json(removeWatchlist(req.user.id, String(req.params.projectId || '').trim()))
+export async function watchlistRemove(req, res) {
+  return res.json(await removeWatchlistAsync(req.user.id, String(req.params.projectId || '').trim()))
 }
 
-export function watchlistPreferences(req, res) { return res.json(listWatchlistPreferences(req.user.id)) }
-export function watchlistPreferencesPatch(req, res) { return res.json(updateWatchlistPreferences(req.user.id, req.body || {})) }
+export async function watchlistPreferences(req, res) { return res.json(await listWatchlistPreferencesAsync(req.user.id)) }
+export async function watchlistPreferencesPatch(req, res) { return res.json(await updateWatchlistPreferencesAsync(req.user.id, req.body || {})) }
 
-export function investorList(req, res) {
-  return res.json({ [req.responseKey]: investorCollection(req.user.id, req.collectionName) })
+export async function investorList(req, res) {
+  return res.json({ [req.responseKey]: await investorCollectionAsync(req.user.id, req.collectionName) })
 }
 
-export function investorCreate(req, res) {
-  return created(res, { [req.itemKey]: createInvestorCollection(req.user.id, req.collectionName, req.body, req.itemPrefix) })
+export async function investorCreate(req, res) {
+  return created(res, { [req.itemKey]: await createInvestorCollectionAsync(req.user.id, req.collectionName, req.body, req.itemPrefix) })
 }
 
 export function intakes(req, res) {

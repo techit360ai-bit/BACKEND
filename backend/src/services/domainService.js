@@ -1,6 +1,7 @@
 import { createId, nowIso, userName } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
+import { domainStoreEnabled, domainFallbackEnabled, runDomainRead, applyDomainMutation } from '../repositories/domainRepository.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
 import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
@@ -2443,4 +2444,57 @@ export function listApplications(userId) {
     .filter(row => row.applicantId === userId)
     .sort(byNewest)
   return { applications }
+}
+
+// Row-level (§5) wrappers — sub-slice: endorsements + investor views. Each runs
+// the existing synchronous service logic against a bounded snapshot (the
+// caller's own rows) loaded from the row-level store and persists only the rows
+// the call changed. Gated by DOMAIN_SOURCE=postgres; on failure they fall back
+// to the snapshot while it still exists.
+async function domainRead(options, read, fallback) {
+  if (!domainStoreEnabled()) return fallback()
+  try { return await runDomainRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'domain_read_failed', slice: 'endorsements_investor', error: error.message }))
+    if (!domainFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+async function domainWrite(options, mutate, fallback) {
+  if (!domainStoreEnabled()) return fallback()
+  try { return await applyDomainMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'domain_write_failed', slice: 'endorsements_investor', error: error.message }))
+    if (!domainFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+
+export async function listEndorsementsAsync(userId) {
+  return domainRead({ userId, endorsements: true }, () => listEndorsements(userId), () => listEndorsements(userId))
+}
+export async function createEndorsementAsync(userId, body = {}) {
+  return domainWrite({ userId, endorsements: true, subjectUserId: body?.subjectUserId || null, projectIds: body?.projectId ? [body.projectId] : [] }, () => createEndorsement(userId, body), () => createEndorsement(userId, body))
+}
+export async function investorDealFlowAsync(userId) {
+  return domainRead({ userId, investor: true }, () => investorDealFlow(userId), () => investorDealFlow(userId))
+}
+export async function investorCollectionAsync(userId, name, field = 'investorId') {
+  return domainRead({ userId, collections: [{ name, field }] }, () => investorCollection(userId, name, field), () => investorCollection(userId, name, field))
+}
+export async function createInvestorCollectionAsync(userId, name, body, prefix, field = 'investorId') {
+  return domainWrite({ userId, collections: [{ name, field }] }, () => createInvestorCollection(userId, name, body, prefix, field), () => createInvestorCollection(userId, name, body, prefix, field))
+}
+export async function listWatchlistAsync(userId) {
+  return domainRead({ userId, investor: true }, () => listWatchlist(userId), () => listWatchlist(userId))
+}
+export async function addWatchlistAsync(userId, body = {}) {
+  return domainWrite({ userId, investor: true }, () => addWatchlist(userId, body), () => addWatchlist(userId, body))
+}
+export async function removeWatchlistAsync(userId, projectId) {
+  return domainWrite({ userId, investor: true }, () => removeWatchlist(userId, projectId), () => removeWatchlist(userId, projectId))
+}
+export async function listWatchlistPreferencesAsync(userId) {
+  return domainRead({ userId, investor: true }, () => listWatchlistPreferences(userId), () => listWatchlistPreferences(userId))
+}
+export async function updateWatchlistPreferencesAsync(userId, body = {}) {
+  return domainWrite({ userId, investor: true }, () => updateWatchlistPreferences(userId, body), () => updateWatchlistPreferences(userId, body))
 }
