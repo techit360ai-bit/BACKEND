@@ -83,10 +83,10 @@ function requireAccess(userId, workspaceId) {
   return { ok: true, access }
 }
 
-function buildPlan(userId, workspaceId, body) {
-  const snapshot = codeWorkspaceSnapshot(userId, workspaceId)
+async function buildPlan(userId, workspaceId, body) {
+  const snapshot = await codeWorkspaceSnapshot(userId, workspaceId)
   if (!snapshot.ok) return snapshot
-  const adapterResult = detectProjectAdapter(userId, workspaceId)
+  const adapterResult = await detectProjectAdapter(userId, workspaceId)
   const adapter = adapterResult.ok ? adapterResult : null
   const files = snapshot.files || []
   const requirement = String(body.requirement || '').slice(0, 8000)
@@ -147,7 +147,7 @@ function buildPlan(userId, workspaceId, body) {
 export async function planCodeTask(userId, workspaceId, body, token) {
   const guard = requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
-  const result = buildPlan(userId, workspaceId, body)
+  const result = await buildPlan(userId, workspaceId, body)
   if (!result.ok) return result
   if (body.use_ai !== true) return result
 
@@ -171,9 +171,9 @@ function extractJson(text) {
 export async function proposeCodeChanges(userId, workspaceId, body, token) {
   const guard = requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
-  const snapshot = codeWorkspaceSnapshot(userId, workspaceId)
+  const snapshot = await codeWorkspaceSnapshot(userId, workspaceId)
   if (!snapshot.ok) return snapshot
-  const plan = buildPlan(userId, workspaceId, body)
+  const plan = await buildPlan(userId, workspaceId, body)
   if (!plan.ok) return plan
   if (!plan.plan.changes.length) return { ok: false, status: 409, error: 'no_target_files', detail: 'No workspace file matched the request.' }
 
@@ -229,7 +229,7 @@ export async function proposeCodeChanges(userId, workspaceId, body, token) {
 export async function orchestrateCodeTask(userId, workspaceId, body) {
   const guard = requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
-  const plan = buildPlan(userId, workspaceId, body)
+  const plan = await buildPlan(userId, workspaceId, body)
   if (!plan.ok) return plan
 
   const changeActions = plan.plan.changes.map(change => `${change.action} ${change.path}`)
