@@ -2,7 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { requireOrganizationPermission, requireOrganizationPermissionAsync } from './organizationIntelligenceService.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
-import { createCase } from './supportService.js'
+import { createCase, createCaseAsync } from './supportService.js'
 import { organizationProgramEnabled, organizationProgramFallbackEnabled, readOrgProgramRecord, readOrgProgramSources, applyOrgProgramMutation } from '../repositories/organizationProgramRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -257,7 +257,7 @@ export async function requestOrganizationSupportAsync(userId, body = {}) {
   if (!context.ok) return context
   const access = evaluateOrganizationEntitlement(organizationId, 'ORGANIZATION_SUPPORT_WORKFLOW')
   if (!access.allowed) return access
-  return createCase(userId, { category: body.category || 'platform', subcategory: 'organization_managed_service', subject: text(body.subject) || 'Organization program support', description: text(body.description) || 'Organization program support request.', severity: body.severity, organizationId, hackathonId: body.hackathonId || null, programId: body.programId || null }, 'organization')
+  return createCaseAsync(userId, { category: body.category || 'platform', subcategory: 'organization_managed_service', subject: text(body.subject) || 'Organization program support', description: text(body.description) || 'Organization program support request.', severity: body.severity, organizationId, hackathonId: body.hackathonId || null, programId: body.programId || null }, 'organization')
 }
 
 function hackathonOutcomeFromDb(db, userId, hackathonId) {

@@ -2,6 +2,7 @@ import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../con
 import { createId, nowIso } from '../utils/api.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
 import { deliverSupportNotification, deliverSupportTeamNotification } from './supportNotificationService.js'
+import { supportStoreEnabled, supportFallbackEnabled, runSupportRead, applySupportMutation } from '../repositories/supportRepository.js'
 
 const CATEGORIES = new Set(['account', 'billing', 'credits', 'platform', 'projects', 'privacy', 'security', 'other'])
 const STATUSES = new Set(['received', 'triaging', 'processing', 'waiting_for_user', 'escalated', 'resolved', 'closed', 'reopened'])
@@ -427,4 +428,108 @@ export function supportOverview() {
     slaAtRisk: cases.filter(row => !['resolved', 'closed'].includes(row.status) && new Date(row.firstResponseDueAt).getTime() - now < 3600000).length,
     resolvedToday: cases.filter(row => row.resolvedAt && now - new Date(row.resolvedAt).getTime() < 86400000).length,
   } }
+}
+
+// Row-level (§5) wrappers. Each runs the existing synchronous service logic
+// against a bounded snapshot loaded from the row-level store and persists only
+// the rows the call changed. Gated by SUPPORT_SOURCE=postgres; on failure they
+// fall back to the snapshot while it still exists.
+async function supportRead(options, read, fallback) {
+  if (!supportStoreEnabled()) return fallback()
+  try { return await runSupportRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'support_read_failed', error: error.message }))
+    if (!supportFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+async function supportWrite(options, mutate, fallback) {
+  if (!supportStoreEnabled()) return fallback()
+  try { return await applySupportMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'support_write_failed', error: error.message }))
+    if (!supportFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+const userScope = userId => ({ userId, admin: false, allCases: true })
+const adminScope = userId => ({ userId, admin: true, allCases: true })
+const adminCaseScope = (userId, caseId) => ({ userId, admin: true, allCases: false, caseIds: [caseId] })
+const globalScope = userId => ({ userId, admin: true, allCases: false })
+
+export async function createCaseAsync(userId, body = {}, role = 'explorer') {
+  return supportWrite(userScope(userId), () => createCase(userId, body, role), () => createCase(userId, body, role))
+}
+export async function listCasesAsync(userId) {
+  return supportRead(userScope(userId), () => listCases(userId), () => listCases(userId))
+}
+export async function getCaseAsync(userId, caseId, admin = false) {
+  return supportRead(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => getCase(userId, caseId, admin), () => getCase(userId, caseId, admin))
+}
+export async function addMessageAsync(userId, caseId, body = {}, admin = false) {
+  return supportWrite(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => addMessage(userId, caseId, body, admin), () => addMessage(userId, caseId, body, admin))
+}
+export async function listAdminCasesAsync(filters = {}) {
+  return supportRead(adminScope(null), () => listAdminCases(filters), () => listAdminCases(filters))
+}
+export async function supportDirectoryAsync(userId) {
+  return supportRead(globalScope(userId), () => supportDirectory(), () => supportDirectory())
+}
+export async function reopenCaseAsync(userId, caseId) {
+  return supportWrite(userScope(userId), () => reopenCase(userId, caseId), () => reopenCase(userId, caseId))
+}
+export async function listKnowledgeBaseAsync() {
+  return supportRead(globalScope(null), () => listKnowledgeBase(), () => listKnowledgeBase())
+}
+export async function saveKnowledgeArticleAsync(adminId, body = {}) {
+  return supportWrite(globalScope(adminId), () => saveKnowledgeArticle(adminId, body), () => saveKnowledgeArticle(adminId, body))
+}
+export async function saveTemplateAsync(adminId, body = {}) {
+  return supportWrite(globalScope(adminId), () => saveTemplate(adminId, body), () => saveTemplate(adminId, body))
+}
+export async function listTemplatesAsync() {
+  return supportRead(globalScope(null), () => listTemplates(), () => listTemplates())
+}
+export async function listKnowledgeBaseAdminAsync() {
+  return supportRead(globalScope(null), () => listKnowledgeBaseAdmin(), () => listKnowledgeBaseAdmin())
+}
+export async function attachMetadataAsync(userId, caseId, body = {}, admin = false) {
+  return supportWrite(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => attachMetadata(userId, caseId, body, admin), () => attachMetadata(userId, caseId, body, admin))
+}
+export async function initAttachmentAsync(userId, caseId, body = {}, admin = false) {
+  return supportWrite(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => initAttachment(userId, caseId, body, admin), () => initAttachment(userId, caseId, body, admin))
+}
+export async function finalizeAttachmentAsync(userId, caseId, attachmentId, admin = false) {
+  return supportWrite(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => finalizeAttachment(userId, caseId, attachmentId, admin), () => finalizeAttachment(userId, caseId, attachmentId, admin))
+}
+export async function correctiveActionAsync(adminId, caseId, body = {}) {
+  return supportWrite(adminCaseScope(adminId, caseId), () => correctiveAction(adminId, caseId, body), () => correctiveAction(adminId, caseId, body))
+}
+export async function updateCaseAsync(adminId, caseId, body = {}) {
+  return supportWrite(adminCaseScope(adminId, caseId), () => updateCase(adminId, caseId, body), () => updateCase(adminId, caseId, body))
+}
+export async function acquireCaseLockAsync(adminId, caseId) {
+  return supportWrite(adminCaseScope(adminId, caseId), () => acquireCaseLock(adminId, caseId), () => acquireCaseLock(adminId, caseId))
+}
+export async function configureSupportAsync(adminId, body = {}) {
+  return supportWrite(globalScope(adminId), () => configureSupport(adminId, body), () => configureSupport(adminId, body))
+}
+export async function supportConfigurationAsync(userId) {
+  return supportRead(globalScope(userId), () => supportConfiguration(), () => supportConfiguration())
+}
+export async function runMaintenanceAsync(userId) {
+  return supportWrite(adminScope(userId), () => runMaintenance(), () => runMaintenance())
+}
+export async function diagnosticsAsync(userId, caseId, admin = false) {
+  return supportRead(admin ? adminCaseScope(userId, caseId) : userScope(userId), () => diagnostics(userId, caseId, admin), () => diagnostics(userId, caseId, admin))
+}
+export async function analyticsAsync() {
+  return supportRead(adminScope(null), () => analytics(), () => analytics())
+}
+export async function intelligenceProjectionAsync() {
+  return supportRead(adminScope(null), () => intelligenceProjection(), () => intelligenceProjection())
+}
+export async function submitFeedbackAsync(userId, caseId, body = {}) {
+  return supportWrite(userScope(userId), () => submitFeedback(userId, caseId, body), () => submitFeedback(userId, caseId, body))
+}
+export async function supportOverviewAsync() {
+  return supportRead(adminScope(null), () => supportOverview(), () => supportOverview())
 }

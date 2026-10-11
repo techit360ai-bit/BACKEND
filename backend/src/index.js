@@ -18,7 +18,7 @@ import { initializePlatformCollectionSchema } from './repositories/platformColle
 import { cleanupSessionsAsync } from './services/sessionService.js'
 import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
-import { runMaintenance as runSupportMaintenance } from './services/supportService.js'
+import { runMaintenanceAsync as runSupportMaintenanceAsync } from './services/supportService.js'
 import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
 import { initializeOrganizationCommercialProjection } from './repositories/organizationOperationsRepository.js'
 
@@ -95,7 +95,7 @@ const dealRoomMaintenanceTimer = setInterval(() => { runMaintenance(() => runDea
 dealRoomMaintenanceTimer.unref?.()
 const organizationIntelligenceTimer = setInterval(() => { runMaintenance(() => runOrganizationIntelligenceMaintenance()).catch(error => console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
 organizationIntelligenceTimer.unref?.()
-const supportMaintenanceTimer = setInterval(() => { runMaintenance(() => runSupportMaintenance()).catch(error => console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message }))) }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
+const supportMaintenanceTimer = setInterval(() => { runSupportMaintenanceAsync(null).catch(error => console.error(JSON.stringify({ event: 'support_maintenance_failed', error: error.message }))) }, Math.max(60 * 1000, Number(process.env.SUPPORT_MAINTENANCE_INTERVAL_MS || 5 * 60 * 1000)))
 supportMaintenanceTimer.unref?.()
 // WS3 revenue refresh worker. Off by default so only one replica (or a scheduler)
 // runs it; enable with TRUST_REVENUE_REFRESH_ENABLED=true on a single instance.
