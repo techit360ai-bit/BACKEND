@@ -46,7 +46,7 @@ function normalizeRecord(record = {}) {
   }
 }
 
-function mapRow(row) {
+export function mapRow(row) {
   if (!row) return null
   return {
     ...(row.payload || {}),
@@ -161,6 +161,30 @@ export async function listRecordsForOwner(client, collectionName, value, { owner
     [collectionName, value, ...ownerFields.map(() => value)],
   )
   return result.rows.map(mapRow)
+}
+
+// Cross-collection owner queries (GDPR export/erasure): match every row the
+// subject owns in any collection, by record id or by any owner-bearing payload
+// field, without loading the whole database.
+export async function listRecordsAcrossCollections(client, value, { ownerFields = [] } = {}) {
+  const clauses = ownerFields.map((field, index) => `payload->>'${field}'=$${index + 2}`)
+  const where = ['deleted_at IS NULL', `(owner_id=$1 OR record_id=$1${clauses.length ? ` OR ${clauses.join(' OR ')}` : ''})`]
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records WHERE ${where.join(' AND ')} ORDER BY collection_name, updated_at DESC`,
+    [value, ...ownerFields.map(() => value)],
+  )
+  return result.rows.map(row => ({ ...mapRow(row), collectionName: row.collection_name }))
+}
+
+export async function deleteRecordsAcrossCollections(client, value, { ownerFields = [] } = {}) {
+  const clauses = ownerFields.map((field, index) => `payload->>'${field}'=$${index + 2}`)
+  const where = ['deleted_at IS NULL', `(owner_id=$1 OR record_id=$1${clauses.length ? ` OR ${clauses.join(' OR ')}` : ''})`]
+  const result = await client.query(
+    `UPDATE platform_collection_records SET deleted_at=now(), version=version+1, updated_at=now()
+     WHERE ${where.join(' AND ')}`,
+    [value, ...ownerFields.map(() => value)],
+  )
+  return result.rowCount
 }
 
 // Soft-delete every row a subject owns in a collection (GDPR erasure).
