@@ -23,10 +23,12 @@ vi.mock('../repositories/platformCollectionRepository.js', () => ({
   upsertRecord: vi.fn(async (_client, name, row) => { const list = store[name] || (store[name] = []); const index = list.findIndex(item => item.id === row.id); if (index >= 0) list[index] = row; else list.push(row); return row }),
   listRecordsForOwner: vi.fn(async (_client, name, value, { ownerFields = ['userId'] } = {}) => (store[name] || []).filter(row => ownerFields.some(field => row[field] === value))),
   listRecordsByField: vi.fn(async (_client, name, field, value) => (store[name] || []).filter(row => row[field] === value)),
+  listRecordsByFieldIn: vi.fn(async (_client, name, field, values = []) => (store[name] || []).filter(row => values.includes(row[field]))),
+  listRecordsLimited: vi.fn(async (_client, name, { limit = 500 } = {}) => (store[name] || []).slice(0, limit)),
   listRecordsByIds: vi.fn(async (_client, name, ids = []) => { const wanted = new Set(ids); return (store[name] || []).filter(row => wanted.has(row.id)) }),
 }))
 
-const { organizationOverviewAsync, organizationProgramHealthAsync, organizationCohortBenchmarksAsync, organizationRisksAsync, createOrganizationActionAsync } = await import('../services/organizationIntelligenceService.js')
+const { organizationOverviewAsync, organizationProgramHealthAsync, organizationCohortBenchmarksAsync, organizationRisksAsync, createOrganizationActionAsync, runOrganizationIntelligenceMaintenanceAsync } = await import('../services/organizationIntelligenceService.js')
 const { updateDb } = await import('../config/database.js')
 const { withPlatformTransaction } = await import('../repositories/platformCollectionRepository.js')
 
@@ -110,6 +112,20 @@ describe('organization intelligence row-level store (§5 cutover)', () => {
     expect(store.organizationAuditEvents).toHaveLength(1)
     expect(mocks.fallbackReads).toBe(0)
     expect(withPlatformTransaction).toHaveBeenCalled()
+  })
+
+  it('runs scheduled maintenance against the bounded store (overdue + due reports)', async () => {
+    const past = new Date(Date.now() - 2 * 86400000).toISOString()
+    store.organizationActions.push({ id: 'act-1', organizationId: 'org-1', ownerId: 'org-user', status: 'open', dueDate: past, updatedAt: past })
+    store.organizationReportSchedules.push({ id: 'sched-1', organizationId: 'org-1', frequency: 'daily', active: true, recipients: ['org-user'], createdBy: 'org-user', createdAt: past, updatedAt: past })
+    const result = await runOrganizationIntelligenceMaintenanceAsync()
+    expect(result.ok).toBe(true)
+    expect(result.overdueActions).toBe(1)
+    expect(result.reportsGenerated).toBe(1)
+    expect(store.organizationActions.find(row => row.id === 'act-1').status).toBe('overdue')
+    expect(store.organizationReports).toHaveLength(1)
+    expect(store.notifications.length).toBeGreaterThan(0)
+    expect(mocks.fallbackReads).toBe(0)
   })
 
   it('falls back to the snapshot when the organization source is disabled', async () => {

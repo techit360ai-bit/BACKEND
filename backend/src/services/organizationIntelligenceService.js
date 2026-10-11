@@ -3,7 +3,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, syncOrganizationCollections, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
 import { organizationAccessEnabled, organizationAccessFallbackEnabled, loadOrganizationAccess } from '../repositories/organizationAccessRepository.js'
-import { organizationIntelligenceEnabled, organizationIntelligenceFallbackEnabled, runOrganizationIntelligenceRead, applyOrganizationIntelligenceMutation } from '../repositories/organizationIntelligenceRepository.js'
+import { organizationIntelligenceEnabled, organizationIntelligenceFallbackEnabled, runOrganizationIntelligenceRead, applyOrganizationIntelligenceMutation, runOrganizationIntelligenceMaintenanceStore } from '../repositories/organizationIntelligenceRepository.js'
 
 const DAY = 86400000
 const INTERNAL_ROLES = new Set(['owner', 'admin', 'executive', 'program_director', 'program_manager', 'mentor_manager', 'reviewer', 'analyst', 'operations', 'communications', 'finance', 'partner', 'read_only', 'mentor'])
@@ -336,3 +336,12 @@ export const createOrganizationResourceAsync = (userId, body = {}) => organizati
 export const createReportScheduleAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createReportSchedule(userId, body), true)
 export const refreshOrganizationIntelligenceAsync = (userId, organizationId = null) => organizationScopedWrite({ userId, organizationId }, () => refreshOrganizationIntelligence(userId, organizationId), true)
 export const generateOrganizationReportAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => generateOrganizationReport(userId, body), true)
+
+export function runOrganizationIntelligenceMaintenanceAsync() {
+  if (!organizationIntelligenceEnabled()) return runOrganizationIntelligenceMaintenance()
+  return runOrganizationIntelligenceMaintenanceStore(() => runOrganizationIntelligenceMaintenance()).catch(error => {
+    console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message }))
+    if (!organizationIntelligenceFallbackEnabled()) throw error
+    return runOrganizationIntelligenceMaintenance()
+  })
+}

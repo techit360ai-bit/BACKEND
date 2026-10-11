@@ -18,7 +18,9 @@ import {
   getRecord,
   upsertRecord,
   listRecordsForOwner,
+  listRecordsLimited,
   listRecordsByField,
+  listRecordsByFieldIn,
   listRecordsByIds,
 } from './platformCollectionRepository.js'
 import { runDatabaseAuthority } from '../config/database.js'
@@ -69,6 +71,12 @@ const WRITE_COLLECTIONS = [
   'organizationRiskSignals',
 ]
 
+// Collections the scheduled maintenance tick touches (overdue actions, due
+// report schedules + the generated reports/notifications they produce).
+const MAINTENANCE_COLLECTIONS = ['organizationActions', 'organizationReportSchedules', 'organizationReports', 'notifications']
+
+function maintenanceLimit() { return Math.max(1, Math.min(10_000, Number(process.env.ORGANIZATION_MAINTENANCE_LIMIT || 2000))) }
+
 export function organizationIntelligenceEnabled() {
   return process.env.ORGANIZATION_SOURCE === 'postgres'
     || process.env.ORGANIZATION_READ_SOURCE === 'postgres'
@@ -109,14 +117,14 @@ async function buildOrganizationIntelligenceScope(client, userId, requestedOrgan
   return db
 }
 
-function captureOriginals(db) {
+function captureOriginals(db, collections = WRITE_COLLECTIONS) {
   const originals = new Map()
-  for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
+  for (const name of collections) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
   return originals
 }
 
-async function persistChanges(client, db, originals) {
-  for (const name of WRITE_COLLECTIONS) {
+async function persistChanges(client, db, originals, collections = WRITE_COLLECTIONS) {
+  for (const name of collections) {
     for (const row of db[name] || []) {
       if (!row) continue
       if (!row.id) row.id = createId('org_row')
@@ -147,4 +155,21 @@ export async function applyOrganizationIntelligenceMutation(options, mutate, aft
     await persistChanges(client, db, originals)
     return result
   }, { userId: options.userId || null })
+}
+
+// Scheduled maintenance. The overdue-action and due-report scans are bounded
+// (ORGANIZATION_MAINTENANCE_LIMIT rows per collection) and run the existing
+// synchronous maintenance logic against that scope via runDatabaseAuthority, so
+// the tick no longer loads the whole-database snapshot.
+export async function runOrganizationIntelligenceMaintenanceStore(run) {
+  const limit = maintenanceLimit()
+  return withPlatformTransaction(async client => {
+    const organizationActions = await listRecordsByFieldIn(client, 'organizationActions', 'status', ['open', 'in_progress', 'blocked'], { limit })
+    const organizationReportSchedules = (await listRecordsLimited(client, 'organizationReportSchedules', { limit })).filter(row => row.active !== false)
+    const db = { organizationActions, organizationReportSchedules, organizationReports: [], notifications: [] }
+    const originals = captureOriginals(db, MAINTENANCE_COLLECTIONS)
+    const result = await runDatabaseAuthority(db, async () => run())
+    await persistChanges(client, db, originals, MAINTENANCE_COLLECTIONS)
+    return result
+  })
 }
