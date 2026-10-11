@@ -4,6 +4,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
 import * as identitySessionRepository from '../repositories/identitySessionRepository.js'
+import { sessionClaimsEnabled, sessionClaimsFallbackEnabled, loadActiveContext, loadActiveSubscription } from '../repositories/sessionClaimsRepository.js'
 
 const ACCESS_COOKIE = 'techit_access'
 const REFRESH_COOKIE = 'techit_refresh'
@@ -49,7 +50,9 @@ const postgresWrites = () => process.env.IDENTITY_WRITE_SOURCE === 'postgres'
 const writeFallbackEnabled = () => process.env.IDENTITY_WRITE_FALLBACK_SQLITE !== 'false'
 function contextClaims(userId, profile) {
   const db = readAuthorityDb()
-  const context = (db.activeContexts || []).find(row => row.userId === userId && row.status === 'active')
+  return contextClaimsFrom((db.activeContexts || []).find(row => row.userId === userId && row.status === 'active') || null, userId, profile)
+}
+function contextClaimsFrom(context, userId, profile) {
   return {
     active_role: context?.role || profile?.activeRole || profile?.role || 'explorer',
     organization_id: context?.organizationId || null,
@@ -60,7 +63,9 @@ function contextClaims(userId, profile) {
 }
 function identityClaims(userId, profile) {
   const db = readAuthorityDb()
-  const subscription = (db.subscriptions || []).find(row => row.userId === userId && ['active', 'trialing'].includes(String(row.status || '').toLowerCase()))
+  return identityClaimsFrom((db.subscriptions || []).find(row => row.userId === userId && ['active', 'trialing'].includes(String(row.status || '').toLowerCase())) || null, profile)
+}
+function identityClaimsFrom(subscription, profile) {
   const displayName = [profile?.firstName, profile?.lastName].filter(Boolean).join(' ').trim()
   return {
     name: displayName || profile?.username || '',
@@ -72,34 +77,69 @@ function identityClaims(userId, profile) {
     subscription_tier: subscription ? String(subscription.planName || subscription.planId || 'subscriber').slice(0, 80) : null,
   }
 }
+// Row-level claim resolution for the authoritative session path. Falls back to
+// the snapshot builders when the identity source is still sqlite (or on a
+// PostgreSQL read failure while the fallback flag is enabled).
+async function loadClaims(userId, profile) {
+  if (!sessionClaimsEnabled()) return { ...contextClaims(userId, profile), ...identityClaims(userId, profile) }
+  try {
+    const [context, subscription] = await Promise.all([loadActiveContext(userId), loadActiveSubscription(userId)])
+    return { ...contextClaimsFrom(context, userId, profile), ...identityClaimsFrom(subscription, profile) }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'identity_claims_read_failed', error: error.message }))
+    if (!sessionClaimsFallbackEnabled()) throw error
+    return { ...contextClaims(userId, profile), ...identityClaims(userId, profile) }
+  }
+}
 function userAgentParts(userAgent = '') { const value = String(userAgent); return { browser: /Edg/i.test(value) ? 'Edge' : /Chrome/i.test(value) ? 'Chrome' : /Safari/i.test(value) ? 'Safari' : /Firefox/i.test(value) ? 'Firefox' : 'Unknown', platform: /Android/i.test(value) ? 'Android' : /iPhone|iPad/i.test(value) ? 'iOS' : /Windows/i.test(value) ? 'Windows' : /Mac OS/i.test(value) ? 'macOS' : /Linux/i.test(value) ? 'Linux' : 'Unknown' } }
 function event(db, payload) { (db.authSecurityEvents || (db.authSecurityEvents = [])).push({ id: createId('auth_event'), createdAt: nowIso(), ...payload }) }
 export function mobileClient(req) { return String(req.get('x-techit-client') || '').toLowerCase() === 'mobile' }
 
-export function issueSession(user, profile, req, { rememberMe = true } = {}) {
+function signAccessToken(user, profile, sessionIdentifier, claims) {
+  return signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...claims, sid: sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+}
+
+// Pure session-record construction (no DB access) so the authoritative path can
+// sign from row-level claims without touching the whole-DB snapshot.
+function buildSessionRecord(user, req, rememberMe) {
   const sessionIdentifier = randomToken(); const refreshToken = randomToken(); const now = Date.now(); const parts = userAgentParts(req.get('user-agent'))
   const session = { id: createId('session'), userId: user.id, sessionIdentifier, refreshTokenHash: hashToken(refreshToken), deviceIdentifier: String(req.get('x-device-id') || '').slice(0, 160) || null, deviceName: String(req.get('x-device-name') || '').slice(0, 120) || null, platform: parts.platform, browser: parts.browser, ipAddress: req.ip || null, userAgent: String(req.get('user-agent') || '').slice(0, 500), createdAt: new Date(now).toISOString(), lastActiveAt: new Date(now).toISOString(), expiresAt: new Date(now + (rememberMe ? SESSION_TTL_SECONDS : 86400) * 1000).toISOString(), lastRefreshedAt: new Date(now).toISOString(), revokedAt: null, rememberMe, rotationCounter: 0 }
-  const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
-  if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateAuthorityDb(db => { (db.userSessions || (db.userSessions = [])).push(session); event(db, { userId: user.id, sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: session.userAgent, metadata: { rememberMe, browser: parts.browser, platform: parts.platform } }) })
-  return { accessToken, refreshToken, session }
+  return { sessionIdentifier, refreshToken, session }
+}
+function buildSessionCredentials(user, profile, req, rememberMe, claims) {
+  const { sessionIdentifier, refreshToken, session } = buildSessionRecord(user, req, rememberMe)
+  return { accessToken: signAccessToken(user, profile, sessionIdentifier, claims), refreshToken, session }
+}
+function persistSqliteSession(db, credentials) {
+  const { session } = credentials
+  ;(db.userSessions || (db.userSessions = [])).push(session)
+  event(db, { userId: session.userId, sessionIdentifier: session.sessionIdentifier, eventType: 'session_created', ipAddress: session.ipAddress || null, userAgent: session.userAgent, metadata: { rememberMe: session.rememberMe, browser: session.browser, platform: session.platform } })
+}
+function sqliteSessionWritable(req) { return process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web' }
+
+export function issueSession(user, profile, req, { rememberMe = true } = {}) {
+  const credentials = buildSessionCredentials(user, profile, req, rememberMe, { ...contextClaims(user.id, profile), ...identityClaims(user.id, profile) })
+  if (sqliteSessionWritable(req)) updateAuthorityDb(db => persistSqliteSession(db, credentials))
+  return credentials
 }
 
 export async function issueSessionAsync(user, profile, req, options = {}) {
-  const credentials = issueSession(user, profile, req, { ...options, rememberMe: options.rememberMe !== false })
-  if (!postgresWrites()) return credentials
+  const rememberMe = options.rememberMe !== false
+  // Without an authoritative identity source, keep the snapshot-backed path.
+  if (!sessionClaimsEnabled()) return issueSession(user, profile, req, { ...options, rememberMe })
+  const credentials = buildSessionCredentials(user, profile, req, rememberMe, await loadClaims(user.id, profile))
   const securityEvent = { id: createId('auth_event'), userId: user.id, sessionIdentifier: credentials.session.sessionIdentifier, eventType: 'session_created', ipAddress: req.ip || null, userAgent: credentials.session.userAgent, metadata: { rememberMe: credentials.session.rememberMe, browser: credentials.session.browser, platform: credentials.session.platform }, createdAt: credentials.session.createdAt }
+  if (!postgresWrites()) {
+    if (sqliteSessionWritable(req)) updateAuthorityDb(db => persistSqliteSession(db, credentials))
+    return credentials
+  }
   try {
-    // The sync helper already persisted SQLite. Remove that local write from the
-    // authoritative path after PostgreSQL confirms the session.
     await identitySessionRepository.createSession(credentials.session, securityEvent)
-    if (process.env.NODE_ENV !== 'test' || req.get('x-techit-client') === 'web') updateAuthorityDb(db => {
-      db.userSessions = (db.userSessions || []).filter(row => row.id !== credentials.session.id)
-      db.authSecurityEvents = (db.authSecurityEvents || []).filter(row => row.id !== securityEvent.id)
-    })
     return credentials
   } catch (error) {
     console.error(JSON.stringify({ event: 'identity_postgres_session_write_failed', operation: 'create', error: error.message }))
     if (!writeFallbackEnabled()) throw error
+    if (sqliteSessionWritable(req)) updateAuthorityDb(db => persistSqliteSession(db, credentials))
     return credentials
   }
 }
@@ -118,7 +158,7 @@ export function rotateSession(refreshToken, req) {
     if (!row || row.revokedAt || new Date(row.expiresAt).getTime() <= Date.now()) { if (row) { row.revokedAt = nowIso(); event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'refresh_token_rejected', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { reason: row.revokedAt ? 'revoked' : 'expired' } }) }; return { ok: false, error: 'refresh_token_invalid' } }
     const user = db.users.find(item => item.id === row.userId); const profile = db.profiles.find(item => item.id === row.userId); if (!user) return { ok: false, error: 'user_not_found' }
     const nextRefresh = randomToken(); const now = nowIso(); row.previousRefreshTokenHash = row.refreshTokenHash; row.refreshTokenHash = hashToken(nextRefresh); row.rotationCounter = Number(row.rotationCounter || 0) + 1; row.lastRefreshedAt = now; row.lastActiveAt = now
-    const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+    const accessToken = signAccessToken(user, profile, row.sessionIdentifier, { ...contextClaims(user.id, profile), ...identityClaims(user.id, profile) })
     event(db, { userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_refreshed', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { rotationCounter: row.rotationCounter } })
     return { ok: true, accessToken, refreshToken: nextRefresh, session: row, user, profile }
   })
@@ -148,7 +188,7 @@ export async function rotateSessionAsync(refreshToken, req) {
     const securityEvent = { id: createId('auth_event'), userId: row.userId, sessionIdentifier: row.sessionIdentifier, eventType: 'session_refreshed', ipAddress: req.ip || null, userAgent: req.get('user-agent') || '', metadata: { rotationCounter: nextSession.rotationCounter }, createdAt: now }
     const persisted = await identitySessionRepository.rotateSession(row.id, tokenHash, nextSession, securityEvent)
     if (!persisted) return { ok: false, error: 'refresh_token_invalid' }
-    const accessToken = signJwt({ sub: user.id, role: profile?.activeRole || profile?.role || 'explorer', ...contextClaims(user.id, profile), ...identityClaims(user.id, profile), sid: row.sessionIdentifier, token_use: 'access' }, { expiresIn: ACCESS_TTL_SECONDS, ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}), ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}) })
+    const accessToken = signAccessToken(user, profile, row.sessionIdentifier, await loadClaims(user.id, profile))
     return { ok: true, accessToken, refreshToken: nextRefresh, session: persisted, user, profile }
   } catch (error) {
     console.error(JSON.stringify({ event: 'identity_postgres_session_write_failed', operation: 'rotate', error: error.message }))
