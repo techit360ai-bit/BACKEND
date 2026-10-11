@@ -149,6 +149,16 @@ export async function deleteRecord(client, collectionName, recordId, { expectedV
   return true
 }
 
+// Match rows by an arbitrary payload field (e.g. a domain+id lookup that is
+// not the owner column).
+export async function listRecordsByField(client, collectionName, field, value) {
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL AND payload->>'${field}'=$2 ORDER BY updated_at DESC`,
+    [collectionName, String(value)],
+  )
+  return result.rows.map(mapRow)
+}
+
 // Scoped row reads for §5 domain cutovers: one bounded query per collection
 // instead of a whole-database snapshot. ownerFields close the gap where a row's
 // owner lives in a payload field other than owner_id (collaboratorId,

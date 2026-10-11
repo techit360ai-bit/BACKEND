@@ -32,17 +32,17 @@ export const bridgeSnapshot = (req, res) => send(res, codeBridgeSnapshot(bridgeT
 export const bridgeSync = (req, res) => send(res, syncCodeBridgeFiles(bridgeTokenFromRequest(req), req.params.workspaceId, req.body))
 export const bridgeRevoke = (req, res) => send(res, revokeCodeBridgeSessions(req.user.id, req.params.workspaceId))
 export const githubWebhook = (req, res) => send(res, reconcileGithubPush(req.headers, req.body, req.rawBody))
-export const buildContext = (req, res) => send(res, getBuildContext(req.user.id, req.params.workspaceId) || { ok: false, status: 404, error: 'workspace_not_found' })
-export const buildPath = async (req, res) => send(res, await persisted(req, chooseBuildPath(req.user.id, req.params.workspaceId, req.body)), true)
-export const costEstimate = (req, res) => send(res, createCostEstimate(req.user.id, req.params.workspaceId, req.body))
-export const lifecycleView = async (req, res) => send(res, await persisted(req, setLifecycleView(req.user.id, req.params.workspaceId, req.body?.view)))
-export const previewContext = async (req, res) => send(res, await persisted(req, createPreviewContext(req.user.id, req.params.workspaceId, req.body)), true)
-export const modelConnections = (req, res) => send(res, { connections: listModelConnections(req.user.id) })
-export const modelConnectionCreate = (req, res) => send(res, createModelConnection(req.user.id, req.body), true)
-export const modelConnectionRevoke = (req, res) => send(res, revokeModelConnection(req.user.id, req.params.connectionId))
-export const workspaceModels = (req, res) => { const models = listWorkspaceModels(req.user.id, req.params.workspaceId); return send(res, models === null ? { ok: false, status: 404, error: 'workspace_not_found' } : { bindings: models }) }
-export const workspaceModelBind = (req, res) => send(res, bindWorkspaceModel(req.user.id, req.params.workspaceId, req.body), true)
-export const workspaceModelUnbind = (req, res) => send(res, unbindWorkspaceModel(req.user.id, req.params.workspaceId, req.params.bindingId))
+export const buildContext = async (req, res) => send(res, await getBuildContext(req.user.id, req.params.workspaceId) || { ok: false, status: 404, error: 'workspace_not_found' })
+export const buildPath = async (req, res) => send(res, await persisted(req, await chooseBuildPath(req.user.id, req.params.workspaceId, req.body)), true)
+export const costEstimate = async (req, res) => send(res, await createCostEstimate(req.user.id, req.params.workspaceId, req.body))
+export const lifecycleView = async (req, res) => send(res, await persisted(req, await setLifecycleView(req.user.id, req.params.workspaceId, req.body?.view)))
+export const previewContext = async (req, res) => send(res, await persisted(req, await createPreviewContext(req.user.id, req.params.workspaceId, req.body)), true)
+export const modelConnections = async (req, res) => send(res, { connections: await listModelConnections(req.user.id) })
+export const modelConnectionCreate = async (req, res) => send(res, await createModelConnection(req.user.id, req.body), true)
+export const modelConnectionRevoke = async (req, res) => send(res, await revokeModelConnection(req.user.id, req.params.connectionId))
+export const workspaceModels = async (req, res) => { const models = await listWorkspaceModels(req.user.id, req.params.workspaceId); return send(res, models === null ? { ok: false, status: 404, error: 'workspace_not_found' } : { bindings: models }) }
+export const workspaceModelBind = async (req, res) => send(res, await bindWorkspaceModel(req.user.id, req.params.workspaceId, req.body), true)
+export const workspaceModelUnbind = async (req, res) => send(res, await unbindWorkspaceModel(req.user.id, req.params.workspaceId, req.params.bindingId))
 
 // Coding-area intelligence. `plan`/`orchestrate` are deterministic and derived from stored
 // project state; `propose` requires the AI router and fails explicitly without it.

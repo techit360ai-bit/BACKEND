@@ -175,14 +175,14 @@ export async function workspaceContextGet(req, res) {
   return res.json(result)
 }
 
-export function hackathonProjectEntryCreate(req, res) {
-  const result = attachHackathonProject(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonProjectEntryCreate(req, res) {
+  const result = await attachHackathonProject(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result.ok) return res.status(result.status || 400).json(result)
   return created(res, result)
 }
 
-export function hackathonProjectEntryGet(req, res) {
-  const entry = getHackathonProjectEntry(req.user.id, req.params.hackathonId, req.params.teamId)
+export async function hackathonProjectEntryGet(req, res) {
+  const entry = await getHackathonProjectEntry(req.user.id, req.params.hackathonId, req.params.teamId)
   if (!entry) return notFound(res, 'Hackathon project entry not found')
   return res.json({ entry })
 }
