@@ -57,7 +57,9 @@ const app = express()
 if (process.env.BILLING_JOBS_ENABLED === 'true' && process.env.NODE_ENV !== 'test') {
   const intervalMs = Math.max(60_000, Number(process.env.BILLING_JOBS_INTERVAL_MS || 3_600_000))
   setInterval(() => {
-    try { runBillingJobs('billing-scheduler') } catch (error) { console.error(JSON.stringify({ event: 'billing_jobs_failed', error: error.message })) }
+    void Promise.resolve()
+      .then(() => runBillingJobs('billing-scheduler'))
+      .catch(error => console.error(JSON.stringify({ event: 'billing_jobs_failed', error: error.message })))
   }, intervalMs).unref?.()
 }
 

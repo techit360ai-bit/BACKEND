@@ -35,6 +35,6 @@ export async function workflowResume(req, res) { return send(res, await resumeWo
 export async function paymentFulfill(req, res) { return send(res, await fulfillPaymentAsync(req.user.id, req.params.paymentId, body(req))) }
 export async function checkout(req, res) { const result = await createTvceCheckout(req.user.id, body(req)); return send(res, result, 201) }
 export function checkoutProviders(_req, res) { return res.json({ providers: providerAvailability() }) }
-export function teamGrantCreate(req, res) { return send(res, createWorkspaceTeamGrant(req.user.id, body(req)), 201) }
-export function billingJobsRun(req, res) { return send(res, runBillingJobs(req.user.id), 201) }
-export function billingJobsStatus(_req, res) { return res.json(billingJobStatus()) }
+export async function teamGrantCreate(req, res) { return send(res, await createWorkspaceTeamGrant(req.user.id, body(req)), 201) }
+export async function billingJobsRun(req, res) { return send(res, await runBillingJobs(req.user.id), 201) }
+export async function billingJobsStatus(_req, res) { return res.json(await billingJobStatus()) }

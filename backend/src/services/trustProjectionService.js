@@ -4,6 +4,7 @@ const readAuthorityDb = (...args) => database.readDb(...args)
 const updateAuthorityDb = mutator => { try { if (typeof database.updateDb === 'function') return database.updateDb(mutator) } catch {} return mutator(database.readDb()) }
 import { safeFetch } from './outboundHttpService.js'
 import { incTrustMetric, observeTrustLatency } from './trustMetrics.js'
+import { trustRepositoryEnabled, trustWriteEnabled } from '../repositories/trustRepository.js'
 
 const endpoint = () => process.env.TRUST_PROJECTION_URL || (process.env.AI_ROUTER_URL ? `${process.env.AI_ROUTER_URL.replace(/\/$/, '')}/internal/trust/projection` : '')
 const secret = () => process.env.TRUST_PROJECTION_SECRET || ''
@@ -42,6 +43,9 @@ export async function postTrustProjection(body) {
 }
 
 export async function publishTrustProjection(userId, projectId = null) {
+  // When the row-level authority is active it enqueues to trust_projection_outbox
+  // and the outbox worker publishes; never fall back to the snapshot here.
+  if (trustWriteEnabled() && trustRepositoryEnabled()) return { enabled: false, skipped: 'repository_authority' }
   const url = endpoint(); if (!url || !secret()) return { enabled: false }
   const db = readAuthorityDb(); const body = projectionPayload(db, userId, projectId)
   const result = await postTrustProjection(body)
@@ -56,6 +60,12 @@ export async function publishTrustProjection(userId, projectId = null) {
 }
 
 export async function flushTrustProjectionOutbox(limit = 20) {
+  // Row-level deployments drain the outbox through the repository worker so the
+  // scheduler never reads the whole-DB snapshot.
+  if (trustWriteEnabled() && trustRepositoryEnabled()) {
+    const { flushTrustProjectionOutboxFromRepository } = await import('./trustProjectionOutboxWorker.js')
+    return flushTrustProjectionOutboxFromRepository(limit)
+  }
   const db = readAuthorityDb(); const pending = (db.trustProjectionOutbox || []).filter(row => !row.deliveredAt).slice(0, limit); const results = []
   for (const row of pending) results.push(await publishTrustProjection(row.userId, row.projectId || null))
   return { attempted: pending.length, results }
