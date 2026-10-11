@@ -1,6 +1,7 @@
 import { createHash } from 'crypto'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
+import { discoveryStoreEnabled, discoveryFallbackEnabled, runDiscoveryRead, applyDiscoveryMutation } from '../repositories/discoveryRepository.js'
 
 const DAY_MS = 86_400_000
 const HOUR_MS = 3_600_000
@@ -1227,4 +1228,71 @@ export function getDiscoveryAnalytics() {
     catchUpCompleted: count('catchup_completed'),
     byRole,
   }
+}
+
+// Row-level (§5) wrappers. Each runs the existing synchronous service logic
+// against a bounded snapshot — the viewer's personalization rows plus a bounded
+// recent candidate window — loaded from the row-level store, and persists only
+// the rows the call changed. Gated by DISCOVERY_SOURCE=postgres; on failure they
+// fall back to the snapshot while it still exists.
+async function discoveryRead(options, read, fallback) {
+  if (!discoveryStoreEnabled()) return fallback()
+  try { return await runDiscoveryRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'discovery_read_failed', error: error.message }))
+    if (!discoveryFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+async function discoveryWrite(options, mutate, fallback) {
+  if (!discoveryStoreEnabled()) return fallback()
+  try { return await applyDiscoveryMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'discovery_write_failed', error: error.message }))
+    if (!discoveryFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+const viewerScope = (userId, extra = {}) => ({ userId, candidates: true, ...extra })
+
+export async function getRecommendationsAsync(userId, options = {}) {
+  return discoveryWrite(viewerScope(userId), () => getRecommendations(userId, options), () => getRecommendations(userId, options))
+}
+export async function searchDiscoveryAsync(userId, query, options = {}) {
+  return discoveryWrite(viewerScope(userId), () => searchDiscovery(userId, query, options), () => searchDiscovery(userId, query, options))
+}
+export async function updateRecommendationProfileAsync(userId, body = {}) {
+  return discoveryWrite(viewerScope(userId), () => updateRecommendationProfile(userId, body), () => updateRecommendationProfile(userId, body))
+}
+export async function recordRecommendationEventAsync(userId, body = {}) {
+  const targetUserIds = Array.isArray(body?.metadata?.targetUserIds) ? body.metadata.targetUserIds : []
+  return discoveryWrite(viewerScope(userId, { profileIds: targetUserIds }), () => recordRecommendationEvent(userId, body), () => recordRecommendationEvent(userId, body))
+}
+export async function recordExposureAsync(userId, recommendationId, body = {}) {
+  return discoveryWrite(viewerScope(userId), () => recordExposure(userId, recommendationId, body), () => recordExposure(userId, recommendationId, body))
+}
+export async function recordFeedbackAsync(userId, recommendationId, body = {}) {
+  return discoveryWrite(viewerScope(userId), () => recordFeedback(userId, recommendationId, body), () => recordFeedback(userId, recommendationId, body))
+}
+export async function noteUserActivityAsync(userId, eventType, surface) {
+  return discoveryWrite(viewerScope(userId), () => noteUserActivity(userId, eventType, surface), () => noteUserActivity(userId, eventType, surface))
+}
+export async function getReturnSummaryAsync(userId) {
+  return discoveryWrite(viewerScope(userId), () => getReturnSummary(userId), () => getReturnSummary(userId))
+}
+export async function markCatchUpItemAsync(userId, recommendationId, action = 'seen') {
+  return discoveryWrite(viewerScope(userId), () => markCatchUpItem(userId, recommendationId, action), () => markCatchUpItem(userId, recommendationId, action))
+}
+export async function completeCatchUpAsync(userId) {
+  return discoveryWrite(viewerScope(userId), () => completeCatchUp(userId), () => completeCatchUp(userId))
+}
+export async function refreshReturnDigestsAsync() {
+  return discoveryWrite({ global: true, candidates: true }, () => refreshReturnDigests(), () => refreshReturnDigests())
+}
+export async function getDiscoveryConfigAsync() {
+  return discoveryRead({ global: true, candidates: false }, () => getDiscoveryConfig(), () => getDiscoveryConfig())
+}
+export async function updateDiscoveryConfigAsync(patch) {
+  return discoveryWrite({ global: true, candidates: false }, () => updateDiscoveryConfig(patch), () => updateDiscoveryConfig(patch))
+}
+export async function getDiscoveryAnalyticsAsync() {
+  return discoveryRead({ global: true, candidates: false }, () => getDiscoveryAnalytics(), () => getDiscoveryAnalytics())
 }

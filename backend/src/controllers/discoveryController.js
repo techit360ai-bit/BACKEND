@@ -1,14 +1,14 @@
 import {
-  completeCatchUp,
-  getRecommendations,
-  getReturnSummary,
-  markCatchUpItem,
-  noteUserActivity,
-  recordExposure,
-  recordFeedback,
-  recordRecommendationEvent,
-  searchDiscovery,
-  updateRecommendationProfile,
+  completeCatchUpAsync,
+  getRecommendationsAsync,
+  getReturnSummaryAsync,
+  markCatchUpItemAsync,
+  noteUserActivityAsync,
+  recordExposureAsync,
+  recordFeedbackAsync,
+  recordRecommendationEventAsync,
+  searchDiscoveryAsync,
+  updateRecommendationProfileAsync,
 } from '../services/discoveryService.js'
 import {
   enqueueDiscoveryRefresh,
@@ -36,13 +36,13 @@ export async function listRecommendations(req, res) {
   const cacheKey = recommendationCacheKey(req.user.id, options)
   const cached = await getCachedDiscovery(cacheKey).catch(() => null)
   if (cached) return res.json({ ...cached, meta: { ...cached.meta, cached: true } })
-  const result = getRecommendations(req.user.id, options)
+  const result = await getRecommendationsAsync(req.user.id, options)
   await Promise.allSettled([setCachedDiscovery(cacheKey, result, options), persistDiscoveryBatch(result)])
   return res.json({ ...result, intelligence: { schema_version: 'intelligence-v1', deterministic: intelligenceFlags.deterministicEnabled, ai_enrichment: false } })
 }
 
 export async function putRecommendationProfile(req, res) {
-  const profile = await persisted(req, updateRecommendationProfile(req.user.id, req.body))
+  const profile = await persisted(req, await updateRecommendationProfileAsync(req.user.id, req.body))
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   void invalidateDiscoveryUser(req.user.id)
   void enqueueDiscoveryRefresh(req.user.id, 'profile_updated')
@@ -51,7 +51,7 @@ export async function putRecommendationProfile(req, res) {
 
 export async function createRecommendationEvent(req, res) {
   try {
-    const event = await persisted(req, recordRecommendationEvent(req.user.id, req.body))
+    const event = await persisted(req, await recordRecommendationEventAsync(req.user.id, req.body))
     void invalidateDiscoveryUser(req.user.id)
     void enqueueDiscoveryRefresh(req.user.id, event.eventType)
     return res.status(201).json({ event })
@@ -61,14 +61,14 @@ export async function createRecommendationEvent(req, res) {
 }
 
 export async function createExposure(req, res) {
-  const exposure = await persisted(req, recordExposure(req.user.id, req.params.id, req.body))
+  const exposure = await persisted(req, await recordExposureAsync(req.user.id, req.params.id, req.body))
   if (!exposure) return res.status(404).json({ error: 'Recommendation not found' })
   return res.status(201).json({ exposure })
 }
 
 export async function createFeedback(req, res) {
   try {
-    const feedback = await persisted(req, recordFeedback(req.user.id, req.params.id, req.body))
+    const feedback = await persisted(req, await recordFeedbackAsync(req.user.id, req.params.id, req.body))
     if (!feedback) return res.status(404).json({ error: 'Recommendation not found' })
     void invalidateDiscoveryUser(req.user.id)
     void enqueueDiscoveryRefresh(req.user.id, 'feedback')
@@ -78,22 +78,22 @@ export async function createFeedback(req, res) {
   }
 }
 
-export function returnSummary(req, res) {
-  return res.json({ ...getReturnSummary(req.user.id), intelligence: { schema_version: 'intelligence-v1', deterministic: true, ai_enrichment: false } })
+export async function returnSummary(req, res) {
+  return res.json({ ...await getReturnSummaryAsync(req.user.id), intelligence: { schema_version: 'intelligence-v1', deterministic: true, ai_enrichment: false } })
 }
 
-export function catchUp(req, res) {
-  return res.json(getReturnSummary(req.user.id))
+export async function catchUp(req, res) {
+  return res.json(await getReturnSummaryAsync(req.user.id))
 }
 
 export async function markCatchUpSeen(req, res) {
-  const state = await persisted(req, markCatchUpItem(req.user.id, req.params.id, req.body.action))
+  const state = await persisted(req, await markCatchUpItemAsync(req.user.id, req.params.id, req.body.action))
   if (!state) return res.status(404).json({ error: 'Active catch-up session not found' })
   return res.json({ state })
 }
 
 export async function finishCatchUp(req, res) {
-  const result = await persisted(req, completeCatchUp(req.user.id))
+  const result = await persisted(req, await completeCatchUpAsync(req.user.id))
   if (!result) return res.status(404).json({ error: 'Active catch-up session not found' })
   return res.json(result)
 }
@@ -101,13 +101,13 @@ export async function finishCatchUp(req, res) {
 export async function recordActivity(req, res) {
   const eventType = String(req.body.eventType || '').trim().toLowerCase()
   if (!eventType) return res.status(400).json({ error: 'eventType is required' })
-  const state = await persisted(req, noteUserActivity(req.user.id, eventType, req.body.surface))
+  const state = await persisted(req, await noteUserActivityAsync(req.user.id, eventType, req.body.surface))
   return res.status(201).json({ state })
 }
 
 export async function search(req, res) {
   const query = String(req.query.q || '')
-  const local = searchDiscovery(req.user.id, query, { type: req.query.type, limit: req.query.limit, personalized: req.query.personalized })
+  const local = await searchDiscoveryAsync(req.user.id, query, { type: req.query.type, limit: req.query.limit, personalized: req.query.personalized })
   const semantic = await semanticEntitySearch(query, { type: req.query.type, limit: req.query.limit, userId: req.user.id, organizationId: req.user.activeContext?.organizationId, workspaceId: req.user.activeContext?.workspaceId }).catch(() => [])
   const semanticScores = new Map(semantic.map(item => [`${item.type}:${item.entityId}`, item.semanticScore]))
   local.results = local.results.map(item => ({ ...item, semanticScore: semanticScores.get(`${item.type}:${item.entityId}`) || 0 }))

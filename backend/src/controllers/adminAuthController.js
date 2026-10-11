@@ -3,7 +3,7 @@ import { signJwt } from '../services/jwtKeyService.js'
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
-import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
+import { getDiscoveryAnalyticsAsync, getDiscoveryConfigAsync, updateDiscoveryConfigAsync } from '../services/discoveryService.js'
 import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTelemetry.js'
 import { upsertComparableAsync } from '../services/investorDealRoomCompletionService.js'
 import { requestAdminRouterTelemetry } from '../services/aiRouterClient.js'
@@ -270,14 +270,14 @@ export function adminDelete(req, res) {
   return res.json({ ok: true })
 }
 
-export function adminDiscoveryConfig(_req, res) {
-  return res.json({ config: getDiscoveryConfig() })
+export async function adminDiscoveryConfig(_req, res) {
+  return res.json({ config: await getDiscoveryConfigAsync() })
 }
 
-export function adminUpdateDiscoveryConfig(req, res) {
-  return res.json({ config: updateDiscoveryConfig(req.body) })
+export async function adminUpdateDiscoveryConfig(req, res) {
+  return res.json({ config: await updateDiscoveryConfigAsync(req.body) })
 }
 
-export function adminDiscoveryAnalytics(_req, res) {
-  return res.json({ analytics: getDiscoveryAnalytics() })
+export async function adminDiscoveryAnalytics(_req, res) {
+  return res.json({ analytics: await getDiscoveryAnalyticsAsync() })
 }

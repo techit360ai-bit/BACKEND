@@ -101,6 +101,30 @@ export async function listRecords(client, collectionName, filters = {}) {
   return result.rows.map(mapRow)
 }
 
+// Bounded candidate window for discovery-style ranking: the most-recently
+// updated rows of a collection (optionally filtered by one payload field such as
+// visibility) capped at a configured limit, instead of the whole collection.
+export async function listRecordsLimited(client, collectionName, { limit = 500, payloadField = null, payloadValue = null } = {}) {
+  const clauses = ['collection_name=$1', 'deleted_at IS NULL']
+  const values = [collectionName]
+  if (payloadField) { values.push(String(payloadValue)); clauses.push(`payload->>'${payloadField}'=$${values.length}`) }
+  values.push(Math.max(1, Math.min(10_000, Number(limit) || 500)))
+  const result = await client.query(`SELECT * FROM platform_collection_records WHERE ${clauses.join(' AND ')} ORDER BY updated_at DESC LIMIT $${values.length}`, values)
+  return result.rows.map(mapRow)
+}
+
+// Fetch a bounded set of records by id (e.g. the owners referenced by a
+// candidate window) in a single query.
+export async function listRecordsByIds(client, collectionName, ids = []) {
+  const unique = [...new Set(ids.filter(Boolean).map(String))]
+  if (!unique.length) return []
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL AND record_id=ANY($2)`,
+    [collectionName, unique],
+  )
+  return result.rows.map(mapRow)
+}
+
 export async function upsertRecord(client, collectionName, record, { idempotencyKey = null, operation = 'update', expectedVersion = null } = {}) {
   if (!record?.id) throw new Error(`A stable id is required for ${collectionName}`)
   const metadata = normalizeRecord(record)
