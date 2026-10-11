@@ -316,3 +316,66 @@ describe('domain row-level store — contracts + opportunities (§5 sub-slice 4)
     expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', contracts: true })
   })
 })
+
+describe('domain row-level store — venture intakes + analyses (§5 sub-slice 5a)', () => {
+  it('lists only the caller venture intakes through the venture scope', async () => {
+    usedBounded({
+      ventureIntakes: [
+        { id: 'i1', ownerId: 'u1', status: 'draft', updatedAt: '2024-01-01T00:00:00Z' },
+        { id: 'i2', ownerId: 'u2', status: 'draft', updatedAt: '2024-02-01T00:00:00Z' },
+      ],
+    })
+    const result = await svc.listIntakesAsync('u1')
+    expect(result.intakes.map(row => row.id)).toEqual(['i1'])
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', venture: true })
+  })
+
+  it('creates an intake owned by the caller', async () => {
+    usedBounded({ ventureIntakes: [] })
+    const result = await svc.createIntakeAsync('u1', { submission: { startup_name: 'FinPay' } })
+    expect(result.intake.ownerId).toBe('u1')
+    expect(result.intake.status).toBe('draft')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', venture: true })
+  })
+
+  it('reads a single intake by id', async () => {
+    usedBounded({ ventureIntakes: [{ id: 'i1', ownerId: 'u1', structuredProfile: { name: 'FinPay' } }] })
+    const found = await svc.getIntakeAsync('u1', 'i1')
+    expect(found.id).toBe('i1')
+    const missing = await svc.getIntakeAsync('u1', 'nope')
+    expect(missing).toBeNull()
+  })
+
+  it('promotes an intake into a project', async () => {
+    const db = { ventureIntakes: [{ id: 'i1', ownerId: 'u1', structuredProfile: { name: 'FinPay', industry: 'FinTech' } }], projects: [] }
+    usedBounded(db)
+    const result = await svc.promoteIntakeAsync('u1', 'i1', {})
+    expect(result.ok).toBe(true)
+    expect(result.project.title).toBe('FinPay')
+    expect(result.intake.promotedProjectId).toBe(result.project.id)
+    expect(db.projects).toHaveLength(1)
+  })
+
+  it('lists and creates venture analyses, mirroring project analyses', async () => {
+    usedBounded({ ventureAnalyses: [{ id: 'a1', ownerId: 'u1', updatedAt: '2024-01-01T00:00:00Z' }] })
+    const listed = await svc.listAnalysesAsync('u1')
+    expect(listed.analyses.map(row => row.id)).toEqual(['a1'])
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', venture: true })
+
+    const db = { ventureAnalyses: [], projectAnalyses: [] }
+    usedBounded(db)
+    const created = await svc.createAnalysisAsync('u1', { module: 'gsis', projectId: 'p1' })
+    expect(created.analysis.ownerId).toBe('u1')
+    expect(db.projectAnalyses).toHaveLength(1)
+    expect(db.projectAnalyses[0].projectId).toBe('p1')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', venture: true })
+  })
+
+  it('reads a single analysis by id', async () => {
+    usedBounded({ ventureAnalyses: [{ id: 'a1', ownerId: 'u1', module: 'gsis' }] })
+    const found = await svc.getAnalysisAsync('u1', 'a1')
+    expect(found.id).toBe('a1')
+    const missing = await svc.getAnalysisAsync('u1', 'nope')
+    expect(missing).toBeNull()
+  })
+})

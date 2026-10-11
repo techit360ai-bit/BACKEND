@@ -2642,3 +2642,28 @@ export async function listApplicationsAsync(userId) {
 export async function createCollaborationCallAsync(userId, body = {}) {
   return domainWrite(contractsScope(userId), () => createCollaborationCall(userId, body), () => createCollaborationCall(userId, body))
 }
+
+// Row-level (§5) wrappers — sub-slice: venture intakes + analyses.
+const ventureScope = userId => ({ userId, venture: true })
+
+export async function listIntakesAsync(userId) {
+  return domainRead(ventureScope(userId), () => listIntakes(userId), () => listIntakes(userId))
+}
+export async function createIntakeAsync(userId, body = {}) {
+  return domainWrite(ventureScope(userId), () => createIntake(userId, body), () => createIntake(userId, body))
+}
+export async function getIntakeAsync(userId, intakeId) {
+  return domainRead(ventureScope(userId), () => getIntake(userId, intakeId), () => getIntake(userId, intakeId))
+}
+export async function promoteIntakeAsync(userId, intakeId, body = {}) {
+  return domainWrite(ventureScope(userId), () => promoteIntake(userId, intakeId, body), () => promoteIntake(userId, intakeId, body))
+}
+export async function listAnalysesAsync(userId) {
+  return domainRead(ventureScope(userId), () => listAnalyses(userId), () => listAnalyses(userId))
+}
+export async function createAnalysisAsync(userId, body = {}) {
+  return domainWrite(ventureScope(userId), () => createAnalysis(userId, body), () => createAnalysis(userId, body))
+}
+export async function getAnalysisAsync(userId, analysisId) {
+  return domainRead(ventureScope(userId), () => getAnalysis(userId, analysisId), () => getAnalysis(userId, analysisId))
+}

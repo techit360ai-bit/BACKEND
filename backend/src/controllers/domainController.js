@@ -14,12 +14,12 @@ import {
   collaboratorEquity,
   countersignContractAsync,
   createCollaborationCallAsync,
-  createAnalysis,
+  createAnalysisAsync,
   createContractAsync,
   createHackathonAsync,
   createHackathonInvitationAsync,
   createEndorsementAsync,
-  createIntake,
+  createIntakeAsync,
   createInvestorCollectionAsync,
   createOrganizationProjectAsync,
   createPaymentIntent,
@@ -32,24 +32,24 @@ import {
   genericList,
   genericDelete,
   genericPatch,
-  getAnalysis,
+  getAnalysisAsync,
   getCollaboratorScores,
   getContractAsync,
   getHackathonAsync,
   getHackathonInviteAsync,
-  getIntake,
+  getIntakeAsync,
   getNotificationPreferences,
   hackathonAggregatesAsync,
   hackathonStatusAsync,
   investorCollectionAsync,
   investorDealFlowAsync,
-  listAnalyses,
+  listAnalysesAsync,
   listContractsAsync,
   listContributions,
   listEndorsementsAsync,
   listHackathonsAsync,
   listHackathonRegistrationsAsync,
-  listIntakes,
+  listIntakesAsync,
   listOrganizationProjectsAsync,
   organizationCohortHealthAsync,
   organizationInterventionsAsync,
@@ -77,7 +77,7 @@ import {
   listWorkspacesAsync,
   logHackathonCheckInAsync,
   organizationDashboardAsync,
-  promoteIntake,
+  promoteIntakeAsync,
   provisionHackathonWorkspaceAsync,
   provisionWorkspace,
   patchHackathonTeamAsync,
@@ -458,36 +458,36 @@ export async function investorCreate(req, res) {
   return created(res, { [req.itemKey]: await createInvestorCollectionAsync(req.user.id, req.collectionName, req.body, req.itemPrefix) })
 }
 
-export function intakes(req, res) {
-  return res.json(listIntakes(req.user.id))
+export async function intakes(req, res) {
+  return res.json(await listIntakesAsync(req.user.id))
 }
 
-export function intakeCreate(req, res) {
-  return created(res, createIntake(req.user.id, req.body))
+export async function intakeCreate(req, res) {
+  return created(res, await createIntakeAsync(req.user.id, req.body))
 }
 
-export function intakeGet(req, res) {
-  const intake = getIntake(req.user.id, req.params.intakeId)
+export async function intakeGet(req, res) {
+  const intake = await getIntakeAsync(req.user.id, req.params.intakeId)
   if (!intake) return notFound(res, 'Intake not found')
   return res.json({ intake })
 }
 
-export function intakePromote(req, res) {
-  const result = promoteIntake(req.user.id, req.params.intakeId, req.body)
+export async function intakePromote(req, res) {
+  const result = await promoteIntakeAsync(req.user.id, req.params.intakeId, req.body)
   if (!result) return notFound(res, 'Intake not found')
   return created(res, result)
 }
 
-export function analyses(req, res) {
-  return res.json(listAnalyses(req.user.id))
+export async function analyses(req, res) {
+  return res.json(await listAnalysesAsync(req.user.id))
 }
 
-export function analysisCreate(req, res) {
-  return created(res, createAnalysis(req.user.id, req.body))
+export async function analysisCreate(req, res) {
+  return created(res, await createAnalysisAsync(req.user.id, req.body))
 }
 
-export function analysisGet(req, res) {
-  const analysis = getAnalysis(req.user.id, req.params.analysisId)
+export async function analysisGet(req, res) {
+  const analysis = await getAnalysisAsync(req.user.id, req.params.analysisId)
   if (!analysis) return notFound(res, 'Analysis not found')
   return res.json({ analysis })
 }
