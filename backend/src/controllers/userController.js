@@ -4,7 +4,7 @@ import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProf
 import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
-import { publicTrustFor } from '../services/trustVerificationAuthority.js'
+import { publicTrustFor } from '../services/trustAuthority.js'
 import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
 const UPDATABLE = new Set([
@@ -109,7 +109,7 @@ export function avatarRemove(req, res) {
   return profile ? res.json({ ok: true, profile: projectOwnProfile(profile) }) : res.status(404).json({ error: 'Profile not found' })
 }
 
-function publicProfile(profile, db, viewerId) {
+async function publicProfile(profile, db, viewerId) {
   const posts = db.feedPosts.filter(p => p.authorId === profile.id)
   const comments = db.feedComments.filter(c => c.authorId === profile.id)
   // Edges are written as fromEntityId/toEntityId (see discoveryService.appendEdge),
@@ -134,7 +134,7 @@ function publicProfile(profile, db, viewerId) {
     .sort((a, b) => String(b.id).localeCompare(String(a.id)))
     .slice(0, 6)
 
-  const trust = publicTrustFor(profile.id, null, db)
+  const trust = await publicTrustFor(profile.id, null)
   const isOwner = viewerId === profile.id
   const sharedContext = sharedPlatformContext(db, viewerId, profile.id)
   return {
@@ -244,9 +244,9 @@ function safeStringArray(value, maxItems = 24, maxLength = 80) {
   return [...new Set(value.map(item => plainText(item, maxLength)).filter(Boolean))].slice(0, maxItems)
 }
 
-function directoryProfile(profile, db, viewerId) {
+async function directoryProfile(profile, db, viewerId) {
   const subscription = activeSubscription(db, profile.id)
-  const trust = publicTrustFor(profile.id, null, db)
+  const trust = await publicTrustFor(profile.id, null)
   return {
     id: profile.id,
     name: userName(profile),
@@ -287,7 +287,7 @@ export async function listUsers(req, res) {
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { profiles = await listIdentityProfiles() } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
   }
-  const users = profiles
+  const users = (await Promise.all(profiles
     .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
     .filter(profile => {
       if (!query) return true
@@ -295,7 +295,7 @@ export async function listUsers(req, res) {
         .filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(query)
     })
-    .map(profile => directoryProfile(profile, db, req.user.id))
+    .map(profile => directoryProfile(profile, db, req.user.id))))
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, limit)
   return res.json({ users })
@@ -310,7 +310,7 @@ export async function getUserProfile(req, res) {
   }
   profile ||= db.profiles.find(p => p.id === id || p.username === id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
-  return res.json(publicProfile(profile, db, req.user.id))
+  return res.json(await publicProfile(profile, db, req.user.id))
 }
 
 function normalizeInvitation(value) {

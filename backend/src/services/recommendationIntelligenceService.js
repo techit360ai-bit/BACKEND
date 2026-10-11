@@ -2,8 +2,10 @@ import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../con
 import { createId, nowIso, userName } from '../utils/api.js'
 import { requireOrganizationPermission, organizationOverview, organizationPulse, organizationRisks } from './organizationIntelligenceService.js'
 import { investorIntelligenceOverview } from './investorIntelligenceService.js'
-import { publicTrustFor } from './trustVerificationAuthority.js'
-import { evaluateEntitlement } from './tvceService.js'
+import { publicTrustFor as legacyPublicTrustFor } from './trustVerificationAuthority.js'
+import { publicTrustFor as dispatchPublicTrustFor } from './trustAuthority.js'
+import { evaluateEntitlement, evaluateEntitlementAsync } from './tvceService.js'
+import { authorizationEnabled, loadAuthorizationSources } from '../repositories/authorizationRepository.js'
 
 const DAY = 86_400_000
 const rows = (db, name) => Array.isArray(db[name]) ? db[name] : (db[name] = [])
@@ -17,16 +19,67 @@ const latest = (items, fields = ['updatedAt', 'createdAt']) => [...items].sort((
 const profileFor = (db, id) => rows(db, 'profiles').find(row => String(row.id) === String(id)) || {}
 const display = (profile, fallback = 'TechIT member') => userName(profile, fallback)
 
-export function matchingAccess(userId, role = null) {
-  const db = readAuthorityDb(); const profile = profileFor(db, userId); const normalizedRole = String(role || profile.activeRole || profile.role || 'founder').toLowerCase().replace('organisation', 'organization')
-  const trust = publicTrustFor(userId, null, db); const subscription = rows(db, 'subscriptions').find(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status)); const ledgerCredits = rows(db, 'creditLedger').filter(row => row.userId === userId).reduce((sum, row) => sum + Number(row.deltaCredits ?? row.credits ?? 0), 0); const walletCredits = Number(rows(db, 'walletAccounts').find(row => row.userId === userId)?.creditBalance || 0); const credits = Math.max(ledgerCredits, walletCredits)
-  const verificationTier = trust.tier || 'Claimed'; const verificationMultiplier = verificationTier === 'Highly Trusted' ? 2 : verificationTier === 'Verified' ? 1.6 : verificationTier === 'Building' ? 1.2 : 1
-  const subscriptionMultiplier = subscription ? 2 : 1; const creditMultiplier = credits > 0 ? 1 + Math.min(1, credits / 100) : 1
+function normalizedAccessRole(profile, role) {
+  return String(role || profile.activeRole || profile.role || 'founder').toLowerCase().replace('organisation', 'organization')
+}
+
+function accessCapabilityFor(normalizedRole) {
+  return normalizedRole === 'investor' ? 'INVESTOR_INTELLIGENCE' : normalizedRole === 'organization' ? 'ORGANIZATION_MONITORING' : normalizedRole === 'collaborator' ? 'ADVANCED_WORKSPACE_AI' : 'IDEA_DIAGNOSTICS_ADVANCED'
+}
+
+function accessSources(db, userId) {
+  const subscription = rows(db, 'subscriptions').find(row => row.userId === userId && ['active', 'trialing', 'grace_period'].includes(row.status)) || null
+  const ledgerCredits = rows(db, 'creditLedger').filter(row => row.userId === userId).reduce((sum, row) => sum + Number(row.deltaCredits ?? row.credits ?? 0), 0)
+  const walletCredits = Number(rows(db, 'walletAccounts').find(row => row.userId === userId)?.creditBalance || 0)
+  return { subscription, credits: Math.max(ledgerCredits, walletCredits) }
+}
+
+function matchingAccessResult(normalizedRole, trust, subscription, credits, entitlement) {
+  const verificationTier = trust.tier || 'Claimed'
+  const verificationMultiplier = verificationTier === 'Highly Trusted' ? 2 : verificationTier === 'Verified' ? 1.6 : verificationTier === 'Building' ? 1.2 : 1
+  const subscriptionMultiplier = subscription ? 2 : 1
+  const creditMultiplier = credits > 0 ? 1 + Math.min(1, credits / 100) : 1
   const matchLimit = Math.max(5, Math.min(100, Math.round(8 * verificationMultiplier * Math.max(subscriptionMultiplier, creditMultiplier))))
   const visibility = trust.verification_status === 'verified' ? (verificationTier === 'Highly Trusted' ? 'high-trust' : 'verified') : 'limited'
-  const capability = normalizedRole === 'investor' ? 'INVESTOR_INTELLIGENCE' : normalizedRole === 'organization' ? 'ORGANIZATION_MONITORING' : normalizedRole === 'collaborator' ? 'ADVANCED_WORKSPACE_AI' : 'IDEA_DIAGNOSTICS_ADVANCED'
-  const entitlement = evaluateEntitlement(userId, { capability, role: normalizedRole })
-  return { ok: true, role: normalizedRole, matchLimit, visibility, verification: { tier: verificationTier, status: trust.verification_status, score: trust.trust_score, verifiedSkills: trust.verified_skill_count || 0 }, funding: { subscriptionActive: Boolean(subscription), plan: subscription?.planId || null, credits: Math.max(0, Math.round(credits)), capability: entitlement.capability, capabilityAllowed: entitlement.allowed, fundingSource: entitlement.funding || 'none' }, message: subscription ? 'Your subscription expands matching breadth and metered intelligence access.' : credits > 0 ? 'Purchased credits expand metered matching and intelligence access.' : 'Complete verification to improve trust visibility; add credits or a subscription for broader metered matching.' }
+  const message = subscription ? 'Your subscription expands matching breadth and metered intelligence access.' : credits > 0 ? 'Purchased credits expand metered matching and intelligence access.' : 'Complete verification to improve trust visibility; add credits or a subscription for broader metered matching.'
+  return {
+    ok: true,
+    role: normalizedRole,
+    matchLimit,
+    visibility,
+    verification: { tier: verificationTier, status: trust.verification_status, score: trust.trust_score, verifiedSkills: trust.verified_skill_count || 0 },
+    funding: { subscriptionActive: Boolean(subscription), plan: subscription?.planId || null, credits: Math.max(0, Math.round(credits)), capability: entitlement.capability, capabilityAllowed: entitlement.allowed, fundingSource: entitlement.funding || 'none' },
+    message,
+  }
+}
+
+export function matchingAccess(userId, role = null) {
+  const db = readAuthorityDb()
+  const normalizedRole = normalizedAccessRole(profileFor(db, userId), role)
+  const { subscription, credits } = accessSources(db, userId)
+  const trust = legacyPublicTrustFor(userId, null, db)
+  const entitlement = evaluateEntitlement(userId, { capability: accessCapabilityFor(normalizedRole), role: normalizedRole })
+  return matchingAccessResult(normalizedRole, trust, subscription, credits, entitlement)
+}
+
+// Row-level (§5) matching access: resolves the caller profile + subscription +
+// wallet/ledger rows through authorizationRepository and the trust read through
+// the trust dispatcher, so the endpoint never loads the snapshot when
+// AUTHORIZATION_SOURCE=postgres. Falls back to the snapshot path otherwise.
+export async function matchingAccessAsync(userId, role = null) {
+  if (!authorizationEnabled()) return matchingAccess(userId, role)
+  try {
+    const db = await loadAuthorizationSources(userId, ['subscriptions', 'walletAccounts', 'creditLedger'])
+    const normalizedRole = normalizedAccessRole(profileFor(db, userId), role)
+    const { subscription, credits } = accessSources(db, userId)
+    const trust = await dispatchPublicTrustFor(userId, null)
+    const entitlement = await evaluateEntitlementAsync(userId, { capability: accessCapabilityFor(normalizedRole), role: normalizedRole })
+    return matchingAccessResult(normalizedRole, trust, subscription, credits, entitlement)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'matching_access_postgres_read_failed', error: error.message }))
+    if (process.env.AUTHORIZATION_FALLBACK_SQLITE === 'false') throw error
+    return matchingAccess(userId, role)
+  }
 }
 
 function executionSignals(db, userId) {
