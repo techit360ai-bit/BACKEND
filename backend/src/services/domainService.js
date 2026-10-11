@@ -2614,3 +2614,31 @@ export async function reportHackathonTeamAsync(userId, hackathonId, teamId, body
 export async function hackathonAggregatesAsync(userId, hackathonId) {
   return domainRead(hackathonScope(userId, hackathonId), () => hackathonAggregates(userId, hackathonId), () => hackathonAggregates(userId, hackathonId))
 }
+
+// Row-level (§5) wrappers — sub-slice: contracts + opportunity applications.
+const contractsScope = (userId, extra = {}) => ({ userId, contracts: true, ...extra })
+
+export async function createContractAsync(userId, body = {}) {
+  return domainWrite(contractsScope(userId, { collaboratorId: body?.collaboratorId || null }), () => createContract(userId, body), () => createContract(userId, body))
+}
+export async function listContractsAsync(userId) {
+  return domainRead(contractsScope(userId), () => listContracts(userId), () => listContracts(userId))
+}
+export async function getContractAsync(userId, contractId) {
+  return domainRead(contractsScope(userId), () => getContract(userId, contractId), () => getContract(userId, contractId))
+}
+export async function signContractAsync(userId, contractId) {
+  return domainWrite(contractsScope(userId), () => signContract(userId, contractId), () => signContract(userId, contractId))
+}
+export async function countersignContractAsync(userId, contractId) {
+  return domainWrite(contractsScope(userId), () => countersignContract(userId, contractId), () => countersignContract(userId, contractId))
+}
+export async function applyToOpportunityAsync(userId, opportunityId, body = {}) {
+  return domainWrite(contractsScope(userId, { opportunityId }), () => applyToOpportunity(userId, opportunityId, body), () => applyToOpportunity(userId, opportunityId, body))
+}
+export async function listApplicationsAsync(userId) {
+  return domainRead(contractsScope(userId), () => listApplications(userId), () => listApplications(userId))
+}
+export async function createCollaborationCallAsync(userId, body = {}) {
+  return domainWrite(contractsScope(userId), () => createCollaborationCall(userId, body), () => createCollaborationCall(userId, body))
+}

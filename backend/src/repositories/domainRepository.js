@@ -50,6 +50,10 @@ const OWNER_FIELDS = {
   organizationAbuseReviews: ['organizationId', 'ownerId', 'userId'],
   workspaces: ['ownerId', 'userId', 'organizationId'],
   notifications: ['userId'],
+  // Contracts + opportunity applications slice.
+  contracts: ['founderId', 'collaboratorId', 'ownerId', 'userId'],
+  opportunities: ['ownerId', 'userId', 'createdBy'],
+  opportunityApplications: ['applicantId', 'ownerId', 'userId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 
@@ -68,7 +72,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, collections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
   for (const name of writeCollections) db[name] = []
@@ -134,6 +138,18 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     await loadByIds(client, 'profiles', profileIds, db.profiles)
     await loadByIds(client, 'projects', db.hackathonTeamWorkspaces.map(row => row.projectId), db.projects)
     await loadByIds(client, 'workspaces', db.hackathonTeamWorkspaces.map(row => row.workspaceId), db.workspaces)
+  }
+
+  if (userId && contracts) {
+    mergeById(db.contracts, await listRecordsForOwner(client, 'contracts', userId, { ownerFields: ['founderId', 'collaboratorId', 'ownerId', 'userId'] }))
+    mergeById(db.opportunityApplications, await listRecordsForOwner(client, 'opportunityApplications', userId, { ownerFields: ['applicantId', 'ownerId', 'userId'] }))
+    mergeById(db.opportunities, await listRecordsForOwner(client, 'opportunities', userId, { ownerFields: ['ownerId', 'userId', 'createdBy'] }))
+    mergeById(db.profiles, [await getRecord(client, 'profiles', userId)])
+  }
+  if (opportunityId) mergeById(db.opportunities, [await getRecord(client, 'opportunities', opportunityId)])
+  if (collaboratorId) {
+    await loadByIds(client, 'users', [collaboratorId], db.users)
+    await loadByIds(client, 'profiles', [collaboratorId], db.profiles)
   }
 
   for (const entry of collections) {

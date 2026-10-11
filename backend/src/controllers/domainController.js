@@ -12,10 +12,10 @@ import {
   updateWatchlistPreferencesAsync,
   collaboratorEarnings,
   collaboratorEquity,
-  countersignContract,
-  createCollaborationCall,
+  countersignContractAsync,
+  createCollaborationCallAsync,
   createAnalysis,
-  createContract,
+  createContractAsync,
   createHackathonAsync,
   createHackathonInvitationAsync,
   createEndorsementAsync,
@@ -34,7 +34,7 @@ import {
   genericPatch,
   getAnalysis,
   getCollaboratorScores,
-  getContract,
+  getContractAsync,
   getHackathonAsync,
   getHackathonInviteAsync,
   getIntake,
@@ -44,7 +44,7 @@ import {
   investorCollectionAsync,
   investorDealFlowAsync,
   listAnalyses,
-  listContracts,
+  listContractsAsync,
   listContributions,
   listEndorsementsAsync,
   listHackathonsAsync,
@@ -86,12 +86,12 @@ import {
   acceptHackathonInviteAsync,
   reportHackathonTeamAsync,
   requestWithdrawal,
-  signContract,
+  signContractAsync,
   submitHackathonBriefAsync,
   submitHackathonFinalAsync,
   updateNotificationPreferences,
-  applyToOpportunity,
-  listApplications,
+  applyToOpportunityAsync,
+  listApplicationsAsync,
   publishProject,
   updateOrganizationProjectAsync,
   updateProject,
@@ -646,8 +646,8 @@ export function genericListGet(req, res) {
   return res.json({ [req.responseKey]: genericList(req.user.id, req.collectionName) })
 }
 
-export function collaborationCallCreate(req, res) {
-  const result = createCollaborationCall(req.user.id, req.body)
+export async function collaborationCallCreate(req, res) {
+  const result = await createCollaborationCallAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json({ error: result.error })
   return res.status(result.created === false ? 200 : 201).json({ opportunity: result.opportunity })
 }
@@ -685,12 +685,12 @@ export function notificationPrefsPatch(req, res) {
   return res.json(updateNotificationPreferences(req.user.id, req.body))
 }
 
-export function contracts(req, res) {
-  return res.json(listContracts(req.user.id))
+export async function contracts(req, res) {
+  return res.json(await listContractsAsync(req.user.id))
 }
 
-export function contractCreate(req, res) {
-  const result = createContract(req.user.id, req.body)
+export async function contractCreate(req, res) {
+  const result = await createContractAsync(req.user.id, req.body)
   if (!result.ok) {
     const status = ['collaborator_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json(result)
@@ -698,28 +698,28 @@ export function contractCreate(req, res) {
   return created(res, result)
 }
 
-export function contractGet(req, res) {
-  const contract = getContract(req.user.id, req.params.id)
+export async function contractGet(req, res) {
+  const contract = await getContractAsync(req.user.id, req.params.id)
   if (!contract) return notFound(res, 'Contract not found')
   return res.json({ contract })
 }
 
-export function contractSign(req, res) {
-  const result = signContract(req.user.id, req.params.id)
+export async function contractSign(req, res) {
+  const result = await signContractAsync(req.user.id, req.params.id)
   if (!result) return notFound(res, 'Contract not found')
   if (!result.ok) return res.status(400).json(result)
   return res.json(result)
 }
 
-export function contractCountersign(req, res) {
-  const result = countersignContract(req.user.id, req.params.id)
+export async function contractCountersign(req, res) {
+  const result = await countersignContractAsync(req.user.id, req.params.id)
   if (!result) return notFound(res, 'Contract not found')
   if (!result.ok) return res.status(400).json(result)
   return res.json(result)
 }
 
-export function opportunityApply(req, res) {
-  const result = applyToOpportunity(req.user.id, req.params.id, req.body)
+export async function opportunityApply(req, res) {
+  const result = await applyToOpportunityAsync(req.user.id, req.params.id, req.body)
   if (!result.ok) {
     const status = result.error === 'opportunity_not_found' ? 404 : 400
     return res.status(status).json(result)
@@ -727,8 +727,8 @@ export function opportunityApply(req, res) {
   return created(res, result)
 }
 
-export function applicationsList(req, res) {
-  return res.json(listApplications(req.user.id))
+export async function applicationsList(req, res) {
+  return res.json(await listApplicationsAsync(req.user.id))
 }
 
 export function incubationPublish(req, res) {

@@ -234,3 +234,85 @@ describe('domain row-level store — hackathons (§5 sub-slice 3)', () => {
     expect(result.leaderboard[0].composite).toBe(60)
   })
 })
+
+describe('domain row-level store — contracts + opportunities (§5 sub-slice 4)', () => {
+  it('lists the caller contracts through the contract scope', async () => {
+    usedBounded({
+      contracts: [
+        { id: 'c1', founderId: 'u1', collaboratorId: 'c2', status: 'draft', updatedAt: '2024-01-01T00:00:00Z' },
+        { id: 'c2', founderId: 'c9', collaboratorId: 'u1', status: 'active', updatedAt: '2024-02-01T00:00:00Z' },
+        { id: 'c3', founderId: 'x', collaboratorId: 'y', status: 'draft', updatedAt: '2024-03-01T00:00:00Z' },
+      ],
+    })
+    const result = await svc.listContractsAsync('u1')
+    expect(result.contracts.map(row => row.id)).toEqual(['c2', 'c1'])
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', contracts: true })
+  })
+
+  it('creates a contract for an existing collaborator', async () => {
+    usedBounded({ users: [{ id: 'c2' }], profiles: [], contracts: [] })
+    const result = await svc.createContractAsync('u1', { collaboratorId: 'c2', projectName: 'FinPay' })
+    expect(result.ok).toBe(true)
+    expect(result.contract.founderId).toBe('u1')
+    expect(result.contract.status).toBe('draft')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', contracts: true, collaboratorId: 'c2' })
+  })
+
+  it('rejects a contract for an unknown collaborator', async () => {
+    usedBounded({ users: [], profiles: [], contracts: [] })
+    const result = await svc.createContractAsync('u1', { collaboratorId: 'ghost' })
+    expect(result.ok).toBe(false)
+    expect(result.error).toBe('collaborator_not_found')
+  })
+
+  it('reads a single contract by id', async () => {
+    usedBounded({ contracts: [{ id: 'c1', founderId: 'u1', collaboratorId: 'c2', status: 'draft' }] })
+    const found = await svc.getContractAsync('u1', 'c1')
+    expect(found.id).toBe('c1')
+    const missing = await svc.getContractAsync('u1', 'nope')
+    expect(missing).toBeNull()
+  })
+
+  it('countersigns a founder contract and signs a collaborator contract', async () => {
+    usedBounded({ contracts: [{ id: 'c1', founderId: 'u1', collaboratorId: 'c2', status: 'pending-signature', collaboratorSignedAt: '2024-01-01T00:00:00Z', collaboratorSignature: 'c2' }] })
+    const countersigned = await svc.countersignContractAsync('u1', 'c1')
+    expect(countersigned.ok).toBe(true)
+    expect(countersigned.contract.status).toBe('active')
+
+    usedBounded({ contracts: [{ id: 'c2', founderId: 'u1', collaboratorId: 'u2', status: 'pending-countersign', founderSignedAt: '2024-01-01T00:00:00Z', founderSignature: 'u1' }] })
+    const signed = await svc.signContractAsync('u2', 'c2')
+    expect(signed.ok).toBe(true)
+    expect(signed.contract.status).toBe('active')
+  })
+
+  it('applies to an opportunity and lists the caller applications', async () => {
+    usedBounded({ opportunities: [{ id: 'o1', ownerId: 'founder', title: 'Designer' }], opportunityApplications: [] })
+    const applied = await svc.applyToOpportunityAsync('u1', 'o1', { message: 'Keen' })
+    expect(applied.ok).toBe(true)
+    expect(applied.application.applicantId).toBe('u1')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', contracts: true, opportunityId: 'o1' })
+
+    usedBounded({ opportunityApplications: [{ id: 'a1', applicantId: 'u1', opportunityId: 'o1', updatedAt: '2024-01-01T00:00:00Z' }] })
+    const listed = await svc.listApplicationsAsync('u1')
+    expect(listed.applications).toHaveLength(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', contracts: true })
+  })
+
+  it('creates a collaboration call as an opportunity', async () => {
+    usedBounded({ opportunities: [], profiles: [{ id: 'u1', firstName: 'Ada' }] })
+    const result = await svc.createCollaborationCallAsync('u1', {
+      projectId: 'p1',
+      company: 'FinPay',
+      summary: 'Need a designer',
+      scope: 'Design system',
+      role: 'Designer',
+      audienceRoles: ['collaborator'],
+      compensationMode: 'equity-heavy',
+      equityPercent: 5,
+    })
+    expect(result.ok).toBe(true)
+    expect(result.created).toBe(true)
+    expect(result.opportunity.type).toBe('collaboration')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', contracts: true })
+  })
+})
