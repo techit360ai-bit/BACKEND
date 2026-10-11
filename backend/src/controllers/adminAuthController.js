@@ -5,7 +5,7 @@ import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalytics, getDiscoveryConfig, updateDiscoveryConfig } from '../services/discoveryService.js'
 import { migrationTelemetrySnapshot } from '../services/intelligence/migrationTelemetry.js'
-import { upsertComparable } from '../services/investorDealRoomCompletionService.js'
+import { upsertComparableAsync } from '../services/investorDealRoomCompletionService.js'
 import { requestAdminRouterTelemetry } from '../services/aiRouterClient.js'
 import { securityPostureSnapshot } from '../services/securityPostureService.js'
 import { listSecurityEvents } from '../services/securityEventService.js'
@@ -157,7 +157,7 @@ export async function adminAiRouterTelemetry(_req, res) {
 }
 export async function adminSecurityPosture(_req, res) { return res.json(await securityPostureSnapshot()) }
 export async function adminSecurityEvents(req, res) { return res.json({ events: await listSecurityEvents(req.query.limit) }) }
-export function adminComparableUpsert(req, res) { const value = upsertComparable(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
+export async function adminComparableUpsert(req, res) { const value = await upsertComparableAsync(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
 export function adminList(req, res) {
   const db = readAuthorityDb()

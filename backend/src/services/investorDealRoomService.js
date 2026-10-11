@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
-import { getDealRoom as getDealRoomPostgres, listDealRooms as listDealRoomsPostgres, syncDealAggregate, investorReadEnabled, investorWriteEnabled, investorFallbackEnabled } from '../repositories/investorDealRoomRepository.js'
+import { getDealRoom as getDealRoomPostgres, listDealRooms as listDealRoomsPostgres, syncDealAggregate, investorReadEnabled, investorWriteEnabled, investorFallbackEnabled, dealRoomStoreEnabled, dealRoomFallbackEnabled, applyDealRoomMutation } from '../repositories/investorDealRoomRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const clean = value => typeof value === 'string' ? value.trim() : value
@@ -144,14 +144,22 @@ async function persistInvestorResult(result, actorId, dealId) {
     return { ok: false, error: 'investor_write_temporarily_unavailable' }
   }
 }
-export async function createDealRoomAsync(userId, body = {}) { const result = createDealRoom(userId, body); return persistInvestorResult(result, userId, result.deal?.id) }
-export async function signDealNdaAsync(userId, dealId, body = {}) { return persistInvestorResult(signDealNda(userId, dealId, body), userId, dealId) }
-export async function transitionDealAsync(userId, dealId, nextState) { return persistInvestorResult(transitionDeal(userId, dealId, nextState), userId, dealId) }
-export async function updateDiligenceItemAsync(userId, dealId, itemId, body = {}) { return persistInvestorResult(updateDiligenceItem(userId, dealId, itemId, body), userId, dealId) }
-export async function createDealQuestionAsync(userId, dealId, body = {}) { return persistInvestorResult(createDealQuestion(userId, dealId, body), userId, dealId) }
-export async function addDealQuestionMessageAsync(userId, dealId, questionId, body = {}) { return persistInvestorResult(addDealQuestionMessage(userId, dealId, questionId, body), userId, dealId) }
-export async function createInternalNoteAsync(userId, dealId, body = {}) { return persistInvestorResult(createInternalNote(userId, dealId, body), userId, dealId) }
-export async function createIcReviewAsync(userId, dealId, body = {}) { return persistInvestorResult(createIcReview(userId, dealId, body), userId, dealId) }
-export async function createTermSheetAsync(userId, dealId, body = {}) { return persistInvestorResult(createTermSheet(userId, dealId, body), userId, dealId) }
+async function dealRoomWrite(options, mutate, fallback) {
+  if (!dealRoomStoreEnabled()) return fallback()
+  try { return await applyDealRoomMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_deal_room_write_failed', error: error.message }))
+    if (!dealRoomFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+export async function createDealRoomAsync(userId, body = {}) { return dealRoomWrite({ userId, relationships: true, projectionDealId: result => result?.deal?.id }, () => createDealRoom(userId, body), () => { const result = createDealRoom(userId, body); return persistInvestorResult(result, userId, result.deal?.id) }) }
+export async function signDealNdaAsync(userId, dealId, body = {}) { return dealRoomWrite({ userId, dealId }, () => signDealNda(userId, dealId, body), () => persistInvestorResult(signDealNda(userId, dealId, body), userId, dealId)) }
+export async function transitionDealAsync(userId, dealId, nextState) { return dealRoomWrite({ userId, dealId }, () => transitionDeal(userId, dealId, nextState), () => persistInvestorResult(transitionDeal(userId, dealId, nextState), userId, dealId)) }
+export async function updateDiligenceItemAsync(userId, dealId, itemId, body = {}) { return dealRoomWrite({ userId, dealId }, () => updateDiligenceItem(userId, dealId, itemId, body), () => persistInvestorResult(updateDiligenceItem(userId, dealId, itemId, body), userId, dealId)) }
+export async function createDealQuestionAsync(userId, dealId, body = {}) { return dealRoomWrite({ userId, dealId }, () => createDealQuestion(userId, dealId, body), () => persistInvestorResult(createDealQuestion(userId, dealId, body), userId, dealId)) }
+export async function addDealQuestionMessageAsync(userId, dealId, questionId, body = {}) { return dealRoomWrite({ userId, dealId }, () => addDealQuestionMessage(userId, dealId, questionId, body), () => persistInvestorResult(addDealQuestionMessage(userId, dealId, questionId, body), userId, dealId)) }
+export async function createInternalNoteAsync(userId, dealId, body = {}) { return dealRoomWrite({ userId, dealId }, () => createInternalNote(userId, dealId, body), () => persistInvestorResult(createInternalNote(userId, dealId, body), userId, dealId)) }
+export async function createIcReviewAsync(userId, dealId, body = {}) { return dealRoomWrite({ userId, dealId }, () => createIcReview(userId, dealId, body), () => persistInvestorResult(createIcReview(userId, dealId, body), userId, dealId)) }
+export async function createTermSheetAsync(userId, dealId, body = {}) { return dealRoomWrite({ userId, dealId }, () => createTermSheet(userId, dealId, body), () => persistInvestorResult(createTermSheet(userId, dealId, body), userId, dealId)) }
 
 export { DEAL_STATES, CHECKLIST, DEFAULT_FOLDERS }

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
+import { dealRoomStoreEnabled, dealRoomFallbackEnabled, runDealRoomRead, applyDealRoomMutation } from '../repositories/investorDealRoomRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const text = value => typeof value === 'string' ? value.trim() : value
@@ -141,3 +142,54 @@ export function upsertComparable(adminId, body = {}) { return updateAuthorityDb(
 export function runDealRoomMaintenance() { return updateAuthorityDb(db => { const created = []; const current = Date.now(); for (const row of collection(db, 'diligenceItems').concat(collection(db, 'diligenceEvidenceLinks'))) { if (row.dueDate && new Date(row.dueDate).getTime() < current && !['accepted', 'waived', 'completed', 'overdue'].includes(row.status)) { row.status = 'overdue'; row.updatedAt = now(); created.push(row.id); const deal = dealFor(db, row.dealId); notification(db, row.ownerId || deal?.founderId, 'deal_room_deadline_overdue', row.dealId, { itemId: row.id }) } } for (const request of collection(db, 'referenceRequests')) { const expiry = new Date(request.expiresAt).getTime(); if (request.status === 'requested' && expiry <= current) { request.status = 'expired'; request.updatedAt = now() } else if (request.status === 'requested' && expiry - current < 48 * 60 * 60 * 1000 && !request.reminderSentAt) { request.reminderSentAt = now(); const deal = dealFor(db, request.dealId); notification(db, deal?.investorId, 'reference_expiry_warning', request.dealId, { requestId: request.id }) } } for (const row of collection(db, 'investorQuestionnaireSubmissions')) if (row.status === 'draft' && row.expiresAt && new Date(row.expiresAt).getTime() <= current) { row.status = 'expired'; row.updatedAt = now() } for (const row of collection(db, 'dataRoomDocuments')) if (row.status === 'available' && row.expiresAt && new Date(row.expiresAt).getTime() <= current) { row.status = 'expired'; row.updatedAt = now() } return { ok: true, overdueCount: created.length } }) }
 
 export { audit }
+
+// ---- Row-level wrappers (§5 cutover) ---------------------------------------
+async function dealRoomRead(options, read, fallback) {
+  if (!dealRoomStoreEnabled()) return fallback()
+  try { return await runDealRoomRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_deal_room_read_failed', error: error.message }))
+    if (!dealRoomFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+async function dealRoomWrite(options, mutate, fallback) {
+  if (!dealRoomStoreEnabled()) return fallback()
+  try { return await applyDealRoomMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_deal_room_write_failed', error: error.message }))
+    if (!dealRoomFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+const byDeal = (userId, dealId) => ({ userId, dealId })
+
+export async function createDealFolderAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => createDealFolder(userId, dealId, body), () => createDealFolder(userId, dealId, body)) }
+export async function listDealFoldersAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => listDealFolders(userId, dealId), () => listDealFolders(userId, dealId)) }
+export async function createDocumentRequestAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => createDocumentRequest(userId, dealId, body), () => createDocumentRequest(userId, dealId, body)) }
+export async function registerDealDocumentAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => registerDealDocument(userId, dealId, body), () => registerDealDocument(userId, dealId, body)) }
+export async function finalizeDealDocumentAsync(userId, dealId, documentId) { return dealRoomWrite(byDeal(userId, dealId), () => finalizeDealDocument(userId, dealId, documentId), () => finalizeDealDocument(userId, dealId, documentId)) }
+export async function listDealDocumentsAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => listDealDocuments(userId, dealId), () => listDealDocuments(userId, dealId)) }
+export async function downloadDealDocumentAsync(userId, dealId, documentId) { return dealRoomWrite(byDeal(userId, dealId), () => downloadDealDocument(userId, dealId, documentId), () => downloadDealDocument(userId, dealId, documentId)) }
+export async function revokeDealDocumentAsync(userId, dealId, documentId) { return dealRoomWrite(byDeal(userId, dealId), () => revokeDealDocument(userId, dealId, documentId), () => revokeDealDocument(userId, dealId, documentId)) }
+export async function saveQuestionnaireTemplateAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => saveQuestionnaireTemplate(userId, dealId, body), () => saveQuestionnaireTemplate(userId, dealId, body)) }
+export async function getQuestionnaireAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => getQuestionnaire(userId, dealId), () => getQuestionnaire(userId, dealId)) }
+export async function saveQuestionnaireAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => saveQuestionnaire(userId, dealId, body), () => saveQuestionnaire(userId, dealId, body)) }
+export async function technicalDueDiligenceAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => technicalDueDiligence(userId, dealId), () => technicalDueDiligence(userId, dealId)) }
+export async function recordRevenueVerificationAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => recordRevenueVerification(userId, dealId, body), () => recordRevenueVerification(userId, dealId, body)) }
+export async function getRevenueVerificationAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => getRevenueVerification(userId, dealId), () => getRevenueVerification(userId, dealId)) }
+export async function refreshRevenueVerificationAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => refreshRevenueVerification(userId, dealId, body), () => refreshRevenueVerification(userId, dealId, body)) }
+export async function createReferenceRequestAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => createReferenceRequest(userId, dealId, body), () => createReferenceRequest(userId, dealId, body)) }
+export async function submitReferenceAsync(token, body = {}) { return dealRoomWrite({ referenceToken: token }, () => submitReference(token, body), () => submitReference(token, body)) }
+export async function listReferencesAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => listReferences(userId, dealId), () => listReferences(userId, dealId)) }
+export async function addDealParticipantAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => addDealParticipant(userId, dealId, body), () => addDealParticipant(userId, dealId, body)) }
+export async function listDealParticipantsAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => listDealParticipants(userId, dealId), () => listDealParticipants(userId, dealId)) }
+export async function revokeDealParticipantAsync(userId, dealId, participantId) { return dealRoomWrite(byDeal(userId, dealId), () => revokeDealParticipant(userId, dealId, participantId), () => revokeDealParticipant(userId, dealId, participantId)) }
+export async function updateIcReviewAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => updateIcReview(userId, dealId, body), () => updateIcReview(userId, dealId, body)) }
+export async function termSheetActionAsync(userId, dealId, action, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => termSheetAction(userId, dealId, action, body), () => termSheetAction(userId, dealId, action, body)) }
+export async function listTermSheetsAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => listTermSheets(userId, dealId), () => listTermSheets(userId, dealId)) }
+export async function upsertClosingItemAsync(userId, dealId, body = {}) { return dealRoomWrite(byDeal(userId, dealId), () => upsertClosingItem(userId, dealId, body), () => upsertClosingItem(userId, dealId, body)) }
+export async function closingReadinessAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => closingReadiness(userId, dealId), () => closingReadiness(userId, dealId)) }
+export async function investorPackAsync(userId, dealId) { return dealRoomWrite(byDeal(userId, dealId), () => investorPack(userId, dealId), () => investorPack(userId, dealId)) }
+export async function verifyDealAuditAsync(userId, dealId) { return dealRoomRead(byDeal(userId, dealId), () => verifyDealAudit(userId, dealId), () => verifyDealAudit(userId, dealId)) }
+export async function listComparablesAsync(userId, filters = {}) { return dealRoomRead({ userId, comparables: true }, () => listComparables(userId, filters), () => listComparables(userId, filters)) }
+export async function upsertComparableAsync(adminId, body = {}) { return dealRoomWrite({ userId: adminId, comparables: true }, () => upsertComparable(adminId, body), () => upsertComparable(adminId, body)) }
+export async function runDealRoomMaintenanceAsync() { return dealRoomWrite({ allDeals: true }, () => runDealRoomMaintenance(), () => runDealRoomMaintenance()) }

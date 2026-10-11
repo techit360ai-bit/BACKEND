@@ -16,7 +16,7 @@ import { initializeContentPostgresProjection } from './services/contentPostgresP
 import { initializeFinancePostgresProjection } from './services/financePostgresProjection.js'
 import { initializePlatformCollectionSchema } from './repositories/platformCollectionRepository.js'
 import { cleanupSessionsAsync } from './services/sessionService.js'
-import { runDealRoomMaintenance } from './services/investorDealRoomCompletionService.js'
+import { runDealRoomMaintenanceAsync } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenance } from './services/organizationIntelligenceService.js'
 import { runMaintenanceAsync as runSupportMaintenanceAsync } from './services/supportService.js'
 import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
@@ -91,7 +91,7 @@ const reverificationTimer = setInterval(() => {
 reverificationTimer.unref?.()
 const sessionCleanupTimer = setInterval(() => { runMaintenance(() => cleanupSessionsAsync()).catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
 sessionCleanupTimer.unref?.()
-const dealRoomMaintenanceTimer = setInterval(() => { runMaintenance(() => runDealRoomMaintenance()).catch(error => console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
+const dealRoomMaintenanceTimer = setInterval(() => { runDealRoomMaintenanceAsync().catch(error => console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
 dealRoomMaintenanceTimer.unref?.()
 const organizationIntelligenceTimer = setInterval(() => { runMaintenance(() => runOrganizationIntelligenceMaintenance()).catch(error => console.error(JSON.stringify({ event: 'organization_intelligence_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.ORGANIZATION_INTELLIGENCE_INTERVAL_MS || 60 * 60 * 1000)))
 organizationIntelligenceTimer.unref?.()
