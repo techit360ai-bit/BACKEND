@@ -1,4 +1,4 @@
-import { accountEntitlementAsync, adminCommercialConfig, adminTvceAnalytics, capabilityCatalogAsync, conversionFunnel, estimateCredits, evaluateEntitlementAsync, evaluatePaywallAsync, freeTierUsage, fulfillPaymentAsync, nextBestAction, progressMeter, recordPaywallEventAsync, resumeWorkflowAsync, saveWorkflowAsync, updateAdminCommercialConfig, walletForecast } from '../services/tvceService.js'
+import { accountEntitlementAsync, adminCommercialConfigAsync, adminTvceAnalyticsAsync, capabilityCatalogAsync, conversionFunnelAsync, estimateCreditsAsync, evaluateEntitlementAsync, evaluatePaywallAsync, freeTierUsageAsync, fulfillPaymentAsync, nextBestActionAsync, progressMeterAsync, recordPaywallEventAsync, resumeWorkflowAsync, saveWorkflowAsync, updateAdminCommercialConfigAsync, walletForecastAsync } from '../services/tvceService.js'
 import { createTvceCheckout } from '../services/tvceCheckoutService.js'
 import { createOrganizationBudget } from '../services/organizationBudgetService.js'
 import { saveOrganizationEntitlement as saveOrganizationEntitlementRecord } from '../services/organizationEntitlementService.js'
@@ -16,15 +16,15 @@ export async function entitlements(req, res) { const capabilities = await capabi
 export async function evaluate(req, res) { return res.json(await evaluateEntitlementAsync(req.user.id, body(req))) }
 export async function paywall(req, res) { const result = await evaluatePaywallAsync(req.user.id, body(req)); void recordPaywallEventAsync(req.user.id, { capability: body(req).capability, role: body(req).role, eventType: result.paywall ? 'PAYWALL_VIEWED' : 'CAPABILITY_ALLOWED', metadata: { code: result.code } }); return res.status(result.allowed ? 200 : 402).json(result) }
 export async function paywallEvent(req, res) { return send(res, await recordPaywallEventAsync(req.user.id, body(req)), 201) }
-export function creditsEstimate(req, res) { return res.json(estimateCredits(req.user.id, body(req))) }
-export function forecast(req, res) { return res.json(walletForecast(req.user.id)) }
-export function nextAction(req, res) { return res.json(nextBestAction(req.user.id, body(req))) }
-export function progress(req, res) { return res.json(progressMeter(req.user.id)) }
-export function freeUsage(req, res) { return res.json({ usage: freeTierUsage(req.user.id) }) }
-export function funnel(req, res) { return res.json(conversionFunnel(req.user.id, req.query.period)) }
-export function adminAnalytics(req, res) { return res.json(adminTvceAnalytics(req.query.period || 'all', { days: req.query.days, from: req.query.from, to: req.query.to })) }
-export function adminConfig(_req, res) { return res.json(adminCommercialConfig()) }
-export function adminConfigUpdate(req, res) { return send(res, updateAdminCommercialConfig(req.user.id, body(req))) }
+export async function creditsEstimate(req, res) { return res.json(await estimateCreditsAsync(req.user.id, body(req))) }
+export async function forecast(req, res) { return res.json(await walletForecastAsync(req.user.id)) }
+export async function nextAction(req, res) { return res.json(await nextBestActionAsync(req.user.id, body(req))) }
+export async function progress(req, res) { return res.json(await progressMeterAsync(req.user.id)) }
+export async function freeUsage(req, res) { return res.json({ usage: await freeTierUsageAsync(req.user.id) }) }
+export async function funnel(req, res) { return res.json(await conversionFunnelAsync(req.user.id, req.query.period)) }
+export async function adminAnalytics(req, res) { return res.json(await adminTvceAnalyticsAsync(req.query.period || 'all', { days: req.query.days, from: req.query.from, to: req.query.to })) }
+export async function adminConfig(_req, res) { return res.json(await adminCommercialConfigAsync()) }
+export async function adminConfigUpdate(req, res) { return send(res, await updateAdminCommercialConfigAsync(req.user.id, body(req))) }
 export function adminOrganizationEntitlement(req, res) { return send(res, saveOrganizationEntitlementRecord(req.user.id, body(req)), 201) }
 export function adminOrganizationBudget(req, res) { return send(res, createOrganizationBudget(req.user.id, body(req)), 201) }
 export function adminOrganizationHackathonReview(req, res) { return send(res, approveOrganizationHackathon(req.user.id, req.params.hackathonId, body(req).decision, body(req).reason)) }

@@ -2,7 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
-import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, recordPaywallEventPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, loadFinanceAdminSnapshotPostgres, loadProgressMeterPostgres, saveAdminCommercialConfigPostgres, recordPaywallEventPostgres, reversePaymentCreditsPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { workspaceTeamGrantFor } from './workspaceTeamEntitlementService.js'
 import { listDefaultRateCards } from './unitEconomicsService.js'
@@ -127,16 +127,39 @@ function commercialFor(db, capability) {
   return merged
 }
 
+// Row-level read helper for the finance snapshot. Returns the db-shaped
+// snapshot when FINANCE_READ_SOURCE=postgres, or null to fall back to the
+// synchronous snapshot once the SQLite fallback is exhausted.
+async function readFinanceSnapshotFor(operation, userId = null) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return null
+  try { return await loadFinanceSnapshotPostgres(userId) } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation, error: error.message }))
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return null
+  }
+}
+
 export function freeTierUsage(userId) {
-  const db = readAuthorityDb()
+  return freeTierUsageFromDb(readAuthorityDb(), userId)
+}
+
+export function freeTierUsageFromDb(db, userId) {
   return Object.keys(TVCE_FREE_QUOTAS).map(capability => { const quota = quotaFor(db, capability); const used = freeUsageFor(db, userId, capability); return { capability, used, quota, remaining: Math.max(0, quota - used), period: 'calendar_month' } })
 }
 
+export async function freeTierUsageAsync(userId) {
+  const db = await readFinanceSnapshotFor('free_tier_usage', userId)
+  return db ? freeTierUsageFromDb(db, userId) : freeTierUsage(userId)
+}
+
 export function adminCommercialConfig() {
-  const db = readAuthorityDb()
+  return adminCommercialConfigFromDb(readAuthorityDb())
+}
+
+export function adminCommercialConfigFromDb(db) {
   return {
     freeQuotas: Object.fromEntries(Object.keys(TVCE_FREE_QUOTAS).map(capability => [capability, quotaFor(db, capability)])),
-    capabilities: capabilityCatalog(),
+    capabilities: capabilityCatalogFromDb(db),
     plans: collection(db, 'billingPlans').map(row => ({ ...row })),
     creditPackages: collection(db, 'creditPackages').map(row => ({ ...row })),
     rateCards: collection(db, 'rateCards').length ? collection(db, 'rateCards').map(row => ({ ...row })) : listDefaultRateCards(),
@@ -148,47 +171,72 @@ export function adminCommercialConfig() {
   }
 }
 
+export async function adminCommercialConfigAsync() {
+  const db = await readFinanceSnapshotFor('admin_commercial_config', null)
+  return db ? adminCommercialConfigFromDb(db) : adminCommercialConfig()
+}
+
+function applyAdminCommercialConfig(db, input = {}) {
+  if (input.freeQuotas && typeof input.freeQuotas === 'object') {
+    for (const [capability, value] of Object.entries(input.freeQuotas)) {
+      if (!(capability in TVCE_FREE_QUOTAS)) continue
+      const quota = Number(value)
+      if (Number.isFinite(quota) && quota >= 0 && quota <= 100000) { db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.freeQuotas = db.tvceConfig.freeQuotas || {}; db.tvceConfig.freeQuotas[capability] = Math.floor(quota) }
+    }
+  }
+  if (Array.isArray(input.plans)) db.billingPlans = input.plans.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+  if (Array.isArray(input.creditPackages)) db.creditPackages = input.creditPackages.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
+  if (Array.isArray(input.rateCards)) db.rateCards = input.rateCards.slice(0, 500).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
+  if (Array.isArray(input.geoPricingProfiles)) db.geoPricingProfiles = input.geoPricingProfiles.slice(0, 300).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
+  if (input.capabilities && typeof input.capabilities === 'object') {
+    db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.capabilities = db.tvceConfig.capabilities || {}
+    for (const [capability, patch] of Object.entries(input.capabilities)) {
+      if (!TVCE_CAPABILITIES.some(item => item.id === capability) || !patch || typeof patch !== 'object') continue
+      const next = { ...(db.tvceConfig.capabilities[capability] || {}) }
+      for (const field of ['valueStatement', 'blockedMessage']) if (typeof patch[field] === 'string' && patch[field].trim()) next[field] = patch[field].trim().slice(0, 500)
+      db.tvceConfig.capabilities[capability] = next
+    }
+  }
+  return db
+}
+
+function adminConfigAudit(adminId, input = {}) {
+  return { id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined, rateCards: Array.isArray(input.rateCards) ? input.rateCards.length : undefined, geoPricingProfiles: Array.isArray(input.geoPricingProfiles) ? input.geoPricingProfiles.length : undefined }, createdAt: nowIso() }
+}
+
 export function updateAdminCommercialConfig(adminId, input = {}) {
   return updateAuthorityDb(db => {
-    if (input.freeQuotas && typeof input.freeQuotas === 'object') {
-      for (const [capability, value] of Object.entries(input.freeQuotas)) {
-        if (!(capability in TVCE_FREE_QUOTAS)) continue
-        const quota = Number(value)
-        if (Number.isFinite(quota) && quota >= 0 && quota <= 100000) { db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.freeQuotas = db.tvceConfig.freeQuotas || {}; db.tvceConfig.freeQuotas[capability] = Math.floor(quota) }
-      }
-    }
-    if (Array.isArray(input.plans)) db.billingPlans = input.plans.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
-    if (Array.isArray(input.creditPackages)) db.creditPackages = input.creditPackages.slice(0, 100).map(row => ({ ...row, updatedAt: nowIso() }))
-    if (Array.isArray(input.rateCards)) db.rateCards = input.rateCards.slice(0, 500).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
-    if (Array.isArray(input.geoPricingProfiles)) db.geoPricingProfiles = input.geoPricingProfiles.slice(0, 300).map(row => ({ ...row, updatedAt: nowIso(), status: row.status || 'active' }))
-    if (input.capabilities && typeof input.capabilities === 'object') {
-      db.tvceConfig = db.tvceConfig || {}; db.tvceConfig.capabilities = db.tvceConfig.capabilities || {}
-      for (const [capability, patch] of Object.entries(input.capabilities)) {
-        if (!TVCE_CAPABILITIES.some(item => item.id === capability) || !patch || typeof patch !== 'object') continue
-        const next = { ...(db.tvceConfig.capabilities[capability] || {}) }
-        for (const field of ['valueStatement', 'blockedMessage']) if (typeof patch[field] === 'string' && patch[field].trim()) next[field] = patch[field].trim().slice(0, 500)
-        db.tvceConfig.capabilities[capability] = next
-      }
-    }
-    collection(db, 'verificationAuditLogs').push({ id: createId('tvce_admin_config'), actorId: adminId, action: 'tvce_commercial_config_updated', metadata: { freeQuotas: input.freeQuotas ? Object.keys(input.freeQuotas) : [], plans: Array.isArray(input.plans) ? input.plans.length : undefined, creditPackages: Array.isArray(input.creditPackages) ? input.creditPackages.length : undefined, rateCards: Array.isArray(input.rateCards) ? input.rateCards.length : undefined, geoPricingProfiles: Array.isArray(input.geoPricingProfiles) ? input.geoPricingProfiles.length : undefined }, createdAt: nowIso() })
-    return { ok: true, config: adminCommercialConfig() }
+    applyAdminCommercialConfig(db, input)
+    collection(db, 'verificationAuditLogs').push(adminConfigAudit(adminId, input))
+    return { ok: true, config: adminCommercialConfigFromDb(db) }
   })
 }
 
+export async function updateAdminCommercialConfigAsync(adminId, input = {}) {
+  if (process.env.FINANCE_WRITE_SOURCE !== 'postgres') return updateAdminCommercialConfig(adminId, input)
+  try {
+    const before = await loadFinanceSnapshotPostgres(null)
+    const after = applyAdminCommercialConfig(structuredClone(before), input)
+    await saveAdminCommercialConfigPostgres(before, after, adminConfigAudit(adminId, input), { userId: adminId })
+    return { ok: true, config: adminCommercialConfigFromDb(after) }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'update_admin_commercial_config', error: error.message }))
+    if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    return updateAdminCommercialConfig(adminId, input)
+  }
+}
+
 export function capabilityCatalog() {
-  const db = readAuthorityDb()
+  return capabilityCatalogFromDb(readAuthorityDb())
+}
+
+export function capabilityCatalogFromDb(db) {
   return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
 }
 
 export async function capabilityCatalogAsync() {
-  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return capabilityCatalog()
-  try {
-    const db = await loadFinanceSnapshotPostgres(null)
-    return TVCE_CAPABILITIES.map(item => ({ ...item, ...commercialFor(db, item.id), freeQuota: commercialFor(db, item.id).freeQuota ?? (quotaFor(db, item.id) || undefined), policy: CAPABILITY_POLICIES[item.authorizationCapability || item.id] || null }))
-  } catch (error) {
-    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
-    return capabilityCatalog()
-  }
+  const db = await readFinanceSnapshotFor('capability_catalog', null)
+  return db ? capabilityCatalogFromDb(db) : capabilityCatalog()
 }
 
 export function accountEntitlement(userId) { return accountEntitlementFor(readAuthorityDb(), userId) }
@@ -298,21 +346,42 @@ export async function recordPaywallEventAsync(userId, input = {}) {
 }
 
 export function estimateCredits(userId, input = {}) {
+  return estimateCreditsFromDb(readAuthorityDb(), userId, input)
+}
+
+export function estimateCreditsFromDb(db, userId, input = {}) {
   const items = Array.isArray(input.actions) ? input.actions : [input]
   const estimate = items.reduce((sum, item) => sum + Math.max(0, number(item.estimatedCredits ?? item.estimated_credits)), 0)
-  const available = availableCredits(readAuthorityDb(), userId)
+  const available = availableCredits(db, userId)
   return { userId, estimatedCredits: estimate, actionCount: items.length, isEstimate: true, source: 'runtime_usage_meter', availableCredits: available, covered: estimate > 0 ? available >= estimate : null, estimateProvided: estimate > 0 }
 }
 
+export async function estimateCreditsAsync(userId, input = {}) {
+  const db = await readFinanceSnapshotFor('estimate_credits', userId)
+  return db ? estimateCreditsFromDb(db, userId, input) : estimateCredits(userId, input)
+}
+
 export function walletForecast(userId) {
-  const db = readAuthorityDb(); const available = availableCredits(db, userId)
+  return walletForecastFromDb(readAuthorityDb(), userId)
+}
+
+export function walletForecastFromDb(db, userId) {
+  const available = availableCredits(db, userId)
   const workflows = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
   const projected = workflows.reduce((sum, row) => sum + number(row.estimatedCredits), 0)
   return { availableCredits: available, workflows: workflows.map(row => ({ id: row.id, name: row.name, estimatedCredits: number(row.estimatedCredits), status: row.status })), projectedRequirement: projected, shortfall: Math.max(0, projected - available), covered: available >= projected, isEstimate: true }
 }
 
+export async function walletForecastAsync(userId) {
+  const db = await readFinanceSnapshotFor('wallet_forecast', userId)
+  return db ? walletForecastFromDb(db, userId) : walletForecast(userId)
+}
+
 export function progressMeter(userId) {
-  const db = readAuthorityDb()
+  return progressMeterFromDb(readAuthorityDb(), userId)
+}
+
+export function progressMeterFromDb(db, userId) {
   const owned = name => collection(db, name).filter(row => row.userId === userId || row.ownerId === userId || row.createdBy === userId)
   const ideas = owned('ventureIntakes').length + owned('projects').length
   const validation = owned('validationSessions').length + owned('customerValidationSessions').length + owned('customerResponses').length
@@ -324,19 +393,49 @@ export function progressMeter(userId) {
   return { meter, strongestOpportunity: weakest ? weakest[0] : 'ideaClarity', generatedAt: nowIso() }
 }
 
+export async function progressMeterAsync(userId) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return progressMeter(userId)
+  try { return progressMeterFromDb(await loadProgressMeterPostgres(userId), userId) } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation: 'progress_meter', error: error.message }))
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return progressMeter(userId)
+  }
+}
+
 export function conversionFunnel(userId, period = 'all') {
-  const db = readAuthorityDb(); const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
+  return conversionFunnelFromDb(readAuthorityDb(), userId, period)
+}
+
+export function conversionFunnelFromDb(db, userId, period = 'all') {
+  const since = period === '30d' ? Date.now() - 30 * 86400000 : 0
   const events = collection(db, 'paywallEvents').filter(row => row.userId === userId && new Date(row.createdAt || 0).getTime() >= since)
   const count = type => events.filter(row => row.eventType === type).length
   const stages = ['PAYWALL_VIEWED', 'VALUE_EXPLANATION_VIEWED', 'CREDIT_OPTION_SELECTED', 'SUBSCRIPTION_OPTION_SELECTED', 'CHECKOUT_STARTED', 'PAYMENT_SUCCESS', 'WORKFLOW_RESUMED', 'OUTCOME_DELIVERED']
   return { period, stages: stages.map(stage => ({ stage, count: count(stage) })), totalEvents: events.length, capabilities: [...new Set(events.map(row => row.capability).filter(Boolean))] }
 }
 
+export async function conversionFunnelAsync(userId, period = 'all') {
+  const db = await readFinanceSnapshotFor('conversion_funnel', userId)
+  return db ? conversionFunnelFromDb(db, userId, period) : conversionFunnel(userId, period)
+}
+
 // Admin-only aggregate view over persisted TVCE and billing records. Monetary
 // values are returned in the provider's stored minor-unit convention and are
 // never inferred from mocked UI data.
 export function adminTvceAnalytics(period = 'all', options = {}) {
-  const db = readAuthorityDb()
+  return adminTvceAnalyticsFromDb(readAuthorityDb(), period, options)
+}
+
+export async function adminTvceAnalyticsAsync(period = 'all', options = {}) {
+  if (process.env.FINANCE_READ_SOURCE !== 'postgres') return adminTvceAnalytics(period, options)
+  try { return adminTvceAnalyticsFromDb(await loadFinanceAdminSnapshotPostgres(), period, options) } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation: 'admin_tvce_analytics', error: error.message }))
+    if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
+    return adminTvceAnalytics(period, options)
+  }
+}
+
+export function adminTvceAnalyticsFromDb(db, period = 'all', options = {}) {
   const days = Number(options.days || (period.endsWith('d') ? period.slice(0, -1) : 0))
   const since = days > 0 ? Date.now() - days * 86400000 : options.from ? new Date(options.from).getTime() : 0
   const until = options.to ? new Date(options.to).getTime() : Date.now()
@@ -437,10 +536,19 @@ export function adminTvceAnalytics(period = 'all', options = {}) {
 }
 
 export function nextBestAction(userId, input = {}) {
-  const db = readAuthorityDb(); const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
+  return nextBestActionFromDb(readAuthorityDb(), userId, input)
+}
+
+export async function nextBestActionAsync(userId, input = {}) {
+  const db = await readFinanceSnapshotFor('next_best_action', userId)
+  return db ? nextBestActionFromDb(db, userId, input) : nextBestAction(userId, input)
+}
+
+export function nextBestActionFromDb(db, userId, input = {}) {
+  const role = roleFor(db, userId, input.role); const active = collection(db, 'workflowSnapshots').filter(row => row.userId === userId && ['pending', 'active'].includes(row.status))
   const action = input.action || (role === 'investor' ? 'INVESTOR_INTELLIGENCE' : role === 'organization' ? 'ORGANIZATION_MONITORING' : active.length ? 'CUSTOMER_VALIDATION_ADVANCED' : 'IDEA_DIAGNOSTICS_ADVANCED')
   const catalog = catalogFor(action) || TVCE_CAPABILITIES[0]
-  const access = evaluateEntitlement(userId, { capability: catalog.id, role })
+  const access = evaluateEntitlementFromDb(userId, { capability: catalog.id, role }, db)
   const usage = collection(db, 'capabilityConsumptions').filter(row => row.userId === userId)
   const completed = usage.filter(row => ['settled', 'completed'].includes(String(row.status).toLowerCase()))
   const successful = completed.filter(row => row.outcome === 'success' || row.success === true || row.resultStatus === 'success').length
@@ -543,6 +651,16 @@ export function reversePaymentCredits(userId, paymentId, reason = 'refund') {
     payment.status = reason === 'dispute' ? 'disputed' : 'refunded'; payment.updatedAt = nowIso()
     return { ok: true, idempotent: remaining === 0, payment, reversedCredits: remaining }
   })
+}
+
+export async function reversePaymentCreditsAsync(userId, paymentId, reason = 'refund') {
+  if (financePostgresEnabled()) {
+    try { return await reversePaymentCreditsPostgres(userId, paymentId, reason) } catch (error) {
+      console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'reverse_payment_credits', error: error.message }))
+      if (process.env.FINANCE_WRITE_FALLBACK_SQLITE === 'false') return { ok: false, error: 'finance_write_temporarily_unavailable' }
+    }
+  }
+  return reversePaymentCredits(userId, paymentId, reason)
 }
 
 export async function fulfillPaymentAsync(userId, paymentId, input = {}) {

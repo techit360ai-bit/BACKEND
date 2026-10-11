@@ -1,6 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { economicsForUsage } from '../services/unitEconomicsService.js'
-import { withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
+import { withPlatformTransaction, upsertRecord, deleteRecord, listRecords, listRecordsForOwner } from './platformCollectionRepository.js'
 
 const enabled = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
 const readEnabled = () => process.env.FINANCE_READ_SOURCE === 'postgres'
@@ -55,6 +55,59 @@ export async function loadFinanceSnapshotPostgres(userId) {
     const config = (await client.query("SELECT payload FROM platform_collection_records WHERE collection_name='tvceConfig' AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1")).rows[0]?.payload
     snapshot.tvceConfig = config || { freeQuotas: {}, capabilities: {} }
     return snapshot
+  }, { userId })
+}
+
+// Global (all-subject) finance view for the admin TVCE analytics dashboard. The
+// per-user loader above intentionally scopes every collection to one account;
+// the admin aggregation needs the full population, so read each collection with
+// a single bounded query instead of the whole-database snapshot.
+const FINANCE_ADMIN_COLLECTIONS = ['paymentIntents', 'creditLedger', 'subscriptions', 'accountEntitlements', 'paywallEvents', 'billingWebhookEvents', 'workflowSnapshots', 'usageEvents', 'walletAccounts']
+
+export async function loadFinanceAdminSnapshotPostgres() {
+  return withPlatformTransaction(async client => {
+    const snapshot = {}
+    for (const name of FINANCE_ADMIN_COLLECTIONS) snapshot[name] = await listRecords(client, name)
+    return snapshot
+  })
+}
+
+// Progress-meter collections span several domains (workspace, investor,
+// validation) that are not part of the finance loader. Read the subject's owned
+// rows per collection rather than loading the whole database.
+const PROGRESS_COLLECTIONS = ['ventureIntakes', 'projects', 'validationSessions', 'customerValidationSessions', 'customerResponses', 'workspaces', 'workspaceTasks', 'investorIntelligenceSnapshots', 'dealRooms']
+
+export async function loadProgressMeterPostgres(userId) {
+  return withPlatformTransaction(async client => {
+    const snapshot = {}
+    for (const name of PROGRESS_COLLECTIONS) snapshot[name] = await listRecordsForOwner(client, name, userId, { ownerFields: ['userId', 'ownerId', 'createdBy'] })
+    return snapshot
+  }, { userId })
+}
+
+// Admin commercial config is a small set of global catalog collections plus the
+// singleton tvceConfig payload. Persist only the rows that actually changed and
+// append the admin audit record.
+const ADMIN_CONFIG_COLLECTIONS = ['billingPlans', 'creditPackages', 'rateCards', 'geoPricingProfiles']
+
+export async function saveAdminCommercialConfigPostgres(before, after, audit, { userId = null } = {}) {
+  return withPlatformTransaction(async client => {
+    for (const name of ADMIN_CONFIG_COLLECTIONS) {
+      const previous = new Map((before?.[name] || []).filter(row => row?.id).map(row => [String(row.id), row]))
+      const next = new Map((after?.[name] || []).filter(row => row?.id).map(row => [String(row.id), row]))
+      for (const [recordId, row] of next) {
+        if (!previous.has(recordId) || JSON.stringify(previous.get(recordId)) !== JSON.stringify(row)) {
+          await upsertRecord(client, name, row, { idempotencyKey: `tvce-config:${name}:${recordId}:${row.updatedAt || Date.now()}`, operation: previous.has(recordId) ? 'update' : 'insert' })
+        }
+      }
+      for (const recordId of previous.keys()) if (!next.has(recordId)) await deleteRecord(client, name, recordId, { idempotencyKey: `tvce-config:${name}:${recordId}:delete:${Date.now()}` })
+    }
+    const config = after?.tvceConfig
+    if (config && JSON.stringify(before?.tvceConfig || {}) !== JSON.stringify(config)) {
+      await upsertRecord(client, 'tvceConfig', { id: 'tvceConfig', ...config, updatedAt: nowIso() }, { idempotencyKey: `tvce-config:${Date.now()}`, operation: 'update' })
+    }
+    if (audit) await upsertRecord(client, 'verificationAuditLogs', audit, { idempotencyKey: `tvce-config-audit:${audit.id}`, operation: 'insert' })
+    return { ok: true }
   }, { userId })
 }
 
