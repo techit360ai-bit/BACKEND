@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { verificationStoreEnabled, verificationFallbackEnabled, runVerificationRead, applyVerificationMutation } from '../repositories/verificationRepository.js'
 import crypto from 'node:crypto'
 import { ensureTrustProfile } from './capabilityAuthorization.js'
 import { issueExecutionGrant } from './usageGrantService.js'
@@ -48,6 +49,10 @@ export function getVerificationProfile(userId, role) {
   const evidence = collections(db, 'verificationEvidence').filter(row => row.userId === userId && (!target || roleName(row.role) === target))
   const requests = collections(db, 'verificationRequests').filter(row => row.userId === userId && (!target || roleName(row.role) === target))
   return { profile: profile || null, evidence, requests }
+}
+
+export function riskProfileFor(userId) {
+  return collections(readAuthorityDb(), 'riskProfiles').find(row => row.userId === userId) || null
 }
 
 export function requestVerification(userId, body = {}) {
@@ -214,4 +219,87 @@ export function verificationAnalytics() {
   const byCapability = {}
   for (const event of events) { const row = byCapability[event.capability] ||= { allowed: 0, denied: 0, completed: 0, released: 0 }; if (event.eventType === 'capability_allowed') row.allowed++; if (event.eventType === 'capability_denied') row.denied++; if (event.eventType === 'capability_completed') row.completed++; if (event.eventType === 'capability_released') row.released++ }
   return { generatedAt: nowIso(), requests: collections(db, 'verificationRequests').length, pendingReviews: collections(db, 'verificationRequests').filter(row => ['pending', 'in_review'].includes(row.status)).length, evidence: collections(db, 'verificationEvidence').length, decisions: decisions.length, byCapability }
+}
+
+export function adminVerificationQueue() {
+  const db = readAuthorityDb()
+  return { requests: collections(db, 'verificationRequests'), evidence: collections(db, 'verificationEvidence'), reviews: collections(db, 'manualReviews') }
+}
+
+// Row-level (§5) wrappers. Each runs the existing synchronous service logic
+// against a bounded snapshot loaded from the row-level verification store and
+// persists only the rows the call changed. Gated by VERIFICATION_SOURCE=postgres;
+// on failure they fall back to the snapshot while it still exists.
+async function verificationRead(options, read, fallback) {
+  if (!verificationStoreEnabled()) return fallback()
+  try { return await runVerificationRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'verification_read_failed', error: error.message }))
+    if (!verificationFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+async function verificationWrite(options, mutate, fallback) {
+  if (!verificationStoreEnabled()) return fallback()
+  try { return await applyVerificationMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'verification_write_failed', error: error.message }))
+    if (!verificationFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+
+export async function getVerificationProfileAsync(userId, role) {
+  return verificationRead({ userId }, () => getVerificationProfile(userId, role), () => getVerificationProfile(userId, role))
+}
+export async function riskProfileForAsync(userId) {
+  return verificationRead({ userId }, () => riskProfileFor(userId), () => riskProfileFor(userId))
+}
+export async function requestVerificationAsync(userId, body = {}) {
+  return verificationWrite({ userId }, () => requestVerification(userId, body), () => requestVerification(userId, body))
+}
+export async function submitEvidenceAsync(userId, requestId, body = {}) {
+  return verificationWrite({ userId, requestId }, () => submitEvidence(userId, requestId, body), () => submitEvidence(userId, requestId, body))
+}
+export async function analyzeEvidenceAsync(userId, token, requestId, body = {}) {
+  if (!verificationStoreEnabled()) return analyzeEvidence(userId, token, requestId, body)
+  try {
+    const request = await runVerificationRead({ userId, requestId }, () => collections(readAuthorityDb(), 'verificationRequests').find(row => row.id === requestId && row.userId === userId) || null)
+    if (!request) return { ok: false, error: 'verification_request_not_found' }
+    const requestKey = `verification-analysis-${requestId}-${String(body.evidenceId || createId('evidence')).slice(-32)}`
+    const grant = issueExecutionGrant({ userId, requestId: requestKey, taskType: 'evidence_research', estimatedCredits: 1, fundingSource: body.fundingSource || 'payg', maxInputTokens: 4000, maxOutputTokens: 1500 })
+    if (!grant.ok) return grant
+    const advisory = await analyzeVerificationEvidence(token, grant.grant.token, { role: request.role, claim: request.claimType, source: body.source, metadata: body.metadata, evidence_text: body.evidenceText })
+    if (!advisory) return { ok: false, error: 'ai_advisory_unavailable' }
+    return await applyVerificationMutation({ userId }, () => updateAuthorityDb(state => { const evidence = (state.verificationEvidence || []).find(row => row.id === body.evidenceId && row.userId === userId); if (evidence) { evidence.aiAdvisory = advisory; evidence.updatedAt = nowIso() }; return { ok: true, advisory, authorizationAuthority: false } }))
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'verification_write_failed', error: error.message }))
+    if (!verificationFallbackEnabled()) throw error
+    return analyzeEvidence(userId, token, requestId, body)
+  }
+}
+export async function reviewVerificationAsync(adminId, requestId, body = {}) {
+  return verificationWrite({ requestId }, () => reviewVerification(adminId, requestId, body), () => reviewVerification(adminId, requestId, body))
+}
+export async function createOrganizationAsync(userId, body = {}) {
+  return verificationWrite({ userId, organizations: true }, () => createOrganization(userId, body), () => createOrganization(userId, body))
+}
+export async function claimOrganizationAsync(userId, organizationId, body = {}) {
+  return verificationWrite({ userId, organizationId }, () => claimOrganization(userId, organizationId, body), () => claimOrganization(userId, organizationId, body))
+}
+export async function organizationMembershipsAsync(userId, organizationId) {
+  return verificationRead({ userId }, () => organizationMemberships(userId, organizationId), () => organizationMemberships(userId, organizationId))
+}
+export async function addOrganizationMemberAsync(actorId, organizationId, body = {}) {
+  return verificationWrite({ userId: actorId, organizationId, targetUserId: body.userId }, () => addOrganizationMember(actorId, organizationId, body), () => addOrganizationMember(actorId, organizationId, body))
+}
+export async function updateRiskStateAsync(adminId, userId, state, note = '') {
+  return verificationWrite({ userId }, () => updateRiskState(adminId, userId, state, note), () => updateRiskState(adminId, userId, state, note))
+}
+export async function generateReverificationNotificationsAsync(at = new Date()) {
+  return verificationWrite({ reverification: true }, () => generateReverificationNotifications(at), () => generateReverificationNotifications(at))
+}
+export async function verificationAnalyticsAsync() {
+  return verificationRead({ analytics: true }, () => verificationAnalytics(), () => verificationAnalytics())
+}
+export async function adminVerificationQueueAsync() {
+  return verificationRead({ adminQueue: true }, () => adminVerificationQueue(), () => adminVerificationQueue())
 }

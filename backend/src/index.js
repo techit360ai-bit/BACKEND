@@ -1,7 +1,7 @@
 import app from './app.js'
 import { validateDatabaseConfig } from './config/database.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
-import { generateReverificationNotifications } from './services/trustVerificationService.js'
+import { generateReverificationNotificationsAsync } from './services/trustVerificationService.js'
 import { runRevenueRefresh } from './services/trustRevenueService.js'
 import { runAnalyticsRefresh } from './services/trustAnalyticsService.js'
 import { runShippingRefresh } from './services/trustShippingService.js'
@@ -86,7 +86,7 @@ if (process.env.ORGANIZATION_DATABASE_URL || process.env.DATABASE_URL) await ini
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {
-  runMaintenance(() => generateReverificationNotifications()).catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
+  runMaintenance(() => generateReverificationNotificationsAsync()).catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
 }, reverificationIntervalMs)
 reverificationTimer.unref?.()
 const sessionCleanupTimer = setInterval(() => { runMaintenance(() => cleanupSessionsAsync()).catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
