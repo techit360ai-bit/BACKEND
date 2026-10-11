@@ -8,7 +8,7 @@ export async function momentsGenerate(req, res) { return send(res, await persist
 export function momentPrompt(req, res) { return send(res, nextMomentPrompt(req.user.id, req.user.role)) }
 export async function momentDismiss(req, res) { return send(res, await persisted(req, dismissMoment(req.user.id, req.params.momentId))) }
 export function momentGet(req, res) { return send(res, getMoment(req.user.id, req.params.momentId)) }
-export async function momentShare(req, res) { return send(res, await persisted(req, recordShare(req.user.id, req.params.momentId, String(req.body?.channel || 'copy'))), 201) }
+export async function momentShare(req, res) { return send(res, await persisted(req, await recordShare(req.user.id, req.params.momentId, String(req.body?.channel || 'copy'))), 201) }
 export function publicMomentGet(req, res) { return send(res, getPublicMoment(req.params.slug)) }
 export function publicMomentVisit(req, res) { return send(res, recordVisit(req.params.slug, req.body?.ref, req.body?.source)) }
 export function momentReferralActivate(req, res) { return send(res, activateReferral(req.params.referralId, req.user.id, req.body?.action || 'account_created')) }

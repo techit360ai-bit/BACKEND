@@ -153,7 +153,7 @@ function shareUrl(channel, url, text, ref) {
   return null
 }
 
-export function recordShare(userId, momentId, channel) {
+export async function recordShare(userId, momentId, channel) {
   if (!SHARE_CHANNELS.has(channel)) return { ok: false, status: 400, error: 'unsupported_share_channel' }
   const result = updateAuthorityDb(db => {
     const moment = rows(db, 'techitMoments').find(row => row.id === momentId && row.userId === userId)
@@ -165,7 +165,7 @@ export function recordShare(userId, momentId, channel) {
   })
   if (result?.ok) {
     try {
-      const distribution = createDistributionObject(userId, { sourceType: 'moment', sourceId: momentId, visibility: 'PUBLIC', title: result.shareText?.split(' — ')[0] || 'TechIT progress', description: result.shareText || '', preview: result.shareText || '', cta: 'Try your own diagnostic', destinationRoute: '/signup' })
+      const distribution = await createDistributionObject(userId, { sourceType: 'moment', sourceId: momentId, visibility: 'PUBLIC', title: result.shareText?.split(' — ')[0] || 'TechIT progress', description: result.shareText || '', preview: result.shareText || '', cta: 'Try your own diagnostic', destinationRoute: '/signup' })
       if (distribution?.ok) result.distributionId = distribution.object.id
     } catch { /* existing Moment sharing remains authoritative if extension is unavailable */ }
   }

@@ -7,22 +7,22 @@ const { createDistributionObject, getDistributionObject, recordDistributionShare
 beforeEach(() => Object.values(db).forEach(value => Array.isArray(value) && (value.length = 0)))
 
 describe('Distribution Intelligence foundation', () => {
-  it('creates a private-safe public object only for the source owner', () => {
+  it('creates a private-safe public object only for the source owner', async () => {
     db.techitMoments.push({ id: 'moment-1', userId: 'founder-1' })
-    expect(createDistributionObject('other', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC' }).error).toBe('distribution_source_forbidden')
-    const result = createDistributionObject('founder-1', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC', title: 'Validation complete', description: 'Three assumptions tested', preview: 'No private notes', destinationRoute: '/diagnostic' })
+    expect((await createDistributionObject('other', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC' })).error).toBe('distribution_source_forbidden')
+    const result = await createDistributionObject('founder-1', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC', title: 'Validation complete', description: 'Three assumptions tested', preview: 'No private notes', destinationRoute: '/diagnostic' })
     expect(result.ok).toBe(true)
-    expect(getDistributionObject(result.object.id).object.title).toBe('Validation complete')
+    expect((await getDistributionObject(result.object.id)).object.title).toBe('Validation complete')
   })
 
-  it('tracks share, visit, signup, activation, and K-factor inputs', () => {
+  it('tracks share, visit, signup, activation, and K-factor inputs', async () => {
     db.techitMoments.push({ id: 'moment-1', userId: 'founder-1' })
-    const object = createDistributionObject('founder-1', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC', title: 'Milestone' }).object
-    const share = recordDistributionShare('founder-1', object.id, 'copy')
-    const click = recordDistributionClick(object.id, { source: 'linkedin' })
+    const object = (await createDistributionObject('founder-1', { sourceType: 'moment', sourceId: 'moment-1', visibility: 'PUBLIC', title: 'Milestone' })).object
+    const share = await recordDistributionShare('founder-1', object.id, 'copy')
+    const click = await recordDistributionClick(object.id, { source: 'linkedin' })
     expect(click.ok).toBe(true)
-    expect(activateDistributionReferral('new-user', click.referralId, { activationAction: 'account_created' }).status).toBe('activated')
-    const metrics = distributionMetrics().metrics
+    expect((await activateDistributionReferral('new-user', click.referralId, { activationAction: 'account_created' })).status).toBe('activated')
+    const metrics = (await distributionMetrics()).metrics
     expect(metrics.shares).toBe(1)
     expect(metrics.signups).toBe(1)
     expect(metrics.activated).toBe(1)
@@ -30,9 +30,9 @@ describe('Distribution Intelligence foundation', () => {
     expect(share.attributionId).toBe(object.attributionId)
   })
 
-  it('does not expose private objects publicly', () => {
-    const object = createDistributionObject('founder-1', { sourceType: 'achievement', visibility: 'PRIVATE', title: 'Private' }).object
-    expect(getDistributionObject(object.id).error).toBe('distribution_private')
-    expect(recordDistributionShare('founder-1', object.id, 'copy').error).toBe('distribution_not_shareable')
+  it('does not expose private objects publicly', async () => {
+    const object = (await createDistributionObject('founder-1', { sourceType: 'achievement', visibility: 'PRIVATE', title: 'Private' })).object
+    expect((await getDistributionObject(object.id)).error).toBe('distribution_private')
+    expect((await recordDistributionShare('founder-1', object.id, 'copy')).error).toBe('distribution_not_shareable')
   })
 })
