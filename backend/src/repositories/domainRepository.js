@@ -76,12 +76,13 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, collections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
   for (const name of writeCollections) db[name] = []
   db.profiles = []
   db.users = []
+  db.workspaceMembers = []
   db.projects = []
 
   if (userId && endorsements) {
@@ -161,9 +162,18 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     mergeById(db.ventureAnalyses, await listRecordsForOwner(client, 'ventureAnalyses', userId, { ownerFields: OWNER_FIELDS.ventureAnalyses }))
   }
 
+  if (workspaceId) {
+    mergeById(db.workspaces, [await getRecord(client, 'workspaces', workspaceId)])
+    mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', [workspaceId]))
+  }
+
   for (const entry of collections) {
     const name = typeof entry === 'string' ? entry : entry.name
     if (!name) continue
+    if (workspaceId) {
+      mergeById(db[name], await listRecordsByFieldIn(client, name, 'workspaceId', [workspaceId]))
+      continue
+    }
     const field = (typeof entry === 'object' && entry.field) || (OWNER_FIELDS[name] ? OWNER_FIELDS[name][0] : 'userId')
     mergeById(db[name], await listRecordsForOwner(client, name, userId, { ownerFields: [field] }))
   }

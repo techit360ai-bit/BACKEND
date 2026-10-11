@@ -12,7 +12,7 @@
 // task is marked failed with an explicit error event.
 
 import { createId, nowIso } from '../utils/api.js'
-import { listWorkspaceCollection, patchWorkspaceCollectionItem } from './domainService.js'
+import { listWorkspaceCollectionAsync, patchWorkspaceCollectionItemAsync } from './domainService.js'
 import { requestWorkspaceConversation } from './aiRouterClient.js'
 
 const TERMINAL = new Set(['done', 'failed', 'cancelled'])
@@ -30,22 +30,22 @@ function publicTask(task) {
   }
 }
 
-function findTask(userId, workspaceId, taskId) {
-  const rows = listWorkspaceCollection(userId, workspaceId, 'workspaceTasks')
+async function findTask(userId, workspaceId, taskId) {
+  const rows = await listWorkspaceCollectionAsync(userId, workspaceId, 'workspaceTasks')
   if (!rows) return { ok: false, status: 404, error: 'workspace_not_found' }
   const task = rows.find(row => row.id === taskId)
   if (!task) return { ok: false, status: 404, error: 'task_not_found' }
   return { ok: true, task }
 }
 
-export function getWorkspaceTask(userId, workspaceId, taskId) {
-  const found = findTask(userId, workspaceId, taskId)
+export async function getWorkspaceTask(userId, workspaceId, taskId) {
+  const found = await findTask(userId, workspaceId, taskId)
   if (!found.ok) return found
   return { ok: true, task: publicTask(found.task) }
 }
 
-export function appendWorkspaceTaskEvent(userId, workspaceId, taskId, body = {}) {
-  const found = findTask(userId, workspaceId, taskId)
+export async function appendWorkspaceTaskEvent(userId, workspaceId, taskId, body = {}) {
+  const found = await findTask(userId, workspaceId, taskId)
   if (!found.ok) return found
   const type = ['message', 'status', 'error', 'tool_call', 'tool_result', 'approval_request', 'approval_resolved'].includes(body.type)
     ? body.type
@@ -61,13 +61,13 @@ export function appendWorkspaceTaskEvent(userId, workspaceId, taskId, body = {})
   const status = typeof body.status === 'string' && ['queued', 'running', 'needs_approval', 'done', 'failed', 'cancelled'].includes(body.status)
     ? body.status
     : found.task.status
-  const updated = patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceTasks', taskId, { events, status })
+  const updated = await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceTasks', taskId, { events, status })
   if (!updated) return { ok: false, status: 403, error: 'task_write_denied' }
   return { ok: true, task: publicTask(updated), event }
 }
 
 export async function runWorkspaceTask(userId, workspaceId, taskId, token) {
-  const found = findTask(userId, workspaceId, taskId)
+  const found = await findTask(userId, workspaceId, taskId)
   if (!found.ok) return found
   if (TERMINAL.has(found.task.status)) return { ok: false, status: 409, error: 'task_already_settled' }
 
@@ -77,7 +77,7 @@ export async function runWorkspaceTask(userId, workspaceId, taskId, token) {
   const events = [...(Array.isArray(found.task.events) ? found.task.events : [])]
   events.push({ id: createId('task_event'), type: 'status', at: nowIso(), text: 'Running' })
   events.push({ id: createId('task_event'), type: 'message', at: nowIso(), text: prompt })
-  patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceTasks', taskId, { events, status: 'running' })
+  await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceTasks', taskId, { events, status: 'running' })
 
   const response = await requestWorkspaceConversation(token, {
     workspace_id: workspaceId,
@@ -87,7 +87,7 @@ export async function runWorkspaceTask(userId, workspaceId, taskId, token) {
   if (response?.message) {
     events.push({ id: createId('task_event'), type: 'message', at: nowIso(), text: String(response.message).slice(0, 8000) })
     events.push({ id: createId('task_event'), type: 'status', at: nowIso(), text: 'Completed' })
-    const updated = patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceTasks', taskId, {
+    const updated = await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceTasks', taskId, {
       events,
       status: 'done',
       aiModel: response.model_used || null,
@@ -96,6 +96,6 @@ export async function runWorkspaceTask(userId, workspaceId, taskId, token) {
   }
 
   events.push({ id: createId('task_event'), type: 'error', at: nowIso(), text: 'The AI router did not answer, so the task stopped without a result.' })
-  const updated = patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceTasks', taskId, { events, status: 'failed' })
+  const updated = await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceTasks', taskId, { events, status: 'failed' })
   return { ok: false, status: 503, error: 'ai_router_unavailable', task: publicTask(updated) }
 }

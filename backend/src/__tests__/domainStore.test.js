@@ -379,3 +379,46 @@ describe('domain row-level store — venture intakes + analyses (§5 sub-slice 5
     expect(missing).toBeNull()
   })
 })
+
+describe('domain row-level store — workspace collections (§5 sub-slice 5b)', () => {
+  it('lets the owner list a workspace collection by workspace id', async () => {
+    usedBounded({ workspaces: [{ id: 'ws1', ownerId: 'owner1' }], workspaceMembers: [], workspaceTasks: [{ id: 't1', workspaceId: 'ws1', title: 'A', updatedAt: '2024-01-01T00:00:00Z' }] })
+    const rows = await svc.listWorkspaceCollectionAsync('owner1', 'ws1', 'workspaceTasks')
+    expect(rows).toHaveLength(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'owner1', workspaceId: 'ws1', collections: ['workspaceTasks'] })
+  })
+
+  it('returns null for a missing workspace and for a non-member', async () => {
+    usedBounded({ workspaces: [], workspaceMembers: [], workspaceTasks: [] })
+    expect(await svc.listWorkspaceCollectionAsync('owner1', 'nope', 'workspaceTasks')).toBeNull()
+
+    usedBounded({ workspaces: [{ id: 'ws1', ownerId: 'owner1' }], workspaceMembers: [], workspaceTasks: [] })
+    expect(await svc.listWorkspaceCollectionAsync('stranger', 'ws1', 'workspaceTasks')).toBeNull()
+  })
+
+  it('hides agents and connectors from non-owner members', async () => {
+    usedBounded({ workspaces: [{ id: 'ws1', ownerId: 'owner1' }], workspaceMembers: [{ id: 'm1', workspaceId: 'ws1', userId: 'collab1', status: 'active', accessLevel: 'contributor' }], workspaceAgents: [{ id: 'a1', workspaceId: 'ws1' }] })
+    const rows = await svc.listWorkspaceCollectionAsync('collab1', 'ws1', 'workspaceAgents')
+    expect(rows).toEqual([])
+  })
+
+  it('lets a contributor create tasks but not agents', async () => {
+    const db = { workspaces: [{ id: 'ws1', ownerId: 'owner1' }], workspaceMembers: [{ id: 'm1', workspaceId: 'ws1', userId: 'collab1', status: 'active', accessLevel: 'contributor' }], workspaceTasks: [], workspaceAgents: [] }
+    usedBounded(db)
+    const created = await svc.createWorkspaceCollectionItemAsync('collab1', 'ws1', 'workspaceTasks', { title: 'Do' }, 'task')
+    expect(created.title).toBe('Do')
+    expect(created.workspaceId).toBe('ws1')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'collab1', workspaceId: 'ws1', collections: ['workspaceTasks'] })
+
+    const denied = await svc.createWorkspaceCollectionItemAsync('collab1', 'ws1', 'workspaceAgents', { name: 'x' }, 'agent')
+    expect(denied).toBeNull()
+  })
+
+  it('patches a workspace item by id while preserving its owner', async () => {
+    usedBounded({ workspaces: [{ id: 'ws1', ownerId: 'owner1' }], workspaceMembers: [], workspaceTasks: [{ id: 't1', workspaceId: 'ws1', ownerId: 'collab1', title: 'A', updatedAt: '2024-01-01T00:00:00Z' }] })
+    const updated = await svc.patchWorkspaceCollectionItemAsync('owner1', 'ws1', 'workspaceTasks', 't1', { status: 'done' })
+    expect(updated.status).toBe('done')
+    expect(updated.ownerId).toBe('collab1')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'owner1', workspaceId: 'ws1', collections: ['workspaceTasks'] })
+  })
+})

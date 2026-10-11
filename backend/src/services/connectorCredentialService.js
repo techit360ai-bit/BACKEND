@@ -14,7 +14,7 @@
 
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
-import { listWorkspaceCollection, patchWorkspaceCollectionItem } from './domainService.js'
+import { listWorkspaceCollectionAsync, patchWorkspaceCollectionItemAsync } from './domainService.js'
 import { sealSecret } from './workspaceCapabilityService.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -25,16 +25,16 @@ function mask(secret) {
   return `${value.slice(0, 6)}…${value.slice(-4)}`
 }
 
-function findConnector(userId, workspaceId, connectorId) {
-  const list = listWorkspaceCollection(userId, workspaceId, 'workspaceConnectors')
+async function findConnector(userId, workspaceId, connectorId) {
+  const list = await listWorkspaceCollectionAsync(userId, workspaceId, 'workspaceConnectors')
   if (!list) return { ok: false, status: 404, error: 'workspace_not_found' }
   const connector = list.find(row => row.id === connectorId)
   if (!connector) return { ok: false, status: 404, error: 'connector_not_found' }
   return { ok: true, connector }
 }
 
-export function connectorCredentialStatus(userId, workspaceId, connectorId) {
-  const found = findConnector(userId, workspaceId, connectorId)
+export async function connectorCredentialStatus(userId, workspaceId, connectorId) {
+  const found = await findConnector(userId, workspaceId, connectorId)
   if (!found.ok) return found
   const db = readAuthorityDb()
   const record = rows(db, 'connectorCredentials').find(row => row.workspaceId === workspaceId && row.connectorId === connectorId)
@@ -48,8 +48,8 @@ export function connectorCredentialStatus(userId, workspaceId, connectorId) {
   }
 }
 
-export function setConnectorCredential(userId, workspaceId, connectorId, body = {}) {
-  const found = findConnector(userId, workspaceId, connectorId)
+export async function setConnectorCredential(userId, workspaceId, connectorId, body = {}) {
+  const found = await findConnector(userId, workspaceId, connectorId)
   if (!found.ok) return found
   const secret = String(body.token || body.apiKey || '').trim()
   if (secret.length < 8) return { ok: false, status: 400, error: 'credential_too_short' }
@@ -69,7 +69,7 @@ export function setConnectorCredential(userId, workspaceId, connectorId, body = 
     else list[index] = { ...list[index], ...next }
   })
 
-  const updated = patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceConnectors', connectorId, {
+  const updated = await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceConnectors', connectorId, {
     status: 'connected',
     authMode: 'credential',
     credentialMasked: maskedIdentifier,
@@ -80,15 +80,15 @@ export function setConnectorCredential(userId, workspaceId, connectorId, body = 
   return { ok: true, connector: updated, credential: { maskedIdentifier, label, connectedAt: now }, handshake: 'credential' }
 }
 
-export function removeConnectorCredential(userId, workspaceId, connectorId) {
-  const found = findConnector(userId, workspaceId, connectorId)
+export async function removeConnectorCredential(userId, workspaceId, connectorId) {
+  const found = await findConnector(userId, workspaceId, connectorId)
   if (!found.ok) return found
   updateAuthorityDb(db => {
     const list = rows(db, 'connectorCredentials')
     const index = list.findIndex(row => row.workspaceId === workspaceId && row.connectorId === connectorId)
     if (index !== -1) list.splice(index, 1)
   })
-  const updated = patchWorkspaceCollectionItem(userId, workspaceId, 'workspaceConnectors', connectorId, {
+  const updated = await patchWorkspaceCollectionItemAsync(userId, workspaceId, 'workspaceConnectors', connectorId, {
     status: 'disconnected',
     authMode: null,
     credentialMasked: null,

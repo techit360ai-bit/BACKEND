@@ -27,25 +27,25 @@ function reset() {
 beforeEach(reset)
 
 describe('workspace task transport', () => {
-  it('exposes a task with its event transcript', () => {
-    const result = getWorkspaceTask('owner', 'w1', 't1')
+  it('exposes a task with its event transcript', async () => {
+    const result = await getWorkspaceTask('owner', 'w1', 't1')
     expect(result.ok).toBe(true)
     expect(result.task.prompt).toBe('Add a billing summary')
     expect(result.task.events).toEqual([])
   })
 
-  it('rejects access for a non-member and unknown tasks', () => {
-    expect(getWorkspaceTask('stranger', 'w1', 't1')).toMatchObject({ ok: false, status: 404 })
-    expect(getWorkspaceTask('owner', 'w1', 'nope')).toMatchObject({ ok: false, status: 404, error: 'task_not_found' })
+  it('rejects access for a non-member and unknown tasks', async () => {
+    expect(await getWorkspaceTask('stranger', 'w1', 't1')).toMatchObject({ ok: false, status: 404 })
+    expect(await getWorkspaceTask('owner', 'w1', 'nope')).toMatchObject({ ok: false, status: 404, error: 'task_not_found' })
   })
 
-  it('appends a validated event and updates status', () => {
-    const result = appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'message', text: 'looking now', status: 'running' })
+  it('appends a validated event and updates status', async () => {
+    const result = await appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'message', text: 'looking now', status: 'running' })
     expect(result.ok).toBe(true)
     expect(result.event.type).toBe('message')
     expect(result.task.status).toBe('running')
     expect(result.task.events).toHaveLength(1)
-    const coerced = appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'not-a-type' })
+    const coerced = await appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'not-a-type' })
     expect(coerced.event.type).toBe('message')
   })
 
@@ -69,16 +69,16 @@ describe('workspace task transport', () => {
   })
 
   it('refuses to re-run a settled task', async () => {
-    appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'status', status: 'done' })
+    await appendWorkspaceTaskEvent('owner', 'w1', 't1', { type: 'status', status: 'done' })
     expect(await runWorkspaceTask('owner', 'w1', 't1', 'jwt')).toMatchObject({ ok: false, status: 409 })
     expect(requestWorkspaceConversation).not.toHaveBeenCalled()
   })
 })
 
 describe('connector credential handshake', () => {
-  it('seals the credential, masks it, and never returns the raw token', () => {
+  it('seals the credential, masks it, and never returns the raw token', async () => {
     const secret = 'xoxb-super-secret-token'
-    const result = setConnectorCredential('owner', 'w1', 'c1', { token: secret, label: 'Slack bot' })
+    const result = await setConnectorCredential('owner', 'w1', 'c1', { token: secret, label: 'Slack bot' })
     expect(result.ok).toBe(true)
     expect(result.credential.label).toBe('Slack bot')
     expect(result.credential.maskedIdentifier).not.toContain('secret')
@@ -88,19 +88,19 @@ describe('connector credential handshake', () => {
     expect(db.workspaceConnectors[0]).toMatchObject({ status: 'connected', authMode: 'credential', credentialMasked: stored.maskedIdentifier })
   })
 
-  it('reports credential status and clears it on removal', () => {
-    setConnectorCredential('owner', 'w1', 'c1', { token: 'ghp_1234567890abcdef' })
-    expect(connectorCredentialStatus('owner', 'w1', 'c1')).toMatchObject({ ok: true, handshake: 'credential', oauthRedirectSupported: false })
-    const removed = removeConnectorCredential('owner', 'w1', 'c1')
+  it('reports credential status and clears it on removal', async () => {
+    await setConnectorCredential('owner', 'w1', 'c1', { token: 'ghp_1234567890abcdef' })
+    expect(await connectorCredentialStatus('owner', 'w1', 'c1')).toMatchObject({ ok: true, handshake: 'credential', oauthRedirectSupported: false })
+    const removed = await removeConnectorCredential('owner', 'w1', 'c1')
     expect(removed.ok).toBe(true)
     expect(db.connectorCredentials).toHaveLength(0)
-    expect(connectorCredentialStatus('owner', 'w1', 'c1').credential).toBeNull()
+    expect((await connectorCredentialStatus('owner', 'w1', 'c1')).credential).toBeNull()
     expect(db.workspaceConnectors[0]).toMatchObject({ status: 'disconnected', authMode: null })
   })
 
-  it('rejects short or unknown-target credentials', () => {
-    expect(setConnectorCredential('owner', 'w1', 'c1', { token: 'short' })).toMatchObject({ ok: false, status: 400, error: 'credential_too_short' })
-    expect(setConnectorCredential('owner', 'w1', 'missing', { token: 'long-enough-token' })).toMatchObject({ ok: false, status: 404 })
-    expect(setConnectorCredential('stranger', 'w1', 'c1', { token: 'long-enough-token' })).toMatchObject({ ok: false, status: 404 })
+  it('rejects short or unknown-target credentials', async () => {
+    expect(await setConnectorCredential('owner', 'w1', 'c1', { token: 'short' })).toMatchObject({ ok: false, status: 400, error: 'credential_too_short' })
+    expect(await setConnectorCredential('owner', 'w1', 'missing', { token: 'long-enough-token' })).toMatchObject({ ok: false, status: 404 })
+    expect(await setConnectorCredential('stranger', 'w1', 'c1', { token: 'long-enough-token' })).toMatchObject({ ok: false, status: 404 })
   })
 })

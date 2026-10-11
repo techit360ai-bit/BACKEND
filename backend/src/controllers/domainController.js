@@ -25,7 +25,7 @@ import {
   createPaymentIntent,
   createPaymentIntentAsync,
   createProject,
-  createWorkspaceCollectionItem,
+  createWorkspaceCollectionItemAsync,
   createWorkspaceInvitation,
   founderCapTable,
   genericCreate,
@@ -65,10 +65,10 @@ import {
   listProjects,
   listProjectsAsync,
   listWatchlistAsync,
-  listWorkspaceCollection,
+  listWorkspaceCollectionAsync,
   listWorkspaceMembers,
   listWorkspaceMembersAsync,
-  patchWorkspaceCollectionItem,
+  patchWorkspaceCollectionItemAsync,
   acceptWorkspaceInvitation,
   declineWorkspaceInvitation,
   getWorkspaceInvitation,
@@ -248,14 +248,14 @@ export async function workspaceCallToken(req, res) {
   }
 }
 
-export function workspaceItems(req, res) {
-  const rows = listWorkspaceCollection(req.user.id, req.params.workspaceId, req.collectionName)
+export async function workspaceItems(req, res) {
+  const rows = await listWorkspaceCollectionAsync(req.user.id, req.params.workspaceId, req.collectionName)
   if (!rows) return notFound(res, 'Workspace not found')
   return res.json({ [req.responseKey]: rows })
 }
 
 export async function workspaceItemCreate(req, res) {
-  const row = await persistedWorkspace(req, createWorkspaceCollectionItem(
+  const row = await persistedWorkspace(req, await createWorkspaceCollectionItemAsync(
     req.user.id,
     req.params.workspaceId,
     req.collectionName,
@@ -267,14 +267,14 @@ export async function workspaceItemCreate(req, res) {
 }
 
 // --- Workspace agent tasks: single-task read, event append, and one real run ----
-export function workspaceTaskOne(req, res) {
-  const result = getWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId)
+export async function workspaceTaskOne(req, res) {
+  const result = await getWorkspaceTask(req.user.id, req.params.workspaceId, req.params.itemId)
   if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
   return res.json({ task: result.task })
 }
 
-export function workspaceTaskEvent(req, res) {
-  const result = appendWorkspaceTaskEvent(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+export async function workspaceTaskEvent(req, res) {
+  const result = await appendWorkspaceTaskEvent(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
   if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
   return created(res, { task: result.task, event: result.event })
 }
@@ -286,26 +286,26 @@ export async function workspaceTaskRun(req, res) {
 }
 
 // --- Connector credential handshake (sealed at rest, masked in responses) ----
-export function connectorCredentialGet(req, res) {
-  const result = connectorCredentialStatus(req.user.id, req.params.workspaceId, req.params.itemId)
+export async function connectorCredentialGet(req, res) {
+  const result = await connectorCredentialStatus(req.user.id, req.params.workspaceId, req.params.itemId)
   if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
   return res.json(result)
 }
 
-export function connectorCredentialSet(req, res) {
-  const result = setConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
+export async function connectorCredentialSet(req, res) {
+  const result = await setConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId, req.body)
   if (!result.ok) return res.status(result.status || 400).json({ error: result.error })
   return created(res, result)
 }
 
-export function connectorCredentialRemove(req, res) {
-  const result = removeConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId)
+export async function connectorCredentialRemove(req, res) {
+  const result = await removeConnectorCredential(req.user.id, req.params.workspaceId, req.params.itemId)
   if (!result.ok) return res.status(result.status || 404).json({ error: result.error })
   return res.json(result)
 }
 
 export async function workspaceItemPatch(req, res) {
-  const row = await persistedWorkspace(req, patchWorkspaceCollectionItem(
+  const row = await persistedWorkspace(req, await patchWorkspaceCollectionItemAsync(
     req.user.id,
     req.params.workspaceId,
     req.collectionName,

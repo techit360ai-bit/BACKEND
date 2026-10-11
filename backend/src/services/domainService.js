@@ -2667,3 +2667,16 @@ export async function createAnalysisAsync(userId, body = {}) {
 export async function getAnalysisAsync(userId, analysisId) {
   return domainRead(ventureScope(userId), () => getAnalysis(userId, analysisId), () => getAnalysis(userId, analysisId))
 }
+
+// Row-level (§5) wrappers — sub-slice: workspace collections (tasks/agents/connectors/reports).
+const workspaceCollectionScope = (userId, workspaceId, name) => ({ userId, workspaceId, collections: [name] })
+
+export async function listWorkspaceCollectionAsync(userId, workspaceId, name) {
+  return domainRead(workspaceCollectionScope(userId, workspaceId, name), () => listWorkspaceCollection(userId, workspaceId, name), () => listWorkspaceCollection(userId, workspaceId, name))
+}
+export async function createWorkspaceCollectionItemAsync(userId, workspaceId, name, body, prefix) {
+  return domainWrite(workspaceCollectionScope(userId, workspaceId, name), () => createWorkspaceCollectionItem(userId, workspaceId, name, body, prefix), () => createWorkspaceCollectionItem(userId, workspaceId, name, body, prefix))
+}
+export async function patchWorkspaceCollectionItemAsync(userId, workspaceId, name, itemId, body) {
+  return domainWrite(workspaceCollectionScope(userId, workspaceId, name), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body))
+}
