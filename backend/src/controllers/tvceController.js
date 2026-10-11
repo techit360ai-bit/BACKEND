@@ -3,7 +3,7 @@ import { createTvceCheckout } from '../services/tvceCheckoutService.js'
 import { createOrganizationBudget } from '../services/organizationBudgetService.js'
 import { saveOrganizationEntitlement as saveOrganizationEntitlementRecord } from '../services/organizationEntitlementService.js'
 import { approveOrganizationHackathon } from '../services/domainService.js'
-import { listOrganizationAbuseReviews, reviewOrganizationAbuse } from '../services/organizationProgramService.js'
+import { listOrganizationAbuseReviewsAsync, reviewOrganizationAbuseAsync } from '../services/organizationProgramService.js'
 import { createWorkspaceTeamGrant } from '../services/workspaceTeamEntitlementService.js'
 import { billingJobStatus, runBillingJobs } from '../services/billingJobsService.js'
 import { providerAvailability } from '../services/billingProviderConfig.js'
@@ -28,8 +28,8 @@ export function adminConfigUpdate(req, res) { return send(res, updateAdminCommer
 export function adminOrganizationEntitlement(req, res) { return send(res, saveOrganizationEntitlementRecord(req.user.id, body(req)), 201) }
 export function adminOrganizationBudget(req, res) { return send(res, createOrganizationBudget(req.user.id, body(req)), 201) }
 export function adminOrganizationHackathonReview(req, res) { return send(res, approveOrganizationHackathon(req.user.id, req.params.hackathonId, body(req).decision, body(req).reason)) }
-export function adminOrganizationAbuseReviews(req, res) { return res.json(listOrganizationAbuseReviews(req.user.id, req.query)) }
-export function adminOrganizationAbuseReview(req, res) { return send(res, reviewOrganizationAbuse(req.user.id, req.params.reviewId, body(req))) }
+export async function adminOrganizationAbuseReviews(req, res) { return res.json(await listOrganizationAbuseReviewsAsync(req.user.id, req.query)) }
+export async function adminOrganizationAbuseReview(req, res) { return send(res, await reviewOrganizationAbuseAsync(req.user.id, req.params.reviewId, body(req))) }
 export async function workflowSave(req, res) { return send(res, await saveWorkflowAsync(req.user.id, body(req)), 201) }
 export async function workflowResume(req, res) { return send(res, await resumeWorkflowAsync(req.user.id, req.params.workflowId, body(req))) }
 export async function paymentFulfill(req, res) { return send(res, await fulfillPaymentAsync(req.user.id, req.params.paymentId, body(req))) }

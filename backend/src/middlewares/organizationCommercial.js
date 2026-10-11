@@ -1,7 +1,7 @@
 import { rateLimit } from 'express-rate-limit'
 import { evaluateEntitlement } from '../services/tvceService.js'
 import { reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from '../services/capabilityConsumptionService.js'
-import { resolveOrganizationContext } from '../services/organizationIntelligenceService.js'
+import { resolveOrganizationContextAsync } from '../services/organizationIntelligenceService.js'
 
 function organizationIdFor(req) {
   return req.body?.organizationId || req.query?.organizationId || req.user?.activeContext?.organizationId || null
@@ -9,7 +9,7 @@ function organizationIdFor(req) {
 
 export function requireOrganizationCapability(capability, { consume = false } = {}) {
   return async (req, res, next) => {
-    const context = resolveOrganizationContext(req.user.id, organizationIdFor(req))
+    const context = await resolveOrganizationContextAsync(req.user.id, organizationIdFor(req))
     if (!context.ok) return res.status(403).json(context)
     const decision = evaluateEntitlement(req.user.id, {
       capability,

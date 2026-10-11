@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
+import { organizationAccessEnabled, organizationAccessFallbackEnabled, loadOrganizationAccess } from '../repositories/organizationAccessRepository.js'
 
 const DAY = 86400000
 const INTERNAL_ROLES = new Set(['owner', 'admin', 'executive', 'program_director', 'program_manager', 'mentor_manager', 'reviewer', 'analyst', 'operations', 'communications', 'finance', 'partner', 'read_only', 'mentor'])
@@ -33,8 +34,7 @@ function legacyOrganizationAccess(db, userId, organizationId) {
   return rows(db, 'organizations').some(row => row.id === userId) || rows(db, 'projects').some(row => row.organizationId === userId) || rows(db, 'organizationDashboards').some(row => row.ownerId === userId)
 }
 
-export function resolveOrganizationContext(userId, requestedOrganizationId = null) {
-  const db = readAuthorityDb()
+function resolveOrganizationContextFromDb(db, userId, requestedOrganizationId = null) {
   const active = rows(db, 'activeContexts').find(row => row.userId === userId && row.status === 'active')
   const candidate = requestedOrganizationId || active?.organizationId || null
   const organizationId = candidate || (legacyOrganizationAccess(db, userId, userId) ? userId : null)
@@ -47,8 +47,33 @@ export function resolveOrganizationContext(userId, requestedOrganizationId = nul
   return { ok: true, organizationId, role, membership, legacy }
 }
 
+export function resolveOrganizationContext(userId, requestedOrganizationId = null) {
+  return resolveOrganizationContextFromDb(readAuthorityDb(), userId, requestedOrganizationId)
+}
+
+// Row-level organization context resolution. Falls back to the snapshot when the
+// organization source is still sqlite (or on a read failure with fallback on).
+export async function resolveOrganizationContextAsync(userId, requestedOrganizationId = null) {
+  if (!organizationAccessEnabled()) return resolveOrganizationContext(userId, requestedOrganizationId)
+  try {
+    const db = await loadOrganizationAccess(userId, requestedOrganizationId)
+    return resolveOrganizationContextFromDb(db, userId, requestedOrganizationId)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'organization_access_read_failed', error: error.message }))
+    if (!organizationAccessFallbackEnabled()) throw error
+    return resolveOrganizationContext(userId, requestedOrganizationId)
+  }
+}
+
 export function requireOrganizationPermission(userId, permission, organizationId = null) {
   const context = resolveOrganizationContext(userId, organizationId)
+  if (!context.ok) return context
+  if (!PERMISSIONS[permission]?.has(context.role)) return { ...context, ok: false, error: 'organization_permission_denied', permission }
+  return context
+}
+
+export async function requireOrganizationPermissionAsync(userId, permission, organizationId = null) {
+  const context = await resolveOrganizationContextAsync(userId, organizationId)
   if (!context.ok) return context
   if (!PERMISSIONS[permission]?.has(context.role)) return { ...context, ok: false, error: 'organization_permission_denied', permission }
   return context
