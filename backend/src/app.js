@@ -43,6 +43,8 @@ import {
   isProdLike,
 } from './config/runtimeConfig.js'
 import { postgresAuthority } from './middlewares/postgresAuthority.js'
+import { requireInternalMetricsAuth } from './middlewares/internalMetricsAuth.js'
+import { platformAuthorityMetrics } from './controllers/platformMetricsController.js'
 import { csrfProtection } from './middlewares/csrf.js'
 import { runBillingJobs } from './services/billingJobsService.js'
 import { flushTrustProjectionOutbox } from './services/trustProjectionService.js'
@@ -172,6 +174,12 @@ app.get('/ready', (_req, res) => {
     warnings,
   })
 })
+
+// §5 scaling gate: query-instrumentation evidence that the request path does no
+// whole-database reads. Mounted BEFORE postgresAuthority so that scraping it can
+// never itself load a snapshot (which would make the gate self-defeating) and it
+// stays scrapeable even when the snapshot authority is eventually deleted.
+app.get('/internal/metrics/platform-authority', requireInternalMetricsAuth, platformAuthorityMetrics)
 
 // When enabled, legacy synchronous services execute against a PostgreSQL
 // snapshot and their mutations are flushed as versioned records. This bridge

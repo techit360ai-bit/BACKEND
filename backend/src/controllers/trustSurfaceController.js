@@ -15,6 +15,7 @@ import { applyTrustOverride, listTrustOverrides, revokeTrustOverride } from '../
 import { syncIntervalMsFor } from '../config/trustSyncIntervals.js'
 import { incTrustMetric, observeTrustLatency } from '../services/trustMetrics.js'
 import { trustObservabilitySnapshot } from '../services/trustObservability.js'
+import { trustPrometheusText } from '../services/trustMetricsPrometheus.js'
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 
@@ -113,6 +114,7 @@ export async function domainVerify(req, res) { const result = await verifyDomain
 export async function proofSubmit(req, res) { const result = await appendTrustProof(req.user.id, { ...req.body, status: 'pending', method: 'user_submitted' }); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
 export async function operations(_req, res) { return res.json(await trustOperations()) }
 export async function metrics(_req, res) { return res.json(await trustObservabilitySnapshot()) }
+export async function trustMetricsProm(_req, res) { return res.type('text/plain; version=0.0.4; charset=utf-8').send(await trustPrometheusText()) }
 export async function proofReview(req, res) { const result = await reviewTrustProof(req.user.id, req.params.proofId, req.body || {}); return result.ok ? res.json(result) : res.status(result.status || 400).json(result) }
 
 // Founder-initiated connect. It NEVER mints a verified proof from caller input:

@@ -45,6 +45,7 @@ describe('trust route coverage', () => {
       '/admin/users/:userId/overrides/:overrideId',
       '/reverification/due',
       '/internal/reverification/run',
+      '/internal/metrics/trust',
       '/internal/adapters/:provider/ingest',
       '/revenue/credentials',
       '/revenue/connect',

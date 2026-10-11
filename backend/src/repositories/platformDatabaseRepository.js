@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { getPlatformPool, upsertRecord, deleteRecord } from './platformCollectionRepository.js'
+import { recordWholeDbRead, recordWholeDbFlush } from '../services/platformAuthorityInstrumentation.js'
 
 const CONFIG_COLLECTIONS = new Set(['tvceConfig'])
 const stable = value => JSON.stringify(value, Object.keys(value || {}).sort())
@@ -8,7 +9,8 @@ function mapRow(row) {
   return { ...(row.payload || {}), id: row.record_id, version: Number(row.version), createdAt: row.created_at, updatedAt: row.updated_at }
 }
 
-export async function loadPlatformDatabase() {
+export async function loadPlatformDatabase(source = 'unknown') {
+  recordWholeDbRead(source)
   const result = await getPlatformPool().query('SELECT collection_name,record_id,payload,version,created_at,updated_at FROM platform_collection_records WHERE deleted_at IS NULL ORDER BY collection_name,updated_at')
   const snapshot = {}
   for (const row of result.rows) {
@@ -18,7 +20,8 @@ export async function loadPlatformDatabase() {
   return snapshot
 }
 
-export async function flushPlatformDatabase(before, after, { userId = null } = {}) {
+export async function flushPlatformDatabase(before, after, { userId = null, source = 'unknown' } = {}) {
+  recordWholeDbFlush(source)
   const pool = getPlatformPool()
   const client = await pool.connect()
   try {
@@ -50,10 +53,10 @@ export async function flushPlatformDatabase(before, after, { userId = null } = {
   } finally { client.release() }
 }
 
-export async function runWithPlatformDatabase(callback, { userId = null } = {}) {
-  const before = await loadPlatformDatabase()
+export async function runWithPlatformDatabase(callback, { userId = null, source = 'runWithPlatformDatabase' } = {}) {
+  const before = await loadPlatformDatabase(source)
   const snapshot = structuredClone(before)
   const result = await callback(snapshot)
-  await flushPlatformDatabase(before, snapshot, { userId })
+  await flushPlatformDatabase(before, snapshot, { userId, source })
   return result
 }

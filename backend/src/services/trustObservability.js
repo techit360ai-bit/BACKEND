@@ -2,13 +2,15 @@
 //
 // Combines the in-process registry (trustMetrics.js) with live, cheap gauges
 // (outbox depth, expired-source count, anomaly window, DB pool saturation) and
-// evaluates alerts. Every gauge is best-effort: a failing/misconfigured source
-// reports `{ available: false, error }` instead of throwing, so the admin
-// metrics endpoint and the health probe never fail because telemetry broke.
+// evaluates alerts against the SLO config (trustSlo.js). Every gauge is
+// best-effort: a failing/misconfigured source reports `{ available: false,
+// error }` instead of throwing, so the admin metrics endpoint, the Prometheus
+// exposition, and the health probe never fail because telemetry broke.
 
 import { trustMetricsSnapshot } from './trustMetrics.js'
 import { trustPoolStats, trustRepositoryEnabled } from '../repositories/trustRepository.js'
 import { trustReverificationDue } from './trustReverificationService.js'
+import { trustSloConfig } from '../config/trustSlo.js'
 import * as database from '../config/database.js'
 
 const readDb = () => database.readDb()
@@ -61,29 +63,41 @@ function poolSaturation() {
   return { available: true, value: { ...stats, utilization: max > 0 && stats.total != null ? Number((stats.total / max).toFixed(4)) : null } }
 }
 
+// HTTP outcome rate from the request counter labels (`method=GET,status=500`).
+export function httpOutcomeStats(labels = {}) {
+  let total = 0
+  let errors = 0
+  for (const [key, count] of Object.entries(labels.trust_http_requests_total || {})) {
+    const value = Number(count) || 0
+    total += value
+    const match = /(?:^|,)status=(\d{3})(?:,|$)/.exec(key)
+    if (match && Number(match[1]) >= 500) errors += value
+  }
+  return { total, errors, rate: total > 0 ? Number((errors / total).toFixed(6)) : null }
+}
+
 const num = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback)
 
 const alert = (code, severity, value, detail) => ({ code, severity, value, ...(detail ? { detail } : {}) })
 
-export function evaluateTrustAlerts({ counters = {}, latency = {}, gauges = {}, anomalyRate = null } = {}) {
+export function evaluateTrustAlerts({ counters = {}, latency = {}, gauges = {}, anomalyRate = null, httpErrorRate = null, slo = trustSloConfig() } = {}) {
   const alerts = []
   const attempts = num(counters.trust_adapter_attempts_total)
   const failures = num(counters.trust_adapter_failures_total)
-  if (attempts >= 20 && failures / attempts > 0.2) {
+  if (attempts >= slo.min_samples && failures / attempts > 0.2) {
     alerts.push(alert('adapter_failure_rate_high', 'critical', Number((failures / attempts).toFixed(4))))
   }
   const p95 = latency.trust_http_ms?.p95
-  if (p95 != null && p95 > num(process.env.TRUST_LATENCY_P95_ALERT_MS, 500)) {
-    alerts.push(alert('trust_latency_p95_high', 'warning', p95))
-  }
+  if (p95 != null && p95 > slo.p95_ms) alerts.push(alert('trust_latency_p95_high', 'warning', p95, { objective_ms: slo.p95_ms }))
   const p99 = latency.trust_http_ms?.p99
-  if (p99 != null && p99 > num(process.env.TRUST_LATENCY_P99_ALERT_MS, 1500)) {
-    alerts.push(alert('trust_latency_p99_high', 'warning', p99))
+  if (p99 != null && p99 > slo.p99_ms) alerts.push(alert('trust_latency_p99_high', 'warning', p99, { objective_ms: slo.p99_ms }))
+  if (httpErrorRate != null && httpErrorRate > slo.error_rate) {
+    alerts.push(alert('trust_error_rate_high', 'critical', httpErrorRate, { objective: slo.error_rate }))
   }
   const projectionFailures = num(counters.trust_projection_failed_total)
   if (projectionFailures >= 5) alerts.push(alert('projection_failures', 'warning', projectionFailures))
   const depth = gauges.outbox_depth?.available ? num(gauges.outbox_depth.value?.value) : 0
-  if (depth > num(process.env.TRUST_OUTBOX_DEPTH_ALERT, 500)) alerts.push(alert('outbox_depth_high', 'warning', depth))
+  if (depth > slo.outbox_depth_alert) alerts.push(alert('outbox_depth_high', 'warning', depth, { threshold: slo.outbox_depth_alert }))
   const pool = gauges.db_pool?.available ? gauges.db_pool.value?.value : null
   if (pool && num(pool.idle) === 0 && num(pool.waiting) > 0) {
     alerts.push(alert('db_pool_saturated', 'critical', num(pool.waiting), { total: pool.total, max: pool.max }))
@@ -92,12 +106,13 @@ export function evaluateTrustAlerts({ counters = {}, latency = {}, gauges = {}, 
     alerts.push(alert('anomaly_rate_high', 'warning', Number(anomalyRate.toFixed(4))))
   }
   const expired = gauges.expired_source_count?.available ? num(gauges.expired_source_count.value?.value) : 0
-  if (expired > num(process.env.TRUST_EXPIRED_SOURCE_ALERT, 1000)) alerts.push(alert('expired_sources_high', 'info', expired))
+  if (expired > slo.expired_source_alert) alerts.push(alert('expired_sources_high', 'info', expired, { threshold: slo.expired_source_alert }))
   return alerts
 }
 
-export async function trustObservabilitySnapshot({ now = new Date(), anomalyWindowHours = 24 } = {}) {
+export async function trustObservabilitySnapshot({ now = new Date(), anomalyWindowHours = 24, env = process.env } = {}) {
   const registry = trustMetricsSnapshot()
+  const slo = trustSloConfig(env)
   const hours = Math.min(24 * 30, Math.max(1, Number(anomalyWindowHours) || 24))
   const [outbox, expired, anomalies] = await Promise.all([
     safely(outboxDepth),
@@ -114,14 +129,17 @@ export async function trustObservabilitySnapshot({ now = new Date(), anomalyWind
   const proofWrites = num(registry.counters.trust_proof_writes_total)
   const anomalyTotal = gauges.anomalies_24h.available ? num(gauges.anomalies_24h.value.total) : 0
   const anomalyRate = proofWrites > 0 ? Number((anomalyTotal / proofWrites).toFixed(6)) : null
+  const http = httpOutcomeStats(registry.labels)
   return {
     generatedAt: now.toISOString(),
+    slo,
     counters: registry.counters,
     labels: registry.labels,
     latency: registry.latency,
     gauges,
+    http,
     anomaly_rate_window: hours,
     anomaly_rate: anomalyRate,
-    alerts: evaluateTrustAlerts({ counters: registry.counters, latency: registry.latency, gauges, anomalyRate }),
+    alerts: evaluateTrustAlerts({ counters: registry.counters, latency: registry.latency, gauges, anomalyRate, httpErrorRate: http.rate, slo }),
   }
 }

@@ -4,7 +4,7 @@ import { requireAuth } from '../middlewares/auth.js'
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin } from '../utils/roleGuards.js'
 import { incTrustMetric, observeTrustLatency } from '../services/trustMetrics.js'
-import { adapterConnect, analyticsConnect, analyticsCredentials, analyticsDisconnect, analyticsRefreshWorker, analyticsVerify, badges, continuousVerification, disconnect, domainChallenge, domainVerify, history, integrations, internalAdapterIngest, linkedinCallback, identityConnect, identityCredentials, identityDisconnect, identityList, identityRefreshWorker, identityRegistryVerify, identityScreeningList, identityScreeningRun, identityVerify, milestoneEvidenceFinalize, milestoneEvidenceUpload, milestoneList, metrics, milestoneReview, milestoneSubmit, notificationsPreview, operations, profile, proofReview, proofSubmit, refresh, refreshPlan, revenueConnect, revenueCredentials, revenueDisconnect, revenueRefreshWorker, revenueVerify, shareProfilePreview, shippingConnect, shippingCredentials, shippingDisconnect, shippingRefreshWorker, shippingVerify, teamConnect, teamCredentials, teamDisconnect, teamHrisVerify, teamInvite, teamRefreshWorker, teamRegistryVerify, teamVerify, teamWorkEmailChallenge, teamWorkEmailVerify, verify, reverificationRun, reverificationDue, overrideApply, overrideRevoke, overrideList } from '../controllers/trustSurfaceController.js'
+import { adapterConnect, analyticsConnect, analyticsCredentials, analyticsDisconnect, analyticsRefreshWorker, analyticsVerify, badges, continuousVerification, disconnect, domainChallenge, domainVerify, history, integrations, internalAdapterIngest, linkedinCallback, identityConnect, identityCredentials, identityDisconnect, identityList, identityRefreshWorker, identityRegistryVerify, identityScreeningList, identityScreeningRun, identityVerify, milestoneEvidenceFinalize, milestoneEvidenceUpload, milestoneList, metrics, milestoneReview, milestoneSubmit, notificationsPreview, operations, profile, trustMetricsProm, proofReview, proofSubmit, refresh, refreshPlan, revenueConnect, revenueCredentials, revenueDisconnect, revenueRefreshWorker, revenueVerify, shareProfilePreview, shippingConnect, shippingCredentials, shippingDisconnect, shippingRefreshWorker, shippingVerify, teamConnect, teamCredentials, teamDisconnect, teamHrisVerify, teamInvite, teamRefreshWorker, teamRegistryVerify, teamVerify, teamWorkEmailChallenge, teamWorkEmailVerify, verify, reverificationRun, reverificationDue, overrideApply, overrideRevoke, overrideList } from '../controllers/trustSurfaceController.js'
 
 // Trusted verification workers only. Fails closed when no secret is configured.
 function requireTrustIngestSecret(req, res, next) {
@@ -40,6 +40,8 @@ router.post('/internal/team/refresh', requireTrustIngestSecret, teamRefreshWorke
 router.post('/internal/identity/refresh', requireTrustIngestSecret, identityRefreshWorker)
 // WS9: scheduled continuous re-verification / decay tick (service-authenticated).
 router.post('/internal/reverification/run', requireTrustIngestSecret, reverificationRun)
+// WS11: Prometheus text exposition (same snapshot as the admin JSON endpoint).
+router.get('/internal/metrics/trust', requireTrustIngestSecret, trustMetricsProm)
 router.use(requireAuth)
 router.get('/profile', profile)
 router.get('/badges', badges)
