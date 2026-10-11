@@ -16,8 +16,8 @@ import {
   createCollaborationCall,
   createAnalysis,
   createContract,
-  createHackathon,
-  createHackathonInvitation,
+  createHackathonAsync,
+  createHackathonInvitationAsync,
   createEndorsementAsync,
   createIntake,
   createInvestorCollectionAsync,
@@ -35,20 +35,20 @@ import {
   getAnalysis,
   getCollaboratorScores,
   getContract,
-  getHackathon,
-  getHackathonInvite,
+  getHackathonAsync,
+  getHackathonInviteAsync,
   getIntake,
   getNotificationPreferences,
-  hackathonAggregates,
-  hackathonStatus,
+  hackathonAggregatesAsync,
+  hackathonStatusAsync,
   investorCollectionAsync,
   investorDealFlowAsync,
   listAnalyses,
   listContracts,
   listContributions,
   listEndorsementsAsync,
-  listHackathons,
-  listHackathonRegistrations,
+  listHackathonsAsync,
+  listHackathonRegistrationsAsync,
   listIntakes,
   listOrganizationProjectsAsync,
   organizationCohortHealthAsync,
@@ -75,20 +75,20 @@ import {
   removeWorkspaceMember,
   listWorkspaces,
   listWorkspacesAsync,
-  logHackathonCheckIn,
+  logHackathonCheckInAsync,
   organizationDashboardAsync,
   promoteIntake,
-  provisionHackathonWorkspace,
+  provisionHackathonWorkspaceAsync,
   provisionWorkspace,
-  patchHackathonTeam,
+  patchHackathonTeamAsync,
   recordDilution,
-  registerHackathon,
-  acceptHackathonInvite,
-  reportHackathonTeam,
+  registerHackathonAsync,
+  acceptHackathonInviteAsync,
+  reportHackathonTeamAsync,
   requestWithdrawal,
   signContract,
-  submitHackathonBrief,
-  submitHackathonFinal,
+  submitHackathonBriefAsync,
+  submitHackathonFinalAsync,
   updateNotificationPreferences,
   applyToOpportunity,
   listApplications,
@@ -492,16 +492,16 @@ export function analysisGet(req, res) {
   return res.json({ analysis })
 }
 
-export function hackathons(req, res) {
-  return res.json(listHackathons(req.user.id, { ownedOnly: req.query.scope === 'owned' }))
+export async function hackathons(req, res) {
+  return res.json(await listHackathonsAsync(req.user.id, { ownedOnly: req.query.scope === 'owned' }))
 }
 
-export function hackathonRegistrations(req, res) {
-  return res.json(listHackathonRegistrations(req.user.id))
+export async function hackathonRegistrations(req, res) {
+  return res.json(await listHackathonRegistrationsAsync(req.user.id))
 }
 
-export function hackathonCreate(req, res) {
-  const result = createHackathon(req.user.id, req.body)
+export async function hackathonCreate(req, res) {
+  const result = await createHackathonAsync(req.user.id, req.body)
   if (result?.ok === false) {
     const status = result.error?.includes('permission') || result.error?.includes('denied') ? 403 : result.error?.includes('required') ? 400 : result.error?.includes('limit') ? 409 : 402
     return res.status(status).json(result)
@@ -509,20 +509,20 @@ export function hackathonCreate(req, res) {
   return created(res, result)
 }
 
-export function hackathonGet(req, res) {
-  const hackathon = getHackathon(req.user.id, req.params.hackathonId)
+export async function hackathonGet(req, res) {
+  const hackathon = await getHackathonAsync(req.user.id, req.params.hackathonId)
   if (!hackathon) return notFound(res, 'Hackathon not found')
   return res.json({ hackathon })
 }
 
-export function hackathonRegister(req, res) {
-  const result = registerHackathon(req.user.id, req.params.hackathonId, req.body)
+export async function hackathonRegister(req, res) {
+  const result = await registerHackathonAsync(req.user.id, req.params.hackathonId, req.body)
   if (!result) return notFound(res, 'Hackathon not found')
   return created(res, result)
 }
 
-export function hackathonInviteGet(req, res) {
-  const result = getHackathonInvite(
+export async function hackathonInviteGet(req, res) {
+  const result = await getHackathonInviteAsync(
     req.user.id,
     req.params.hackathonId,
     req.params.teamId,
@@ -535,8 +535,8 @@ export function hackathonInviteGet(req, res) {
   return res.json(result)
 }
 
-export function hackathonInvitationCreate(req, res) {
-  const result = createHackathonInvitation(
+export async function hackathonInvitationCreate(req, res) {
+  const result = await createHackathonInvitationAsync(
     req.user.id,
     req.params.hackathonId,
     req.params.teamId,
@@ -549,8 +549,8 @@ export function hackathonInvitationCreate(req, res) {
   return created(res, result)
 }
 
-export function hackathonInviteAccept(req, res) {
-  const result = acceptHackathonInvite(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonInviteAccept(req, res) {
+  const result = await acceptHackathonInviteAsync(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result.ok) {
     const status = ['invite_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json(result)
@@ -558,68 +558,68 @@ export function hackathonInviteAccept(req, res) {
   return created(res, result)
 }
 
-export function hackathonTeamPatch(req, res) {
-  const result = patchHackathonTeam(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonTeamPatch(req, res) {
+  const result = await patchHackathonTeamAsync(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return res.json(result)
 }
 
-export function hackathonBrief(req, res) {
-  const result = submitHackathonBrief(req.user.id, req.params.hackathonId, req.body)
+export async function hackathonBrief(req, res) {
+  const result = await submitHackathonBriefAsync(req.user.id, req.params.hackathonId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }
 
-export function hackathonCheckIn(req, res) {
-  const result = logHackathonCheckIn(req.user.id, req.params.hackathonId, req.body)
+export async function hackathonCheckIn(req, res) {
+  const result = await logHackathonCheckInAsync(req.user.id, req.params.hackathonId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }
 
-export function hackathonFinal(req, res) {
-  const result = submitHackathonFinal(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonFinal(req, res) {
+  const result = await submitHackathonFinalAsync(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }
 
-export function hackathonTeamStatus(req, res) {
-  const result = hackathonStatus(req.user.id, req.params.hackathonId, req.params.teamId)
+export async function hackathonTeamStatus(req, res) {
+  const result = await hackathonStatusAsync(req.user.id, req.params.hackathonId, req.params.teamId)
   if (!result) return notFound(res, 'Team not found')
   return res.json(result)
 }
 
-export function hackathonWorkspace(req, res) {
-  const result = provisionHackathonWorkspace(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonWorkspace(req, res) {
+  const result = await provisionHackathonWorkspaceAsync(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }
 
-export function hackathonReport(req, res) {
-  const result = reportHackathonTeam(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
+export async function hackathonReport(req, res) {
+  const result = await reportHackathonTeamAsync(req.user.id, req.params.hackathonId, req.params.teamId, req.body)
   if (!result) return notFound(res, 'Team not found')
   return created(res, result)
 }
 
-export function hackathonOverview(req, res) {
-  const result = hackathonAggregates(req.user.id, req.params.hackathonId)
+export async function hackathonOverview(req, res) {
+  const result = await hackathonAggregatesAsync(req.user.id, req.params.hackathonId)
   if (!result) return notFound(res, 'Hackathon not found')
   return res.json(result.overview)
 }
 
-export function hackathonVelocity(req, res) {
-  const result = hackathonAggregates(req.user.id, req.params.hackathonId)
+export async function hackathonVelocity(req, res) {
+  const result = await hackathonAggregatesAsync(req.user.id, req.params.hackathonId)
   if (!result) return notFound(res, 'Hackathon not found')
   return res.json({ hackathonId: req.params.hackathonId, teams: result.velocity })
 }
 
-export function hackathonLeaderboard(req, res) {
-  const result = hackathonAggregates(req.user.id, req.params.hackathonId)
+export async function hackathonLeaderboard(req, res) {
+  const result = await hackathonAggregatesAsync(req.user.id, req.params.hackathonId)
   if (!result) return notFound(res, 'Hackathon not found')
   return res.json({ hackathonId: req.params.hackathonId, leaderboard: result.leaderboard })
 }
 
-export function hackathonPipeline(req, res) {
-  const result = hackathonAggregates(req.user.id, req.params.hackathonId)
+export async function hackathonPipeline(req, res) {
+  const result = await hackathonAggregatesAsync(req.user.id, req.params.hackathonId)
   if (!result) return notFound(res, 'Hackathon not found')
   return res.json({ hackathonId: req.params.hackathonId, buckets: result.pipeline })
 }

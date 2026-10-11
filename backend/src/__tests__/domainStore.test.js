@@ -174,3 +174,63 @@ describe('domain row-level store — organization intelligence (§5 sub-slice 2)
     expect(mocks.lastReadOptions).toMatchObject({ userId: 'org1', organization: true })
   })
 })
+
+describe('domain row-level store — hackathons (§5 sub-slice 3)', () => {
+  it('lists visible hackathons with counts through the hackathon scope', async () => {
+    usedBounded({ hackathons: [{ id: 'h1', visibility: 'public', name: 'Build Weekend', status: 'upcoming' }], hackathonTeams: [{ id: 't1', hackathonId: 'h1' }], hackathonMembers: [] })
+    const result = await svc.listHackathonsAsync('u1')
+    expect(result.hackathons).toHaveLength(1)
+    expect(result.hackathons[0].teamsFormed).toBe(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', hackathon: true })
+  })
+
+  it('creates a hackathon through the hackathon-scoped mutation', async () => {
+    usedBounded({ hackathons: [] })
+    const result = await svc.createHackathonAsync('u1', { name: 'Build Weekend', visibility: 'private' })
+    expect(result.hackathon.name).toBe('Build Weekend')
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', hackathon: true })
+  })
+
+  it('reads a single hackathon by id', async () => {
+    usedBounded({ hackathons: [{ id: 'h1', visibility: 'public', name: 'Build Weekend' }], hackathonTeams: [], hackathonMembers: [] })
+    const result = await svc.getHackathonAsync('u1', 'h1')
+    expect(result.id).toBe('h1')
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', hackathon: true, hackathonId: 'h1' })
+  })
+
+  it('registers a hackathon team and returns the registration', async () => {
+    usedBounded({ hackathons: [{ id: 'h1', visibility: 'public', name: 'Build Weekend' }], hackathonTeams: [], hackathonMembers: [], hackathonBriefs: [], hackathonScores: [], hackathonCheckIns: [], hackathonFinalSubmissions: [], hackathonTeamWorkspaces: [] })
+    const result = await svc.registerHackathonAsync('u1', 'h1', { name: 'Team Rocket' })
+    expect(result.ok).toBe(true)
+    expect(result.team.name).toBe('Team Rocket')
+    expect(result.registration.role).toBe('leader')
+  })
+
+  it('invites a collaborator through the hackathon-scoped mutation', async () => {
+    usedBounded({ hackathonTeams: [{ id: 't1', hackathonId: 'h1', leaderId: 'u1', openRoles: ['dev'], teamSize: 5 }], profiles: [{ id: 'u1' }, { id: 'c1', role: 'collaborator' }], hackathonMembers: [], hackathonInvitations: [], notifications: [] })
+    const result = await svc.createHackathonInvitationAsync('u1', 'h1', 't1', { collaboratorId: 'c1', role: 'dev' })
+    expect(result.ok).toBe(true)
+    expect(result.invitation.collaboratorId).toBe('c1')
+  })
+
+  it('accepts a hackathon invite with the targeted token', async () => {
+    usedBounded({ hackathonTeams: [{ id: 't1', hackathonId: 'h1', leaderId: 'u1', inviteToken: 'tok', openRoles: ['dev'], teamSize: 5 }], profiles: [{ id: 'c1', firstName: 'Cy' }], hackathonMembers: [], hackathonInvitations: [{ id: 'i1', hackathonId: 'h1', teamId: 't1', token: 'tok', collaboratorId: 'c1', role: 'dev', status: 'pending' }], hackathonBriefs: [], hackathonScores: [], hackathonCheckIns: [], hackathonFinalSubmissions: [], hackathonTeamWorkspaces: [] })
+    const result = await svc.acceptHackathonInviteAsync('c1', 'h1', 't1', { token: 'tok' })
+    expect(result.ok).toBe(true)
+    expect(result.registration.role).toBe('member')
+  })
+
+  it('provisions a hackathon team workspace', async () => {
+    usedBounded({ hackathonTeams: [{ id: 't1', hackathonId: 'h1', leaderId: 'u1', name: 'Team Rocket' }], hackathonTeamWorkspaces: [], projects: [], workspaces: [], hackathonBriefs: [], hackathonScores: [], hackathonCheckIns: [], hackathonFinalSubmissions: [], hackathonMembers: [] })
+    const result = await svc.provisionHackathonWorkspaceAsync('u1', 'h1', 't1', { projectTitle: 'Rocket' })
+    expect(result.ok).toBe(true)
+    expect(result.workspace.projectId).toBe(result.project.id)
+  })
+
+  it('aggregates the hackathon command center from bounded rows', async () => {
+    usedBounded({ hackathons: [{ id: 'h1', visibility: 'public', status: 'live' }], hackathonTeams: [{ id: 't1', hackathonId: 'h1', name: 'Rocket', isSolo: false }], hackathonMembers: [{ id: 'm1', hackathonId: 'h1', teamId: 't1' }], hackathonBriefs: [{ id: 'b1', hackathonId: 'h1', teamId: 't1' }], hackathonCheckIns: [{ id: 'c1', hackathonId: 'h1', teamId: 't1', activityScore: 5 }], hackathonScores: [{ id: 's1', hackathonId: 'h1', teamId: 't1', composite: 60 }] })
+    const result = await svc.hackathonAggregatesAsync('u1', 'h1')
+    expect(result.overview.teamsFormed).toBe(1)
+    expect(result.leaderboard[0].composite).toBe(60)
+  })
+})

@@ -2559,3 +2559,58 @@ export async function organizationDemoDayAnalyticsAsync(userId) {
 export async function organizationDashboardAsync(userId) {
   return domainRead(orgScope(userId), () => organizationDashboard(userId), () => organizationDashboard(userId))
 }
+
+// Row-level (§5) wrappers — sub-slice: hackathons.
+const hackathonScope = (userId, hackathonId = null, teamId = null) => ({ userId, hackathon: true, hackathonId, teamId })
+
+export async function listHackathonsAsync(userId, options = {}) {
+  return domainRead(hackathonScope(userId), () => listHackathons(userId, options), () => listHackathons(userId, options))
+}
+export async function createHackathonAsync(userId, body = {}) {
+  return domainWrite(hackathonScope(userId), () => createHackathon(userId, body), () => createHackathon(userId, body))
+}
+export async function approveOrganizationHackathonAsync(adminId, hackathonId, decision = 'approved', reason = '') {
+  return domainWrite(hackathonScope(adminId, hackathonId), () => approveOrganizationHackathon(adminId, hackathonId, decision, reason), () => approveOrganizationHackathon(adminId, hackathonId, decision, reason))
+}
+export async function getHackathonAsync(userId, hackathonId) {
+  return domainRead(hackathonScope(userId, hackathonId), () => getHackathon(userId, hackathonId), () => getHackathon(userId, hackathonId))
+}
+export async function registerHackathonAsync(userId, hackathonId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId), () => registerHackathon(userId, hackathonId, body), () => registerHackathon(userId, hackathonId, body))
+}
+export async function listHackathonRegistrationsAsync(userId) {
+  return domainRead(hackathonScope(userId), () => listHackathonRegistrations(userId), () => listHackathonRegistrations(userId))
+}
+export async function createHackathonInvitationAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => createHackathonInvitation(userId, hackathonId, teamId, body), () => createHackathonInvitation(userId, hackathonId, teamId, body))
+}
+export async function getHackathonInviteAsync(userId, hackathonId, teamId, token) {
+  return domainRead(hackathonScope(userId, hackathonId, teamId), () => getHackathonInvite(userId, hackathonId, teamId, token), () => getHackathonInvite(userId, hackathonId, teamId, token))
+}
+export async function acceptHackathonInviteAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => acceptHackathonInvite(userId, hackathonId, teamId, body), () => acceptHackathonInvite(userId, hackathonId, teamId, body))
+}
+export async function patchHackathonTeamAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => patchHackathonTeam(userId, hackathonId, teamId, body), () => patchHackathonTeam(userId, hackathonId, teamId, body))
+}
+export async function submitHackathonBriefAsync(userId, hackathonId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, body?.teamId), () => submitHackathonBrief(userId, hackathonId, body), () => submitHackathonBrief(userId, hackathonId, body))
+}
+export async function logHackathonCheckInAsync(userId, hackathonId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, body?.teamId), () => logHackathonCheckIn(userId, hackathonId, body), () => logHackathonCheckIn(userId, hackathonId, body))
+}
+export async function submitHackathonFinalAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => submitHackathonFinal(userId, hackathonId, teamId, body), () => submitHackathonFinal(userId, hackathonId, teamId, body))
+}
+export async function hackathonStatusAsync(userId, hackathonId, teamId) {
+  return domainRead(hackathonScope(userId, hackathonId, teamId), () => hackathonStatus(userId, hackathonId, teamId), () => hackathonStatus(userId, hackathonId, teamId))
+}
+export async function provisionHackathonWorkspaceAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => provisionHackathonWorkspace(userId, hackathonId, teamId, body), () => provisionHackathonWorkspace(userId, hackathonId, teamId, body))
+}
+export async function reportHackathonTeamAsync(userId, hackathonId, teamId, body = {}) {
+  return domainWrite(hackathonScope(userId, hackathonId, teamId), () => reportHackathonTeam(userId, hackathonId, teamId, body), () => reportHackathonTeam(userId, hackathonId, teamId, body))
+}
+export async function hackathonAggregatesAsync(userId, hackathonId) {
+  return domainRead(hackathonScope(userId, hackathonId), () => hackathonAggregates(userId, hackathonId), () => hackathonAggregates(userId, hackathonId))
+}

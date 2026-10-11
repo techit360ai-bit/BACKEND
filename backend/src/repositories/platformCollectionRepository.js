@@ -125,6 +125,18 @@ export async function listRecordsByIds(client, collectionName, ids = []) {
   return result.rows.map(mapRow)
 }
 
+// Match rows whose payload field is one of a bounded set of values (e.g. every
+// team of the addressed hackathons) in a single query.
+export async function listRecordsByFieldIn(client, collectionName, field, values = []) {
+  const unique = [...new Set(values.filter(Boolean).map(String))]
+  if (!unique.length) return []
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL AND payload->>'${field}'=ANY($2) ORDER BY updated_at DESC`,
+    [collectionName, unique],
+  )
+  return result.rows.map(mapRow)
+}
+
 export async function upsertRecord(client, collectionName, record, { idempotencyKey = null, operation = 'update', expectedVersion = null } = {}) {
   if (!record?.id) throw new Error(`A stable id is required for ${collectionName}`)
   const metadata = normalizeRecord(record)

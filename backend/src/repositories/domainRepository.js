@@ -10,7 +10,7 @@
 //     reputation) which are owner-scoped by the bound collection name.
 // Only changed rows are written back. Enabled with DOMAIN_SOURCE=postgres; the
 // snapshot fallback stays in the service until the authority is deleted.
-import { withPlatformTransaction, getRecord, upsertRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds } from './platformCollectionRepository.js'
+import { withPlatformTransaction, getRecord, upsertRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds, listRecordsByFieldIn } from './platformCollectionRepository.js'
 import { runDatabaseAuthority } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
@@ -37,6 +37,19 @@ const OWNER_FIELDS = {
   orgDemoDayEvents: ['organizationId', 'ownerId', 'userId'],
   organizationDashboards: ['ownerId', 'userId', 'organizationId'],
   hackathons: ['organizationId', 'ownerId', 'userId'],
+  // Hackathon slice.
+  hackathonTeams: ['leaderId', 'ownerId', 'userId', 'organizationId'],
+  hackathonMembers: ['userId', 'ownerId', 'createdBy'],
+  hackathonBriefs: ['createdBy', 'userId', 'ownerId'],
+  hackathonCheckIns: ['createdBy', 'userId', 'ownerId'],
+  hackathonScores: ['createdBy', 'userId', 'ownerId'],
+  hackathonFinalSubmissions: ['createdBy', 'userId', 'ownerId'],
+  hackathonInvitations: ['inviterId', 'collaboratorId', 'userId', 'ownerId'],
+  hackathonTeamWorkspaces: ['ownerId', 'userId', 'organizationId'],
+  hackathonTeamReports: ['createdBy', 'ownerId', 'userId'],
+  organizationAbuseReviews: ['organizationId', 'ownerId', 'userId'],
+  workspaces: ['ownerId', 'userId', 'organizationId'],
+  notifications: ['userId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 
@@ -55,7 +68,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, collections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
   for (const name of writeCollections) db[name] = []
@@ -91,6 +104,36 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     // Investor matchmaking / demo-day reach read cross-org rows: bounded windows.
     mergeById(db.profiles, await listRecordsLimited(client, 'profiles', { limit: domainCandidateLimit(), payloadField: 'role', payloadValue: 'investor' }))
     mergeById(db.investorWatchlists, await listRecordsLimited(client, 'investorWatchlists', { limit: domainCandidateLimit() }))
+  }
+
+  if (userId && hackathon) {
+    mergeById(db.organizationMemberships, await listRecordsForOwner(client, 'organizationMemberships', userId, { ownerFields: ['userId'] }))
+    mergeById(db.hackathons, await listRecordsLimited(client, 'hackathons', { limit: domainCandidateLimit() }))
+    const orgIds = db.organizationMemberships.filter(row => row.status === 'active').map(row => row.organizationId)
+    mergeById(db.hackathons, await listRecordsByFieldIn(client, 'hackathons', 'organizationId', orgIds))
+    if (hackathonId) mergeById(db.hackathons, [await getRecord(client, 'hackathons', hackathonId)])
+    if (teamId) mergeById(db.hackathonTeams, [await getRecord(client, 'hackathonTeams', teamId)])
+    const hackathonIds = db.hackathons.map(row => row.id)
+    mergeById(db.hackathonTeams, await listRecordsForOwner(client, 'hackathonTeams', userId, { ownerFields: ['leaderId', 'ownerId', 'userId'] }))
+    mergeById(db.hackathonTeams, await listRecordsByFieldIn(client, 'hackathonTeams', 'hackathonId', hackathonIds))
+    const teamIds = db.hackathonTeams.map(row => row.id)
+    for (const name of ['hackathonBriefs', 'hackathonCheckIns', 'hackathonScores', 'hackathonFinalSubmissions', 'hackathonInvitations', 'hackathonTeamWorkspaces']) {
+      mergeById(db[name], await listRecordsByFieldIn(client, name, 'teamId', teamIds))
+    }
+    mergeById(db.hackathonMembers, await listRecordsByFieldIn(client, 'hackathonMembers', 'teamId', teamIds))
+    mergeById(db.hackathonMembers, await listRecordsByFieldIn(client, 'hackathonMembers', 'hackathonId', hackathonIds))
+    mergeById(db.hackathonMembers, await listRecordsForOwner(client, 'hackathonMembers', userId, { ownerFields: ['userId'] }))
+    mergeById(db.hackathonInvitations, await listRecordsForOwner(client, 'hackathonInvitations', userId, { ownerFields: ['collaboratorId', 'userId'] }))
+    mergeById(db.hackathonTeamReports, await listRecordsForOwner(client, 'hackathonTeamReports', userId, { ownerFields: ['createdBy', 'ownerId', 'userId'] }))
+    mergeById(db.organizationAbuseReviews, await listRecordsForOwner(client, 'organizationAbuseReviews', userId, { ownerFields: ['organizationId'] }))
+    mergeById(db.notifications, await listRecordsForOwner(client, 'notifications', userId, { ownerFields: ['userId'] }))
+    const profileIds = [userId]
+    for (const row of db.hackathonTeams) profileIds.push(row.leaderId)
+    for (const row of db.hackathonMembers) profileIds.push(row.userId)
+    for (const row of db.hackathonInvitations) profileIds.push(row.collaboratorId)
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
+    await loadByIds(client, 'projects', db.hackathonTeamWorkspaces.map(row => row.projectId), db.projects)
+    await loadByIds(client, 'workspaces', db.hackathonTeamWorkspaces.map(row => row.workspaceId), db.workspaces)
   }
 
   for (const entry of collections) {
