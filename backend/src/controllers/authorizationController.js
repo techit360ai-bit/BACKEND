@@ -31,12 +31,12 @@ export async function organizationClaim(req, res) { return result(res, await per
 export async function organizationMembership(req, res) { if (identitySecurityEnabled()) { try { const rows = await listIdentitySecurity(req.user.id, 'organizationMemberships'); return res.json({ memberships: rows?.filter(row => !req.params.organizationId || row.organizationId === req.params.organizationId) || [] }) } catch (error) { if (!identitySecurityFallbackEnabled()) throw error } } return res.json({ memberships: organizationMemberships(req.user.id, req.params.organizationId) }) }
 export function adminVerificationQueue(_req, res) { const db = readAuthorityDb(); return res.json({ requests: db.verificationRequests || [], evidence: db.verificationEvidence || [], reviews: db.manualReviews || [] }) }
 export function registryCatalog(req, res) { return res.json({ configurations: registryConfigurations(req.query.country || null) }) }
-export function organizationRegistryCheck(req, res) { return result(res, registryCheck(req.user.id, req.params.organizationId, body(req)), 201) }
-export function organizationDomainChallenge(req, res) { return result(res, createDomainChallenge(req.user.id, req.params.organizationId, body(req)), 201) }
+export async function organizationRegistryCheck(req, res) { return result(res, await registryCheck(req.user.id, req.params.organizationId, body(req)), 201) }
+export async function organizationDomainChallenge(req, res) { return result(res, await createDomainChallenge(req.user.id, req.params.organizationId, body(req)), 201) }
 export async function organizationDomainVerify(req, res) { return result(res, await verifyDomainChallenge(req.user.id, req.params.challengeId)) }
-export async function adminVerificationOperations(_req, res) { return res.json({ ...verificationOperations(), trust: await trustOperations() }) }
+export async function adminVerificationOperations(_req, res) { return res.json({ ...(await verificationOperations()), trust: await trustOperations() }) }
 export async function adminRegistryCheckRun(req, res) { return result(res, await runRegistryCheck(req.params.checkId)) }
-export async function adminVerificationOperationReview(req, res) { const operation = req.params.kind === 'trust_proof' ? await reviewTrustProof(req.user.id, req.params.operationId, body(req)) : reviewVerificationOperation(req.user.id, req.params.kind, req.params.operationId, body(req)); return result(res, operation) }
+export async function adminVerificationOperationReview(req, res) { const operation = req.params.kind === 'trust_proof' ? await reviewTrustProof(req.user.id, req.params.operationId, body(req)) : await reviewVerificationOperation(req.user.id, req.params.kind, req.params.operationId, body(req)); return result(res, operation) }
 export async function adminVerificationReview(req, res) { return result(res, await persistedSecurity(req, reviewVerification(req.user.id, req.params.requestId, body(req)), body(req).userId || req.params.userId || req.user.id)) }
 export function adminCapabilityPolicies(_req, res) { return res.json({ policies: Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: capabilityPolicy(capability) })) }) }
 export function adminCapabilityPolicyUpdate(req, res) { return result(res, updateCapabilityPolicy(req.user.id, req.params.capability, body(req).policy || body(req))) }

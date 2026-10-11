@@ -3,6 +3,16 @@ import dns from 'node:dns/promises'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { safeFetch } from './outboundHttpService.js'
+import {
+  registryStoreEnabled,
+  loadOrganization,
+  actorMembership,
+  insertRow,
+  findRow,
+  saveRow,
+  listAllRows,
+  upsertOrganizationDomain,
+} from '../repositories/registryVerificationRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const text = (value, max = 160) => typeof value === 'string' ? value.replace(/[<>\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max) : ''
@@ -21,51 +31,80 @@ const INTERNATIONAL_REGISTRIES = {
 // configured. These fallback entries intentionally route to manual review.
 const ISO_COUNTRY_CODES = 'AF AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI CV KH CM CA KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW'.split(' ')
 
-function seedConfigurations(db) {
-  const rows = collection(db, 'countryRegistryConfigurations')
+// The country registry catalog is fully derived from these constants + the
+// environment, so it is computed in memory instead of being seeded into and
+// read from a snapshot collection.
+function computeRegistryConfigurations() {
   const configured = { ...AFRICAN_REGISTRIES, ...INTERNATIONAL_REGISTRIES }
   const displayNames = new Intl.DisplayNames(['en'], { type: 'region' })
   for (const code of ISO_COUNTRY_CODES) {
     const display = displayNames.of(code)
-    if (display) {
-      const country = normalizeCountry(display)
-      if (!configured[country]) configured[country] = [`${display} business registry`, 'company', 'registration number']
-    }
+    if (!display) continue
+    const country = normalizeCountry(display)
+    if (!configured[country]) configured[country] = [`${display} business registry`, 'company', 'registration number']
   }
-  for (const [country, [authority, types, identifierLabel]] of Object.entries(configured)) {
-    if (!rows.some(row => row.country === country)) rows.push({ id: createId('registry_config'), country, authority, organizationTypes: types.split('/'), identifierLabel, automated: Boolean(process.env[`REGISTRY_${country.toUpperCase().replace(/-/g, '_')}_URL`]), adapterEnv: `REGISTRY_${country.toUpperCase().replace(/-/g, '_')}_URL`, active: true, updatedAt: nowIso() })
-  }
-  return rows
+  return Object.entries(configured).map(([country, [authority, types, identifierLabel]]) => ({
+    id: `registry_config_${country}`, country, authority, organizationTypes: types.split('/'), identifierLabel,
+    automated: Boolean(process.env[`REGISTRY_${country.toUpperCase().replace(/-/g, '_')}_URL`]),
+    adapterEnv: `REGISTRY_${country.toUpperCase().replace(/-/g, '_')}_URL`, active: true, updatedAt: nowIso(),
+  }))
 }
 
 export function registryConfigurations(country = null) {
-  const db = readAuthorityDb(); const rows = seedConfigurations(db); const key = country ? normalizeCountry(country) : null
-  return rows.filter(row => !key || row.country === key).map(row => ({ ...row, credentialsConfigured: Boolean(process.env[row.adapterEnv.replace(/_URL$/, '_API_KEY')]) }))
+  const key = country ? normalizeCountry(country) : null
+  return computeRegistryConfigurations().filter(row => !key || row.country === key).map(row => ({ ...row, credentialsConfigured: Boolean(process.env[row.adapterEnv.replace(/_URL$/, '_API_KEY')]) }))
 }
 
 function actorCanManage(db, userId, organizationId) {
   return collection(db, 'organizationMemberships').some(row => row.userId === userId && row.organizationId === organizationId && row.status === 'active' && ['owner', 'admin', 'authorized_representative'].includes(row.role))
 }
 
-export function registryCheck(userId, organizationId, body = {}) {
-  const country = normalizeCountry(body.country); const config = registryConfigurations(country)[0]
+function buildRegistryCheck(userId, organizationId, organization, canManage, body) {
+  if (!organization) return { ok: false, error: 'organization_not_found' }
+  if (!canManage) return { ok: false, error: 'organization_admin_required' }
+  const config = registryConfigurations(normalizeCountry(body.country))[0]
   if (!config) return { ok: false, error: 'country_registry_not_configured' }
+  const registrationIdentifier = text(body.registrationIdentifier || body.registrationNumber, 120)
+  if (!registrationIdentifier) return { ok: false, status: 400, error: 'registration_identifier_required' }
+  const endpoint = process.env[config.adapterEnv]
+  const apiKey = process.env[config.adapterEnv.replace(/_URL$/, '_API_KEY')]
+  const check = { id: createId('registry_check'), organizationId, requestedBy: userId, country: config.country, authority: config.authority, registrationIdentifier, legalName: text(body.legalName || body.name || organization.name, 240), status: endpoint && apiKey ? 'queued' : 'manual_review_required', automated: Boolean(endpoint && apiKey), createdAt: nowIso(), updatedAt: nowIso() }
+  if (!check.automated) return { ok: true, check, manualReviewRequired: true, reason: 'registry_credentials_not_configured' }
+  return { ok: true, check, queued: true }
+}
+
+export async function registryCheck(userId, organizationId, body = {}) {
+  if (!registryConfigurations(normalizeCountry(body.country))[0]) return { ok: false, error: 'country_registry_not_configured' }
+  if (registryStoreEnabled()) {
+    const organization = await loadOrganization(organizationId)
+    const membership = organization ? await actorMembership(userId, organizationId) : null
+    const result = buildRegistryCheck(userId, organizationId, organization, Boolean(membership), body)
+    if (result.ok) await insertRow('organizationRegistryChecks', result.check)
+    return result
+  }
   return updateAuthorityDb(db => {
-    const organization = collection(db, 'organizations').find(row => row.id === organizationId)
-    if (!organization) return { ok: false, error: 'organization_not_found' }
-    if (!actorCanManage(db, userId, organizationId)) return { ok: false, error: 'organization_admin_required' }
-    const registrationIdentifier = text(body.registrationIdentifier || body.registrationNumber, 120)
-    if (!registrationIdentifier) return { ok: false, status: 400, error: 'registration_identifier_required' }
-    const endpoint = process.env[config.adapterEnv]
-    const apiKey = process.env[config.adapterEnv.replace(/_URL$/, '_API_KEY')]
-    const check = { id: createId('registry_check'), organizationId, requestedBy: userId, country, authority: config.authority, registrationIdentifier, legalName: text(body.legalName || body.name || organization.name, 240), status: endpoint && apiKey ? 'queued' : 'manual_review_required', automated: Boolean(endpoint && apiKey), createdAt: nowIso(), updatedAt: nowIso() }
-    collection(db, 'organizationRegistryChecks').push(check)
-    if (!check.automated) return { ok: true, check, manualReviewRequired: true, reason: 'registry_credentials_not_configured' }
-    return { ok: true, check, queued: true }
+    const result = buildRegistryCheck(userId, organizationId, collection(db, 'organizations').find(row => row.id === organizationId), actorCanManage(db, userId, organizationId), body)
+    if (result.ok) collection(db, 'organizationRegistryChecks').push(result.check)
+    return result
   })
 }
 
 export async function runRegistryCheck(checkId) {
+  if (registryStoreEnabled()) {
+    const check = await findRow('organizationRegistryChecks', checkId)
+    if (!check) return { ok: false, error: 'registry_check_not_found' }
+    const config = registryConfigurations(check.country)[0]; const endpoint = config && process.env[config.adapterEnv]
+    const apiKey = config && process.env[config.adapterEnv.replace(/_URL$/, '_API_KEY')]
+    if (!endpoint || !apiKey) { const row = { ...check, status: 'manual_review_required', reason: 'registry_credentials_not_configured', updatedAt: nowIso() }; await saveRow('organizationRegistryChecks', row); return { ok: true, check: row, manualReviewRequired: true } }
+    try {
+      const url = new URL(endpoint); url.searchParams.set('registrationIdentifier', check.registrationIdentifier); url.searchParams.set('legalName', check.legalName)
+      const response = await safeFetch(url.toString(), { headers: { accept: 'application/json', 'x-api-key': apiKey }, signal: AbortSignal.timeout(15000) }, { schemes: ['https'], allowHosts: [url.hostname] })
+      const payload = await response.json().catch(() => ({})); const verified = response.ok && (payload.verified === true || payload.status === 'active' || payload.match === true)
+      const row = { ...check, status: verified ? 'verified' : response.ok ? 'manual_review_required' : 'provider_error', providerResponse: { verified: Boolean(verified), status: payload.status || null, source: payload.source || config.authority }, updatedAt: nowIso() }
+      await saveRow('organizationRegistryChecks', row)
+      return { ok: true, check: row, manualReviewRequired: !verified }
+    } catch (error) { const row = { ...check, status: 'provider_error', reason: error.message.slice(0, 200), updatedAt: nowIso() }; await saveRow('organizationRegistryChecks', row); return { ok: true, check: row, manualReviewRequired: true } }
+  }
   const initial = readAuthorityDb(); const check = collection(initial, 'organizationRegistryChecks').find(row => row.id === checkId)
   if (!check) return { ok: false, error: 'registry_check_not_found' }
   const config = registryConfigurations(check.country)[0]; const endpoint = config && process.env[config.adapterEnv]
@@ -79,20 +118,44 @@ export async function runRegistryCheck(checkId) {
   } catch (error) { return updateAuthorityDb(db => { const row = collection(db, 'organizationRegistryChecks').find(item => item.id === checkId); row.status = 'provider_error'; row.reason = error.message.slice(0, 200); row.updatedAt = nowIso(); return { ok: true, check: row, manualReviewRequired: true } }) }
 }
 
-export function createDomainChallenge(userId, organizationId, input = {}) {
+function buildDomainChallenge(userId, organizationId, hasOrganization, canManage, input) {
+  if (!hasOrganization) return { ok: false, error: 'organization_not_found' }
+  if (!canManage) return { ok: false, error: 'organization_admin_required' }
+  const domain = normalizeDomain(input.domain || input.website); if (!domain) return { ok: false, error: 'organization_domain_invalid' }
+  const challenge = { id: createId('domain_challenge'), organizationId, userId, domain, token: token(), recordName: `_techit-verification.${domain}`, recordType: 'TXT', status: 'pending', expiresAt: new Date(Date.now() + 24 * 3600000).toISOString(), createdAt: nowIso(), updatedAt: nowIso() }
+  return { ok: true, challenge: { ...challenge }, instructions: `Publish a TXT record at ${challenge.recordName} with this verification token.` }
+}
+
+export async function createDomainChallenge(userId, organizationId, input = {}) {
+  if (registryStoreEnabled()) {
+    const organization = await loadOrganization(organizationId)
+    const membership = organization ? await actorMembership(userId, organizationId) : null
+    const result = buildDomainChallenge(userId, organizationId, Boolean(organization), Boolean(membership), input)
+    if (result.ok) await insertRow('organizationDomainChallenges', result.challenge)
+    return result
+  }
   return updateAuthorityDb(db => {
-    if (!collection(db, 'organizations').some(row => row.id === organizationId)) return { ok: false, error: 'organization_not_found' }
-    if (!actorCanManage(db, userId, organizationId)) return { ok: false, error: 'organization_admin_required' }
-    const domain = normalizeDomain(input.domain || input.website); if (!domain) return { ok: false, error: 'organization_domain_invalid' }
-    const challenge = { id: createId('domain_challenge'), organizationId, userId, domain, token: token(), recordName: `_techit-verification.${domain}`, recordType: 'TXT', status: 'pending', expiresAt: new Date(Date.now() + 24 * 3600000).toISOString(), createdAt: nowIso(), updatedAt: nowIso() }
-    collection(db, 'organizationDomainChallenges').push(challenge)
-    // The token is returned only to the authenticated organization administrator;
-    // it is never included in the public organization profile or admin listings.
-    return { ok: true, challenge: { ...challenge }, instructions: `Publish a TXT record at ${challenge.recordName} with this verification token.` }
+    const result = buildDomainChallenge(userId, organizationId, collection(db, 'organizations').some(row => row.id === organizationId), actorCanManage(db, userId, organizationId), input)
+    if (result.ok) collection(db, 'organizationDomainChallenges').push(result.challenge)
+    return result
   })
 }
 
 export async function verifyDomainChallenge(userId, challengeId) {
+  if (registryStoreEnabled()) {
+    const challenge = await findRow('organizationDomainChallenges', challengeId)
+    if (!challenge) return { ok: false, error: 'domain_challenge_not_found' }
+    const membership = await actorMembership(userId, challenge.organizationId)
+    if (!membership) return { ok: false, status: 403, error: 'organization_admin_required' }
+    if (new Date(challenge.expiresAt).getTime() <= Date.now()) { const row = { ...challenge, status: 'expired', updatedAt: nowIso() }; await saveRow('organizationDomainChallenges', row); return { ok: false, error: 'domain_challenge_expired', challenge: { ...row, token: undefined } } }
+    let values = []
+    try { values = (await dns.resolveTxt(challenge.recordName)).flat().map(value => String(value).trim()) } catch { values = [] }
+    const found = values.includes(challenge.token)
+    const row = { ...challenge, lastCheckedAt: nowIso(), status: found ? 'verified' : 'pending', updatedAt: nowIso() }
+    await saveRow('organizationDomainChallenges', row)
+    if (found) await upsertOrganizationDomain({ id: createId('org_domain'), organizationId: row.organizationId, domain: row.domain, status: 'verified', verifiedAt: nowIso(), verifiedBy: userId, createdAt: nowIso(), updatedAt: nowIso() })
+    return { ok: true, verified: found, challenge: { ...row, token: undefined } }
+  }
   const db = readAuthorityDb(); const challenge = collection(db, 'organizationDomainChallenges').find(row => row.id === challengeId)
   if (!challenge) return { ok: false, error: 'domain_challenge_not_found' }
   if (!actorCanManage(db, userId, challenge.organizationId)) return { ok: false, status: 403, error: 'organization_admin_required' }
@@ -107,7 +170,16 @@ export async function verifyDomainChallenge(userId, challengeId) {
   })
 }
 
-export function verificationOperations() {
+export async function verificationOperations() {
+  if (registryStoreEnabled()) {
+    return {
+      registryConfigurations: registryConfigurations(),
+      registryChecks: await listAllRows('organizationRegistryChecks'),
+      domainChallenges: (await listAllRows('organizationDomainChallenges')).map(row => ({ ...row, token: undefined })),
+      evidenceObjects: (await listAllRows('evidenceObjects')).map(row => ({ ...row, objectKey: undefined })),
+      manualReviews: await listAllRows('manualReviews'),
+    }
+  }
   const db = readAuthorityDb()
   return {
     registryConfigurations: registryConfigurations(),
@@ -118,15 +190,25 @@ export function verificationOperations() {
   }
 }
 
-export function reviewVerificationOperation(adminId, kind, id, body = {}) {
+export async function reviewVerificationOperation(adminId, kind, id, body = {}) {
   const decision = String(body.decision || body.status || '').toLowerCase()
   const statusByKind = {
     registry: new Set(['verified', 'rejected', 'manual_review_required', 'in_review']),
     domain: new Set(['verified', 'rejected', 'pending', 'expired']),
   }
   if (!statusByKind[kind]?.has(decision)) return { ok: false, status: 400, error: 'invalid_operation_review_status' }
+  const name = kind === 'registry' ? 'organizationRegistryChecks' : 'organizationDomainChallenges'
+  if (registryStoreEnabled()) {
+    const row = await findRow(name, id)
+    if (!row) return { ok: false, status: 404, error: 'verification_operation_not_found' }
+    const previousStatus = row.status
+    const next = { ...row, status: decision, reviewedBy: adminId, reviewedAt: nowIso(), reviewNote: text(body.note || body.reason, 1000) || null, updatedAt: nowIso() }
+    await saveRow(name, next)
+    if (kind === 'domain' && decision === 'verified') await upsertOrganizationDomain({ id: createId('org_domain'), organizationId: next.organizationId, domain: next.domain, status: 'verified', verifiedAt: nowIso(), verifiedBy: adminId, createdAt: nowIso(), updatedAt: nowIso() })
+    await insertRow('manualReviews', { id: createId('manual_review'), operationKind: kind, operationId: id, adminId, decision, note: next.reviewNote, createdAt: nowIso() })
+    return { ok: true, operation: { ...next, token: undefined }, previousStatus }
+  }
   return updateAuthorityDb(db => {
-    const name = kind === 'registry' ? 'organizationRegistryChecks' : 'organizationDomainChallenges'
     const row = collection(db, name).find(item => item.id === id)
     if (!row) return { ok: false, status: 404, error: 'verification_operation_not_found' }
     const previousStatus = row.status
