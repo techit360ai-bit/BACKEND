@@ -225,7 +225,7 @@ export async function signup(req, res) {
 
   if (req.body.referralId) {
     try { await activateDistributionReferral(id, req.body.referralId, { activationAction: 'account_created' }) } catch { /* generic attribution is best-effort */ }
-    try { activateMomentReferral(req.body.referralId, id, 'account_created') } catch { /* Moment attribution is best-effort */ }
+    try { await activateMomentReferral(req.body.referralId, id, 'account_created') } catch { /* Moment attribution is best-effort */ }
   }
 
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
