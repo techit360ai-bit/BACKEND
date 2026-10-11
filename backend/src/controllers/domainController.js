@@ -33,12 +33,12 @@ import {
   genericDelete,
   genericPatch,
   getAnalysisAsync,
-  getCollaboratorScores,
+  getCollaboratorScoresAsync,
   getContractAsync,
   getHackathonAsync,
   getHackathonInviteAsync,
   getIntakeAsync,
-  getNotificationPreferences,
+  getNotificationPreferencesAsync,
   hackathonAggregatesAsync,
   hackathonStatusAsync,
   investorCollectionAsync,
@@ -89,7 +89,7 @@ import {
   signContractAsync,
   submitHackathonBriefAsync,
   submitHackathonFinalAsync,
-  updateNotificationPreferences,
+  updateNotificationPreferencesAsync,
   applyToOpportunityAsync,
   listApplicationsAsync,
   publishProject,
@@ -354,8 +354,8 @@ export function contributions(req, res) {
   return res.json(listContributions(req.user.id))
 }
 
-export function collaboratorScores(req, res) {
-  return res.json(getCollaboratorScores(req.user.id))
+export async function collaboratorScores(req, res) {
+  return res.json(await getCollaboratorScoresAsync(req.user.id))
 }
 
 export async function orgDashboard(req, res) {
@@ -677,12 +677,12 @@ export function founderEquity(req, res) {
   return res.json(founderCapTable(req.user.id))
 }
 
-export function notificationPrefsGet(req, res) {
-  return res.json(getNotificationPreferences(req.user.id))
+export async function notificationPrefsGet(req, res) {
+  return res.json(await getNotificationPreferencesAsync(req.user.id))
 }
 
-export function notificationPrefsPatch(req, res) {
-  return res.json(updateNotificationPreferences(req.user.id, req.body))
+export async function notificationPrefsPatch(req, res) {
+  return res.json(await updateNotificationPreferencesAsync(req.user.id, req.body))
 }
 
 export async function contracts(req, res) {

@@ -422,3 +422,38 @@ describe('domain row-level store — workspace collections (§5 sub-slice 5b)', 
     expect(mocks.lastWriteOptions).toMatchObject({ userId: 'owner1', workspaceId: 'ws1', collections: ['workspaceTasks'] })
   })
 })
+
+describe('domain row-level store — notification prefs + contributor scores (§5 sub-slice 6)', () => {
+  it('reads the caller notification preferences and defaults when absent', async () => {
+    usedBounded({ notificationPreferences: [{ id: 'p1', userId: 'u1', preferences: { trust: { email: true } } }] })
+    const found = await svc.getNotificationPreferencesAsync('u1')
+    expect(found.preferences.trust).toEqual({ email: true })
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', notificationPreferences: true })
+
+    usedBounded({ notificationPreferences: [] })
+    const fallback = await svc.getNotificationPreferencesAsync('u1')
+    expect(fallback).toEqual({ userId: 'u1', preferences: {} })
+  })
+
+  it('updates preferences scoped to a surface', async () => {
+    usedBounded({ notificationPreferences: [] })
+    const result = await svc.updateNotificationPreferencesAsync('u1', { scope: 'trust', preferences: { email: true } })
+    expect(result.userId).toBe('u1')
+    expect(result.preferences.trust).toEqual({ email: true })
+    expect(mocks.lastWriteOptions).toMatchObject({ userId: 'u1', notificationPreferences: true })
+  })
+
+  it('derives contributor scores from the caller contributions', async () => {
+    usedBounded({
+      contributions: [
+        { id: 'c1', collaboratorId: 'u1', projectId: 'p1', milestonesShipped: 2, technologies: ['js', 'go'], verified: true },
+        { id: 'c2', collaboratorId: 'u1', projectId: 'p2', milestonesShipped: 5, technologies: ['js'], verified: false },
+      ],
+    })
+    const result = await svc.getCollaboratorScoresAsync('u1')
+    expect(result.scores.cbs).toBe(25)
+    expect(result.scores.crs).toBe(50)
+    expect(result.scores.tss).toEqual({ js: 10, go: 10 })
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', contributions: true })
+  })
+})

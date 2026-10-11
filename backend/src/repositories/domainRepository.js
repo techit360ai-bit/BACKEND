@@ -58,6 +58,9 @@ const OWNER_FIELDS = {
   ventureIntakes: ['ownerId', 'userId'],
   ventureAnalyses: ['ownerId', 'userId'],
   projectAnalyses: ['ownerId', 'userId'],
+  // Notification preferences + contributor scores slice.
+  notificationPreferences: ['userId', 'ownerId'],
+  contributions: ['collaboratorId', 'userId', 'ownerId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 
@@ -76,7 +79,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
   for (const name of writeCollections) db[name] = []
@@ -165,6 +168,13 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   if (workspaceId) {
     mergeById(db.workspaces, [await getRecord(client, 'workspaces', workspaceId)])
     mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', [workspaceId]))
+  }
+
+  if (userId && notificationPreferences) {
+    mergeById(db.notificationPreferences, await listRecordsForOwner(client, 'notificationPreferences', userId, { ownerFields: OWNER_FIELDS.notificationPreferences }))
+  }
+  if (userId && contributions) {
+    mergeById(db.contributions, await listRecordsForOwner(client, 'contributions', userId, { ownerFields: OWNER_FIELDS.contributions }))
   }
 
   for (const entry of collections) {

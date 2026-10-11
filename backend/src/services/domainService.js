@@ -2680,3 +2680,17 @@ export async function createWorkspaceCollectionItemAsync(userId, workspaceId, na
 export async function patchWorkspaceCollectionItemAsync(userId, workspaceId, name, itemId, body) {
   return domainWrite(workspaceCollectionScope(userId, workspaceId, name), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body))
 }
+
+// Row-level (§5) wrappers — sub-slice: notification preferences + contributor scores.
+const notificationScope = userId => ({ userId, notificationPreferences: true })
+const contributionScope = userId => ({ userId, contributions: true })
+
+export async function getNotificationPreferencesAsync(userId) {
+  return domainRead(notificationScope(userId), () => getNotificationPreferences(userId), () => getNotificationPreferences(userId))
+}
+export async function updateNotificationPreferencesAsync(userId, body = {}) {
+  return domainWrite(notificationScope(userId), () => updateNotificationPreferences(userId, body), () => updateNotificationPreferences(userId, body))
+}
+export async function getCollaboratorScoresAsync(userId) {
+  return domainRead(contributionScope(userId), () => getCollaboratorScores(userId), () => getCollaboratorScores(userId))
+}
