@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
-import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
+import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, syncOrganizationCollections, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
 import { organizationAccessEnabled, organizationAccessFallbackEnabled, loadOrganizationAccess } from '../repositories/organizationAccessRepository.js'
+import { organizationIntelligenceEnabled, organizationIntelligenceFallbackEnabled, runOrganizationIntelligenceRead, applyOrganizationIntelligenceMutation } from '../repositories/organizationIntelligenceRepository.js'
 
 const DAY = 86400000
 const INTERNAL_ROLES = new Set(['owner', 'admin', 'executive', 'program_director', 'program_manager', 'mentor_manager', 'reviewer', 'analyst', 'operations', 'communications', 'finance', 'partner', 'read_only', 'mentor'])
@@ -128,19 +129,12 @@ export function organizationRisks(userId, filters = {}) {
 export function listOrganizationActions(userId, filters = {}) { const context = requireOrganizationPermission(userId, 'actions', filters.organizationId); if (!context.ok) return context; const db = readAuthorityDb(); let actions = scoped(db, 'organizationActions', context.organizationId); for (const key of ['status', 'priority', 'ownerId', 'sourceType']) if (filters[key]) actions = actions.filter(row => row[key] === filters[key]); return { ok: true, organizationId: context.organizationId, actions: actions.sort((a, b) => timestamp(a.dueDate) - timestamp(b.dueDate)), deterministic: true } }
 export async function listOrganizationActionsAsync(userId, filters = {}) { const context = requireOrganizationPermission(userId, 'actions', filters.organizationId); if (!context.ok) return context; if (!organizationReadEnabled()) return listOrganizationActions(userId, filters); try { return { ok: true, organizationId: context.organizationId, actions: await listActionsPostgres(context.organizationId, { status: filters.status, priority: filters.priority, owner_id: filters.ownerId, source_type: filters.sourceType }), deterministic: true } } catch (error) { if (!organizationFallbackEnabled('READ')) throw error; return listOrganizationActions(userId, filters) } }
 export function createOrganizationAction(userId, body = {}) { const context = requireOrganizationPermission(userId, 'actions', body.organizationId); if (!context.ok) return context; const title = clean(body.title); if (!title) return { ok: false, error: 'action_title_required' }; const priority = ['critical', 'high', 'normal', 'low'].includes(body.priority) ? body.priority : 'normal'; return updateAuthorityDb(db => { const row = { id: createId('org_action'), organizationId: context.organizationId, title, reason: clean(body.reason) || null, evidence: Array.isArray(body.evidence) ? body.evidence.slice(0, 20) : [], sourceType: clean(body.sourceType) || 'manual', sourceId: clean(body.sourceId) || null, ownerId: clean(body.ownerId) || userId, priority, dueDate: body.dueDate || null, status: 'open', createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }; rows(db, 'organizationActions').push(row); audit(db, context, userId, 'action_created', 'organization_action', row.id, null, row); return { ok: true, action: row } }) }
-export async function createOrganizationActionAsync(userId, body = {}) { const result = createOrganizationAction(userId, body); return persistOrganizationResult(result, userId, result.action?.organizationId) }
 export function updateOrganizationAction(userId, actionId, body = {}) { return updateAuthorityDb(db => { const context = requireOrganizationPermission(userId, 'actions', body.organizationId); if (!context.ok) return context; const row = rows(db, 'organizationActions').find(item => item.id === actionId && item.organizationId === context.organizationId); if (!row) return { ok: false, error: 'action_not_found' }; if (body.status !== undefined && !['open', 'in_progress', 'blocked', 'completed', 'dismissed'].includes(body.status)) return { ok: false, error: 'invalid_action_status' }; const previous = { ...row }; for (const key of ['status', 'ownerId', 'priority', 'dueDate', 'reason']) if (body[key] !== undefined) row[key] = clean(body[key]); row.updatedAt = nowIso(); audit(db, context, userId, 'action_updated', 'organization_action', row.id, previous, row); return { ok: true, action: row } }) }
-export async function updateOrganizationActionAsync(userId, actionId, body = {}) { const result = updateOrganizationAction(userId, actionId, body); return persistOrganizationResult(result, userId, result.action?.organizationId || body.organizationId) }
 
 export function listOrganizationKpis(userId, organizationId = null) { const context = requireOrganizationPermission(userId, 'kpis', organizationId); if (!context.ok) return context; const db = readAuthorityDb(); const definitions = rows(db, 'organizationKpiDefinitions').filter(row => row.organizationId === context.organizationId); return { ok: true, organizationId: context.organizationId, kpis: definitions.map(definition => ({ ...definition, values: rows(db, 'organizationKpiValues').filter(row => row.definitionId === definition.id).sort((a, b) => timestamp(b.periodEnd || b.createdAt) - timestamp(a.periodEnd || a.createdAt)).slice(0, 12) })), deterministic: true } }
 export async function listOrganizationKpisAsync(userId, organizationId = null) { const context = requireOrganizationPermission(userId, 'kpis', organizationId); if (!context.ok) return context; if (!organizationReadEnabled()) return listOrganizationKpis(userId, organizationId); try { return { ok: true, organizationId: context.organizationId, kpis: await listKpisPostgres(context.organizationId), deterministic: true } } catch (error) { if (!organizationFallbackEnabled('READ')) throw error; return listOrganizationKpis(userId, organizationId) } }
 export function saveOrganizationKpi(userId, body = {}) { const context = requireOrganizationPermission(userId, 'kpis', body.organizationId); if (!context.ok) return context; const name = clean(body.name); if (!name) return { ok: false, error: 'kpi_name_required' }; return updateAuthorityDb(db => { let definition = rows(db, 'organizationKpiDefinitions').find(row => row.id === body.id && row.organizationId === context.organizationId); if (!definition) { definition = { id: createId('org_kpi'), organizationId: context.organizationId, name, definition: clean(body.definition) || null, unit: clean(body.unit) || 'count', target: body.target == null ? null : Number(body.target), frequency: clean(body.frequency) || 'monthly', ownerId: clean(body.ownerId) || userId, visibility: clean(body.visibility) || 'organization', createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }; rows(db, 'organizationKpiDefinitions').push(definition) } else { for (const key of ['name', 'definition', 'unit', 'frequency', 'ownerId', 'visibility']) if (body[key] !== undefined) definition[key] = clean(body[key]); if (body.target !== undefined) definition.target = Number(body.target); definition.updatedAt = nowIso() } if (body.value !== undefined) rows(db, 'organizationKpiValues').push({ id: createId('org_kpi_value'), definitionId: definition.id, organizationId: context.organizationId, value: Number(body.value), source: clean(body.source) || 'manual', periodStart: body.periodStart || null, periodEnd: body.periodEnd || null, recordedBy: userId, createdAt: nowIso() }); audit(db, context, userId, 'kpi_updated', 'organization_kpi', definition.id, null, definition); return { ok: true, kpi: definition } }) }
-export async function saveOrganizationKpiAsync(userId, body = {}) { const result = saveOrganizationKpi(userId, body); return persistOrganizationResult(result, userId, result.kpi?.organizationId || body.organizationId) }
 
-async function persistOrganizationResult(result, userId, organizationId) {
-  if (!organizationWriteEnabled() || !result?.ok || !organizationId) return result
-  try { await syncOrganizationAggregate(organizationId); return result } catch (error) { console.error(JSON.stringify({ event: 'organization_postgres_write_failed', organizationId, error: error.message })); if (organizationFallbackEnabled('WRITE')) return result; return { ok: false, error: 'organization_write_temporarily_unavailable' } }
-}
 
 export async function listOrganizationCollectionAsync(userId, collectionName, organizationId = null) {
   const permissions = collectionName === 'organizationCohorts' ? 'programs' : collectionName === 'organizationReportSchedules' ? 'metrics' : 'view'
@@ -268,3 +262,77 @@ export function runOrganizationIntelligenceMaintenance() {
     return { ok: true, overdueActions: overdue, reportsGenerated: reports }
   })
 }
+
+// ---------------------------------------------------------------------------
+// Row-level (§5) organization intelligence wrappers. Each loads a bounded
+// organization scope through organizationIntelligenceRepository and runs the
+// existing synchronous service logic against it via runDatabaseAuthority, so the
+// call never touches the whole-database snapshot when the organization source is
+// Postgres. Mutations persist only the rows they changed and re-run the domain's
+// normalized Postgres projections. Falls back to the snapshot path when the
+// source is sqlite or the read/write fails.
+// ---------------------------------------------------------------------------
+async function organizationScopedRead(options, read) {
+  if (!organizationIntelligenceEnabled()) return read()
+  try {
+    return await runOrganizationIntelligenceRead(options, read)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'organization_intelligence_read_failed', error: error.message }))
+    if (!organizationIntelligenceFallbackEnabled()) throw error
+    return read()
+  }
+}
+
+function organizationIdFrom(result, options) {
+  return result?.organizationId || result?.action?.organizationId || result?.kpi?.organizationId || result?.member?.organizationId || result?.record?.organizationId || result?.schedule?.organizationId || result?.report?.organizationId || options?.organizationId || null
+}
+
+async function organizationScopedWrite(options, mutate, collections = false) {
+  if (!organizationIntelligenceEnabled()) return mutate()
+  const sync = async result => {
+    if (!organizationWriteEnabled() || result?.ok === false) return
+    const organizationId = organizationIdFrom(result, options)
+    if (!organizationId) return
+    try {
+      await syncOrganizationAggregate(organizationId)
+      if (collections) await syncOrganizationCollections(organizationId)
+      await syncOrganizationCommercial(organizationId)
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'organization_postgres_write_failed', organizationId, error: error.message }))
+      if (!organizationFallbackEnabled('WRITE')) throw error
+    }
+  }
+  try {
+    return await applyOrganizationIntelligenceMutation(options, mutate, sync)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'organization_intelligence_write_failed', error: error.message }))
+    if (!organizationIntelligenceFallbackEnabled()) throw error
+    return mutate()
+  }
+}
+
+export const organizationOverviewAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationOverview(userId, organizationId))
+export const organizationPulseAsync = (userId, options = {}) => organizationScopedRead({ userId, organizationId: options.organizationId ?? null }, () => organizationPulse(userId, options))
+export const organizationRisksAsync = (userId, filters = {}) => organizationScopedRead({ userId, organizationId: filters.organizationId ?? null }, () => organizationRisks(userId, filters))
+export const organizationRecommendationsAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationRecommendations(userId, organizationId))
+export const organizationActivityAsync = (userId, options = {}) => organizationScopedRead({ userId, organizationId: options.organizationId ?? null }, () => organizationActivity(userId, options))
+export const organizationMembersAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationMembers(userId, organizationId))
+export const organizationAuditEventsAsync = (userId, options = {}) => organizationScopedRead({ userId, organizationId: options.organizationId ?? null }, () => organizationAuditEvents(userId, options))
+export const verifyOrganizationAuditAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => verifyOrganizationAudit(userId, organizationId))
+export const organizationBriefingEvidenceAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationBriefingEvidence(userId, organizationId))
+export const organizationStartupPortfolioAsync = (userId, filters = {}) => organizationScopedRead({ userId, organizationId: filters.organizationId ?? null }, () => organizationStartupPortfolio(userId, filters))
+export const organizationProgramHealthAsync = (userId, programId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationProgramHealth(userId, programId, organizationId))
+export const organizationResourceAllocationAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationResourceAllocation(userId, organizationId))
+export const organizationAlumniOutcomesAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationAlumniOutcomes(userId, organizationId))
+export const organizationCohortBenchmarksAsync = (userId, organizationId = null) => organizationScopedRead({ userId, organizationId }, () => organizationCohortBenchmarks(userId, organizationId))
+
+export const createOrganizationActionAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createOrganizationAction(userId, body))
+export const updateOrganizationActionAsync = (userId, actionId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => updateOrganizationAction(userId, actionId, body))
+export const saveOrganizationKpiAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => saveOrganizationKpi(userId, body))
+export const updateOrganizationMemberAsync = (userId, memberId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => updateOrganizationMember(userId, memberId, body), true)
+export const createOrganizationCohortAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createOrganizationCohort(userId, body), true)
+export const createOrganizationPartnerAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createOrganizationPartner(userId, body), true)
+export const createOrganizationResourceAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createOrganizationResource(userId, body), true)
+export const createReportScheduleAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => createReportSchedule(userId, body), true)
+export const refreshOrganizationIntelligenceAsync = (userId, organizationId = null) => organizationScopedWrite({ userId, organizationId }, () => refreshOrganizationIntelligence(userId, organizationId), true)
+export const generateOrganizationReportAsync = (userId, body = {}) => organizationScopedWrite({ userId, organizationId: body?.organizationId ?? null }, () => generateOrganizationReport(userId, body), true)
