@@ -1,6 +1,8 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
+import { getRecord, listRecords } from '../repositories/platformCollectionRepository.js'
+import { authorizationEnabled, authorizationFallbackEnabled, applyScopedMutation, loadAuthorizationSources } from '../repositories/authorizationRepository.js'
 
 export const SPECIALIZED_ROLES = Object.freeze(['founder', 'collaborator', 'investor', 'organization'])
 export const ROLE_STATUSES = Object.freeze(['pending', 'pending_verification', 'active', 'suspended', 'revoked'])
@@ -92,26 +94,45 @@ function presentableContexts(rows) {
 }
 
 export function availableContexts(userId) {
-  return updateAuthorityDb(db => {
-    const { roles } = synchronizeLegacyRoles(db, userId)
-    const contexts = presentableContexts(roles)
-    const profile = profileFor(db, userId)
-    let activeContext = contextFor(db, userId)
-    const primaryRole = normalizeRole(profile?.activeRole || profile?.role || roles.find(row => row.isPrimary)?.role || 'explorer')
-    const primaryAssignment = roles.find(row => normalizeRole(row.role) === primaryRole && row.status === 'active') || roles.find(row => Boolean(row.isPrimary) && row.status === 'active')
-    // Repair legacy sessions that were created without a context or were
-    // incorrectly initialized as Explorer. An explicit context switch is
-    // preserved; this branch only repairs the default/initial state.
-    if (!activeContext || (activeContext.role === 'explorer' && primaryRole !== 'explorer' && !profile?.activeRole)) {
-      const now = nowIso()
-      const next = { id: activeContext?.id || createId('context'), userId, role: primaryRole, roleAssignmentId: primaryAssignment?.id || null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: activeContext?.startedAt || now, lastActiveAt: now, updatedAt: now }
-      if (activeContext) Object.assign(activeContext, next)
-      else collection(db, 'activeContexts').push(next)
-      activeContext = next
-      if (profile && !profile.activeRole) { profile.activeRole = primaryRole; profile.updatedAt = now }
-    }
-    return { contexts, activeContext, profile: profile ? { activeRole: normalizeRole(profile.activeRole || activeContext?.role || profile.role || 'explorer') } : null }
-  })
+  return updateAuthorityDb(db => computeAvailableContexts(db, userId))
+}
+
+function computeAvailableContexts(db, userId) {
+  const { roles } = synchronizeLegacyRoles(db, userId)
+  const contexts = presentableContexts(roles)
+  const profile = profileFor(db, userId)
+  let activeContext = contextFor(db, userId)
+  const primaryRole = normalizeRole(profile?.activeRole || profile?.role || roles.find(row => row.isPrimary)?.role || 'explorer')
+  const primaryAssignment = roles.find(row => normalizeRole(row.role) === primaryRole && row.status === 'active') || roles.find(row => Boolean(row.isPrimary) && row.status === 'active')
+  // Repair legacy sessions that were created without a context or were
+  // incorrectly initialized as Explorer. An explicit context switch is
+  // preserved; this branch only repairs the default/initial state.
+  if (!activeContext || (activeContext.role === 'explorer' && primaryRole !== 'explorer' && !profile?.activeRole)) {
+    const now = nowIso()
+    const next = { id: activeContext?.id || createId('context'), userId, role: primaryRole, roleAssignmentId: primaryAssignment?.id || null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: activeContext?.startedAt || now, lastActiveAt: now, updatedAt: now }
+    if (activeContext) Object.assign(activeContext, next)
+    else collection(db, 'activeContexts').push(next)
+    activeContext = next
+    if (profile && !profile.activeRole) { profile.activeRole = primaryRole; profile.updatedAt = now }
+  }
+  return { contexts, activeContext, profile: profile ? { activeRole: normalizeRole(profile.activeRole || activeContext?.role || profile.role || 'explorer') } : null }
+}
+
+// Row-level context listing/repair. Converts the read-modify-write on
+// profiles/userRoles/activeContexts to scoped queries; roleHistory rows
+// appended by synchronizeLegacyRoles are inserted individually.
+export async function availableContextsAsync(userId) {
+  if (!authorizationEnabled()) return availableContexts(userId)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'activeContexts'], db => ({
+      result: computeAvailableContexts(db, userId),
+      append: (db.roleHistory || []).map(row => ({ collection: 'roleHistory', row })),
+    }))
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'multi_role_context_read_failed', operation: 'available', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return availableContexts(userId)
+  }
 }
 
 export function getActiveContext(userId) {
@@ -127,24 +148,61 @@ export function getActiveContext(userId) {
   return { id: null, userId, role: normalizeRole(profile?.activeRole || profile?.role || 'explorer'), roleAssignmentId: null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: null, lastActiveAt: null, updatedAt: null }
 }
 
+export async function getActiveContextAsync(userId) {
+  if (!authorizationEnabled()) return getActiveContext(userId)
+  let db = await loadAuthorizationSources(userId, ['activeContexts'])
+  let context = (db.activeContexts || []).find(row => row.status === 'active') || null
+  let profile = (db.profiles || [])[0] || null
+  if (!context && profile) {
+    await availableContextsAsync(userId)
+    db = await loadAuthorizationSources(userId, ['activeContexts'])
+    context = (db.activeContexts || []).find(row => row.status === 'active') || null
+    profile = (db.profiles || [])[0] || null
+  }
+  if (context) return context
+  return { id: null, userId, role: normalizeRole(profile?.activeRole || profile?.role || 'explorer'), roleAssignmentId: null, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, status: 'active', startedAt: null, lastActiveAt: null, updatedAt: null }
+}
+
 export function switchContext(userId, input = {}) {
   const requestedRole = normalizeRole(input.role)
   if (!['explorer', ...SPECIALIZED_ROLES].includes(requestedRole)) return { ok: false, error: 'role_unavailable' }
-  return updateAuthorityDb(db => {
-    const { roles, profile } = synchronizeLegacyRoles(db, userId)
-    const assignment = roles.find(row => normalizeRole(row.role) === requestedRole && row.status === 'active')
-    if (!assignment) return { ok: false, error: 'role_not_activated' }
-    if (!validWorkspace(db, userId, input.workspaceId)) return { ok: false, error: 'workspace_access_denied' }
-    if (!validOrganization(db, userId, input.organizationId)) return { ok: false, error: 'organization_access_denied' }
-    const previous = contextFor(db, userId)
-    const now = nowIso()
-    const next = { id: previous?.id || createId('context'), userId, role: requestedRole, roleAssignmentId: assignment.id, organizationId: input.organizationId || null, workspaceId: input.workspaceId || null, resourceType: input.resourceType || null, resourceId: input.resourceId || null, status: 'active', startedAt: previous?.role === requestedRole ? (previous.startedAt || now) : now, lastActiveAt: now, updatedAt: now }
-    const contexts = collection(db, 'activeContexts')
-    if (previous) Object.assign(previous, next); else contexts.push(next)
-    if (profile) { profile.activeRole = requestedRole; profile.updatedAt = now }
-    collection(db, 'contextHistory').push({ id: createId('context_event'), ...next, eventType: previous?.role === requestedRole ? 'context_touched' : 'context_switched', createdAt: now, metadata: {} })
-    return { ok: true, activeContext: next, availableContexts: availableContextsFromDb(db, userId) }
-  })
+  return updateAuthorityDb(db => switchContextFromDb(db, userId, requestedRole, input))
+}
+
+function switchContextFromDb(db, userId, requestedRole, input) {
+  const { roles, profile } = synchronizeLegacyRoles(db, userId)
+  const assignment = roles.find(row => normalizeRole(row.role) === requestedRole && row.status === 'active')
+  if (!assignment) return { ok: false, error: 'role_not_activated' }
+  if (!validWorkspace(db, userId, input.workspaceId)) return { ok: false, error: 'workspace_access_denied' }
+  if (!validOrganization(db, userId, input.organizationId)) return { ok: false, error: 'organization_access_denied' }
+  const previous = contextFor(db, userId)
+  const now = nowIso()
+  const next = { id: previous?.id || createId('context'), userId, role: requestedRole, roleAssignmentId: assignment.id, organizationId: input.organizationId || null, workspaceId: input.workspaceId || null, resourceType: input.resourceType || null, resourceId: input.resourceId || null, status: 'active', startedAt: previous?.role === requestedRole ? (previous.startedAt || now) : now, lastActiveAt: now, updatedAt: now }
+  const contexts = collection(db, 'activeContexts')
+  if (previous) Object.assign(previous, next); else contexts.push(next)
+  if (profile) { profile.activeRole = requestedRole; profile.updatedAt = now }
+  collection(db, 'contextHistory').push({ id: createId('context_event'), ...next, eventType: previous?.role === requestedRole ? 'context_touched' : 'context_switched', createdAt: now, metadata: {} })
+  return { ok: true, activeContext: next, availableContexts: availableContextsFromDb(db, userId) }
+}
+
+export async function switchContextAsync(userId, input = {}) {
+  const requestedRole = normalizeRole(input.role)
+  if (!['explorer', ...SPECIALIZED_ROLES].includes(requestedRole)) return { ok: false, error: 'role_unavailable' }
+  if (!authorizationEnabled()) return switchContext(userId, input)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'activeContexts', 'organizationMemberships'], db => ({
+      result: switchContextFromDb(db, userId, requestedRole, input),
+      append: [...(db.contextHistory || []).map(row => ({ collection: 'contextHistory', row })), ...(db.roleHistory || []).map(row => ({ collection: 'roleHistory', row }))],
+    }), async client => {
+      const workspace = input.workspaceId ? await getRecord(client, 'workspaces', input.workspaceId) : null
+      const members = input.workspaceId ? await listRecords(client, 'workspaceMembers', { workspaceId: input.workspaceId }) : []
+      return { workspaces: workspace ? [workspace] : [], workspaceMembers: members }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'multi_role_context_write_failed', operation: 'switch', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return switchContext(userId, input)
+  }
 }
 
 function availableContextsFromDb(db, userId) {
@@ -163,48 +221,102 @@ export function touchContext(userId, input = {}) {
   })
 }
 
+export async function touchContextAsync(userId, input = {}) {
+  if (!authorizationEnabled()) return touchContext(userId, input)
+  const current = await getActiveContextAsync(userId)
+  if (!current.id) return switchContextAsync(userId, { role: input.role || current.role || 'explorer', ...input })
+  try {
+    return await applyScopedMutation(userId, ['activeContexts'], db => {
+      const context = (db.activeContexts || []).find(row => row.status === 'active') || null
+      if (!context) return { result: { ok: false, error: 'active_context_not_found' } }
+      context.lastActiveAt = nowIso(); context.updatedAt = context.lastActiveAt
+      return { result: { ok: true, activeContext: context } }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'multi_role_context_write_failed', operation: 'touch', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return touchContext(userId, input)
+  }
+}
+
 export function activateRoleAssignment(userId, role, profilePatch = {}) {
   const normalized = normalizeRole(role)
   if (!['explorer', ...SPECIALIZED_ROLES].includes(normalized)) return { ok: false, error: 'role_unavailable' }
-  return updateAuthorityDb(db => {
-    const profile = profileFor(db, userId)
-    if (!profile) return { ok: false, error: 'profile_not_found' }
-    ensureBaseExplorer(db, userId)
-    const rows = collection(db, 'userRoles')
-    let record = rows.find(row => row.userId === userId && normalizeRole(row.role) === normalized)
-    const previousStatus = record?.status || null
-    const now = nowIso()
-    if (!record) { record = { id: createId('user_role'), userId, role: normalized, createdAt: now }; rows.push(record) }
-    Object.assign(record, { role: normalized, status: 'active', active: true, assurance: record.assurance || 'CLAIMED', isPrimary: normalizeRole(profile.role) === normalized || Boolean(record.isPrimary), activatedAt: record.activatedAt || now, updatedAt: now, profile: { ...(record.profile || {}), ...profilePatch } })
-    profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(item => item !== normalizeRole(profile.role))
-    profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || now, updatedAt: now } }
-    appendRoleEvent(db, userId, normalized, previousStatus, 'active', { reason: 'explicit_activation' })
-    return { ok: true, role: normalized, userRole: record, activeContext: contextFor(db, userId) }
-  })
+  return updateAuthorityDb(db => activateRoleAssignmentFromDb(db, userId, normalized, profilePatch))
+}
+
+function activateRoleAssignmentFromDb(db, userId, normalized, profilePatch = {}) {
+  const profile = profileFor(db, userId)
+  if (!profile) return { ok: false, error: 'profile_not_found' }
+  ensureBaseExplorer(db, userId)
+  const rows = collection(db, 'userRoles')
+  let record = rows.find(row => row.userId === userId && normalizeRole(row.role) === normalized)
+  const previousStatus = record?.status || null
+  const now = nowIso()
+  if (!record) { record = { id: createId('user_role'), userId, role: normalized, createdAt: now }; rows.push(record) }
+  Object.assign(record, { role: normalized, status: 'active', active: true, assurance: record.assurance || 'CLAIMED', isPrimary: normalizeRole(profile.role) === normalized || Boolean(record.isPrimary), activatedAt: record.activatedAt || now, updatedAt: now, profile: { ...(record.profile || {}), ...profilePatch } })
+  profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(item => item !== normalizeRole(profile.role))
+  profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || now, updatedAt: now } }
+  appendRoleEvent(db, userId, normalized, previousStatus, 'active', { reason: 'explicit_activation' })
+  return { ok: true, role: normalized, userRole: record, activeContext: contextFor(db, userId) }
+}
+
+export async function activateRoleAssignmentAsync(userId, role, profilePatch = {}) {
+  const normalized = normalizeRole(role)
+  if (!['explorer', ...SPECIALIZED_ROLES].includes(normalized)) return { ok: false, error: 'role_unavailable' }
+  if (!authorizationEnabled()) return activateRoleAssignment(userId, role, profilePatch)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'roleProfiles', 'activeContexts'], db => {
+      const result = activateRoleAssignmentFromDb(db, userId, normalized, profilePatch)
+      return { result, append: (db.roleHistory || []).map(row => ({ collection: 'roleHistory', row })) }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'multi_role_context_write_failed', operation: 'activate', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return activateRoleAssignment(userId, role, profilePatch)
+  }
 }
 
 export function deactivateRoleAssignment(userId, role) {
   const normalized = normalizeRole(role)
   if (normalized === 'explorer') return { ok: false, error: 'base_explorer_cannot_be_deactivated' }
-  return updateAuthorityDb(db => {
-    const record = roleRows(db, userId).find(row => normalizeRole(row.role) === normalized)
-    if (!record) return { ok: false, error: 'role_not_activated' }
-    const previousStatus = record.status || 'active'
-    record.status = 'revoked'; record.active = false; record.deactivatedAt = nowIso(); record.updatedAt = record.deactivatedAt
-    const profile = profileFor(db, userId)
-    if (profile) {
-      profile.secondaryRoles = (profile.secondaryRoles || []).filter(item => normalizeRole(item) !== normalized)
-      if (normalizeRole(profile.activeRole) === normalized) profile.activeRole = 'explorer'
-      profile.updatedAt = nowIso()
-    }
-    const context = contextFor(db, userId)
-    if (context?.role === normalized) {
-      const explorer = ensureBaseExplorer(db, userId)
-      Object.assign(context, { role: 'explorer', roleAssignmentId: explorer.id, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, startedAt: nowIso(), lastActiveAt: nowIso(), updatedAt: nowIso() })
-    }
-    appendRoleEvent(db, userId, normalized, previousStatus, 'revoked', { reason: 'user_deactivated' })
-    return { ok: true, role: normalized, activeContext: contextFor(db, userId) }
-  })
+  return updateAuthorityDb(db => deactivateRoleAssignmentFromDb(db, userId, normalized))
+}
+
+function deactivateRoleAssignmentFromDb(db, userId, normalized) {
+  const record = roleRows(db, userId).find(row => normalizeRole(row.role) === normalized)
+  if (!record) return { ok: false, error: 'role_not_activated' }
+  const previousStatus = record.status || 'active'
+  record.status = 'revoked'; record.active = false; record.deactivatedAt = nowIso(); record.updatedAt = record.deactivatedAt
+  const profile = profileFor(db, userId)
+  if (profile) {
+    profile.secondaryRoles = (profile.secondaryRoles || []).filter(item => normalizeRole(item) !== normalized)
+    if (normalizeRole(profile.activeRole) === normalized) profile.activeRole = 'explorer'
+    profile.updatedAt = nowIso()
+  }
+  const context = contextFor(db, userId)
+  if (context?.role === normalized) {
+    const explorer = ensureBaseExplorer(db, userId)
+    Object.assign(context, { role: 'explorer', roleAssignmentId: explorer.id, organizationId: null, workspaceId: null, resourceType: null, resourceId: null, startedAt: nowIso(), lastActiveAt: nowIso(), updatedAt: nowIso() })
+  }
+  appendRoleEvent(db, userId, normalized, previousStatus, 'revoked', { reason: 'user_deactivated' })
+  return { ok: true, role: normalized, activeContext: contextFor(db, userId) }
+}
+
+export async function deactivateRoleAssignmentAsync(userId, role) {
+  const normalized = normalizeRole(role)
+  if (normalized === 'explorer') return { ok: false, error: 'base_explorer_cannot_be_deactivated' }
+  if (!authorizationEnabled()) return deactivateRoleAssignment(userId, role)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'activeContexts'], db => {
+      const result = deactivateRoleAssignmentFromDb(db, userId, normalized)
+      return { result, append: (db.roleHistory || []).map(row => ({ collection: 'roleHistory', row })) }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'multi_role_context_write_failed', operation: 'deactivate', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return deactivateRoleAssignment(userId, role)
+  }
 }
 
 export function roleAssignments(userId) {

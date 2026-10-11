@@ -4,7 +4,7 @@ import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
-import { activateRoleAssignment, getActiveContext, normalizeRole, roleAssignments } from '../services/multiRoleContextService.js'
+import { getActiveContextAsync, normalizeRole, roleAssignmentsAsync } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
 import { recordActivityInDb } from '../services/discoveryService.js'
 import { browserBodyTokenAllowed, clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
@@ -272,7 +272,7 @@ export async function signin(req, res) {
   const db = readAuthorityDb()
   recordActivityInDb(db, user.id, 'login', 'auth')
   writeAuthorityDb(db)
-  roleAssignments(user.id)
+  await roleAssignmentsAsync(user.id)
 
   const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
@@ -291,8 +291,8 @@ export async function session(req, res) {
   const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
   recordActivityInDb(db, req.user.id, 'session', 'auth')
   writeAuthorityDb(db)
-  const assignments = roleAssignments(req.user.id)
-  return res.json({ user: sessionUser(req.user), profile: projectOwnProfile(profile), session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || getActiveContext(req.user.id), availableContexts: assignments.contexts })
+  const assignments = await roleAssignmentsAsync(req.user.id)
+  return res.json({ user: sessionUser(req.user), profile: projectOwnProfile(profile), session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || await getActiveContextAsync(req.user.id), availableContexts: assignments.contexts })
 }
 
 export async function signout(req, res) {

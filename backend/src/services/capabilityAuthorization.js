@@ -2,6 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
 import { reserveCapabilityConsumption, settleCapabilityConsumption, reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from './capabilityConsumptionService.js'
+import { authorizationEnabled, authorizationFallbackEnabled, loadAuthorizationSources, applyScopedMutation, applyGlobalMutation, appendRow, listCapabilityPolicies } from '../repositories/authorizationRepository.js'
 
 export const ASSURANCE_LEVELS = Object.freeze({
   CLAIMED: 0,
@@ -126,26 +127,77 @@ export function trustProfileFor(userId, role = null) {
   return derivedTrustProfile(readAuthorityDb(), userId, role)
 }
 
+export async function trustProfileForAsync(userId, role = null) {
+  if (!authorizationEnabled()) return trustProfileFor(userId, role)
+  try {
+    const db = await loadAuthorizationSources(userId, ['userRoles', 'trustProfiles', 'verificationProfiles', 'riskProfiles'])
+    return derivedTrustProfile(db, userId, role)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_trust_read_failed', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return trustProfileFor(userId, role)
+  }
+}
+
 export function capabilityPolicy(capability, db = readAuthorityDb()) {
   const stored = collection(db, 'capabilityPolicies').find(row => row.capability === capability && row.active !== false)
   return stored ? { ...CAPABILITY_POLICIES[capability], ...stored.policy } : CAPABILITY_POLICIES[capability] || null
 }
 
-export function updateCapabilityPolicy(adminId, capability, patch = {}) {
+// Resolves every capability policy in one query for the admin/capability
+// listings, avoiding a snapshot read per capability.
+export async function capabilityPoliciesForAdmin() {
+  if (!authorizationEnabled()) return Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: capabilityPolicy(capability) }))
+  try {
+    const rows = await listCapabilityPolicies()
+    const stored = new Map(rows.filter(row => row.active !== false).map(row => [row.capability, row.policy]))
+    return Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: stored.has(capability) ? { ...CAPABILITY_POLICIES[capability], ...stored.get(capability) } : CAPABILITY_POLICIES[capability] || null }))
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_policy_read_failed', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return Object.keys(CAPABILITY_POLICIES).map(capability => ({ capability, policy: capabilityPolicy(capability) }))
+  }
+}
+
+function validateCapabilityPolicyPatch(capability, patch) {
   if (!CAPABILITY_POLICIES[capability]) return { ok: false, error: 'unknown_capability' }
   if (patch.roles && (!Array.isArray(patch.roles) || patch.roles.some(role => !KNOWN_ROLES.has(normalizeRole(role))))) return { ok: false, error: 'invalid_roles' }
   if (patch.assurance && !(String(patch.assurance).toUpperCase() in ASSURANCE_LEVELS)) return { ok: false, error: 'invalid_assurance' }
   if (!KNOWN_FUNDING.has(patch.funding)) return { ok: false, error: 'invalid_funding' }
   if (patch.credits !== undefined && (!Number.isFinite(Number(patch.credits)) || Number(patch.credits) < 0 || Number(patch.credits) > 100000)) return { ok: false, error: 'invalid_credits' }
-  return updateAuthorityDb(db => {
-    const policies = collection(db, 'capabilityPolicies')
-    let row = policies.find(item => item.capability === capability)
-    if (!row) { row = { id: createId('cap_policy'), capability, policy: {}, active: true, createdAt: nowIso() }; policies.push(row) }
-    row.policy = { ...(row.policy || {}), ...patch }
-    row.updatedAt = nowIso()
-    collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), action: 'capability_policy_updated', capability, actorId: adminId, policyVersion: 'capability-v1', metadata: row.policy, createdAt: nowIso() })
-    return { ok: true, capability, policy: capabilityPolicy(capability, db) }
-  })
+  return { ok: true }
+}
+
+function updateCapabilityPolicyFromDb(db, adminId, capability, patch) {
+  const policies = collection(db, 'capabilityPolicies')
+  let row = policies.find(item => item.capability === capability)
+  if (!row) { row = { id: createId('cap_policy'), capability, policy: {}, active: true, createdAt: nowIso() }; policies.push(row) }
+  row.policy = { ...(row.policy || {}), ...patch }
+  row.updatedAt = nowIso()
+  collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), action: 'capability_policy_updated', capability, actorId: adminId, policyVersion: 'capability-v1', metadata: row.policy, createdAt: nowIso() })
+  return { ok: true, capability, policy: capabilityPolicy(capability, db) }
+}
+
+export function updateCapabilityPolicy(adminId, capability, patch = {}) {
+  const valid = validateCapabilityPolicyPatch(capability, patch)
+  if (valid.ok === false) return valid
+  return updateAuthorityDb(db => updateCapabilityPolicyFromDb(db, adminId, capability, patch))
+}
+
+export async function updateCapabilityPolicyAsync(adminId, capability, patch = {}) {
+  const valid = validateCapabilityPolicyPatch(capability, patch)
+  if (valid.ok === false) return valid
+  if (!authorizationEnabled()) return updateCapabilityPolicy(adminId, capability, patch)
+  try {
+    return await applyGlobalMutation(db => {
+      const result = updateCapabilityPolicyFromDb(db, adminId, capability, patch)
+      return { result, append: (db.verificationAuditLogs || []).map(row => ({ collection: 'verificationAuditLogs', row })) }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_policy_write_failed', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return updateCapabilityPolicy(adminId, capability, patch)
+  }
 }
 
 export function auditCapabilityDecision(decision, userId) {
@@ -155,8 +207,24 @@ export function auditCapabilityDecision(decision, userId) {
   })
 }
 
+export async function auditCapabilityDecisionAsync(decision, userId) {
+  const row = { id: createId('authorization_audit'), userId, capability: decision.capability, allowed: decision.allowed, code: decision.code, activeRole: decision.activeRole || null, assurance: decision.assurance || null, riskState: decision.riskState || null, policyVersion: 'capability-v1', createdAt: nowIso() }
+  if (!authorizationEnabled()) return auditCapabilityDecision(decision, userId)
+  try {
+    await appendRow('authorizationAuditLogs', row)
+    return decision
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_audit_write_failed', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return auditCapabilityDecision(decision, userId)
+  }
+}
+
 export function authorizeCapability(userId, capability, context = {}, sourceDb = null) {
-  const db = sourceDb || readAuthorityDb()
+  return authorizeCapabilityFromDb(sourceDb || readAuthorityDb(), userId, capability, context)
+}
+
+function authorizeCapabilityFromDb(db, userId, capability, context = {}) {
   const policy = capabilityPolicy(capability, db)
   const profile = profileFor(db, userId)
   if (!policy) return { allowed: false, code: 'unknown_capability', capability }
@@ -189,10 +257,25 @@ export function authorizeCapability(userId, capability, context = {}, sourceDb =
   return { allowed: reasons.length === 0, code: reasons[0] || 'allowed', reasons, capability, activeRole, assurance: currentAssurance, riskState: risk, subscription, availableCredits: credits, organizationId: context.organizationId || null, funding: policy.funding || 'none', metering: policy.funding ? 'runtime' : 'none', policy }
 }
 
+// Row-level capability decision. Falls back to the snapshot when the
+// authorization source is still sqlite (or on a read failure while the fallback
+// flag is enabled).
+export async function authorizeCapabilityAsync(userId, capability, context = {}) {
+  if (!authorizationEnabled()) return authorizeCapability(userId, capability, context)
+  try {
+    const db = await loadAuthorizationSources(userId)
+    return authorizeCapabilityFromDb(db, userId, capability, context)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_decision_read_failed', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return authorizeCapability(userId, capability, context)
+  }
+}
+
 export function requireCapability(capability, contextFactory = () => ({}), options = {}) {
   return async (req, res, next) => {
-    const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
-    void auditCapabilityDecision(decision, req.user.id)
+    const decision = await authorizeCapabilityAsync(req.user.id, capability, { ...(req.user.activeContext || {}), ...contextFactory(req), mfaAssertion: req.get('x-mfa-assertion') })
+    void auditCapabilityDecisionAsync(decision, req.user.id)
     if (decision.allowed) {
       req.capabilityDecision = decision
       if (options.consume) {
@@ -214,36 +297,71 @@ export function requireCapability(capability, contextFactory = () => ({}), optio
 
 export function switchActiveRole(userId, role) {
   const normalized = normalizeRole(role)
-  return updateAuthorityDb(db => {
-    const profile = profileFor(db, userId)
-    if (!profile) return { ok: false, error: 'profile_not_found' }
-    const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
-    if (!roles.includes(normalized)) return { ok: false, error: 'role_not_activated' }
-    profile.activeRole = normalized; profile.updatedAt = nowIso()
-    const trust = ensureTrustProfile(db, userId, normalized); trust.activeRole = normalized
-    collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'active_role_switched', role: normalized, policyVersion: 'capability-v1', createdAt: nowIso() })
-    return { ok: true, activeRole: normalized, roles }
-  })
+  return updateAuthorityDb(db => switchActiveRoleFromDb(db, userId, normalized))
+}
+
+function switchActiveRoleFromDb(db, userId, normalized) {
+  const profile = profileFor(db, userId)
+  if (!profile) return { ok: false, error: 'profile_not_found' }
+  const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
+  if (!roles.includes(normalized)) return { ok: false, error: 'role_not_activated' }
+  profile.activeRole = normalized; profile.updatedAt = nowIso()
+  const trust = ensureTrustProfile(db, userId, normalized); trust.activeRole = normalized
+  collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'active_role_switched', role: normalized, policyVersion: 'capability-v1', createdAt: nowIso() })
+  return { ok: true, activeRole: normalized, roles }
+}
+
+export async function switchActiveRoleAsync(userId, role) {
+  const normalized = normalizeRole(role)
+  if (!authorizationEnabled()) return switchActiveRole(userId, role)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'trustProfiles', 'verificationProfiles', 'riskProfiles'], db => {
+      const result = switchActiveRoleFromDb(db, userId, normalized)
+      return { result, append: (db.verificationAuditLogs || []).map(row => ({ collection: 'verificationAuditLogs', row })) }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_role_write_failed', operation: 'switch', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return switchActiveRole(userId, role)
+  }
 }
 
 export function roleActivation(userId, role, profilePatch = {}) {
   const normalized = normalizeRole(role)
   if (!['founder', 'collaborator', 'investor', 'organization', 'explorer'].includes(normalized)) return { ok: false, error: 'role_unavailable' }
-  return updateAuthorityDb(db => {
-    const profile = profileFor(db, userId)
-    if (!profile) return { ok: false, error: 'profile_not_found' }
-    profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)
-    profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || nowIso(), updatedAt: nowIso() } }
-    const roleProfiles = collection(db, 'roleProfiles')
-    const roleProfile = roleProfiles.find(row => row.userId === userId && row.role === normalized)
-    if (roleProfile) Object.assign(roleProfile, profile.roleProfiles[normalized])
-    else roleProfiles.push({ id: createId('role_profile'), userId, role: normalized, ...profile.roleProfiles[normalized] })
-    const roles = collection(db, 'userRoles')
-    let record = roles.find(row => row.userId === userId && row.role === normalized)
-    if (!record) { record = { id: createId('user_role'), userId, role: normalized, status: 'active', assurance: 'CLAIMED', createdAt: nowIso() }; roles.push(record) }
-    record.status = 'active'; record.updatedAt = nowIso()
-    ensureTrustProfile(db, userId, normalized)
-    collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'role_activated', role: normalized, previousState: null, newState: 'CLAIMED', policyVersion: 'capability-v1', createdAt: nowIso() })
-    return { ok: true, role: normalized, profile, userRole: record }
-  })
+  return updateAuthorityDb(db => roleActivationFromDb(db, userId, normalized, profilePatch))
+}
+
+function roleActivationFromDb(db, userId, normalized, profilePatch) {
+  const profile = profileFor(db, userId)
+  if (!profile) return { ok: false, error: 'profile_not_found' }
+  profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)
+  profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || nowIso(), updatedAt: nowIso() } }
+  const roleProfiles = collection(db, 'roleProfiles')
+  const roleProfile = roleProfiles.find(row => row.userId === userId && row.role === normalized)
+  if (roleProfile) Object.assign(roleProfile, profile.roleProfiles[normalized])
+  else roleProfiles.push({ id: createId('role_profile'), userId, role: normalized, ...profile.roleProfiles[normalized] })
+  const roles = collection(db, 'userRoles')
+  let record = roles.find(row => row.userId === userId && row.role === normalized)
+  if (!record) { record = { id: createId('user_role'), userId, role: normalized, status: 'active', assurance: 'CLAIMED', createdAt: nowIso() }; roles.push(record) }
+  record.status = 'active'; record.updatedAt = nowIso()
+  ensureTrustProfile(db, userId, normalized)
+  collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'role_activated', role: normalized, previousState: null, newState: 'CLAIMED', policyVersion: 'capability-v1', createdAt: nowIso() })
+  return { ok: true, role: normalized, profile, userRole: record }
+}
+
+export async function roleActivationAsync(userId, role, profilePatch = {}) {
+  const normalized = normalizeRole(role)
+  if (!['founder', 'collaborator', 'investor', 'organization', 'explorer'].includes(normalized)) return { ok: false, error: 'role_unavailable' }
+  if (!authorizationEnabled()) return roleActivation(userId, role, profilePatch)
+  try {
+    return await applyScopedMutation(userId, ['profiles', 'userRoles', 'roleProfiles', 'trustProfiles', 'verificationProfiles', 'riskProfiles'], db => {
+      const result = roleActivationFromDb(db, userId, normalized, profilePatch)
+      return { result, append: (db.verificationAuditLogs || []).map(row => ({ collection: 'verificationAuditLogs', row })) }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'authorization_role_write_failed', operation: 'activate', error: error.message }))
+    if (!authorizationFallbackEnabled()) throw error
+    return roleActivation(userId, role, profilePatch)
+  }
 }

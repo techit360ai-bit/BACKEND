@@ -1,10 +1,10 @@
-import { authorizeCapability, auditCapabilityDecision } from '../services/capabilityAuthorization.js'
+import { authorizeCapabilityAsync, auditCapabilityDecisionAsync } from '../services/capabilityAuthorization.js'
 import { investorAdvisoryEvidence, investorAlerts, investorDailyBrief, investorIntelligenceOverview, investorReports, investorRiskSignals, investorStartupIntelligence } from '../services/investorIntelligenceService.js'
 import { requestInvestorAdvisory, requestInvestorEvi } from '../services/aiRouterClient.js'
 
-function guard(req, capability) {
-  const decision = authorizeCapability(req.user.id, capability, { ...(req.user.activeContext || {}), role: 'investor', mfaAssertion: req.get('x-mfa-assertion') })
-  auditCapabilityDecision(decision, req.user.id)
+async function guard(req, capability) {
+  const decision = await authorizeCapabilityAsync(req.user.id, capability, { ...(req.user.activeContext || {}), role: 'investor', mfaAssertion: req.get('x-mfa-assertion') })
+  await auditCapabilityDecisionAsync(decision, req.user.id)
   return decision
 }
 
@@ -13,59 +13,59 @@ function deny(res, decision) {
   return res.status(payment ? 402 : 403).json({ error: decision.code, decision })
 }
 
-export function overview(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function overview(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorIntelligenceOverview(req.user.id))
 }
 
-export function startup(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function startup(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   const result = investorStartupIntelligence(req.user.id, req.params.startupId)
   return result ? res.json(result) : res.status(404).json({ error: 'startup_not_authorized' })
 }
 
-export function changes(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function changes(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   const result = investorIntelligenceOverview(req.user.id)
   return res.json({ changes: result.changes, generatedAt: result.generatedAt, deterministic: true })
 }
 
-export function portfolio(req, res) {
-  const decision = guard(req, 'investor.portfolio.analytics')
+export async function portfolio(req, res) {
+  const decision = await guard(req, 'investor.portfolio.analytics')
   if (!decision.allowed) return deny(res, decision)
   const result = investorIntelligenceOverview(req.user.id)
   return res.json({ portfolio: result.portfolio, startups: result.startups, deterministic: true })
 }
 
-export function risks(req, res) {
-  const decision = guard(req, 'investor.risk.monitor')
+export async function risks(req, res) {
+  const decision = await guard(req, 'investor.risk.monitor')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorRiskSignals(req.user.id))
 }
 
-export function brief(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function brief(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorDailyBrief(req.user.id))
 }
 
-export function alerts(req, res) {
-  const decision = guard(req, 'investor.risk.monitor')
+export async function alerts(req, res) {
+  const decision = await guard(req, 'investor.risk.monitor')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorAlerts(req.user.id))
 }
 
-export function reports(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function reports(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   return res.json(investorReports(req.user.id))
 }
 
-export function stream(req, res) {
-  const decision = guard(req, 'investor.mentorship.intelligence')
+export async function stream(req, res) {
+  const decision = await guard(req, 'investor.mentorship.intelligence')
   if (!decision.allowed) return deny(res, decision)
   res.status(200)
   res.setHeader('Content-Type', 'text/event-stream')
@@ -84,7 +84,7 @@ export function stream(req, res) {
 }
 
 export async function advisory(req, res) {
-  const decision = guard(req, 'investor.ai.recommendations')
+  const decision = await guard(req, 'investor.ai.recommendations')
   if (!decision.allowed) return deny(res, decision)
   const scope = req.params.scope === 'portfolio' ? null : req.params.scope
   const evidence = investorAdvisoryEvidence(req.user.id, scope)
@@ -93,7 +93,7 @@ export async function advisory(req, res) {
 }
 
 export async function evi(req, res) {
-  const decision = guard(req, 'investor.intelligence.view')
+  const decision = await guard(req, 'investor.intelligence.view')
   if (!decision.allowed) return deny(res, decision)
   const evidence = investorAdvisoryEvidence(req.user.id, req.params.startupId)
   if (!evidence.startups.length) return res.status(404).json({ error: 'startup_not_authorized' })
