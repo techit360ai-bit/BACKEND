@@ -1,7 +1,7 @@
 import { listProjectFiles, readProjectFile, saveProjectFile, moveProjectFile, deleteProjectFile, projectFileHistory, codeWorkspaceSnapshot, detectProjectAdapter, recordRuntimeSession, saveSyncState, createBridgeGrant, recordDeployment, listCodeDestinations, verifyCodeDeployment } from '../services/codeWorkspaceService.js'
-import { reconcileGithubPush } from '../services/codeExecutionProjectionService.js'
-import { applyCodeExecutionRun, createCodeExecutionRun, finalizeCodeExecutionRun, getCodeExecutionRun, recordCodeExecutionStage, recordCodeReviewDecision } from '../services/codeExecutionRunService.js'
-import { bridgeTokenFromRequest, codeBridgeSnapshot, exchangeCodeBridgeGrant, revokeCodeBridgeSessions, syncCodeBridgeFiles } from '../services/codeBridgeService.js'
+import { reconcileGithubPush, reconcileGithubPushAsync } from '../services/codeExecutionProjectionService.js'
+import { applyCodeExecutionRun, applyCodeExecutionRunAsync, createCodeExecutionRun, createCodeExecutionRunAsync, finalizeCodeExecutionRun, finalizeCodeExecutionRunAsync, getCodeExecutionRun, getCodeExecutionRunAsync, recordCodeExecutionStage, recordCodeExecutionStageAsync, recordCodeReviewDecision, recordCodeReviewDecisionAsync } from '../services/codeExecutionRunService.js'
+import { bridgeTokenFromRequest, codeBridgeSnapshot, codeBridgeSnapshotAsync, exchangeCodeBridgeGrant, exchangeCodeBridgeGrantAsync, revokeCodeBridgeSessions, revokeCodeBridgeSessionsAsync, syncCodeBridgeFiles, syncCodeBridgeFilesAsync } from '../services/codeBridgeService.js'
 import { syncWorkspaceCode, workspaceCodeEnabled, workspaceCodeFallbackEnabled } from '../repositories/workspaceCodeRepository.js'
 import { chooseBuildPath, createCostEstimate, setLifecycleView, createPreviewContext, getBuildContext, listModelConnections, createModelConnection, revokeModelConnection, listWorkspaceModels, bindWorkspaceModel, unbindWorkspaceModel } from '../services/workspaceCapabilityService.js'
 import { orchestrateCodeTask, planCodeTask, proposeCodeChanges } from '../services/codeIntelligenceService.js'
@@ -21,17 +21,17 @@ export const bridge = async (req, res) => send(res, await persisted(req, await c
 export const deployment = async (req, res) => send(res, await persisted(req, await recordDeployment(req.user.id, req.params.workspaceId, req.body)), true)
 export const destinations = async (req, res) => send(res, await listCodeDestinations(req.user.id, req.params.workspaceId))
 export const deploymentVerification = async (req, res) => send(res, await persisted(req, await verifyCodeDeployment(req.user.id, req.params.workspaceId, req.params.deploymentId, req.body)), true)
-export const executionCreate = async (req, res) => send(res, await persisted(req, createCodeExecutionRun(req.user.id, req.params.workspaceId, req.body)), true)
-export const executionGet = (req, res) => send(res, getCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId))
-export const executionStage = async (req, res) => send(res, await persisted(req, recordCodeExecutionStage(req.user.id, req.params.workspaceId, req.params.runId, req.body)), true)
-export const executionReview = async (req, res) => send(res, await persisted(req, recordCodeReviewDecision(req.user.id, req.params.workspaceId, req.params.runId, req.body)), true)
-export const executionFinalize = async (req, res) => send(res, await persisted(req, finalizeCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId)))
-export const executionApply = async (req, res) => send(res, await persisted(req, applyCodeExecutionRun(req.user.id, req.params.workspaceId, req.params.runId, req.body)))
-export const bridgeExchange = (req, res) => send(res, exchangeCodeBridgeGrant(req.body), true)
-export const bridgeSnapshot = (req, res) => send(res, codeBridgeSnapshot(bridgeTokenFromRequest(req), req.params.workspaceId))
-export const bridgeSync = (req, res) => send(res, syncCodeBridgeFiles(bridgeTokenFromRequest(req), req.params.workspaceId, req.body))
-export const bridgeRevoke = (req, res) => send(res, revokeCodeBridgeSessions(req.user.id, req.params.workspaceId))
-export const githubWebhook = (req, res) => send(res, reconcileGithubPush(req.headers, req.body, req.rawBody))
+export const executionCreate = async (req, res) => send(res, await persisted(req, await createCodeExecutionRunAsync(req.user.id, req.params.workspaceId, req.body)), true)
+export const executionGet = async (req, res) => send(res, await getCodeExecutionRunAsync(req.user.id, req.params.workspaceId, req.params.runId))
+export const executionStage = async (req, res) => send(res, await persisted(req, await recordCodeExecutionStageAsync(req.user.id, req.params.workspaceId, req.params.runId, req.body)), true)
+export const executionReview = async (req, res) => send(res, await persisted(req, await recordCodeReviewDecisionAsync(req.user.id, req.params.workspaceId, req.params.runId, req.body)), true)
+export const executionFinalize = async (req, res) => send(res, await persisted(req, await finalizeCodeExecutionRunAsync(req.user.id, req.params.workspaceId, req.params.runId)))
+export const executionApply = async (req, res) => send(res, await persisted(req, await applyCodeExecutionRunAsync(req.user.id, req.params.workspaceId, req.params.runId, req.body)))
+export const bridgeExchange = async (req, res) => send(res, await exchangeCodeBridgeGrantAsync(req.body), true)
+export const bridgeSnapshot = async (req, res) => send(res, await codeBridgeSnapshotAsync(bridgeTokenFromRequest(req), req.params.workspaceId))
+export const bridgeSync = async (req, res) => send(res, await syncCodeBridgeFilesAsync(bridgeTokenFromRequest(req), req.params.workspaceId, req.body))
+export const bridgeRevoke = async (req, res) => send(res, await revokeCodeBridgeSessionsAsync(req.user.id, req.params.workspaceId))
+export const githubWebhook = async (req, res) => send(res, await reconcileGithubPushAsync(req.headers, req.body, req.rawBody))
 export const buildContext = async (req, res) => send(res, await getBuildContext(req.user.id, req.params.workspaceId) || { ok: false, status: 404, error: 'workspace_not_found' })
 export const buildPath = async (req, res) => send(res, await persisted(req, await chooseBuildPath(req.user.id, req.params.workspaceId, req.body)), true)
 export const costEstimate = async (req, res) => send(res, await createCostEstimate(req.user.id, req.params.workspaceId, req.body))

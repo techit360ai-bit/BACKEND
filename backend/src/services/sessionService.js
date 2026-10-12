@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { signJwt } from './jwtKeyService.js'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { findIdentityById } from '../repositories/identityRepository.js'
 import * as identitySessionRepository from '../repositories/identitySessionRepository.js'
 import { sessionClaimsEnabled, sessionClaimsFallbackEnabled, loadActiveContext, loadActiveSubscription } from '../repositories/sessionClaimsRepository.js'

@@ -60,3 +60,16 @@ export async function billingJobStatusRowLevel() {
   )
   return { lastRun: runs.rows[0]?.payload || null, marginAlerts: alerts.rows.map(row => row.payload).reverse() }
 }
+
+// Row-level usage-settlement health (§5): counts of the usage collections
+// instead of loading the whole-DB snapshot. Enabled with FINANCE_WRITE_SOURCE
+// (or BILLING_JOBS_SOURCE)=postgres.
+export async function usageSettlementHealthRowLevel() {
+  const pool = getPlatformPool()
+  const [events, pending, last] = await Promise.all([
+    pool.query(`SELECT count(*)::int AS n FROM platform_collection_records WHERE collection_name='usageEvents' AND deleted_at IS NULL`),
+    pool.query(`SELECT count(*)::int AS n FROM platform_collection_records WHERE collection_name='usageReservations' AND deleted_at IS NULL AND payload->>'status'='reserved'`),
+    pool.query(`SELECT payload->>'updatedAt' AS updated_at FROM platform_collection_records WHERE collection_name='usageEvents' AND deleted_at IS NULL AND payload->>'status'='completed' ORDER BY payload->>'updatedAt' DESC LIMIT 1`),
+  ])
+  return { ok: true, usageEvents: events.rows[0]?.n || 0, pendingReservations: pending.rows[0]?.n || 0, lastSettledAt: last.rows[0]?.updated_at || null }
+}

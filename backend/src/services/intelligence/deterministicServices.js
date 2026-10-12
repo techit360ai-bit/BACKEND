@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../../config/database.js'
 import { deterministicIntelligenceInputs } from '../../repositories/intelligenceStateRepository.js'
 import {
   computeCis,

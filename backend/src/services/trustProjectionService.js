@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import * as database from '../config/database.js'
-const readAuthorityDb = (...args) => database.readDb(...args)
-const updateAuthorityDb = mutator => { try { if (typeof database.updateDb === 'function') return database.updateDb(mutator) } catch {} return mutator(database.readDb()) }
+const readAuthorityDb = (...args) => database.readAuthorityDb(...args)
+const updateAuthorityDb = mutator => { try { if (typeof database.updateAuthorityDb === 'function') return database.updateAuthorityDb(mutator) } catch {} return mutator(database.readAuthorityDb()) }
 import { safeFetch } from './outboundHttpService.js'
 import { incTrustMetric, observeTrustLatency } from './trustMetrics.js'
 import { trustRepositoryEnabled, trustWriteEnabled } from '../repositories/trustRepository.js'

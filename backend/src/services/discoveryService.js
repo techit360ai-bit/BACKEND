@@ -1,5 +1,5 @@
 import { createHash } from 'crypto'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 import { discoveryStoreEnabled, discoveryFallbackEnabled, runDiscoveryRead, applyDiscoveryMutation } from '../repositories/discoveryRepository.js'
 

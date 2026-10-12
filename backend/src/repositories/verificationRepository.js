@@ -8,7 +8,7 @@
 // VERIFICATION_SOURCE=postgres; the snapshot fallback stays in the service until
 // the authority is deleted.
 import { withPlatformTransaction, getRecord, upsertRecord, listRecords, listRecordsForOwner, listRecordsByField } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 export function verificationStoreEnabled() {
@@ -116,7 +116,7 @@ async function persistChanges(client, db, originals) {
 export async function runVerificationRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildVerificationDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -126,7 +126,7 @@ export async function applyVerificationMutation(options, mutate) {
     const db = await buildVerificationDb(client, options)
     const originals = new Map()
     for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals)
     return result
   }, { userId: options.userId || null })

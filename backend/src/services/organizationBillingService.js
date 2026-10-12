@@ -1,7 +1,8 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createOrganizationBudget } from './organizationBudgetService.js'
 import { saveOrganizationEntitlement } from './organizationEntitlementService.js'
+import { organizationBillingEnabled, applyOrganizationPaymentStore, applyOrganizationPaymentLifecycleStore } from '../repositories/organizationBillingRepository.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const text = value => typeof value === 'string' ? value.trim() : ''
@@ -91,4 +92,19 @@ export function applyOrganizationPaymentLifecycle({ paymentId = null, providerRe
     }
     return { ok: true, organizationId, status: commercialStatus }
   })
+}
+
+
+// Row-level (§5) wrappers — the payment webhook path. The synchronous forms
+// above load the whole-database snapshot; these run the same logic against a
+// payment-scoped bundle and persist only the changed rows. Gated by
+// ORGANIZATION_*_SOURCE=postgres; the snapshot path stays the sqlite fallback.
+export async function applyOrganizationPaymentAsync(options = {}) {
+  if (!organizationBillingEnabled()) return applyOrganizationPayment(options)
+  return applyOrganizationPaymentStore(options.paymentId, options.userId, () => applyOrganizationPayment(options))
+}
+
+export async function applyOrganizationPaymentLifecycleAsync(options = {}) {
+  if (!organizationBillingEnabled()) return applyOrganizationPaymentLifecycle(options)
+  return applyOrganizationPaymentLifecycleStore(options.paymentId, options.providerReference, () => applyOrganizationPaymentLifecycle(options))
 }

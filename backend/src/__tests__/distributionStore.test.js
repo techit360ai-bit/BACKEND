@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({ distributionObjects: [], distributionAttributions: [], growthEvents: [] })),
-  updateDb: vi.fn(mutator => mutator({ distributionObjects: [], distributionAttributions: [], growthEvents: [] })),
+  readAuthorityDb: vi.fn(() => ({ distributionObjects: [], distributionAttributions: [], growthEvents: [] })),
+  updateAuthorityDb: vi.fn(mutator => mutator({ distributionObjects: [], distributionAttributions: [], growthEvents: [] })),
   storeEnabled: vi.fn(() => true),
   findSourceOwner: vi.fn(async () => 'founder-1'),
   insertObject: vi.fn(async () => {}),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   aggregates: vi.fn(),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/distributionRepository.js', () => ({
   distributionStoreEnabled: mocks.storeEnabled,
   distributionFallbackEnabled: () => true,
@@ -47,14 +47,14 @@ describe('distribution row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(mocks.insertObject).toHaveBeenCalledTimes(1)
     expect(mocks.findSourceOwner).toHaveBeenCalledWith('m-1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('reads an object row-level for the public viewer', async () => {
     expect((await getDistributionObject('dist-1', null)).object.id).toBe('dist-1')
     expect(mocks.loadObject).toHaveBeenCalledWith('dist-1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('records a share row-level and bumps the object', async () => {
@@ -62,7 +62,7 @@ describe('distribution row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(mocks.insertShare).toHaveBeenCalledTimes(1)
     expect(mocks.saveObject).toHaveBeenCalledWith(expect.objectContaining({ id: 'dist-1', shareCount: 1 }))
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('records a click row-level and bumps the object', async () => {
@@ -77,6 +77,6 @@ describe('distribution row-level store (§5 cutover)', () => {
     const result = await activateDistributionReferral('new-user', 'ref-1', { activationAction: 'account_created' })
     expect(result).toEqual({ ok: true, referralId: 'ref-1', status: 'activated' })
     expect(mocks.updateAttribution).toHaveBeenCalledTimes(1)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 })

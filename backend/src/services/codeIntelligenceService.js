@@ -13,7 +13,7 @@
 //    a personal (BYOK) connection was selected but the router can only serve a
 //    platform model. That gap is disclosed, never hidden.
 
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { codeWorkspaceAccess, codeWorkspaceSnapshot, detectProjectAdapter, safeCodePath } from './codeWorkspaceService.js'
 import { requestWorkspaceConversation } from './aiRouterClient.js'
 

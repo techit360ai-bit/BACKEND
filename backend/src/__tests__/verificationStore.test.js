@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runVerificationRead: vi.fn(),
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   lastWriteOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/verificationRepository.js', () => ({
   verificationStoreEnabled: mocks.storeEnabled,
   verificationFallbackEnabled: mocks.fallbackEnabled,
@@ -26,8 +26,8 @@ vi.mock('../services/aiRouterClient.js', () => ({ analyzeVerificationEvidence: v
 const svc = await import('../services/trustVerificationService.js')
 
 function usedBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runVerificationRead.mockImplementation(async (options, read) => { mocks.lastReadOptions = options; return read() })
   mocks.applyVerificationMutation.mockImplementation(async (options, mutate) => { mocks.lastWriteOptions = options; return mutate() })
 }
@@ -114,6 +114,6 @@ describe('verification row-level store (§5 cutover)', () => {
     const result = await svc.requestVerificationAsync('u1', { role: 'investor' })
     expect(result.ok).toBe(true)
     expect(mocks.applyVerificationMutation).not.toHaveBeenCalled()
-    expect(mocks.updateDb).toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).toHaveBeenCalled()
   })
 })

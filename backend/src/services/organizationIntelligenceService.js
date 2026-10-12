@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, syncOrganizationCollections, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
 import { organizationAccessEnabled, organizationAccessFallbackEnabled, loadOrganizationAccess } from '../repositories/organizationAccessRepository.js'
 import { organizationIntelligenceEnabled, organizationIntelligenceFallbackEnabled, runOrganizationIntelligenceRead, applyOrganizationIntelligenceMutation, runOrganizationIntelligenceMaintenanceStore } from '../repositories/organizationIntelligenceRepository.js'
@@ -266,7 +266,7 @@ export function runOrganizationIntelligenceMaintenance() {
 // ---------------------------------------------------------------------------
 // Row-level (§5) organization intelligence wrappers. Each loads a bounded
 // organization scope through organizationIntelligenceRepository and runs the
-// existing synchronous service logic against it via runDatabaseAuthority, so the
+// existing synchronous service logic against it via runBoundedDatabase, so the
 // call never touches the whole-database snapshot when the organization source is
 // Postgres. Mutations persist only the rows they changed and re-run the domain's
 // normalized Postgres projections. Falls back to the snapshot path when the

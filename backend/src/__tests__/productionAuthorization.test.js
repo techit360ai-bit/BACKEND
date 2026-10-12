@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { reserveCapabilityConsumption, settleCapabilityConsumption } from '../services/capabilityConsumptionService.js'
 import { beginMfaEnrollment, mfaStatus, verifyMfa } from '../services/mfaService.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn(), writeDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn() }))
 
 describe('production authorization controls', () => {
   let db
   beforeEach(() => {
     db = { walletAccounts: [{ userId: 'u1', creditBalance: 10 }], creditLedger: [], usageEvents: [], usageReservations: [], subscriptions: [], capabilityConsumptions: [], capabilityAnalytics: [], mfaProfiles: [] }
-    readDb.mockReturnValue(db); updateDb.mockImplementation(fn => { const result = fn(db); writeDb(db); return result })
+    readAuthorityDb.mockReturnValue(db); updateAuthorityDb.mockImplementation(fn => { const result = fn(db); writeAuthorityDb(db); return result })
   })
   it('enrolls and verifies TOTP MFA with a short-lived assertion', () => {
     const enrollment = beginMfaEnrollment('u1', 'u1@example.com'); expect(enrollment.secret).toBeTruthy(); expect(mfaStatus('u1').enabled).toBe(false)

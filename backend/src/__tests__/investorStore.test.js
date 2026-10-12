@@ -19,9 +19,9 @@ const store = vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({ authority: { snapshot: null }, fallback: {} }))
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(() => mocks.authority.snapshot || mocks.fallback),
-  updateDb: vi.fn(fn => fn(mocks.authority.snapshot || mocks.fallback)),
-  runDatabaseAuthority: (snapshot, callback) => { const previous = mocks.authority.snapshot; mocks.authority.snapshot = snapshot; try { return callback() } finally { mocks.authority.snapshot = previous } },
+  readAuthorityDb: vi.fn(() => mocks.authority.snapshot || mocks.fallback),
+  updateAuthorityDb: vi.fn(fn => fn(mocks.authority.snapshot || mocks.fallback)),
+  runBoundedDatabase: (snapshot, callback) => { const previous = mocks.authority.snapshot; mocks.authority.snapshot = snapshot; try { return callback() } finally { mocks.authority.snapshot = previous } },
 }))
 vi.mock('../repositories/platformCollectionRepository.js', () => ({
   withPlatformTransaction: vi.fn(async fn => fn({})),

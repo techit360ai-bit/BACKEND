@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { recordCutoverComparison } from '../services/postgresCutoverMonitor.js'
 import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 

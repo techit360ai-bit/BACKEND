@@ -6,12 +6,12 @@ import app from '../app.js'
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
 }))
 
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 function token(userId = 'founder-1', role = 'founder') {
   return jwt.sign({ sub: userId, role }, TEST_SECRET, { expiresIn: '1h' })
@@ -79,11 +79,11 @@ let db
 beforeEach(() => {
   vi.clearAllMocks()
   db = makeDb()
-  readDb.mockImplementation(() => db)
-  writeDb.mockImplementation(next => { db = next })
-  updateDb.mockImplementation(mutator => {
+  readAuthorityDb.mockImplementation(() => db)
+  writeAuthorityDb.mockImplementation(next => { db = next })
+  updateAuthorityDb.mockImplementation(mutator => {
     const result = mutator(db)
-    writeDb(db)
+    writeAuthorityDb(db)
     return result
   })
 })

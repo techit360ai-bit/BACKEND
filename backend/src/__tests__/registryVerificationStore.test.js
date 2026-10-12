@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   storeEnabled: vi.fn(() => true),
   loadOrganization: vi.fn(async () => ({ id: 'org1', name: 'Acme' })),
   actorMembership: vi.fn(async () => ({ userId: 'u1', organizationId: 'org1', role: 'owner', status: 'active' })),
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   upsertDomain: vi.fn(async () => {}),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/registryVerificationRepository.js', () => ({
   registryStoreEnabled: mocks.storeEnabled,
   registryFallbackEnabled: () => true,
@@ -43,8 +43,8 @@ describe('registry verification row-level store (§5 cutover)', () => {
     expect(mocks.loadOrganization).toHaveBeenCalledWith('org1')
     expect(mocks.actorMembership).toHaveBeenCalledWith('u1', 'org1')
     expect(mocks.insertRow).toHaveBeenCalledWith('organizationRegistryChecks', expect.objectContaining({ organizationId: 'org1', authority: 'Corporate Affairs Commission' }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('creates a domain challenge row-level', async () => {
@@ -52,7 +52,7 @@ describe('registry verification row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(result.challenge.token).toBeTruthy()
     expect(mocks.insertRow).toHaveBeenCalledWith('organizationDomainChallenges', expect.objectContaining({ domain: 'acme.example' }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('reads the admin operations view row-level with redacted secrets', async () => {
@@ -60,7 +60,7 @@ describe('registry verification row-level store (§5 cutover)', () => {
     const operations = await verificationOperations()
     expect(operations.registryConfigurations.length).toBeGreaterThan(0)
     expect(operations.domainChallenges[0].token).toBeUndefined()
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('records an admin review decision row-level', async () => {
@@ -70,6 +70,6 @@ describe('registry verification row-level store (§5 cutover)', () => {
     expect(reviewed.operation.status).toBe('verified')
     expect(mocks.saveRow).toHaveBeenCalledWith('organizationRegistryChecks', expect.objectContaining({ id: 'c1', status: 'verified' }))
     expect(mocks.insertRow).toHaveBeenCalledWith('manualReviews', expect.objectContaining({ operationId: 'c1', decision: 'verified' }))
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 })

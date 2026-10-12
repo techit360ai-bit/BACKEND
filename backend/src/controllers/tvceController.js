@@ -1,7 +1,7 @@
 import { accountEntitlementAsync, adminCommercialConfigAsync, adminTvceAnalyticsAsync, capabilityCatalogAsync, conversionFunnelAsync, estimateCreditsAsync, evaluateEntitlementAsync, evaluatePaywallAsync, freeTierUsageAsync, fulfillPaymentAsync, nextBestActionAsync, progressMeterAsync, recordPaywallEventAsync, resumeWorkflowAsync, saveWorkflowAsync, updateAdminCommercialConfigAsync, walletForecastAsync } from '../services/tvceService.js'
 import { createTvceCheckout } from '../services/tvceCheckoutService.js'
-import { createOrganizationBudget } from '../services/organizationBudgetService.js'
-import { saveOrganizationEntitlement as saveOrganizationEntitlementRecord } from '../services/organizationEntitlementService.js'
+import { createOrganizationBudgetAsync } from '../services/organizationBudgetService.js'
+import { saveOrganizationEntitlementAsync } from '../services/organizationEntitlementService.js'
 import { approveOrganizationHackathonAsync } from '../services/domainService.js'
 import { listOrganizationAbuseReviewsAsync, reviewOrganizationAbuseAsync } from '../services/organizationProgramService.js'
 import { createWorkspaceTeamGrant } from '../services/workspaceTeamEntitlementService.js'
@@ -25,8 +25,8 @@ export async function funnel(req, res) { return res.json(await conversionFunnelA
 export async function adminAnalytics(req, res) { return res.json(await adminTvceAnalyticsAsync(req.query.period || 'all', { days: req.query.days, from: req.query.from, to: req.query.to })) }
 export async function adminConfig(_req, res) { return res.json(await adminCommercialConfigAsync()) }
 export async function adminConfigUpdate(req, res) { return send(res, await updateAdminCommercialConfigAsync(req.user.id, body(req))) }
-export function adminOrganizationEntitlement(req, res) { return send(res, saveOrganizationEntitlementRecord(req.user.id, body(req)), 201) }
-export function adminOrganizationBudget(req, res) { return send(res, createOrganizationBudget(req.user.id, body(req)), 201) }
+export async function adminOrganizationEntitlement(req, res) { return send(res, await saveOrganizationEntitlementAsync(req.user.id, body(req)), 201) }
+export async function adminOrganizationBudget(req, res) { return send(res, await createOrganizationBudgetAsync(req.user.id, body(req)), 201) }
 export async function adminOrganizationHackathonReview(req, res) { return send(res, await approveOrganizationHackathonAsync(req.user.id, req.params.hackathonId, body(req).decision, body(req).reason)) }
 export async function adminOrganizationAbuseReviews(req, res) { return res.json(await listOrganizationAbuseReviewsAsync(req.user.id, req.query)) }
 export async function adminOrganizationAbuseReview(req, res) { return send(res, await reviewOrganizationAbuseAsync(req.user.id, req.params.reviewId, body(req))) }

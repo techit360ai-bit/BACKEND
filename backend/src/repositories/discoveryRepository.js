@@ -18,7 +18,7 @@
 // set the vector index (discovery_entities) is the preferred candidate source and
 // this window is the fallback.
 import { withPlatformTransaction, getRecord, upsertRecord, listRecords, listRecordsForOwner, listRecordsByField, listRecordsLimited, listRecordsByIds } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 export function discoveryStoreEnabled() {
@@ -137,7 +137,7 @@ async function persistChanges(client, db, originals) {
 export async function runDiscoveryRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildDiscoveryDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -146,7 +146,7 @@ export async function applyDiscoveryMutation(options, mutate) {
     const db = await buildDiscoveryDb(client, options)
     const originals = new Map()
     for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals)
     return result
   }, { userId: options.userId || null })

@@ -1,8 +1,8 @@
 import { deactivateRoleAssignmentAsync, roleAssignmentsAsync } from '../services/multiRoleContextService.js'
 import { auditCapabilityDecisionAsync, authorizeCapabilityAsync, capabilityPoliciesForAdmin, roleActivationAsync, switchActiveRoleAsync, trustProfileForAsync, updateCapabilityPolicyAsync } from '../services/capabilityAuthorization.js'
 import { addOrganizationMemberAsync, adminVerificationQueueAsync, analyzeEvidenceAsync, claimOrganizationAsync, createOrganizationAsync, generateReverificationNotificationsAsync, getVerificationProfileAsync, organizationMembershipsAsync, requestVerificationAsync, reviewVerificationAsync, riskProfileForAsync, submitEvidenceAsync, updateRiskStateAsync, verificationAnalyticsAsync } from '../services/trustVerificationService.js'
-import { beginMfaEnrollment, mfaStatus, verifyMfa } from '../services/mfaService.js'
-import { createEvidenceUpload, finalizeEvidenceUpload } from '../services/evidenceStorageService.js'
+import { beginMfaEnrollmentAsync, mfaStatusAsync, verifyMfaAsync } from '../services/mfaService.js'
+import { createEvidenceUploadAsync, finalizeEvidenceUpload } from '../services/evidenceStorageService.js'
 import { identitySecurityEnabled, identitySecurityFallbackEnabled, listIdentitySecurity, syncIdentitySecurity } from '../repositories/identitySecurityRepository.js'
 import { createDomainChallenge, registryCheck, registryConfigurations, reviewVerificationOperation, runRegistryCheck, verificationOperations, verifyDomainChallenge } from '../services/registryVerificationService.js'
 import { reviewTrustProof, trustOperations } from '../services/trustAuthority.js'
@@ -41,10 +41,10 @@ export async function adminCapabilityPolicies(_req, res) { return res.json({ pol
 export async function adminCapabilityPolicyUpdate(req, res) { return result(res, await updateCapabilityPolicyAsync(req.user.id, req.params.capability, body(req).policy || body(req))) }
 export async function organizationMemberAdd(req, res) { return result(res, await persistedSecurity(req, await addOrganizationMemberAsync(req.user.id, req.params.organizationId, body(req))), 201) }
 export async function adminRiskUpdate(req, res) { return result(res, await persistedSecurity(req, await updateRiskStateAsync(req.user.id, req.params.userId, body(req).state, body(req).note), req.params.userId)) }
-export async function mfaEnroll(req, res) { return result(res, await persistedSecurity(req, beginMfaEnrollment(req.user.id, req.user.email))) }
-export async function mfaVerify(req, res) { return result(res, await persistedSecurity(req, verifyMfa(req.user.id, body(req).code, body(req).enable !== false))) }
-export async function mfaStatusGet(req, res) { if (identitySecurityEnabled()) { try { const rows = await listIdentitySecurity(req.user.id, 'mfaProfiles'); const profile = rows?.[0]; return res.json({ enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null }) } catch (error) { if (!identitySecurityFallbackEnabled()) throw error } } return res.json(mfaStatus(req.user.id)) }
-export function evidenceUploadUrl(req, res) { return result(res, createEvidenceUpload(req.user.id, req.params.requestId, body(req)), 201) }
+export async function mfaEnroll(req, res) { return result(res, await persistedSecurity(req, await beginMfaEnrollmentAsync(req.user.id, req.user.email))) }
+export async function mfaVerify(req, res) { return result(res, await persistedSecurity(req, await verifyMfaAsync(req.user.id, body(req).code, body(req).enable !== false))) }
+export async function mfaStatusGet(req, res) { if (identitySecurityEnabled()) { try { const rows = await listIdentitySecurity(req.user.id, 'mfaProfiles'); const profile = rows?.[0]; return res.json({ enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null }) } catch (error) { if (!identitySecurityFallbackEnabled()) throw error } } return res.json(await mfaStatusAsync(req.user.id)) }
+export async function evidenceUploadUrl(req, res) { return result(res, await createEvidenceUploadAsync(req.user.id, req.params.requestId, body(req)), 201) }
 export async function evidenceUploadFinalize(req, res) { return result(res, await finalizeEvidenceUpload(req.user.id, req.params.objectId)) }
 export async function verificationEvidenceAnalyze(req, res) { return result(res, await analyzeEvidenceAsync(req.user.id, req.user.token, req.params.requestId, body(req))) }
 export async function adminVerificationAnalytics(_req, res) { return res.json(await verificationAnalyticsAsync()) }

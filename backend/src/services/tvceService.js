@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
 import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, loadFinanceAdminSnapshotPostgres, loadProgressMeterPostgres, saveAdminCommercialConfigPostgres, recordPaywallEventPostgres, reversePaymentCreditsPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'

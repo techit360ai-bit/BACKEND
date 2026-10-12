@@ -281,14 +281,18 @@ const INITIAL = {
 let sqliteDb = null
 let sqliteDbPath = null
 let DatabaseSync = null
-const authorityStorage = new AsyncLocalStorage()
+// Bounded-database context (§5.3 task 5). The whole-DB request authority
+// middleware is gone; this AsyncLocalStorage now only carries a *scoped* bundle
+// (one domain's own rows) so a repository can run the existing synchronous
+// service logic against that bundle and persist only the rows it changed.
+const boundedDatabaseStorage = new AsyncLocalStorage()
 
-export function currentDatabaseAuthority() {
-  return authorityStorage.getStore() || null
+export function currentBoundedDatabase() {
+  return boundedDatabaseStorage.getStore() || null
 }
 
-export function runDatabaseAuthority(snapshot, callback) {
-  return authorityStorage.run({ snapshot, dirty: false }, callback)
+export function runBoundedDatabase(snapshot, callback) {
+  return boundedDatabaseStorage.run({ snapshot }, callback)
 }
 
 export function currentDriver() {
@@ -565,16 +569,18 @@ export function validateDatabaseConfig() {
     throw new Error('SCALE_PROFILE=multi-replica requires REDIS_URL for shared rate limits and coordination.')
   }
   if (process.env.NODE_ENV === 'production' && process.env.SCALE_PROFILE === 'multi-replica') {
-    if (process.env.PLATFORM_REQUEST_AUTHORITY !== 'postgres' || process.env.PLATFORM_AUTHORITY_FALLBACK_SQLITE === 'true') {
-      throw new Error('SCALE_PROFILE=multi-replica requires PLATFORM_REQUEST_AUTHORITY=postgres with SQLite fallback disabled.')
-    }
-    const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
+    // The whole-DB request-authority middleware is deleted (§5.3 task 4), so the
+    // legacy PLATFORM_REQUEST_AUTHORITY requirement no longer applies. Multi-replica
+    // safety now depends on every request path resolving its data row-level, so
+    // each row-level domain must read *and* write Postgres.
+    const domains = [
+      'IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE', 'TRUST',
+      'DOMAIN', 'VERIFICATION', 'SUPPORT', 'REGISTRY', 'DISCOVERY', 'DISTRIBUTION',
+      'CONTEXT', 'COMPLIANCE', 'MOMENTS', 'WORKSPACE_CAPABILITY',
+    ]
     for (const domain of domains) {
       if (process.env[`${domain}_READ_SOURCE`] !== 'postgres' || process.env[`${domain}_WRITE_SOURCE`] !== 'postgres') {
         throw new Error(`SCALE_PROFILE=multi-replica requires ${domain}_READ_SOURCE and ${domain}_WRITE_SOURCE to be postgres.`)
-      }
-      if (process.env[`${domain}_READ_FALLBACK_SQLITE`] === 'true' || process.env[`${domain}_WRITE_FALLBACK_SQLITE`] === 'true') {
-        throw new Error(`SCALE_PROFILE=multi-replica requires ${domain} SQLite fallbacks to be disabled after rollback drills.`)
       }
     }
   }
@@ -596,7 +602,7 @@ export function validateDatabaseConfig() {
 }
 
 export function readAuthorityDb() {
-  const authority = authorityStorage.getStore()
+  const authority = boundedDatabaseStorage.getStore()
   if (authority?.snapshot) return authority.snapshot
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? readSqliteDb() : readJsonDb()
@@ -608,7 +614,7 @@ export function readAuthorityDb() {
 // no request context the snapshot is loaded from the platform database so the
 // legacy projections can run without throwing. Pre-cutover it reads SQLite.
 export async function loadAuthoritySnapshot() {
-  const authority = authorityStorage.getStore()
+  const authority = boundedDatabaseStorage.getStore()
   if (authority?.snapshot) return authority.snapshot
   if (currentDriver() === 'postgres') {
     const { loadPlatformDatabase } = await import('../repositories/platformDatabaseRepository.js')
@@ -618,25 +624,22 @@ export async function loadAuthoritySnapshot() {
 }
 
 export function writeAuthorityDb(data) {
-  const authority = authorityStorage.getStore()
-  if (authority?.snapshot) { authority.snapshot = data; authority.dirty = true; return }
+  const authority = boundedDatabaseStorage.getStore()
+  if (authority?.snapshot) { authority.snapshot = data; return }
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   if (currentDriver() === 'sqlite') writeSqliteDb(data)
   else writeJsonDb(data)
 }
 
 export function updateAuthorityDb(mutator) {
-  const authority = authorityStorage.getStore()
-  if (authority?.snapshot) { const result = mutator(authority.snapshot); authority.dirty = true; return result }
+  const authority = boundedDatabaseStorage.getStore()
+  if (authority?.snapshot) { const result = mutator(authority.snapshot); return result }
   if (currentDriver() === 'postgres') throw new Error('PostgreSQL request authority context is required for synchronous collection access')
   return currentDriver() === 'sqlite' ? updateSqliteDb(mutator) : updateJsonDb(mutator)
 }
 
-// Legacy names remain as adapter aliases for tests and one-time migration
-// tooling. Application services use the authority-prefixed API above.
-export const readDb = (...args) => readAuthorityDb(...args)
-export const writeDb = (...args) => writeAuthorityDb(...args)
-export const updateDb = (...args) => updateAuthorityDb(...args)
+// §5.3 task 5: the legacy readDb/writeDb/updateDb aliases are removed; every
+// caller now imports the authority-prefixed API directly.
 
 export function closeDbForTests() {
   if (sqliteDb) sqliteDb.close()

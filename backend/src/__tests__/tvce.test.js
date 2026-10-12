@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { adminTvceAnalytics, capabilityCatalog, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, nextBestAction, saveWorkflow, walletForecast } from '../services/tvceService.js'
 import { codeWorkspaceAccess } from '../services/codeWorkspaceService.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 
 describe('TVCE entitlement and continuation contracts', () => {
   let db
@@ -15,8 +15,8 @@ describe('TVCE entitlement and continuation contracts', () => {
       activeContexts: [{ id: 'c1', userId: 'u1', role: 'founder', status: 'active' }],
       subscriptions: [], walletAccounts: [{ userId: 'u1', creditBalance: 0 }], creditLedger: [], usageReservations: [], usageEvents: [], paymentIntents: [], accountEntitlements: [], paywallEvents: [], workflowSnapshots: [], billingWebhookEvents: [], billingPlans: [], capabilityPolicies: [], verificationProfiles: [], trustProfiles: [], riskProfiles: [], organizationMemberships: [],
     }
-    readDb.mockReturnValue(db)
-    updateDb.mockImplementation(fn => fn(db))
+    readAuthorityDb.mockReturnValue(db)
+    updateAuthorityDb.mockImplementation(fn => fn(db))
   })
 
   it('shares one paid account entitlement across multiple roles', () => {

@@ -1,4 +1,4 @@
-import { readDb } from '../src/config/database.js'
+import { readAuthorityDb } from '../src/config/database.js'
 import pg from 'pg'
 
 const url = process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL
@@ -8,7 +8,7 @@ if (!url) throw new Error('TRUST_DATABASE_URL or DATABASE_URL is required')
 // like-for-like even when the platform is configured for Postgres.
 const configuredDriver = process.env.DB_DRIVER
 if (configuredDriver === 'postgres') process.env.DB_DRIVER = process.env.LEGACY_DB_DRIVER || 'sqlite'
-const legacy = readDb()
+const legacy = readAuthorityDb()
 if (configuredDriver === 'postgres') process.env.DB_DRIVER = configuredDriver
 
 const client = new pg.Client({ connectionString: url, ssl: /sslmode=require/.test(url) ? { rejectUnauthorized: process.env.TRUST_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined })

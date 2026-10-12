@@ -3,13 +3,13 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const SECRET = 'test_jwt_secret_do_not_use_in_production'
 const token = (id, role = 'investor') => jwt.sign({ sub: id, role }, SECRET, { expiresIn: '1h' })
 let db
-beforeEach(() => { db = { users: [{ id: 'investor' }, { id: 'founder' }, { id: 'other' }], profiles: [{ id: 'investor', role: 'investor', isOnboarded: true }, { id: 'founder', role: 'founder', isOnboarded: true }, { id: 'other', role: 'investor', isOnboarded: true }], verificationProfiles: [{ userId: 'investor', role: 'investor', assurance: 'VERIFIED', expiresAt: new Date(Date.now() + 86400000).toISOString() }, { userId: 'other', role: 'investor', assurance: 'VERIFIED', expiresAt: new Date(Date.now() + 86400000).toISOString() }], walletAccounts: [{ userId: 'investor', creditBalance: 30 }, { userId: 'other', creditBalance: 30 }], creditLedger: [], usageReservations: [], subscriptions: [], investorWatchlists: [{ investorId: 'investor', projectId: 'project-1' }], dealFlowSnapshots: [], projects: [{ id: 'project-1', title: 'Northstar' }], dealRooms: [], dealRoomParticipants: [], ndaTemplates: [], ndaSignatures: [], diligenceItems: [], dealAuditEvents: [], dealStatusEvents: [], dealQuestions: [], dealQuestionMessages: [], investorInternalNotes: [], icReviews: [], termSheetVersions: [], authorizationAuditLogs: [], capabilityAnalytics: [] }; readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => fn(db)) })
+beforeEach(() => { db = { users: [{ id: 'investor' }, { id: 'founder' }, { id: 'other' }], profiles: [{ id: 'investor', role: 'investor', isOnboarded: true }, { id: 'founder', role: 'founder', isOnboarded: true }, { id: 'other', role: 'investor', isOnboarded: true }], verificationProfiles: [{ userId: 'investor', role: 'investor', assurance: 'VERIFIED', expiresAt: new Date(Date.now() + 86400000).toISOString() }, { userId: 'other', role: 'investor', assurance: 'VERIFIED', expiresAt: new Date(Date.now() + 86400000).toISOString() }], walletAccounts: [{ userId: 'investor', creditBalance: 30 }, { userId: 'other', creditBalance: 30 }], creditLedger: [], usageReservations: [], subscriptions: [], investorWatchlists: [{ investorId: 'investor', projectId: 'project-1' }], dealFlowSnapshots: [], projects: [{ id: 'project-1', title: 'Northstar' }], dealRooms: [], dealRoomParticipants: [], ndaTemplates: [], ndaSignatures: [], diligenceItems: [], dealAuditEvents: [], dealStatusEvents: [], dealQuestions: [], dealQuestionMessages: [], investorInternalNotes: [], icReviews: [], termSheetVersions: [], authorizationAuditLogs: [], capabilityAnalytics: [] }; readAuthorityDb.mockReturnValue(db); writeAuthorityDb.mockImplementation(() => {}); updateAuthorityDb.mockImplementation(fn => fn(db)) })
 
 describe('Investor Deal Room deterministic security', () => {
   it('creates an isolated deal, requires NDA, and validates transitions', async () => {

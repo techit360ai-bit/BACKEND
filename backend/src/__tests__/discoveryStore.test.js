@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runDiscoveryRead: vi.fn(),
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   lastWriteOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/discoveryRepository.js', () => ({
   discoveryStoreEnabled: mocks.storeEnabled,
   discoveryFallbackEnabled: mocks.fallbackEnabled,
@@ -22,8 +22,8 @@ vi.mock('../repositories/discoveryRepository.js', () => ({
 const svc = await import('../services/discoveryService.js')
 
 function usedBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runDiscoveryRead.mockImplementation(async (options, read) => { mocks.lastReadOptions = options; return read() })
   mocks.applyDiscoveryMutation.mockImplementation(async (options, mutate) => { mocks.lastWriteOptions = options; return mutate() })
 }
@@ -88,6 +88,6 @@ describe('discovery row-level store (§5 cutover)', () => {
     const result = await svc.getDiscoveryConfigAsync()
     expect(result).toBeTruthy()
     expect(mocks.runDiscoveryRead).not.toHaveBeenCalled()
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

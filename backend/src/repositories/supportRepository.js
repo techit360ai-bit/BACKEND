@@ -9,7 +9,7 @@
 // SUPPORT_SOURCE=postgres; the snapshot fallback is retained in the service
 // until the authority is deleted.
 import { withPlatformTransaction, getRecord, upsertRecord, listRecords, listRecordsForOwner, listRecordsByField } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 export function supportStoreEnabled() {
@@ -96,7 +96,7 @@ async function persistChanges(client, db, originals) {
 export async function runSupportRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildSupportDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -106,7 +106,7 @@ export async function applySupportMutation(options, mutate) {
     const db = await buildSupportDb(client, options)
     const originals = new Map()
     for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals)
     return result
   }, { userId: options.userId || null })

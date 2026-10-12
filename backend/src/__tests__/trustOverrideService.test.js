@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn(), writeDb: vi.fn() }))
-import { readDb, updateDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { applyTrustOverride, listTrustOverrides, revokeTrustOverride } from '../services/trustOverrideService.js'
 import { applyScoreOverrides, validateOverrideInput } from '../services/trustScoreOverrides.js'
 
@@ -15,8 +15,8 @@ beforeEach(() => {
     trustVerificationProofs: [{ id: 'p1', userId: 'u1', projectId: null, source: 'github', status: 'verified', confidence: 0.98, points: 15, metadata: {}, evidenceHash: 'h', attestationLevel: 'provider_observed', expiresAt: future(), verifiedAt: pastIso(), createdAt: pastIso(), updatedAt: pastIso() }],
     trustVerificationHistory: [], verifiedSkills: [], trustProfiles: [], trustScoreSnapshots: [], trustProjectionOutbox: [], trustScoreOverrides: [], manualReviews: [], notifications: [],
   }
-  readDb.mockReturnValue(db)
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
 })
 
 describe('override validation (WS9)', () => {

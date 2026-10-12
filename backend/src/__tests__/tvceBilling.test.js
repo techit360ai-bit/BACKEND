@@ -1,17 +1,17 @@
 import crypto from 'crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { handleBillingWebhook } from '../services/tvceBillingService.js'
 import { createTvceCheckout } from '../services/tvceCheckoutService.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 
 describe('TVCE billing webhook contracts', () => {
   let db
   beforeEach(() => {
     db = { users: [{ id: 'u1' }], profiles: [{ id: 'u1', role: 'founder' }], paymentIntents: [{ id: 'p1', userId: 'u1', credits: 20, status: 'pending', provider: 'stripe' }], subscriptions: [], accountEntitlements: [], creditLedger: [], billingWebhookEvents: [], creditPackages: [], billingPlans: [] }
-    readDb.mockReturnValue(db)
-    updateDb.mockImplementation(fn => fn(db))
+    readAuthorityDb.mockReturnValue(db)
+    updateAuthorityDb.mockImplementation(fn => fn(db))
     process.env.STRIPE_WEBHOOK_SECRET = 'stripe-secret'
     process.env.PAYSTACK_SECRET_KEY = 'paystack-secret'
   })

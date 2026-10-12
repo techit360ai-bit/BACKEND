@@ -10,7 +10,7 @@ const ADMIN_USERS = 'adminUsers'
 const TELEMETRY = 'adminTelemetrySnapshots'
 
 export function adminAuthEnabled() {
-  return process.env.ADMIN_AUTH_SOURCE === 'postgres' || process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres' || process.env.DB_DRIVER === 'postgres'
+  return process.env.ADMIN_AUTH_SOURCE === 'postgres' || process.env.DB_DRIVER === 'postgres'
 }
 
 export async function findAdminById(id) {

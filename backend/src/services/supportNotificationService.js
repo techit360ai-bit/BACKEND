@@ -1,5 +1,5 @@
 import { Resend } from 'resend'
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { supportStoreEnabled, loadUserContact } from '../repositories/supportRepository.js'
 import { configuredFromEmail, assertEmailAccepted } from '../utils/emailDelivery.js'
 

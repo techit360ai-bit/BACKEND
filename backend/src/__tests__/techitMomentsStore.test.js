@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({ techitMoments: [], techitMomentEvents: [], techitMomentShares: [], techitMomentReferrals: [] })),
-  updateDb: vi.fn(mutator => mutator({ techitMoments: [], techitMomentEvents: [], techitMomentShares: [], techitMomentReferrals: [] })),
+  readAuthorityDb: vi.fn(() => ({ techitMoments: [], techitMomentEvents: [], techitMomentShares: [], techitMomentReferrals: [] })),
+  updateAuthorityDb: vi.fn(mutator => mutator({ techitMoments: [], techitMomentEvents: [], techitMomentShares: [], techitMomentReferrals: [] })),
   createDistribution: vi.fn(async () => ({ ok: false })),
   storeEnabled: vi.fn(() => true),
   loadSources: vi.fn(),
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   listReferrals: vi.fn(async () => []),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../services/distributionIntelligenceService.js', () => ({ createDistributionObject: mocks.createDistribution }))
 vi.mock('../repositories/techitMomentsRepository.js', () => ({
   momentsStoreEnabled: mocks.storeEnabled,
@@ -59,8 +59,8 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     expect(result.moments.some(row => row.kind === 'project_started')).toBe(true)
     expect(result.moments.some(row => row.kind === 'mvp_ready')).toBe(true)
     expect(mocks.insertMoments).toHaveBeenCalledTimes(1)
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('deduplicates against row-level existing moments', async () => {
@@ -68,7 +68,7 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     const result = await generateMoments('founder-1', 'founder')
     expect(result.moments).toHaveLength(2)
     expect(mocks.insertMoments).toHaveBeenCalledTimes(1)
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('dismisses a pending moment row-level', async () => {
@@ -76,7 +76,7 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     const result = await dismissMoment('founder-1', 'moment-1')
     expect(result).toEqual({ ok: true })
     expect(mocks.saveMoment).toHaveBeenCalledWith(expect.objectContaining({ id: 'moment-1', status: 'dismissed' }), expect.any(Array))
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('records a share row-level and bumps the object', async () => {
@@ -85,8 +85,8 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(mocks.insertShare).toHaveBeenCalledTimes(1)
     expect(mocks.saveMoment).toHaveBeenCalledWith(expect.objectContaining({ id: 'moment-1', shareCount: 1, status: 'published' }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('reads a published moment and records a visit row-level', async () => {
@@ -96,8 +96,8 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     expect(visit.ok).toBe(true)
     expect(mocks.insertReferral).toHaveBeenCalledTimes(1)
     expect(mocks.saveMoment).toHaveBeenCalledWith(expect.objectContaining({ id: 'moment-1', referralCount: 1 }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('activates a referral and aggregates analytics row-level', async () => {
@@ -109,7 +109,7 @@ describe('TechIT Moments row-level store (§5 cutover)', () => {
     mocks.listReferrals.mockResolvedValue([{ momentId: 'moment-1', activatedAt: '2026-01-01T00:00:00.000Z' }])
     const summary = await analytics('founder-1')
     expect(summary.totals).toEqual({ moments: 1, shares: 1, referrals: 1 })
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 })

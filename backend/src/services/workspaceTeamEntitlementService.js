@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createWorkspaceTeamGrantRow, workspaceTeamGrantWriteEnabled } from '../repositories/workspaceTeamEntitlementRepository.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -24,7 +24,7 @@ function buildGrant(founderId, input = {}) {
 export async function createWorkspaceTeamGrant(founderId, input = {}) {
   const grant = buildGrant(founderId, input)
   if (workspaceTeamGrantWriteEnabled()) return createWorkspaceTeamGrantRow(grant)
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const workspace = rows(db, 'workspaces').find(row => row.id === grant.workspaceId && (row.ownerId === founderId || row.userId === founderId))
     if (!workspace) return { ok: false, error: 'founder_workspace_required' }
     const members = rows(db, 'workspaceMembers').filter(row => row.workspaceId === grant.workspaceId && row.status !== 'revoked')
@@ -36,7 +36,7 @@ export async function createWorkspaceTeamGrant(founderId, input = {}) {
 }
 
 export function workspaceTeamGrantFor(userId, workspaceId, capability, source = null) {
-  const db = source || readDb()
+  const db = source || readAuthorityDb()
   const grant = rows(db, 'workspaceTeamEntitlements').find(row => row.workspaceId === workspaceId && row.collaboratorId === userId && active(row) && (!row.capabilities?.length || row.capabilities.includes(capability)))
   return grant || null
 }

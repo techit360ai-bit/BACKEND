@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import crypto from 'node:crypto'
 
 const db = { projects: [], workspaces: [], workspaceMembers: [], workspaceConnectors: [], workspaceTasks: [], workspaceReports: [], contributions: [], projectActivities: [], startupActivities: [] }
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(() => db), updateAuthorityDb: vi.fn(mutator => mutator(db)) }))
 const { authorizeCodeDestination, projectCodeCommit, reconcileGithubPush } = await import('../services/codeExecutionProjectionService.js')
 const { investorIntelligenceOverview } = await import('../services/investorIntelligenceService.js')
 

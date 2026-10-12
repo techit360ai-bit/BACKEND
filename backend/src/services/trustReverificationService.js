@@ -19,10 +19,10 @@ import { trustWriteEnabled, trustRepositoryEnabled, trustReadEnabled, countDueRe
 import { isExpired } from '../config/trustSyncIntervals.js'
 import { incTrustMetric } from './trustMetrics.js'
 
-const readAuthorityDb = (...args) => database.readDb(...args)
+const readAuthorityDb = (...args) => database.readAuthorityDb(...args)
 const updateAuthorityDb = mutator => {
-  try { if (typeof database.updateDb === 'function') return database.updateDb(mutator) } catch {}
-  return mutator(database.readDb())
+  try { if (typeof database.updateAuthorityDb === 'function') return database.updateAuthorityDb(mutator) } catch {}
+  return mutator(database.readAuthorityDb())
 }
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const toIso = value => (value instanceof Date ? value.toISOString() : new Date(value).toISOString())

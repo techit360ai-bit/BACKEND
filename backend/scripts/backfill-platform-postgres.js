@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb } from '../src/config/database.js'
+import { readAuthorityDb } from '../src/config/database.js'
 import { getPlatformPool, upsertRecord } from '../src/repositories/platformCollectionRepository.js'
 import fs from 'node:fs/promises'
 
@@ -9,7 +9,7 @@ const runId = `backfill_${crypto.randomUUID()}`
 const startedAt = new Date().toISOString()
 const configuredDriver = process.env.DB_DRIVER
 if (configuredDriver === 'postgres') process.env.DB_DRIVER = process.env.LEGACY_DB_DRIVER || 'sqlite'
-const db = readDb()
+const db = readAuthorityDb()
 if (configuredDriver === 'postgres') process.env.DB_DRIVER = configuredDriver
 const client = await getPlatformPool().connect()
 const hash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')

@@ -7,12 +7,12 @@ const store = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   enabled: vi.fn(() => true),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/contentRepository.js', () => ({ createMentorshipMessage: vi.fn(), createFeedPost: vi.fn(), contentWriteEnabled: () => false, contentWriteFallbackEnabled: () => true }))
 vi.mock('../repositories/mentorshipRepository.js', () => ({
   mentorshipEnabled: () => mocks.enabled(),
@@ -39,8 +39,8 @@ describe('mentorship row-level store (§5 cutover)', () => {
     expect(store.mentorshipRooms).toHaveLength(1)
     const list = await listMentorshipRoomsAsync('mentor-1', { mine: true })
     expect(list.rooms.map(row => row.id)).toEqual([created.room.id])
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('applies to a published room row-level', async () => {
@@ -65,14 +65,14 @@ describe('mentorship row-level store (§5 cutover)', () => {
     const resolved = await resolveMentorshipInviteAsync('applicant-1', 'secret-token')
     expect(resolved.ok).toBe(true)
     expect(resolved.room.id).toBe('r1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('falls back to the snapshot when the source is sqlite', async () => {
     mocks.enabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({ mentorshipRooms: [{ id: 'r1', mentorId: 'mentor-1', name: 'Snapshot room', status: 'published', createdAt: '2026-01-01T00:00:00.000Z' }], profiles: [] })
+    mocks.readAuthorityDb.mockReturnValue({ mentorshipRooms: [{ id: 'r1', mentorId: 'mentor-1', name: 'Snapshot room', status: 'published', createdAt: '2026-01-01T00:00:00.000Z' }], profiles: [] })
     const list = await listMentorshipRoomsAsync('mentor-1', { mine: true })
     expect(list.rooms.map(row => row.id)).toEqual(['r1'])
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

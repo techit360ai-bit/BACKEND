@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 
 export const CREDIT_VALUE_USD = 0.025
 export const DEFAULT_TARGET_MARGIN = 0.60

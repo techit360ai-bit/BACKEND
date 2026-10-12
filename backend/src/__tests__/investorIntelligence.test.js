@@ -3,8 +3,8 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const SECRET = 'test_jwt_secret_do_not_use_in_production'
 const token = (id = 'investor-1') => jwt.sign({ sub: id, role: 'investor' }, SECRET, { expiresIn: '1h' })
@@ -25,7 +25,7 @@ beforeEach(() => {
     milestones: [{ id: 'milestone-1', projectId: 'startup-1', status: 'completed' }, { id: 'milestone-2', projectId: 'startup-1', status: 'in_progress', dueDate: new Date(Date.now() + 86400000).toISOString() }],
     investorIntelligenceSnapshots: [], investorIntelligenceAudits: [], investorRiskSignals: [], investorRecommendations: [], authorizationAuditLogs: [], capabilityAnalytics: [],
   }
-  readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => fn(db))
+  readAuthorityDb.mockReturnValue(db); writeAuthorityDb.mockImplementation(() => {}); updateAuthorityDb.mockImplementation(fn => fn(db))
 })
 
 describe('investor mentorship intelligence', () => {

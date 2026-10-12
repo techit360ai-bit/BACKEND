@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 
 export function recordMigrationEvent(db, { domain, aggregateType, aggregateId, operation, payload = {}, version = 1 }) {
   if (!db.migrationOutbox) db.migrationOutbox = []

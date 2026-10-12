@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const url = () => process.env.WORKSPACE_DATABASE_URL || process.env.DATABASE_URL

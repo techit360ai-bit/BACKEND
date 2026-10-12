@@ -5,8 +5,8 @@ const db = {
 }
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(() => db),
-  updateDb: vi.fn(mutator => mutator(db)),
+  readAuthorityDb: vi.fn(() => db),
+  updateAuthorityDb: vi.fn(mutator => mutator(db)),
 }))
 
 const { createCase, addMessage, getCase, listAdminCases, submitFeedback, updateCase, acquireCaseLock, correctiveAction, configureSupport, runMaintenance, initAttachment, supportDirectory } = await import('../services/supportService.js')

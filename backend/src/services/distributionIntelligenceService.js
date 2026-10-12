@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import {
   distributionStoreEnabled,
@@ -41,7 +41,7 @@ export async function createDistributionObject(userId, input = {}) {
   if (!SOURCES.has(sourceType)) return { ok: false, status: 400, error: 'distribution_source_invalid' }
   if (!VISIBILITIES.has(visibility)) return { ok: false, status: 400, error: 'distribution_visibility_invalid' }
   const sourceId = clean(input.sourceId || input.source_id, 160) || null
-  const owner = distributionStoreEnabled() ? await findDistributionSourceOwner(sourceId) : snapshotSourceOwner(readDb(), sourceType, sourceId)
+  const owner = distributionStoreEnabled() ? await findDistributionSourceOwner(sourceId) : snapshotSourceOwner(readAuthorityDb(), sourceType, sourceId)
   if (owner && owner !== userId) return { ok: false, status: 403, error: 'distribution_source_forbidden' }
   if (visibility === 'PUBLIC' && !owner && !input.publicApproved) return { ok: false, status: 403, error: 'public_distribution_approval_required' }
   const createdAt = nowIso()
@@ -58,11 +58,11 @@ export async function createDistributionObject(userId, input = {}) {
     await insertDistributionObject(object, [created])
     return { ok: true, object: publicObject(object) }
   }
-  return updateDb(db => { rows(db, 'distributionObjects').push(object); pushEvent(db, created); return { ok: true, object: publicObject(object) } })
+  return updateAuthorityDb(db => { rows(db, 'distributionObjects').push(object); pushEvent(db, created); return { ok: true, object: publicObject(object) } })
 }
 
 export async function getDistributionObject(id, actorId = null) {
-  const object = distributionStoreEnabled() ? await loadDistributionObject(id) : rows(readDb(), 'distributionObjects').find(row => row.id === id)
+  const object = distributionStoreEnabled() ? await loadDistributionObject(id) : rows(readAuthorityDb(), 'distributionObjects').find(row => row.id === id)
   if (!object || (object.expiresAt && Date.parse(object.expiresAt) <= Date.now())) return { ok: false, status: 404, error: 'distribution_not_found' }
   if (object.visibility !== 'PUBLIC' && object.creatorId !== actorId) return { ok: false, status: 403, error: 'distribution_private' }
   return { ok: true, object: publicObject(object) }
@@ -79,7 +79,7 @@ export async function recordDistributionShare(userId, id, channel = 'copy') {
     await saveDistributionObject(updated)
     return { ok: true, shareId: share.id, attributionId: object.attributionId, object: publicObject(updated) }
   }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const object = rows(db, 'distributionObjects').find(row => row.id === id && row.creatorId === userId)
     if (!object || object.visibility === 'PRIVATE') return { ok: false, status: 404, error: 'distribution_not_shareable' }
     const share = { id: createId('share'), distributionObjectId: id, userId, channel: clean(channel, 30) || 'copy', createdAt: nowIso() }
@@ -100,7 +100,7 @@ export async function recordDistributionClick(id, input = {}) {
     await saveDistributionObject(updated)
     return { ok: true, referralId: attribution.id, attributionId: object.attributionId, destinationRoute: object.destinationRoute }
   }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const object = rows(db, 'distributionObjects').find(row => row.id === id && row.visibility === 'PUBLIC')
     if (!object || (object.expiresAt && Date.parse(object.expiresAt) <= Date.now())) return { ok: false, status: 404, error: 'distribution_not_found' }
     const attribution = buildAttribution(object)
@@ -126,7 +126,7 @@ export async function activateDistributionReferral(userId, referralId, input = {
     await updateDistributionAttribution(attribution, events)
     return { ok: true, referralId: attribution.id, status: attribution.status }
   }
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const attribution = rows(db, 'distributionAttributions').find(row => row.id === referralId)
     if (!attribution) return { ok: false, status: 404, error: 'referral_not_found' }
     if (attribution.signupUserId && attribution.signupUserId !== userId) return { ok: false, status: 409, error: 'referral_already_attributed' }
@@ -150,7 +150,7 @@ export async function distributionMetrics() {
       events: (a.events || []).slice(-100),
     }
   }
-  const db = readDb(); const objects = rows(db, 'distributionObjects'); const shares = rows(db, 'distributionShares'); const attrs = rows(db, 'distributionAttributions'); const events = rows(db, 'growthEvents')
+  const db = readAuthorityDb(); const objects = rows(db, 'distributionObjects'); const shares = rows(db, 'distributionShares'); const attrs = rows(db, 'distributionAttributions'); const events = rows(db, 'growthEvents')
   const activated = attrs.filter(row => row.activatedAt).length; const inviters = new Set(shares.map(row => row.userId)).size
   return { ok: true, metrics: { objects: objects.length, publicObjects: objects.filter(row => row.visibility === 'PUBLIC').length, shares: shares.length, visits: attrs.length, signups: attrs.filter(row => row.signupUserId).length, activated, converted: attrs.filter(row => row.convertedAt).length, shareRate: objects.length ? shares.length / objects.length : 0, activationRate: attrs.length ? activated / attrs.length : 0, viralCoefficient: inviters ? activated / inviters : 0, organicAcquisitionRate: attrs.length ? attrs.filter(row => row.source === 'direct').length / attrs.length : 0 }, events: events.slice(-100) }
 }

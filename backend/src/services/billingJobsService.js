@@ -1,5 +1,5 @@
 import { nowIso } from '../utils/api.js'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { TVCE_FREE_QUOTAS } from './tvceService.js'
 import { billingJobStatusRowLevel, billingJobsRowLevelEnabled, runBillingJobsRowLevel } from '../repositories/billingJobsRepository.js'
 
@@ -7,7 +7,7 @@ const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return
 
 export async function runBillingJobs(actor = 'scheduler') {
   if (billingJobsRowLevelEnabled()) return runBillingJobsRowLevel(actor, { freeQuotaCycles: Object.keys(TVCE_FREE_QUOTAS).length, runAt: nowIso() })
-  return updateDb(db => {
+  return updateAuthorityDb(db => {
     const now = Date.now(); const runAt = nowIso(); const results = {}
     // Capability counters are event-derived and reset by cycle; this job only
     // records the run so it remains idempotent and auditable.
@@ -26,6 +26,6 @@ export async function runBillingJobs(actor = 'scheduler') {
 
 export async function billingJobStatus() {
   if (billingJobsRowLevelEnabled()) return billingJobStatusRowLevel()
-  const db = readDb(); const runs = rows(db, 'billingJobRuns')
+  const db = readAuthorityDb(); const runs = rows(db, 'billingJobRuns')
   return { lastRun: runs[runs.length - 1] || null, marginAlerts: rows(db, 'marginAlerts').slice(-100) }
 }

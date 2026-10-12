@@ -3,9 +3,9 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
   findIdentityById: vi.fn(),
   listIdentityProfiles: vi.fn(),
   loadMemberDirectorySources: vi.fn(),
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   trustPublic: vi.fn(),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, writeDb: mocks.writeDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, writeAuthorityDb: mocks.writeAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../services/trustAuthority.js', async importOriginal => ({ ...(await importOriginal()), publicTrustFor: mocks.trustPublic }))
 vi.mock('../services/tvceService.js', async importOriginal => ({ ...(await importOriginal()), accountEntitlementAsync: mocks.entitlement }))
 vi.mock('../repositories/identityRepository.js', async importOriginal => ({
@@ -36,7 +36,7 @@ vi.mock('../repositories/userDirectoryRepository.js', () => ({
 }))
 
 import app from '../app.js'
-import { readDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 const auth = (userId = 'viewer') => `Bearer ${jwt.sign({ sub: userId }, TEST_SECRET, { expiresIn: '1h' })}`
@@ -92,7 +92,7 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.body.users.map(user => user.id)).toEqual(['target'])
     expect(res.body.users[0]).toMatchObject({ subscriber: true, sharedContext: true })
     expect(mocks.loadMemberDirectorySources).toHaveBeenCalledWith('viewer', ['target'])
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('renders a public profile from bounded member + activity rows', async () => {
@@ -101,7 +101,7 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({ id: 'target', name: 'Target Person' })
     expect(mocks.loadMemberDirectorySources).toHaveBeenCalledWith('viewer', ['target'], { activity: true, fullEdgeIds: ['target'] })
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('lists the viewer connections from bounded edges without the snapshot', async () => {
@@ -110,7 +110,7 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.status).toBe(200)
     expect(res.body.connections.map(connection => connection.id)).toEqual(['target'])
     expect(mocks.loadConnectionSources).toHaveBeenCalledWith('viewer')
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('lists incoming connection requests from bounded request rows without the snapshot', async () => {
@@ -119,12 +119,12 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.status).toBe(200)
     expect(res.body.requests.map(row => row.fromUserId)).toEqual(['sender'])
     expect(mocks.loadConnectionRequestSources).toHaveBeenCalledWith('viewer')
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('keeps the snapshot as the fallback when identity is not authoritative', async () => {
     delete process.env.IDENTITY_READ_SOURCE
-    readDb.mockReturnValue({
+    readAuthorityDb.mockReturnValue({
       users: [{ id: 'viewer' }, { id: 'target' }],
       profiles: [viewerProfile, targetProfile],
       subscriptions: [{ id: 'sub-1', userId: 'target', status: 'active' }],
@@ -137,7 +137,7 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.status).toBe(200)
     expect(res.body.users.map(user => user.id)).toEqual(['target'])
     expect(mocks.loadMemberDirectorySources).not.toHaveBeenCalled()
-    expect(readDb).toHaveBeenCalled()
+    expect(readAuthorityDb).toHaveBeenCalled()
   })
 
   it('creates a connection through the bounded write path without the snapshot', async () => {
@@ -147,7 +147,7 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.body).toMatchObject({ ok: true, status: 'pending' })
     expect(mocks.loadProfileByRef).toHaveBeenCalledWith('target')
     expect(mocks.applyConnectionMutation).toHaveBeenCalled()
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('accepts a connection request through the bounded write path without the snapshot', async () => {
@@ -159,6 +159,6 @@ describe('member directory + connections — row-level store (§5 cutover)', () 
     expect(res.status).toBe(200)
     expect(res.body).toMatchObject({ ok: true, status: 'connected' })
     expect(mocks.applyConnectionMutation).toHaveBeenCalled()
-    expect(readDb).not.toHaveBeenCalled()
+    expect(readAuthorityDb).not.toHaveBeenCalled()
   })
 })

@@ -5,7 +5,7 @@ const db = {
   techitMoments: [], techitMomentShares: [], techitMomentReferrals: [], techitMomentEvents: [],
 }
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(() => db), updateAuthorityDb: vi.fn(mutator => mutator(db)) }))
 const { generateMoments, listMoments, nextMomentPrompt, dismissMoment, getMoment, recordShare, getPublicMoment, recordVisit, analytics } = await import('../services/techitMomentsService.js')
 
 beforeEach(() => { for (const value of Object.values(db)) value.length = 0 })

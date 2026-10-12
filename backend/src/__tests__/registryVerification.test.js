@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createDomainChallenge, registryCheck, reviewVerificationOperation, verificationOperations, verifyDomainChallenge } from '../services/registryVerificationService.js'
 
 let db
@@ -11,8 +11,8 @@ beforeEach(() => {
     organizationMemberships: [{ userId: 'u1', organizationId: 'org1', role: 'owner', status: 'active' }],
     organizationDomains: [], organizationRegistryChecks: [], organizationDomainChallenges: [], evidenceObjects: [], manualReviews: [], countryRegistryConfigurations: [],
   }
-  readDb.mockReturnValue(db)
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
   delete process.env.REGISTRY_NIGERIA_URL
   delete process.env.REGISTRY_NIGERIA_API_KEY
 })

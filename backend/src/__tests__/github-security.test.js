@@ -4,11 +4,11 @@ import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
 }))
 
-import { readDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
@@ -33,7 +33,7 @@ beforeEach(() => {
 
 describe('GitHub OAuth security boundaries', () => {
   it('rejects expired OAuth state before calling GitHub', async () => {
-    readDb.mockReturnValue(db({
+    readAuthorityDb.mockReturnValue(db({
       githubOauthStates: [{
         state: 'expired-state',
         userId: 'user-1',
@@ -53,10 +53,10 @@ describe('GitHub OAuth security boundaries', () => {
     const store = db({
       githubOauthStates: [{ state: 'valid-state', userId: 'user-1', createdAt: new Date().toISOString() }],
     })
-    readDb.mockReturnValue(store)
+    readAuthorityDb.mockReturnValue(store)
     vi.spyOn(globalThis, 'fetch')
       .mockImplementationOnce(async () => {
-        expect(writeDb).toHaveBeenCalledOnce()
+        expect(writeAuthorityDb).toHaveBeenCalledOnce()
         expect(store.githubOauthStates).toEqual([])
         return { json: async () => ({ access_token: 'github-plaintext-token' }) }
       })
@@ -67,7 +67,7 @@ describe('GitHub OAuth security boundaries', () => {
     const res = await request(app).get('/api/github/callback?code=abc&state=valid-state')
 
     expect(res.status).toBe(302)
-    expect(writeDb).toHaveBeenCalledTimes(2)
+    expect(writeAuthorityDb).toHaveBeenCalledTimes(2)
     expect(store.githubConnections).toHaveLength(1)
     expect(store.githubConnections[0].accessToken).toBeUndefined()
     expect(store.githubConnections[0].accessTokenEncrypted).toMatch(/^[^.]+\.[^.]+\.[^.]+$/)
@@ -76,7 +76,7 @@ describe('GitHub OAuth security boundaries', () => {
 
   it('creates high-entropy state tied to the authenticated user', async () => {
     const store = db()
-    readDb.mockReturnValue(store)
+    readAuthorityDb.mockReturnValue(store)
 
     const res = await request(app)
       .get('/api/github/authorize')

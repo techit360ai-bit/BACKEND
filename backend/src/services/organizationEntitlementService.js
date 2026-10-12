@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
+import { organizationBillingEnabled, applyOrganizationEntitlementStore } from '../repositories/organizationBillingRepository.js'
 
 const ACTIVE_STATUSES = new Set(['active', 'trialing', 'grace_period'])
 
@@ -137,4 +138,14 @@ export function saveOrganizationEntitlement(adminId, input = {}) {
     collection(db, 'organizationAuditEvents').push({ id: createId('org_audit'), organizationId, actorId: adminId, action: 'entitlement_updated', resourceType: 'organization_entitlement', resourceId: row.id, metadata: { plan: row.plan, source: row.source }, createdAt: nowIso() })
     return { ok: true, entitlement: organizationEntitlement(organizationId, db) }
   })
+}
+
+
+// Row-level (§5) wrapper — admin entitlement grant. The sync form above loads
+// the whole-DB snapshot; this runs it against an organization-scoped bundle and
+// persists only the changed rows. Gated by ORGANIZATION_*_SOURCE=postgres; the
+// snapshot path stays the sqlite fallback.
+export async function saveOrganizationEntitlementAsync(adminId, input = {}) {
+  if (!organizationBillingEnabled()) return saveOrganizationEntitlement(adminId, input)
+  return applyOrganizationEntitlementStore(adminId, input, () => saveOrganizationEntitlement(adminId, input))
 }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readDb as readAuthorityDb, runDatabaseAuthority } from '../config/database.js'
+import { readAuthorityDb, runBoundedDatabase } from '../config/database.js'
 import { withPlatformTransaction, getRecord, upsertRecord, listRecords, listRecordsForOwner, listRecordsByField, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 import { createId } from '../utils/api.js'
 
@@ -112,7 +112,7 @@ async function persistDealChanges(client, db, originals) {
 export async function runDealRoomRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildDealDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -121,7 +121,7 @@ export async function applyDealRoomMutation(options, mutate) {
     const db = await buildDealDb(client, options)
     const originals = new Map()
     for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistDealChanges(client, db, originals)
     const projectionDealId = typeof options.projectionDealId === 'function' ? options.projectionDealId(result) : (options.dealId || null)
     if (projectionDealId && options.refreshProjection !== false) {

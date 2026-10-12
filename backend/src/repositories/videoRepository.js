@@ -6,7 +6,7 @@
 // the rows a mutation changed. Gated by VIDEO_SOURCE=postgres; fallback
 // VIDEO_FALLBACK_SQLITE keeps the snapshot until the authority is deleted.
 import { withPlatformTransaction, listRecords, listRecordsForOwner, upsertRecord } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 
 export function videoStoreEnabled() {
   return process.env.VIDEO_SOURCE === 'postgres' || process.env.VIDEO_READ_SOURCE === 'postgres' || process.env.VIDEO_WRITE_SOURCE === 'postgres'
@@ -24,7 +24,7 @@ async function buildVideoDb(client, userId) {
 export async function runVideoRead(userId, read) {
   return withPlatformTransaction(async client => {
     const db = await buildVideoDb(client, userId)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId })
 }
 
@@ -33,7 +33,7 @@ export async function applyVideoMutation(userId, mutate) {
     const db = await buildVideoDb(client, userId)
     const originals = new Map()
     for (const name of WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     for (const name of WRITE_COLLECTIONS) {
       for (const row of db[name] || []) {
         if (!row?.id) continue

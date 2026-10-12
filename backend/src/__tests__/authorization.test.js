@@ -4,8 +4,8 @@ import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
 const SECRET = 'test_jwt_secret_do_not_use_in_production'
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const token = (id = 'u1', role = 'founder') => jwt.sign({ sub: id, role }, SECRET, { expiresIn: '1h' })
 const baseDb = () => ({
@@ -20,9 +20,9 @@ let db
 beforeEach(() => {
   db = baseDb()
   vi.clearAllMocks()
-  readDb.mockReturnValue(db)
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => { const result = mutator(db); writeDb(db); return result })
+  readAuthorityDb.mockReturnValue(db)
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => { const result = mutator(db); writeAuthorityDb(db); return result })
 })
 
 describe('capability authorization and progressive verification', () => {

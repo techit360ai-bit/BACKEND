@@ -1,9 +1,9 @@
 import crypto from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { fulfillPaymentAsync, reversePaymentCreditsAsync } from './tvceService.js'
 import { billingEventExistsPostgres, paymentUserPostgres, recordBillingEventPostgres, updateSubscriptionPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
-import { applyOrganizationPayment, applyOrganizationPaymentLifecycle } from './organizationBillingService.js'
+import { applyOrganizationPaymentAsync, applyOrganizationPaymentLifecycleAsync } from './organizationBillingService.js'
 
 const supported = new Set(['stripe', 'paystack', 'flutterwave'])
 const signature = (value, expected) => {
@@ -69,7 +69,7 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
       await reversePaymentCreditsAsync(event.userId, event.paymentId, status === 'disputed' ? 'dispute' : 'refund')
     }
     const userId = event.userId || (financePostgresEnabled() ? await paymentUserPostgres(event.paymentId) : readAuthorityDb().paymentIntents?.find(row => row.id === event.paymentId)?.userId)
-    const organizationLifecycle = await applyOrganizationPaymentLifecycle({ paymentId: event.paymentId, providerReference: event.providerReference, status })
+    const organizationLifecycle = await applyOrganizationPaymentLifecycleAsync({ paymentId: event.paymentId, providerReference: event.providerReference, status })
     if (organizationLifecycle?.ok === false) return organizationLifecycle
     if (financePostgresEnabled() && userId) {
       const subscription = await updateSubscriptionPostgres({ userId, provider, providerId: event.subscriptionId || event.providerReference, planId: event.planId, status, amount: event.amount, currency: event.currency, failureReason: event.failureReason })
@@ -99,7 +99,7 @@ export async function handleBillingWebhook(providerInput, payload, headers = {},
   if (event.paymentId && event.userId) result = await fulfillPaymentAsync(event.userId, event.paymentId, { verified: true, planId: event.planId, providerReference: event.providerReference })
   if (result?.ok === false) return result
   if (event.paymentId && event.userId) {
-    const organizationPayment = await applyOrganizationPayment({ userId: event.userId, paymentId: event.paymentId, provider, providerReference: event.providerReference, planId: event.planId })
+    const organizationPayment = await applyOrganizationPaymentAsync({ userId: event.userId, paymentId: event.paymentId, provider, providerReference: event.providerReference, planId: event.planId })
     if (organizationPayment?.ok === false) return organizationPayment
   }
   if (financePostgresEnabled()) {

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const db = { users: [], profiles: [], techitMoments: [], achievements: [], projectMilestones: [], validationSessions: [], investorReadiness: [], distributionObjects: [], distributionShares: [], distributionAttributions: [], growthEvents: [] }
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(() => db), updateAuthorityDb: vi.fn(mutator => mutator(db)) }))
 const { createDistributionObject, getDistributionObject, recordDistributionShare, recordDistributionClick, activateDistributionReferral, distributionMetrics } = await import('../services/distributionIntelligenceService.js')
 
 beforeEach(() => Object.values(db).forEach(value => Array.isArray(value) && (value.length = 0)))

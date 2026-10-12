@@ -8,9 +8,9 @@ const db = {
 }
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(() => db),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(mutator => mutator(db)),
+  readAuthorityDb: vi.fn(() => db),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(mutator => mutator(db)),
 }))
 
 const { evaluateTrustAlerts, trustObservabilitySnapshot } = await import('../services/trustObservability.js')
@@ -47,7 +47,7 @@ describe('trust observability snapshot (WS11)', () => {
 
   it('never throws when a gauge source fails', async () => {
     const database = await import('../config/database.js')
-    database.readDb.mockImplementationOnce(() => { throw new Error('db down') })
+    database.readAuthorityDb.mockImplementationOnce(() => { throw new Error('db down') })
     const snapshot = await trustObservabilitySnapshot()
     expect(snapshot.gauges.outbox_depth.available).toBe(false)
     expect(snapshot.gauges.expired_source_count.available).toBe(true)

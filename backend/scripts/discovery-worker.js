@@ -1,4 +1,4 @@
-import { readDb } from '../src/config/database.js'
+import { readAuthorityDb } from '../src/config/database.js'
 import { loadPlatformDatabase, runWithPlatformDatabase } from '../src/repositories/platformDatabaseRepository.js'
 import { getRecommendations, refreshReturnDigests } from '../src/services/discoveryService.js'
 import { initializeDiscoveryInfrastructure, persistDiscoveryBatch, persistDiscoveryState, waitForDiscoveryRefresh } from '../src/services/discoveryInfrastructure.js'
@@ -11,12 +11,12 @@ async function refresh(userId, reason) {
     : getRecommendations(userId, { surface: 'discovery', limit: 50 })
   await persistDiscoveryBatch(result)
   if (process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres') await runWithPlatformDatabase(snapshot => persistDiscoveryState(snapshot), { userId })
-  else await persistDiscoveryState(readDb())
+  else await persistDiscoveryState(readAuthorityDb())
   console.log(JSON.stringify({ event: 'discovery_refresh_completed', userId, reason, recommendations: result.recommendations.length }))
 }
 
 async function refreshAll(reason) {
-  const profiles = process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres' ? (await loadPlatformDatabase()).profiles || [] : readDb().profiles || []
+  const profiles = process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres' ? (await loadPlatformDatabase()).profiles || [] : readAuthorityDb().profiles || []
   for (const profile of profiles) await refresh(profile.id, reason)
   refreshReturnDigests()
 }

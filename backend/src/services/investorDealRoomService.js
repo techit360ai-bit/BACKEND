@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { getDealRoom as getDealRoomPostgres, listDealRooms as listDealRoomsPostgres, syncDealAggregate, investorReadEnabled, investorWriteEnabled, investorFallbackEnabled, dealRoomStoreEnabled, dealRoomFallbackEnabled, applyDealRoomMutation } from '../repositories/investorDealRoomRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }

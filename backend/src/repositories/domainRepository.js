@@ -11,7 +11,7 @@
 // Only changed rows are written back. Enabled with DOMAIN_SOURCE=postgres; the
 // snapshot fallback stays in the service until the authority is deleted.
 import { withPlatformTransaction, getRecord, upsertRecord, deleteRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds, listRecordsByFieldIn } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 export function domainStoreEnabled() {
@@ -324,7 +324,7 @@ function writeCollectionsFor(options) {
 export async function runDomainRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildDomainDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -334,7 +334,7 @@ export async function applyDomainMutation(options, mutate) {
     const writeCollections = writeCollectionsFor(options)
     const originals = new Map()
     for (const name of writeCollections) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals, writeCollections)
     return result
   }, { userId: options.userId || null })

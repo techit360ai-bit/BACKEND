@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from './evidenceStorageService.js'
 import { dealRoomStoreEnabled, dealRoomFallbackEnabled, runDealRoomRead, applyDealRoomMutation } from '../repositories/investorDealRoomRepository.js'
 

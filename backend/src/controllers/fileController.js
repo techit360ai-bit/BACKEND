@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso, requireBodyString, timeAgo } from '../utils/api.js'
 import { listFiles as listFilesPostgres, createFile as createFilePostgres, deleteFile as deleteFilePostgres, contentReadEnabled, contentReadFallbackEnabled, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 

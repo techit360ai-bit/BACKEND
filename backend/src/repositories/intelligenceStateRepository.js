@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, listRecords, getRecord, listRecordsForOwner } from './platformCollectionRepository.js'
 
 const collections = [

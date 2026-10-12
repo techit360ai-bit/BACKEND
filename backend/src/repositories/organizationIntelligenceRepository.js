@@ -8,7 +8,7 @@
 // organization's own rows across the intelligence collections, its projects and
 // workspace tasks, and the member/project-owner profiles they reference. The
 // mutation path runs the existing synchronous service logic against that bundle
-// via `runDatabaseAuthority`, persists (and, where the domain keeps normalized
+// via `runBoundedDatabase`, persists (and, where the domain keeps normalized
 // Postgres projections, re-syncs) only the rows the call changed. Gated by
 // ORGANIZATION_SOURCE / ORGANIZATION_READ_SOURCE / ORGANIZATION_WRITE_SOURCE
 // (or an authoritative authorization source); the snapshot stays as the sqlite
@@ -23,7 +23,7 @@ import {
   listRecordsByFieldIn,
   listRecordsByIds,
 } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 // Collections keyed by `organizationId` and read by the intelligence domain.
@@ -139,7 +139,7 @@ async function persistChanges(client, db, originals, collections = WRITE_COLLECT
 export async function runOrganizationIntelligenceRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildOrganizationIntelligenceScope(client, options.userId, options.organizationId ?? null)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -147,7 +147,7 @@ export async function applyOrganizationIntelligenceMutation(options, mutate, aft
   return withPlatformTransaction(async client => {
     const db = await buildOrganizationIntelligenceScope(client, options.userId, options.organizationId ?? null)
     const originals = captureOriginals(db)
-    const result = await runDatabaseAuthority(db, async () => {
+    const result = await runBoundedDatabase(db, async () => {
       const value = await mutate()
       if (typeof after === 'function') await after(value)
       return value
@@ -159,7 +159,7 @@ export async function applyOrganizationIntelligenceMutation(options, mutate, aft
 
 // Scheduled maintenance. The overdue-action and due-report scans are bounded
 // (ORGANIZATION_MAINTENANCE_LIMIT rows per collection) and run the existing
-// synchronous maintenance logic against that scope via runDatabaseAuthority, so
+// synchronous maintenance logic against that scope via runBoundedDatabase, so
 // the tick no longer loads the whole-database snapshot.
 export async function runOrganizationIntelligenceMaintenanceStore(run) {
   const limit = maintenanceLimit()
@@ -168,7 +168,7 @@ export async function runOrganizationIntelligenceMaintenanceStore(run) {
     const organizationReportSchedules = (await listRecordsLimited(client, 'organizationReportSchedules', { limit })).filter(row => row.active !== false)
     const db = { organizationActions, organizationReportSchedules, organizationReports: [], notifications: [] }
     const originals = captureOriginals(db, MAINTENANCE_COLLECTIONS)
-    const result = await runDatabaseAuthority(db, async () => run())
+    const result = await runBoundedDatabase(db, async () => run())
     await persistChanges(client, db, originals, MAINTENANCE_COLLECTIONS)
     return result
   })

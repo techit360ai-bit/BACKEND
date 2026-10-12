@@ -1,6 +1,6 @@
 import { Resend } from 'resend'
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto'
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { otpStoreEnabled, otpFallbackEnabled, loadOtp, replaceOtp, deleteOtp, saveEmailVerification } from '../repositories/otpRepository.js'
 import { normalizeEmail } from '../utils/authInputs.js'
 import {

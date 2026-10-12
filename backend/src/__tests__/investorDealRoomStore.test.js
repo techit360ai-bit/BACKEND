@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runDealRoomRead: vi.fn(),
@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   lastOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/investorDealRoomRepository.js', () => ({
   dealRoomStoreEnabled: mocks.storeEnabled,
   dealRoomFallbackEnabled: mocks.fallbackEnabled,
@@ -35,8 +35,8 @@ const completion = await import('../services/investorDealRoomCompletionService.j
 const core = await import('../services/investorDealRoomService.js')
 
 function useBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runDealRoomRead.mockImplementation(async (options, read) => { mocks.lastOptions = options; return read() })
   mocks.applyDealRoomMutation.mockImplementation(async (options, mutate) => { mocks.lastOptions = options; return mutate() })
 }
@@ -87,7 +87,7 @@ describe('investor deal room row-level store (§5 cutover)', () => {
     const result = await core.getDealRoomAsync('inv1', 'd1')
     expect(result.deal.id).toBe('d1')
     expect(mocks.getDealRoomPostgres).toHaveBeenCalledWith('inv1', 'd1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('signs the NDA through the row-level mutation', async () => {

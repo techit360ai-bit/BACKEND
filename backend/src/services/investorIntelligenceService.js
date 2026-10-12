@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }

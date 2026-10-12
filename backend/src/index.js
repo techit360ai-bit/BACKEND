@@ -19,14 +19,13 @@ import { cleanupSessionsAsync } from './services/sessionService.js'
 import { runDealRoomMaintenanceAsync } from './services/investorDealRoomCompletionService.js'
 import { runOrganizationIntelligenceMaintenanceAsync } from './services/organizationIntelligenceService.js'
 import { runMaintenanceAsync as runSupportMaintenanceAsync } from './services/supportService.js'
-import { runWithPlatformDatabase } from './repositories/platformDatabaseRepository.js'
 import { initializeOrganizationCommercialProjection } from './repositories/organizationOperationsRepository.js'
 
 const PORT = process.env.PORT || 3000
-const runMaintenance = async (callback, actorId = null) => {
-  if (process.env.DB_DRIVER === 'postgres' || process.env.PLATFORM_REQUEST_AUTHORITY === 'postgres') return runWithPlatformDatabase(() => callback(), { userId: actorId })
-  return callback()
-}
+// Maintenance workers call their own repository-backed (bounded) paths; they no
+// longer load the whole-database snapshot through runWithPlatformDatabase.
+// When a domain source is not yet Postgres the worker's internal sqlite
+// fallback still runs, but it is never reached on the cutover configuration.
 
 function validateSecurityConfig() {
   if (process.env.NODE_ENV !== 'production') return
@@ -86,10 +85,10 @@ if (process.env.ORGANIZATION_DATABASE_URL || process.env.DATABASE_URL) await ini
 
 const reverificationIntervalMs = Math.max(15 * 60 * 1000, Number(process.env.REVERIFICATION_NOTIFICATION_INTERVAL_MS || 24 * 60 * 60 * 1000))
 const reverificationTimer = setInterval(() => {
-  runMaintenance(() => generateReverificationNotificationsAsync()).catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
+  generateReverificationNotificationsAsync().catch(error => { console.error(JSON.stringify({ event: 'reverification_notification_run_failed', error: error.message })) })
 }, reverificationIntervalMs)
 reverificationTimer.unref?.()
-const sessionCleanupTimer = setInterval(() => { runMaintenance(() => cleanupSessionsAsync()).catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
+const sessionCleanupTimer = setInterval(() => { cleanupSessionsAsync().catch(error => console.error(JSON.stringify({ event: 'session_cleanup_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.AUTH_CLEANUP_INTERVAL_MS || 24 * 60 * 60 * 1000)))
 sessionCleanupTimer.unref?.()
 const dealRoomMaintenanceTimer = setInterval(() => { runDealRoomMaintenanceAsync().catch(error => console.error(JSON.stringify({ event: 'deal_room_maintenance_failed', error: error.message }))) }, Math.max(15 * 60 * 1000, Number(process.env.DEAL_ROOM_MAINTENANCE_INTERVAL_MS || 60 * 60 * 1000)))
 dealRoomMaintenanceTimer.unref?.()
@@ -151,7 +150,7 @@ if (String(process.env.TRUST_IDENTITY_REFRESH_ENABLED || '').toLowerCase() === '
 if (String(process.env.TRUST_REVERIFICATION_ENABLED || '').toLowerCase() === 'true') {
   const reverificationIntervalMs = Math.max(60_000, Number(process.env.TRUST_REVERIFICATION_INTERVAL_MS || 6 * 3600_000))
   const reverificationTimer = setInterval(() => {
-    runMaintenance(() => runTrustReverificationTick()).catch(error => console.error(JSON.stringify({ event: 'trust_reverification_failed', error: error.message })))
+    runTrustReverificationTick().catch(error => console.error(JSON.stringify({ event: 'trust_reverification_failed', error: error.message })))
   }, reverificationIntervalMs)
   reverificationTimer.unref?.()
 }
@@ -161,7 +160,7 @@ if (String(process.env.TRUST_REVERIFICATION_ENABLED || '').toLowerCase() === 'tr
 if (process.env.TRUST_PROJECTION_SECRET && process.env.TRUST_PROJECTION_URL && process.env.TRUST_WRITE_SOURCE === 'postgres') {
   const trustOutboxIntervalMs = Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))
   const trustOutboxTimer = setInterval(() => {
-    runMaintenance(() => flushTrustProjectionOutboxFromRepository()).catch(error => console.error(JSON.stringify({ event: 'trust_projection_outbox_failed', error: error.message })))
+    flushTrustProjectionOutboxFromRepository().catch(error => console.error(JSON.stringify({ event: 'trust_projection_outbox_failed', error: error.message })))
   }, trustOutboxIntervalMs)
   trustOutboxTimer.unref?.()
 }

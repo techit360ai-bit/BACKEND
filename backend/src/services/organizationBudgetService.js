@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
+import { organizationBudgetEnabled, saveOrganizationBudgetRow } from '../repositories/organizationBudgetRepository.js'
 
 const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const number = value => Number.isFinite(Number(value)) ? Number(value) : 0
@@ -63,4 +64,20 @@ export function createOrganizationBudget(adminId, input = {}) {
     collection(db, 'organizationBudgets').push(budget)
     return { ok: true, budget }
   })
+}
+
+
+// Row-level (§5) wrapper — organization budget creation. The budget row is
+// written to the platform collection store instead of the whole-DB snapshot.
+// Gated by ORGANIZATION_*_SOURCE=postgres; createOrganizationBudget above stays
+// the fallback.
+export async function createOrganizationBudgetAsync(adminId, input = {}) {
+  const organizationId = typeof input.organizationId === 'string' ? input.organizationId.trim() : ''
+  const balance = number(input.balance)
+  if (!organizationId || balance <= 0) return { ok: false, error: 'organization_budget_fields_required' }
+  if (!organizationBudgetEnabled()) return createOrganizationBudget(adminId, input)
+  const now = nowIso()
+  const budget = { id: input.id || createId('org_budget'), organizationId, programId: input.programId || null, hackathonId: input.hackathonId || null, source: input.source || 'admin_grant', status: input.status || 'active', balance, reservedBalance: 0, currency: input.currency || 'credits', expiresAt: input.expiresAt || null, paymentIntentId: input.paymentIntentId || null, providerReference: input.providerReference || null, createdBy: adminId, createdAt: now, updatedAt: now }
+  await saveOrganizationBudgetRow(budget)
+  return { ok: true, budget }
 }

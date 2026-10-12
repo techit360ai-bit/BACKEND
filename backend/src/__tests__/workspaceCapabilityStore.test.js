@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   enabled: vi.fn(() => true),
   workspaceAccess: vi.fn(async () => ({ workspace: { id: 'ws1', projectId: 'p1' }, owner: true, member: null })),
   findById: vi.fn(async () => null),
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   remove: vi.fn(async () => {}),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/workspaceCapabilityRepository.js', () => ({
   workspaceCapabilityEnabled: mocks.enabled,
   workspaceCapabilityFallbackEnabled: () => true,
@@ -42,7 +42,7 @@ describe('workspace capability row-level store (§5 cutover)', () => {
     const context = await getBuildContext('u1', 'ws1')
     expect(context.workspaceId).toBe('ws1')
     expect(mocks.workspaceAccess).toHaveBeenCalledWith('ws1', 'u1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('chooses a build path row-level (profile + estimate + lifecycle)', async () => {
@@ -52,8 +52,8 @@ describe('workspace capability row-level store (§5 cutover)', () => {
     expect(mocks.save).toHaveBeenCalledWith('workspaceBuildProfiles', expect.objectContaining({ workspaceId: 'ws1', buildPath: 'mvp' }))
     expect(mocks.insert).toHaveBeenCalledWith('workspaceCostEstimates', expect.objectContaining({ workspaceId: 'ws1' }))
     expect(mocks.insert).toHaveBeenCalledWith('workspaceLifecycleEvents', expect.objectContaining({ workspaceId: 'ws1' }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('lists and creates model connections row-level', async () => {
@@ -63,7 +63,7 @@ describe('workspace capability row-level store (§5 cutover)', () => {
     expect(created.ok).toBe(true)
     expect(created.connection.maskedIdentifier).toBe('sk-a...6789')
     expect(mocks.insert).toHaveBeenCalledWith('userModelConnections', expect.objectContaining({ userId: 'u1' }))
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('binds a workspace model row-level', async () => {
@@ -71,7 +71,7 @@ describe('workspace capability row-level store (§5 cutover)', () => {
     const result = await bindWorkspaceModel('u1', 'ws1', { connectionId: 'conn1' })
     expect(result.ok).toBe(true)
     expect(mocks.insert).toHaveBeenCalledWith('workspaceModelBindings', expect.objectContaining({ connectionId: 'conn1' }))
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('reads a hackathon project entry row-level', async () => {
@@ -79,6 +79,6 @@ describe('workspace capability row-level store (§5 cutover)', () => {
     mocks.findByField.mockResolvedValue([{ id: 'entry1', hackathonId: 'h1', teamId: 'team1' }])
     const entry = await getHackathonProjectEntry('u1', 'h1', 'team1')
     expect(entry.id).toBe('entry1')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 })

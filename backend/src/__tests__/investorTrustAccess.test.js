@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { decideInvestorTrustAccess, investorTrustAccessStatus, listFounderTrustAccessRequests, requestInvestorTrustAccess } from '../services/investorTrustAccessService.js'
 
 let db
 beforeEach(() => {
   db = { projects: [{ id: 'project-1', ownerId: 'founder-1' }], investorTrustAccessRequests: [], investorTrustAccessHistory: [], notifications: [] }
-  readDb.mockReturnValue(db)
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
 })
 
 describe('investor Trust access requests', () => {

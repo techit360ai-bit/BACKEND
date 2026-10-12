@@ -1,6 +1,6 @@
 import { previewTrustSurfaceNotificationsAsync } from '../services/trustSurfaceService.js'
 import { appendTrustProof, beginProviderVerification, createDomainProofChallenge, disconnectTrustSource, publicTrustFor, reviewTrustProof, trustHistoryFor, trustOperations, trustProofsFor, verifyDomainProofChallenge } from '../services/trustAuthority.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { linkedinStoreEnabled, linkedinFallbackEnabled, consumeLinkedinOauthState, saveLinkedinConnection } from '../repositories/linkedinRepository.js'
 import { safeFetch } from '../services/outboundHttpService.js'
 import { findTrustSourceByProvider, listTrustSources } from '../config/trustSources.js'

@@ -5,11 +5,11 @@ import path from 'path'
 import {
   closeDbForTests,
   migrateSqlite,
-  readDb,
+  readAuthorityDb,
   rollbackLatestSqliteMigration,
-  updateDb,
+  updateAuthorityDb,
   validateDatabaseConfig,
-  writeDb,
+  writeAuthorityDb,
 } from '../config/database.js'
 
 const ORIGINAL_ENV = { ...process.env }
@@ -33,7 +33,7 @@ afterEach(() => {
 
 describe('database persistence adapter', () => {
   it('persists auth, profile, notification, and file metadata through SQLite restarts', () => {
-    const db = readDb()
+    const db = readAuthorityDb()
     db.users.push({
       id: 'user-1',
       email: 'alice@example.com',
@@ -68,10 +68,10 @@ describe('database persistence adapter', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
     })
 
-    writeDb(db)
+    writeAuthorityDb(db)
     closeDbForTests()
 
-    const persisted = readDb()
+    const persisted = readAuthorityDb()
     expect(persisted.users).toHaveLength(1)
     expect(persisted.profiles[0].email).toBe('alice@example.com')
     expect(persisted.notifications[0].content).toBe('Welcome')
@@ -81,7 +81,7 @@ describe('database persistence adapter', () => {
   it('supports migration apply, apply dry-run, and rollback dry-run against a disposable SQLite database', () => {
     migrateSqlite({ dbPath: process.env.SQLITE_DB_PATH, dryRun: false })
 
-    const db = readDb()
+    const db = readAuthorityDb()
     db.notifications.push({
       id: 'notif-dry-run',
       userId: 'user-1',
@@ -90,7 +90,7 @@ describe('database persistence adapter', () => {
       content: 'Persistent',
       createdAt: '2026-01-01T00:00:00.000Z',
     })
-    writeDb(db)
+    writeAuthorityDb(db)
 
     migrateSqlite({ dbPath: process.env.SQLITE_DB_PATH, dryRun: true })
     const rolledBack = rollbackLatestSqliteMigration({
@@ -99,7 +99,7 @@ describe('database persistence adapter', () => {
     })
 
     closeDbForTests()
-    const afterDryRuns = readDb()
+    const afterDryRuns = readAuthorityDb()
     expect(rolledBack.version).toBe('011_customer_support')
     expect(afterDryRuns.notifications).toHaveLength(1)
     expect(afterDryRuns.notifications[0].id).toBe('notif-dry-run')
@@ -109,7 +109,7 @@ describe('database persistence adapter', () => {
   it('preserves sequential writes under event-loop concurrency', async () => {
     await Promise.all(Array.from({ length: 5 }, (_, index) => new Promise(resolve => {
       setImmediate(() => {
-        const db = readDb()
+        const db = readAuthorityDb()
         db.notifications.push({
           id: `notif-${index}`,
           userId: 'user-1',
@@ -118,12 +118,12 @@ describe('database persistence adapter', () => {
           content: `Event ${index}`,
           createdAt: '2026-01-01T00:00:00.000Z',
         })
-        writeDb(db)
+        writeAuthorityDb(db)
         resolve()
       })
     })))
 
-    const db = readDb()
+    const db = readAuthorityDb()
     expect(db.notifications.map(n => n.id).sort()).toEqual([
       'notif-0',
       'notif-1',
@@ -133,8 +133,8 @@ describe('database persistence adapter', () => {
     ])
   })
 
-  it('applies updateDb mutations atomically and returns the mutator result', () => {
-    const result = updateDb(db => {
+  it('applies updateAuthorityDb mutations atomically and returns the mutator result', () => {
+    const result = updateAuthorityDb(db => {
       db.notifications.push({
         id: 'notif-atomic',
         userId: 'user-1',
@@ -147,11 +147,11 @@ describe('database persistence adapter', () => {
     })
 
     expect(result).toEqual({ id: 'notif-atomic' })
-    expect(readDb().notifications.map(n => n.id)).toContain('notif-atomic')
+    expect(readAuthorityDb().notifications.map(n => n.id)).toContain('notif-atomic')
   })
 
-  it('rolls back updateDb mutations when the mutator throws', () => {
-    expect(() => updateDb(db => {
+  it('rolls back updateAuthorityDb mutations when the mutator throws', () => {
+    expect(() => updateAuthorityDb(db => {
       db.notifications.push({
         id: 'notif-rolled-back',
         userId: 'user-1',
@@ -163,17 +163,17 @@ describe('database persistence adapter', () => {
       throw new Error('abort mutation')
     })).toThrow(/abort mutation/)
 
-    expect(readDb().notifications.map(n => n.id)).not.toContain('notif-rolled-back')
+    expect(readAuthorityDb().notifications.map(n => n.id)).not.toContain('notif-rolled-back')
   })
 
-  it('rejects async updateDb mutators to avoid holding transactions across awaits', () => {
-    expect(() => updateDb(async () => ({ ok: true }))).toThrow(/must be synchronous/i)
+  it('rejects async updateAuthorityDb mutators to avoid holding transactions across awaits', () => {
+    expect(() => updateAuthorityDb(async () => ({ ok: true }))).toThrow(/must be synchronous/i)
   })
 
-  it('preserves overlapping updateDb writes against the same collection', async () => {
+  it('preserves overlapping updateAuthorityDb writes against the same collection', async () => {
     await Promise.all(Array.from({ length: 5 }, (_, index) => new Promise(resolve => {
       setImmediate(() => {
-        updateDb(db => {
+        updateAuthorityDb(db => {
           db.notifications.push({
             id: `notif-update-${index}`,
             userId: 'user-1',
@@ -187,7 +187,7 @@ describe('database persistence adapter', () => {
       })
     })))
 
-    const db = readDb()
+    const db = readAuthorityDb()
     expect(db.notifications.map(n => n.id).sort()).toEqual([
       'notif-update-0',
       'notif-update-1',

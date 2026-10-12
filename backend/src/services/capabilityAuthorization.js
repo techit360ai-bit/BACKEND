@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { verifyMfaAssertion } from './mfaService.js'
 import { reserveCapabilityConsumption, settleCapabilityConsumption, reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from './capabilityConsumptionService.js'
 import { authorizationEnabled, authorizationFallbackEnabled, loadAuthorizationSources, applyScopedMutation, applyGlobalMutation, appendRow, listCapabilityPolicies } from '../repositories/authorizationRepository.js'

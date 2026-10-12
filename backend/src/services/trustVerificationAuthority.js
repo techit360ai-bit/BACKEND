@@ -7,10 +7,10 @@ import { GITHUB_OAUTH_SCOPES_TRUST } from '../config/github.js'
 import { expiryForSource } from '../config/trustSyncIntervals.js'
 import { applyScoreOverrides } from './trustScoreOverrides.js'
 
-const readAuthorityDb = (...args) => database.readDb(...args)
+const readAuthorityDb = (...args) => database.readAuthorityDb(...args)
 const updateAuthorityDb = mutator => {
-  try { if (typeof database.updateDb === 'function') return database.updateDb(mutator) } catch {}
-  const db = database.readDb()
+  try { if (typeof database.updateAuthorityDb === 'function') return database.updateAuthorityDb(mutator) } catch {}
+  const db = database.readAuthorityDb()
   const result = mutator(db)
   return result
 }

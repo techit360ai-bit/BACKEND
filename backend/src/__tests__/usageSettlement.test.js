@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 
 const SECRET = 'settlement-test-secret-at-least-32-chars'
 function makeDb() {
@@ -29,8 +29,8 @@ beforeEach(() => {
   process.env.AI_USAGE_GRANT_SERVICE_ID = 'platform-backend'
   process.env.AI_USAGE_GRANT_SERVICE_SECRET = 'grant-service-secret-at-least-32-chars'
   const db = makeDb()
-  readDb.mockReturnValue(db)
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
 })
 
 describe('usage settlement service contract', () => {
@@ -43,7 +43,7 @@ describe('usage settlement service contract', () => {
     const body = { userId: 'u1', requestId: 'router-cannot-grant', taskType: 'chat', estimatedCredits: 1 }
     const res = await request(app).post('/internal/usage-settlement/grant').set(signed(body)).send(body)
     expect(res.status).toBe(401)
-    expect(readDb().usageReservations).toHaveLength(0)
+    expect(readAuthorityDb().usageReservations).toHaveLength(0)
   })
 
   it('reserves atomically and settles idempotently', async () => {
@@ -68,8 +68,8 @@ describe('usage settlement service contract', () => {
     expect(settled.body.usageEvent.grossMargin).toBe(0)
     expect(settled.body.reservation.releasedCredits).toBe(0)
     expect(replay.body.idempotent).toBe(true)
-    expect(readDb().usageEvents).toHaveLength(1)
-    expect(readDb().creditLedger).toHaveLength(1)
+    expect(readAuthorityDb().usageEvents).toHaveLength(1)
+    expect(readAuthorityDb().creditLedger).toHaveLength(1)
   })
 
   it('rejects conflicting payloads for an existing request id', async () => {
@@ -88,7 +88,7 @@ describe('usage settlement service contract', () => {
     expect(res.status).toBe(201)
     expect(res.body.grant.token).toBeTruthy()
     expect(res.body.grant.reservationId).toBe('r-grant')
-    expect(readDb().usageReservations).toHaveLength(1)
+    expect(readAuthorityDb().usageReservations).toHaveLength(1)
   })
 
   it('rejects reservation identity mismatches and invalid funding sources', async () => {
@@ -106,8 +106,8 @@ describe('usage settlement service contract', () => {
     const mismatch = await request(app).post('/internal/usage-settlement/settle').set(signed(settleBody)).send(settleBody)
     expect(mismatch.status).toBe(409)
     expect(mismatch.body.error).toBe('reservation_execution_mismatch')
-    expect(readDb().usageEvents).toHaveLength(0)
-    expect(readDb().creditLedger).toHaveLength(0)
+    expect(readAuthorityDb().usageEvents).toHaveLength(0)
+    expect(readAuthorityDb().creditLedger).toHaveLength(0)
   })
 
   it('rejects an idempotency-key replay with different reservation terms', async () => {
@@ -117,11 +117,11 @@ describe('usage settlement service contract', () => {
     const replay = await request(app).post('/internal/usage-settlement/reserve').set(grantSigned(changed)).send(changed)
     expect(replay.status).toBe(409)
     expect(replay.body.error).toBe('request_id_reservation_conflict')
-    expect(readDb().usageReservations).toHaveLength(1)
+    expect(readAuthorityDb().usageReservations).toHaveLength(1)
   })
 
   it('keeps PAYG and capped-subscription reservations strictly separated', async () => {
-    readDb().subscriptions.push({ userId: 'u1', status: 'active', includedCredits: 10 })
+    readAuthorityDb().subscriptions.push({ userId: 'u1', status: 'active', includedCredits: 10 })
     const subscription = { userId: 'u1', requestId: 'sub-1', taskType: 'chat', estimatedCredits: 8, fundingSource: 'subscription' }
     const subscriptionRes = await request(app).post('/internal/usage-settlement/reserve').set(grantSigned(subscription)).send(subscription)
     expect(subscriptionRes.status).toBe(201)

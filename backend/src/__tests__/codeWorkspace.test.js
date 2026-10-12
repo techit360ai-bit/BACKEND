@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import crypto from 'node:crypto'
 const db = { projects: [], workspaces: [], workspaceMembers: [], workspaceConnectors: [], projectFiles: [], projectFileVersions: [], codeChangeEvents: [], codeSyncStates: [], codeRuntimeSessions: [], codeDeploymentRecords: [], codeDeploymentVerifications: [], codeBridgeGrants: [], codeBridgeSessions: [], codeExecutionRuns: [], codeExecutionStepEvents: [], codeReviewDecisions: [] }
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(() => db), updateAuthorityDb: vi.fn(mutator => mutator(db)) }))
 const service = await import('../services/codeWorkspaceService.js')
 const execution = await import('../services/codeExecutionRunService.js')
 const bridge = await import('../services/codeBridgeService.js')

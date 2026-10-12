@@ -1,7 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { getPlatformPool, upsertRecord, deleteRecord } from './platformCollectionRepository.js'
 import { recordWholeDbRead, recordWholeDbFlush } from '../services/platformAuthorityInstrumentation.js'
-import { runDatabaseAuthority, currentDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase, currentBoundedDatabase } from '../config/database.js'
 
 const CONFIG_COLLECTIONS = new Set(['tvceConfig'])
 const stable = value => JSON.stringify(value, Object.keys(value || {}).sort())
@@ -66,9 +66,9 @@ export async function runWithPlatformDatabase(callback, { userId = null, source 
   // context is required" for every background job (support maintenance,
   // session cleanup, deal-room / org-intelligence timers) that runs outside an
   // HTTP request. Flush whatever the authority store ended up holding so a
-  // writeDb() inside the job is persisted too.
-  const result = await runDatabaseAuthority(snapshot, () => callback(snapshot))
-  const after = currentDatabaseAuthority()?.snapshot || snapshot
+  // writeAuthorityDb() inside the job is persisted too.
+  const result = await runBoundedDatabase(snapshot, () => callback(snapshot))
+  const after = currentBoundedDatabase()?.snapshot || snapshot
   await flushPlatformDatabase(before, after, { userId, source })
   return result
 }

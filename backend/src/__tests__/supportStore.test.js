@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runSupportRead: vi.fn(),
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   lastWriteOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/supportRepository.js', () => ({
   supportStoreEnabled: mocks.storeEnabled,
   supportFallbackEnabled: mocks.fallbackEnabled,
@@ -24,8 +24,8 @@ vi.mock('../services/evidenceStorageService.js', () => ({ createPrivateUpload: v
 const svc = await import('../services/supportService.js')
 
 function usedBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runSupportRead.mockImplementation(async (options, read) => { mocks.lastReadOptions = options; return read() })
   mocks.applySupportMutation.mockImplementation(async (options, mutate) => { mocks.lastWriteOptions = options; return mutate() })
 }
@@ -80,6 +80,6 @@ describe('support row-level store (§5 cutover)', () => {
     const result = await svc.createCaseAsync('u1', { category: 'other', subject: 'Question', description: 'Need help.' })
     expect(result.ok).toBe(true)
     expect(mocks.applySupportMutation).not.toHaveBeenCalled()
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

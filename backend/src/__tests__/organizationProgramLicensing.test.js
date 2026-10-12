@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { evaluateOrganizationEntitlement, organizationCapacity } from '../services/organizationEntitlementService.js'
 import { evaluateEntitlement } from '../services/tvceService.js'
 import { createHackathon, getHackathon, listHackathons } from '../services/domainService.js'
@@ -7,7 +7,7 @@ import { createOrganizationBudget } from '../services/organizationBudgetService.
 import { reserveUsage, settleUsage } from '../services/usageSettlementService.js'
 import { convertHackathonTeam, hackathonOutcome } from '../services/organizationProgramService.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 
 describe('organization program licensing extension', () => {
   let db
@@ -27,8 +27,8 @@ describe('organization program licensing extension', () => {
       projects: [], workspaces: [], mentorshipRooms: [], organizationAuditEvents: [],
       subscriptions: [], walletAccounts: [], creditLedger: [], capabilityConsumptions: [], capabilityAnalytics: [], accountEntitlements: [], capabilityPolicies: [], verificationProfiles: [], trustProfiles: [], riskProfiles: [],
     }
-    readDb.mockReturnValue(db)
-    updateDb.mockImplementation(fn => fn(db))
+    readAuthorityDb.mockReturnValue(db)
+    updateAuthorityDb.mockImplementation(fn => fn(db))
   })
 
   it('gives existing organizations a free Community Host entitlement without changing user billing', () => {

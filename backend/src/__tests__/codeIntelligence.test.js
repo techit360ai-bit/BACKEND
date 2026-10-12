@@ -4,7 +4,7 @@ const db = {
   projects: [], workspaces: [], workspaceMembers: [], projectFiles: [], projectFileVersions: [],
   codeChangeEvents: [], codeSyncStates: [], workspaceModelBindings: [], userModelConnections: [],
 }
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(() => db), updateDb: vi.fn(mutator => mutator(db)) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(() => db), updateAuthorityDb: vi.fn(mutator => mutator(db)) }))
 vi.mock('../services/aiRouterClient.js', () => ({
   requestWorkspaceConversation: vi.fn(),
   computeGsisNarrative: vi.fn(async () => null),

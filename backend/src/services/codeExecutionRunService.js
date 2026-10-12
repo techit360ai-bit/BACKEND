@@ -1,7 +1,14 @@
 import crypto from 'node:crypto'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
-import { appendCodeEvent, codeWorkspaceAccess, safeCodePath } from './codeWorkspaceService.js'
+import { appendCodeEvent, appendEventRow, codeWorkspaceAccess, codeWorkspaceAccessRow, safeCodePath } from './codeWorkspaceService.js'
+import {
+  workspaceCodeEnabled,
+  loadById,
+  listByWorkspace,
+  insertRow,
+  saveRow,
+} from '../repositories/workspaceCodeRepository.js'
 
 const STAGES = ['execution_intelligence', 'mvp_builder', 'product_architect', 'code', 'test', 'debugger', 'security', 'review', 'deployment']
 const REQUIRED_READY_STAGES = ['execution_intelligence', 'product_architect', 'code', 'test', 'security', 'review']
@@ -202,6 +209,183 @@ export function applyCodeExecutionRun(userId, workspaceId, runId, body = {}) {
     run.status = 'applied'; run.appliedAt = nowIso(); run.updatedAt = run.appliedAt
     return { ok: true, run: runView(db, run), applied }
   })
+}
+
+// Row-level (§5) wrappers — code execution runs. The run/step/review state
+// machine runs against scoped rows (the run, its step events and review
+// decisions, and the workspace's files) loaded from the row-level store instead
+// of the whole-DB snapshot. Gated by WORKSPACE_CODE_*_SOURCE=postgres; on the
+// legacy configuration the synchronous functions above remain the fallback.
+const runViewOf = (run, steps = [], reviews = []) => runView({ codeExecutionStepEvents: steps, codeReviewDecisions: reviews }, run)
+
+export async function createCodeExecutionRunAsync(userId, workspaceId, body = {}) {
+  const requirement = String(body.requirement || '').trim()
+  if (!requirement) return { ok: false, status: 400, error: 'requirement_required' }
+  if (!workspaceCodeEnabled()) return createCodeExecutionRun(userId, workspaceId, body)
+  const auth = await codeWorkspaceAccessRow(userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
+  const currentFiles = (await listByWorkspace('projectFiles', workspaceId)).filter(row => !row.deleted)
+  const requestedPaths = Array.isArray(body.allowedPaths) ? body.allowedPaths : currentFiles.map(row => row.path)
+  const allowedPaths = [...new Set(requestedPaths.slice(0, 100).map(safeCodePath).filter(Boolean))]
+  const adapter = String(body.adapter || 'static').slice(0, 40)
+  const allowedCommands = [...new Set((Array.isArray(body.allowedCommands) ? body.allowedCommands : []).slice(0, 10).map(value => String(value).slice(0, 300)))]
+  const createdAt = nowIso()
+  const run = {
+    id: createId('code_run'), workspaceId, projectId: auth.workspace.projectId, actorId: userId,
+    requirement: requirement.slice(0, 10000), mode: ['suggest', 'execute', 'autonomous'].includes(body.mode) ? body.mode : 'suggest',
+    adapter, allowedPaths, allowedCommands,
+    budget: { maxFiles: Math.min(100, Math.max(1, Number(body.maxFiles || 40))), maxSteps: Math.min(20, Math.max(1, Number(body.maxSteps || 12))), timeoutMs: Math.min(1_200_000, Math.max(30_000, Number(body.timeoutMs || 600_000))) },
+    baseline: currentFiles.filter(row => allowedPaths.includes(row.path)).map(row => ({ path: row.path, version: row.version, contentHash: row.contentHash })),
+    proposedChanges: [], status: 'planned', createdAt, updatedAt: createdAt,
+  }
+  await insertRow('codeExecutionRuns', run)
+  await appendEventRow({ workspaceId, projectId: run.projectId, actorId: userId, type: 'execution_run_created', executionRunId: run.id, metadata: { mode: run.mode, allowedPaths, budget: run.budget } })
+  return { ok: true, run: runViewOf(run) }
+}
+
+export async function getCodeExecutionRunAsync(userId, workspaceId, runId) {
+  if (!workspaceCodeEnabled()) return getCodeExecutionRun(userId, workspaceId, runId)
+  if (!await codeWorkspaceAccessRow(userId, workspaceId)) return { ok: false, status: 403, error: 'workspace_access_denied' }
+  const run = await loadById('codeExecutionRuns', runId)
+  if (!run || run.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'execution_run_not_found' }
+  const [steps, reviews] = await Promise.all([listByWorkspace('codeExecutionStepEvents', workspaceId), listByWorkspace('codeReviewDecisions', workspaceId)])
+  return { ok: true, run: runViewOf(run, steps, reviews) }
+}
+
+export async function recordCodeExecutionStageAsync(userId, workspaceId, runId, body = {}) {
+  const stage = String(body.stage || '')
+  const status = String(body.status || '')
+  if (!STAGES.includes(stage) || !['started', 'completed', 'failed', 'skipped'].includes(status)) return { ok: false, status: 400, error: 'execution_stage_invalid' }
+  if (!workspaceCodeEnabled()) return recordCodeExecutionStage(userId, workspaceId, runId, body)
+  const auth = await codeWorkspaceAccessRow(userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
+  const run = await loadById('codeExecutionRuns', runId); if (!run || run.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'execution_run_not_found' }
+  const [files, allSteps, allReviews] = await Promise.all([
+    listByWorkspace('projectFiles', workspaceId),
+    listByWorkspace('codeExecutionStepEvents', workspaceId),
+    listByWorkspace('codeReviewDecisions', workspaceId),
+  ])
+  const steps = allSteps.filter(row => row.runId === runId)
+  const reviews = allReviews.filter(row => row.runId === runId)
+  const scoped = { codeExecutionStepEvents: steps, codeReviewDecisions: reviews }
+  const previous = latestSteps(scoped, runId).find(row => row.stage === stage)
+  if (steps.length >= run.budget.maxSteps) return { ok: false, status: 409, error: 'execution_step_budget_exhausted' }
+  const latest = latestSteps(scoped, runId)
+  const latestDebugger = latest.find(row => row.stage === 'debugger')
+  const latestCode = latest.find(row => row.stage === 'code')
+  const previousIndex = previous?.id ? steps.findIndex(row => row.id === previous.id) : -1
+  const repeatAllowed = stage === 'code' && latestDebugger?.status === 'completed' && steps.findIndex(row => row.id === latestDebugger.id) > previousIndex
+    || ['test', 'security'].includes(stage) && latestCode?.status === 'completed' && steps.findIndex(row => row.id === latestCode.id) > previousIndex
+  if ((previous?.status === 'completed' || previous?.status === 'skipped') && !repeatAllowed) return { ok: false, status: 409, error: 'execution_stage_already_final' }
+  if (previous?.status === 'failed' && stage === 'test' && !repeatAllowed) return { ok: false, status: 409, error: 'debugged_code_required_before_test_retry' }
+  let evidence = body.evidence && typeof body.evidence === 'object' && !Array.isArray(body.evidence) ? body.evidence : {}
+  if (stage === 'code' && status === 'completed') {
+    const changes = Array.isArray(body.changes) ? body.changes.slice(0, run.budget.maxFiles) : []
+    let normalized
+    try { normalized = changes.map(item => normalizeProposedChange({ projectFiles: files }, run, item)).filter(item => item.path && run.allowedPaths.includes(item.path) && /^[a-f0-9]{64}$/i.test(item.contentHash)) }
+    catch (error) { return { ok: false, status: 400, error: error instanceof Error ? error.message : 'execution_hunk_invalid' } }
+    if (normalized.length !== changes.length) return { ok: false, status: 400, error: 'execution_proposal_out_of_scope' }
+    run.proposedChanges = normalized
+    evidence = { ...evidence, proposedFiles: normalized.length }
+  }
+  if (stage === 'test' && status === 'completed') {
+    const sessions = await listByWorkspace('codeRuntimeSessions', workspaceId)
+    const session = sessions.find(row => row.id === body.runtimeSessionId && row.status === 'completed' && Number(row.exitCode) === 0)
+    if (!session) return { ok: false, status: 409, error: 'passing_test_evidence_required' }
+    evidence = { ...evidence, runtimeSessionId: session.id }
+  }
+  if (stage === 'security' && status === 'completed') {
+    const scan = scanCodeChanges(body.changes || [])
+    if (scan.critical > 0) return { ok: false, status: 409, error: 'critical_security_findings', scan }
+    evidence = { ...evidence, scan }
+  }
+  if (stage === 'review' && status === 'completed') {
+    const acceptedReviews = latestReviews(scoped, runId)
+    if (!run.proposedChanges.length || run.proposedChanges.some(change => !acceptedReviews.some(review => review.path === change.path && review.decision === 'accepted' && review.contentHash === change.contentHash))) return { ok: false, status: 409, error: 'accepted_review_required' }
+    evidence = { ...evidence, acceptedFiles: acceptedReviews.filter(row => row.decision === 'accepted').length }
+  }
+  const createdAt = nowIso()
+  const row = { id: createId('code_step'), runId, workspaceId, projectId: run.projectId, actorId: userId, stage, agent: String(body.agent || stage).slice(0, 100), status, summary: String(body.summary || '').slice(0, 4000), evidenceHash: hash(JSON.stringify(evidence)), evidence, createdAt }
+  await insertRow('codeExecutionStepEvents', row)
+  const updated = { ...run, updatedAt: createdAt, status: status === 'failed' ? 'failed' : 'running' }
+  await saveRow('codeExecutionRuns', updated)
+  await appendEventRow({ workspaceId, projectId: run.projectId, actorId: userId, type: `execution_stage_${status}`, executionRunId: runId, metadata: { stage, stepEventId: row.id, evidenceHash: row.evidenceHash } })
+  return { ok: true, run: runViewOf(updated, [...steps, row], reviews), step: row }
+}
+
+export async function recordCodeReviewDecisionAsync(userId, workspaceId, runId, body = {}) {
+  const path = safeCodePath(body.path); const decision = String(body.decision || '')
+  if (!path || !['accepted', 'rejected'].includes(decision) || !/^[a-f0-9]{64}$/i.test(String(body.contentHash || ''))) return { ok: false, status: 400, error: 'review_decision_invalid' }
+  if (!workspaceCodeEnabled()) return recordCodeReviewDecision(userId, workspaceId, runId, body)
+  const auth = await codeWorkspaceAccessRow(userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
+  const run = await loadById('codeExecutionRuns', runId); if (!run || run.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'execution_run_not_found' }
+  if (!run.proposedChanges.some(change => change.path === path && change.contentHash === body.contentHash)) return { ok: false, status: 409, error: 'review_content_not_proposed' }
+  const proposal = run.proposedChanges.find(change => change.path === path && change.contentHash === body.contentHash)
+  const hunks = Array.isArray(body.hunks) ? body.hunks.slice(0, 500).map(item => ({ id: String(item?.id || '').slice(0, 100), decision: item?.decision === 'accepted' ? 'accepted' : 'rejected' })) : []
+  if (proposal.hunks?.length && (hunks.length !== proposal.hunks.length || proposal.hunks.some(hunk => !hunks.some(review => review.id === hunk.id)))) return { ok: false, status: 400, error: 'review_hunks_incomplete' }
+  const row = { id: createId('code_review'), runId, workspaceId, projectId: run.projectId, reviewerId: userId, path, contentHash: body.contentHash, decision, hunks, reason: String(body.reason || '').slice(0, 2000), createdAt: nowIso() }
+  await insertRow('codeReviewDecisions', row)
+  await appendEventRow({ workspaceId, projectId: run.projectId, actorId: userId, type: `code_review_${decision}`, executionRunId: runId, path, metadata: { reviewDecisionId: row.id, contentHash: row.contentHash } })
+  return { ok: true, review: row }
+}
+
+export async function finalizeCodeExecutionRunAsync(userId, workspaceId, runId) {
+  if (!workspaceCodeEnabled()) return finalizeCodeExecutionRun(userId, workspaceId, runId)
+  const auth = await codeWorkspaceAccessRow(userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
+  const run = await loadById('codeExecutionRuns', runId); if (!run || run.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'execution_run_not_found' }
+  const [allSteps, allReviews] = await Promise.all([listByWorkspace('codeExecutionStepEvents', workspaceId), listByWorkspace('codeReviewDecisions', workspaceId)])
+  const steps = allSteps.filter(row => row.runId === runId)
+  const reviews = allReviews.filter(row => row.runId === runId)
+  const latest = latestSteps({ codeExecutionStepEvents: steps, codeReviewDecisions: reviews }, runId)
+  const missing = REQUIRED_READY_STAGES.filter(stage => latest.find(row => row.stage === stage)?.status !== 'completed')
+  if (missing.length) return { ok: false, status: 409, error: 'execution_evidence_incomplete', missing }
+  const updated = { ...run, status: 'ready_to_apply', updatedAt: nowIso() }
+  await saveRow('codeExecutionRuns', updated)
+  await appendEventRow({ workspaceId, projectId: run.projectId, actorId: userId, type: 'execution_run_ready', executionRunId: runId, metadata: { proposedFiles: run.proposedChanges.length } })
+  return { ok: true, run: runViewOf(updated, steps, reviews) }
+}
+
+export async function applyCodeExecutionRunAsync(userId, workspaceId, runId, body = {}) {
+  const changes = Array.isArray(body.changes) ? body.changes.slice(0, 100) : []
+  if (!workspaceCodeEnabled()) return applyCodeExecutionRun(userId, workspaceId, runId, body)
+  const auth = await codeWorkspaceAccessRow(userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
+  const run = await loadById('codeExecutionRuns', runId); if (!run || run.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'execution_run_not_found' }
+  if (run.status !== 'ready_to_apply') return { ok: false, status: 409, error: 'execution_run_not_ready' }
+  const [files, allSteps, allReviews] = await Promise.all([
+    listByWorkspace('projectFiles', workspaceId),
+    listByWorkspace('codeExecutionStepEvents', workspaceId),
+    listByWorkspace('codeReviewDecisions', workspaceId),
+  ])
+  const steps = allSteps.filter(row => row.runId === runId)
+  const runReviews = allReviews.filter(row => row.runId === runId)
+  const reviews = latestReviews({ codeReviewDecisions: runReviews }, runId)
+  const normalized = changes.map(item => ({ path: safeCodePath(item?.path), content: typeof item?.content === 'string' ? item.content : null, expectedVersion: Number(item?.expectedVersion || 0) }))
+  if (normalized.some(item => !item.path || (item.content !== null && Buffer.byteLength(item.content, 'utf8') > 1_000_000))) return { ok: false, status: 400, error: 'execution_change_invalid' }
+  for (const change of normalized) {
+    const proposal = run.proposedChanges.find(item => item.path === change.path)
+    const review = reviews.find(item => item.path === change.path && item.contentHash === proposal?.contentHash && item.decision === 'accepted')
+    if (!proposal || !review) return { ok: false, status: 409, error: 'execution_change_not_approved', path: change.path }
+    const current = files.find(row => row.path === change.path)
+    if (Number(current?.version || 0) !== change.expectedVersion) return { ok: false, status: 409, error: 'file_version_conflict', path: change.path }
+    const accepted = new Set(review.hunks.filter(hunk => hunk.decision === 'accepted').map(hunk => hunk.id))
+    const reviewedContent = proposal.hunks?.length ? applyLineHunks(String(current?.content || ''), proposal.hunks, accepted) : change.content
+    if (reviewedContent === null || (change.content !== null && change.content !== reviewedContent)) return { ok: false, status: 409, error: 'execution_reviewed_content_mismatch', path: change.path }
+    change.content = reviewedContent
+  }
+  const applied = []
+  for (const change of normalized) {
+    let file = files.find(row => row.path === change.path)
+    const createdAt = nowIso(); const nextVersion = Number(file?.version || 0) + 1; const contentHash = hash(change.content)
+    const isNew = !file
+    if (isNew) { file = { id: createId('project_file'), workspaceId, projectId: run.projectId, path: change.path, createdAt, createdBy: userId }; files.push(file) }
+    Object.assign(file, { content: change.content, language: languageForPath(change.path), sizeBytes: Buffer.byteLength(change.content, 'utf8'), contentHash, version: nextVersion, deleted: false, updatedAt: createdAt, updatedBy: userId })
+    if (isNew) await insertRow('projectFiles', file); else await saveRow('projectFiles', file)
+    await insertRow('projectFileVersions', { id: createId('file_version'), fileId: file.id, workspaceId, projectId: run.projectId, path: change.path, version: nextVersion, content: change.content, contentHash, actorId: userId, source: 'agent_reviewed', executionRunId: runId, createdAt })
+    await appendEventRow({ workspaceId, projectId: run.projectId, actorId: userId, type: 'execution_change_applied', executionRunId: runId, fileId: file.id, path: change.path, after: { contentHash, version: nextVersion } })
+    applied.push({ path: change.path, version: nextVersion, contentHash })
+  }
+  const appliedAt = nowIso()
+  const updated = { ...run, status: 'applied', appliedAt, updatedAt: appliedAt }
+  await saveRow('codeExecutionRuns', updated)
+  return { ok: true, run: runViewOf(updated, steps, runReviews), applied }
 }
 
 export function scanCodeChanges(changes) {

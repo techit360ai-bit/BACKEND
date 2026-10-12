@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
+  readAuthorityDb: vi.fn(() => ({})),
   authorizationEnabled: vi.fn(() => true),
   loadAuthorizationSources: vi.fn(),
   dispatchPublicTrustFor: vi.fn(),
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   evaluateEntitlementAsync: vi.fn(),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: vi.fn(fn => fn({})) }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: vi.fn(fn => fn({})) }))
 vi.mock('../repositories/authorizationRepository.js', () => ({
   authorizationEnabled: mocks.authorizationEnabled,
   loadAuthorizationSources: mocks.loadAuthorizationSources,
@@ -32,7 +32,7 @@ const ENTITLEMENT = { allowed: true, capability: 'IDEA_DIAGNOSTICS_ADVANCED', fu
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.authorizationEnabled.mockReturnValue(true)
-  mocks.readDb.mockReturnValue({})
+  mocks.readAuthorityDb.mockReturnValue({})
 })
 
 describe('recommendation matching access row-level store (§5 remaining controllers)', () => {
@@ -54,7 +54,7 @@ describe('recommendation matching access row-level store (§5 remaining controll
     expect(result).toMatchObject({ ok: true, role: 'founder', visibility: 'verified' })
     expect(result.funding).toMatchObject({ subscriptionActive: true, plan: 'pro', credits: 40, capabilityAllowed: true, fundingSource: 'subscription' })
     expect(result.verification).toMatchObject({ tier: 'Verified', status: 'verified', score: 82, verifiedSkills: 3 })
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('derives the capability from the requested role when the profile has none', async () => {
@@ -71,7 +71,7 @@ describe('recommendation matching access row-level store (§5 remaining controll
 
   it('falls back to the snapshot path when the authorization store is disabled', async () => {
     mocks.authorizationEnabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({ profiles: [{ id: 'u3', role: 'collaborator' }], subscriptions: [], walletAccounts: [], creditLedger: [] })
+    mocks.readAuthorityDb.mockReturnValue({ profiles: [{ id: 'u3', role: 'collaborator' }], subscriptions: [], walletAccounts: [], creditLedger: [] })
     mocks.legacyPublicTrustFor.mockReturnValue(TRUST)
     mocks.evaluateEntitlement.mockReturnValue(ENTITLEMENT)
 
@@ -79,18 +79,18 @@ describe('recommendation matching access row-level store (§5 remaining controll
 
     expect(result.role).toBe('collaborator')
     expect(mocks.loadAuthorizationSources).not.toHaveBeenCalled()
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 
   it('falls back to the snapshot path when the row-level read fails', async () => {
     mocks.loadAuthorizationSources.mockRejectedValue(new Error('pool offline'))
-    mocks.readDb.mockReturnValue({ profiles: [{ id: 'u4', role: 'founder' }], subscriptions: [], walletAccounts: [], creditLedger: [] })
+    mocks.readAuthorityDb.mockReturnValue({ profiles: [{ id: 'u4', role: 'founder' }], subscriptions: [], walletAccounts: [], creditLedger: [] })
     mocks.legacyPublicTrustFor.mockReturnValue(TRUST)
     mocks.evaluateEntitlement.mockReturnValue(ENTITLEMENT)
 
     const result = await svc.matchingAccessAsync('u4')
 
     expect(result.ok).toBe(true)
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

@@ -3,8 +3,8 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const SECRET = 'test_jwt_secret_do_not_use_in_production'
 const token = (id, role) => jwt.sign({ sub: id, role }, SECRET, { expiresIn: '1h' })
@@ -23,7 +23,7 @@ beforeEach(() => {
     investorWatchlists: [{ investorId: 'investor', projectId: 'project-1' }], projects: [{ id: 'project-1', title: 'Northstar', industry: 'Fintech', stage: 'Seed' }], projectAnalyses: [{ id: 'code-1', projectId: 'project-1', engine: 'CodebaseAnalysisEngine', updatedAt: new Date().toISOString(), analysis: { summary: 'Stable platform', architecture: 'Services', security: 'Reviewed' } }],
     dealRooms: [], dealRoomParticipants: [], ndaTemplates: [], ndaSignatures: [], diligenceItems: [], diligenceEvidenceLinks: [], dataRoomFolders: [], dataRoomDocuments: [], dataRoomDocumentVersions: [], dealQuestions: [], dealQuestionMessages: [], investorInternalNotes: [], icReviews: [], icApprovalHistory: [], termSheetVersions: [], dealStatusEvents: [], dealAuditEvents: [], investorQuestionnaireTemplates: [], investorQuestionnaireSubmissions: [], revenueVerifications: [], referenceRequests: [], investorPacks: [], comparableTransactions: [], notifications: [], authorizationAuditLogs: [], capabilityAnalytics: [], subscriptions: [], walletAccounts: [], creditLedger: [], usageReservations: [], userRoles: [], riskProfiles: [], trustProfiles: [],
   }
-  readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => fn(db))
+  readAuthorityDb.mockReturnValue(db); writeAuthorityDb.mockImplementation(() => {}); updateAuthorityDb.mockImplementation(fn => fn(db))
 })
 afterEach(() => { vi.restoreAllMocks() })
 

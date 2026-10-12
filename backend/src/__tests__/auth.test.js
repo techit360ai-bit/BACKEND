@@ -8,12 +8,12 @@ const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 const TEST_NODE_ENV = process.env.NODE_ENV || 'test'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
 }))
 
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const MOCK_HASH = '$2a$02$test.hash.that.matches.Test.1234567890'
 const { resendSend } = vi.hoisted(() => ({
@@ -94,12 +94,12 @@ beforeEach(() => {
   process.env.RESEND_API_KEY = 're_test_key'
   delete process.env.FROM_EMAIL
   resendSend.mockResolvedValue({ data: { id: 'email-1' }, error: null, headers: null })
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => {
-    const db = readDb()
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => {
+    const db = readAuthorityDb()
     const before = JSON.stringify(db)
     const result = mutator(db)
-    if (JSON.stringify(db) !== before) writeDb(db)
+    if (JSON.stringify(db) !== before) writeAuthorityDb(db)
     return result
   })
 })
@@ -108,7 +108,7 @@ beforeEach(() => {
 
 describe('POST /api/auth/signup', () => {
   it('returns 201 with token, user, and full profile on valid signup', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('new@example.com')],
     }))
 
@@ -128,13 +128,13 @@ describe('POST /api/auth/signup', () => {
     expect(res.body.profile.firstName).toBe('New')
     expect(res.body.profile.role).toBe('founder')
     expect(res.body.profile.isVerified).toBe(true)
-    expect(writeDb).toHaveBeenCalledOnce()
-    const written = writeDb.mock.calls[0][0]
+    expect(writeAuthorityDb).toHaveBeenCalledOnce()
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.emailVerifications[0].consumedAt).toBeTruthy()
   })
 
   it('defaults role to founder when not provided', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('no-role@example.com')],
     }))
 
@@ -151,7 +151,7 @@ describe('POST /api/auth/signup', () => {
   })
 
   it('creates Explorer accounts as the base network role', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('explorer@example.com')],
     }))
 
@@ -166,7 +166,7 @@ describe('POST /api/auth/signup', () => {
 
     expect(res.status).toBe(201)
     expect(res.body.profile.role).toBe('explorer')
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.userRoles).toEqual(expect.arrayContaining([
       expect.objectContaining({ userId: res.body.user.id, role: 'explorer', status: 'active' }),
     ]))
@@ -176,7 +176,7 @@ describe('POST /api/auth/signup', () => {
   })
 
   it('normalizes email casing and whitespace before storing the account', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('mixed@example.com')],
     }))
 
@@ -192,13 +192,13 @@ describe('POST /api/auth/signup', () => {
     expect(res.status).toBe(201)
     expect(res.body.user.email).toBe('mixed@example.com')
     expect(res.body.profile.email).toBe('mixed@example.com')
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.users[0].email).toBe('mixed@example.com')
     expect(written.profiles[0].role).toBe('investor')
   })
 
   it('rejects unsupported roles before creating an account or consuming verification', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('admin@example.com')],
     }))
 
@@ -213,11 +213,11 @@ describe('POST /api/auth/signup', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/role/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('stores optional fields as empty strings when omitted', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('opt@example.com')],
     }))
 
@@ -235,7 +235,7 @@ describe('POST /api/auth/signup', () => {
   })
 
   it('initialises credit and credibility scores to 0', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('score@example.com')],
     }))
 
@@ -254,7 +254,7 @@ describe('POST /api/auth/signup', () => {
   })
 
   it('returns 409 when email is already registered', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
 
     const res = await request(app).post('/api/auth/signup').send({
       email: 'alice@example.com',
@@ -266,11 +266,11 @@ describe('POST /api/auth/signup', () => {
 
     expect(res.status).toBe(409)
     expect(res.body.error).toMatch(/already in use/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('returns 400 when email verification proof is missing', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
 
     const res = await request(app).post('/api/auth/signup').send({
       email: 'new@example.com',
@@ -282,11 +282,11 @@ describe('POST /api/auth/signup', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/verified/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('returns 400 when email verification proof is invalid', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [makeVerification('new@example.com', 'real-token')],
     }))
 
@@ -300,11 +300,11 @@ describe('POST /api/auth/signup', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/invalid or expired/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('returns 400 when email verification proof was already consumed', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       emailVerifications: [
         { ...makeVerification('new@example.com'), consumedAt: '2026-01-01T00:00:00.000Z' },
       ],
@@ -356,7 +356,7 @@ describe('POST /api/auth/signup', () => {
 
 describe('POST /api/auth/send-otp', () => {
   it('sends an OTP email and stores the pending code only after delivery succeeds', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
 
     const res = await request(app).post('/api/auth/send-otp').send({
       email: '  OTP@EXAMPLE.COM ',
@@ -366,8 +366,8 @@ describe('POST /api/auth/send-otp', () => {
     expect(res.body.message).toMatch(/sent/i)
     expect(resendSend).toHaveBeenCalledOnce()
     expect(resendSend.mock.calls[0][0].to).toEqual(['otp@example.com'])
-    expect(writeDb).toHaveBeenCalledOnce()
-    const written = writeDb.mock.calls[0][0]
+    expect(writeAuthorityDb).toHaveBeenCalledOnce()
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.otps).toHaveLength(1)
     // The platform authority store only persists rows with a stable id; an
     // id-less OTP is dropped on flush and every verify then says "not found".
@@ -379,7 +379,7 @@ describe('POST /api/auth/send-otp', () => {
   })
 
   it('does not persist an OTP when email delivery fails', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
     resendSend.mockRejectedValue(new Error('resend offline'))
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
@@ -389,13 +389,13 @@ describe('POST /api/auth/send-otp', () => {
 
     expect(res.status).toBe(502)
     expect(res.body.error).toMatch(/failed to send/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
 
     error.mockRestore()
   })
 
   it('does not persist an OTP when Resend returns an error response', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
     resendSend.mockResolvedValue({
       data: null,
       error: { name: 'validation_error', message: 'Invalid from address' },
@@ -409,7 +409,7 @@ describe('POST /api/auth/send-otp', () => {
 
     expect(res.status).toBe(502)
     expect(res.body.error).toMatch(/failed to send/i)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
 
     error.mockRestore()
   })
@@ -417,7 +417,7 @@ describe('POST /api/auth/send-otp', () => {
   it('does not use the Resend test sender for production OTP email', async () => {
     process.env.NODE_ENV = 'production'
     process.env.FROM_EMAIL = 'TechIT <onboarding@resend.dev>'
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await request(app).post('/api/auth/send-otp').send({
@@ -426,14 +426,14 @@ describe('POST /api/auth/send-otp', () => {
 
     expect(res.status).toBe(502)
     expect(resendSend).not.toHaveBeenCalled()
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
 
     error.mockRestore()
   })
 
   it('does not persist an OTP when mail credentials are missing', async () => {
     delete process.env.RESEND_API_KEY
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await request(app).post('/api/auth/send-otp').send({
@@ -441,7 +441,7 @@ describe('POST /api/auth/send-otp', () => {
     })
 
     expect(res.status).toBe(502)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
 
     error.mockRestore()
   })
@@ -451,7 +451,7 @@ describe('POST /api/auth/send-otp', () => {
 
 describe('POST /api/auth/verify-otp', () => {
   it('returns a one-time verification token and stores only its hash', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       otps: [{
         email: 'otp@example.com',
         code: '123456',
@@ -469,7 +469,7 @@ describe('POST /api/auth/verify-otp', () => {
     expect(res.status).toBe(200)
     expect(res.body.verified).toBe(true)
     expect(res.body.verificationToken).toBeTruthy()
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.otps).toEqual([])
     expect(written.emailVerifications).toHaveLength(1)
     expect(written.emailVerifications[0].tokenHash).toBe(hashToken(res.body.verificationToken))
@@ -477,7 +477,7 @@ describe('POST /api/auth/verify-otp', () => {
   })
 
   it('normalizes email casing and whitespace before matching and storing verification proof', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       otps: [{
         email: 'otp@example.com',
         code: '123456',
@@ -493,7 +493,7 @@ describe('POST /api/auth/verify-otp', () => {
     })
 
     expect(res.status).toBe(200)
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.emailVerifications[0].email).toBe('otp@example.com')
   })
 })
@@ -504,7 +504,7 @@ describe('POST /api/auth/signin', () => {
   it('returns 200 with token, user, and profile on correct credentials', async () => {
     const user = makeUser({ passwordHash: 'hashed::CorrectPass' })
     const profile = makeProfile()
-    readDb.mockReturnValue(makeDb({ users: [user], profiles: [profile] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [user], profiles: [profile] }))
 
     const res = await request(app).post('/api/auth/signin').send({
       email: 'alice@example.com',
@@ -519,7 +519,7 @@ describe('POST /api/auth/signin', () => {
 
   it('normalizes email casing and whitespace before credential lookup', async () => {
     const user = makeUser({ passwordHash: 'hashed::CorrectPass' })
-    readDb.mockReturnValue(makeDb({ users: [user], profiles: [makeProfile()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [user], profiles: [makeProfile()] }))
 
     const res = await request(app).post('/api/auth/signin').send({
       email: '  ALICE@EXAMPLE.COM ',
@@ -532,7 +532,7 @@ describe('POST /api/auth/signin', () => {
 
   it('returns 401 on wrong password', async () => {
     const user = makeUser({ passwordHash: 'hashed::RightPassword' })
-    readDb.mockReturnValue(makeDb({ users: [user], profiles: [makeProfile()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [user], profiles: [makeProfile()] }))
 
     const res = await request(app).post('/api/auth/signin').send({
       email: 'alice@example.com',
@@ -544,7 +544,7 @@ describe('POST /api/auth/signin', () => {
   })
 
   it('returns 401 on unknown email', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
 
     const res = await request(app).post('/api/auth/signin').send({
       email: 'ghost@example.com',
@@ -565,13 +565,13 @@ describe('POST /api/auth/signin', () => {
   })
 
   it('does not reveal whether the email exists (same error for both cases)', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
     const unknownRes = await request(app).post('/api/auth/signin').send({
       email: 'unknown@example.com', password: 'any',
     })
 
     const user = makeUser({ passwordHash: 'hashed::real' })
-    readDb.mockReturnValue(makeDb({ users: [user] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [user] }))
     const wrongPwdRes = await request(app).post('/api/auth/signin').send({
       email: 'alice@example.com', password: 'wrong',
     })
@@ -587,7 +587,7 @@ describe('POST /api/auth/signin', () => {
 describe('GET /api/auth/session', () => {
   it('returns 200 with user when token is valid', async () => {
     const user = makeUser()
-    readDb.mockReturnValue(makeDb({ users: [user] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [user] }))
 
     const res = await request(app)
       .get('/api/auth/session')
@@ -619,7 +619,7 @@ describe('GET /api/auth/session', () => {
   })
 
   it('returns 401 when user no longer exists in DB', async () => {
-    readDb.mockReturnValue(makeDb({ users: [] })) // user deleted
+    readAuthorityDb.mockReturnValue(makeDb({ users: [] })) // user deleted
 
     const res = await request(app)
       .get('/api/auth/session')
@@ -628,7 +628,7 @@ describe('GET /api/auth/session', () => {
   })
 
   it('never serializes the raw bearer token back to the client', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
 
     const res = await request(app)
       .get('/api/auth/session')
@@ -644,7 +644,7 @@ describe('GET /api/auth/session', () => {
 
 describe('POST /api/auth/signout', () => {
   it('returns 200 with valid token', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
 
     const res = await request(app)
       .post('/api/auth/signout')
@@ -662,7 +662,7 @@ describe('POST /api/auth/signout', () => {
 
 describe('POST /api/auth/change-password', () => {
   it('verifies the current password and persists the replacement hash', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
       profiles: [makeProfile()],
     }))
@@ -673,12 +673,12 @@ describe('POST /api/auth/change-password', () => {
       .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
 
     expect(res.status).toBe(200)
-    expect(writeDb).toHaveBeenCalledOnce()
-    expect(writeDb.mock.calls[0][0].users[0].passwordHash).toBe('hashed::NewSecret@99')
+    expect(writeAuthorityDb).toHaveBeenCalledOnce()
+    expect(writeAuthorityDb.mock.calls[0][0].users[0].passwordHash).toBe('hashed::NewSecret@99')
   })
 
   it('rejects an incorrect current password without writing', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
       profiles: [makeProfile()],
     }))
@@ -689,7 +689,7 @@ describe('POST /api/auth/change-password', () => {
       .send({ currentPassword: 'WrongPass', newPassword: 'NewSecret@99' })
 
     expect(res.status).toBe(401)
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('requires authentication and an eight-character replacement password', async () => {
@@ -698,7 +698,7 @@ describe('POST /api/auth/change-password', () => {
       .send({ currentPassword: 'CurrentPass', newPassword: 'NewSecret@99' })
     expect(unauthenticated.status).toBe(401)
 
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser({ passwordHash: 'hashed::CurrentPass' })],
       profiles: [makeProfile()],
     }))
@@ -714,7 +714,7 @@ describe('POST /api/auth/change-password', () => {
 
 describe('Password recovery', () => {
   it('creates a reset token for an existing account without storing the raw token', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
 
     const res = await request(app).post('/api/auth/forgot-password').send({
       email: 'alice@example.com',
@@ -723,15 +723,15 @@ describe('Password recovery', () => {
     expect(res.status).toBe(200)
     expect(res.body.message).toMatch(/if an account exists/i)
     expect(res.body.resetToken).toBeTruthy()
-    expect(writeDb).toHaveBeenCalledOnce()
-    const written = writeDb.mock.calls[0][0]
+    expect(writeAuthorityDb).toHaveBeenCalledOnce()
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.passwordResets).toHaveLength(1)
     expect(written.passwordResets[0].tokenHash).toBe(hashToken(res.body.resetToken))
     expect(written.passwordResets[0].resetToken).toBeUndefined()
   })
 
   it('normalizes password reset request emails before account lookup', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
 
     const res = await request(app).post('/api/auth/forgot-password').send({
       email: '  ALICE@EXAMPLE.COM ',
@@ -739,12 +739,12 @@ describe('Password recovery', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.resetToken).toBeTruthy()
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.passwordResets[0].email).toBe('alice@example.com')
   })
 
   it('returns the same generic response for an unknown email', async () => {
-    readDb.mockReturnValue(makeDb())
+    readAuthorityDb.mockReturnValue(makeDb())
 
     const res = await request(app).post('/api/auth/forgot-password').send({
       email: 'ghost@example.com',
@@ -753,7 +753,7 @@ describe('Password recovery', () => {
     expect(res.status).toBe(200)
     expect(res.body.message).toMatch(/if an account exists/i)
     expect(res.body.resetToken).toBeUndefined()
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('does not persist a password reset token when Resend returns an error response in production', async () => {
@@ -764,7 +764,7 @@ describe('Password recovery', () => {
       error: { name: 'validation_error', message: 'Invalid from address' },
       headers: null,
     })
-    readDb.mockReturnValue(makeDb({ users: [makeUser()] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()] }))
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const res = await request(app).post('/api/auth/forgot-password').send({
@@ -774,7 +774,7 @@ describe('Password recovery', () => {
     expect(res.status).toBe(200)
     expect(res.body.message).toMatch(/if an account exists/i)
     expect(res.body.resetToken).toBeUndefined()
-    expect(writeDb).not.toHaveBeenCalled()
+    expect(writeAuthorityDb).not.toHaveBeenCalled()
 
     error.mockRestore()
   })
@@ -790,7 +790,7 @@ describe('Password recovery', () => {
       consumedAt: null,
       createdAt: '2026-01-01T00:00:00.000Z',
     }
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser()],
       passwordResets: [reset],
     }))
@@ -803,14 +803,14 @@ describe('Password recovery', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.message).toMatch(/reset successfully/i)
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.users[0].passwordHash).toBe('hashed::NewSecret@99')
     expect(written.passwordResets[0].consumedAt).toBeTruthy()
   })
 
   it('normalizes reset submission emails before token lookup', async () => {
     const resetToken = 'reset-token'
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser()],
       passwordResets: [{
         id: 'reset-1',
@@ -830,12 +830,12 @@ describe('Password recovery', () => {
     })
 
     expect(res.status).toBe(200)
-    const written = writeDb.mock.calls[0][0]
+    const written = writeAuthorityDb.mock.calls[0][0]
     expect(written.users[0].passwordHash).toBe('hashed::NewSecret@99')
   })
 
   it('rejects reused password reset tokens', async () => {
-    readDb.mockReturnValue(makeDb({
+    readAuthorityDb.mockReturnValue(makeDb({
       users: [makeUser()],
       passwordResets: [{
         id: 'reset-1',
@@ -859,7 +859,7 @@ describe('Password recovery', () => {
   })
 
   it('rejects a weak replacement password before consuming the token', async () => {
-    readDb.mockReturnValue(makeDb({ users: [makeUser()], passwordResets: [] }))
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()], passwordResets: [] }))
 
     const res = await request(app).post('/api/auth/reset-password').send({
       email: 'alice@example.com',
@@ -869,6 +869,6 @@ describe('Password recovery', () => {
 
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/at least 8 characters/i)
-    expect(updateDb).not.toHaveBeenCalled()
+    expect(updateAuthorityDb).not.toHaveBeenCalled()
   })
 })

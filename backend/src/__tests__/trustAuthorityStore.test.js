@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   trustReadEnabled: vi.fn(() => true),
   trustWriteEnabled: vi.fn(() => true),
   trustRepositoryEnabled: vi.fn(() => true),
@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   saveLinkedinOauthState: vi.fn(async () => {}),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb, runDatabaseAuthority: (_db, fn) => fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb, runBoundedDatabase: (_db, fn) => fn() }))
 vi.mock('../repositories/trustRepository.js', () => ({
   trustReadEnabled: mocks.trustReadEnabled,
   trustWriteEnabled: mocks.trustWriteEnabled,

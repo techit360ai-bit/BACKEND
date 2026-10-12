@@ -3,8 +3,8 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const token = (id, role = 'organization') => jwt.sign({ sub: id, role }, 'test_jwt_secret_do_not_use_in_production', { expiresIn: '1h' })
 let db
@@ -19,7 +19,7 @@ beforeEach(() => {
     organizationPrograms: [{ id: 'program-1', organizationId: 'org-owner', name: 'Accelerator', status: 'active', updatedAt: new Date().toISOString() }],
     organizationPartners: [], mentorshipRooms: [], workspaceTasks: [], organizationRiskSignals: [{ id: 'risk-1', organizationId: 'org-owner', severity: 'high', status: 'open', updatedAt: new Date().toISOString() }], organizationActions: [], organizationActivityEvents: [], organizationKpiDefinitions: [], organizationKpiValues: [], organizationAuditEvents: [], organizationDashboards: [], notifications: [], userRoles: [], verificationProfiles: [], trustProfiles: [], riskProfiles: [], capabilityPolicies: [], authorizationAuditLogs: [], capabilityAnalytics: [], subscriptions: [], walletAccounts: [], creditLedger: [], usageReservations: [],
   }
-  readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => fn(db))
+  readAuthorityDb.mockReturnValue(db); writeAuthorityDb.mockImplementation(() => {}); updateAuthorityDb.mockImplementation(fn => fn(db))
 })
 
 describe('Organization intelligence context and deterministic operations', () => {

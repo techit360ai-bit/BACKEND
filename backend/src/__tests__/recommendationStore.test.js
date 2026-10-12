@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runRecommendationRead: vi.fn(),
@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   lastWriteOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb, runDatabaseAuthority: (_db, fn) => fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb, runBoundedDatabase: (_db, fn) => fn() }))
 vi.mock('../repositories/recommendationRepository.js', () => ({
   recommendationStoreEnabled: mocks.storeEnabled,
   recommendationFallbackEnabled: mocks.fallbackEnabled,
@@ -46,8 +46,8 @@ vi.mock('../services/investorIntelligenceService.js', () => ({ investorIntellige
 const svc = await import('../services/recommendationIntelligenceService.js')
 
 function usedBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runRecommendationRead.mockImplementation(async (options, read) => { mocks.lastReadOptions = options; return read() })
   mocks.applyRecommendationMutation.mockImplementation(async (options, mutate) => { mocks.lastWriteOptions = options; return mutate() })
 }
@@ -98,7 +98,7 @@ describe('recommendation row-level store (§5)', () => {
   it('falls back to the snapshot path when the store is disabled', async () => {
     mocks.storeEnabled.mockReturnValue(false)
     const db = { profiles: [{ id: 'u1', role: 'collaborator' }, { id: 'u2', role: 'collaborator' }], subscriptions: [], walletAccounts: [], creditLedger: [] }
-    mocks.readDb.mockReturnValue(db)
+    mocks.readAuthorityDb.mockReturnValue(db)
     const result = await svc.collaboratorRecommendationsAsync('u1')
     expect(result.ok).toBe(true)
     expect(mocks.runRecommendationRead).not.toHaveBeenCalled()

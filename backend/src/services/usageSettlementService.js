@@ -1,10 +1,11 @@
 import { createHash } from 'crypto'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
 import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { reserveOrganizationBudget, settleOrganizationBudget } from './organizationBudgetService.js'
 import { economicsForUsage } from './unitEconomicsService.js'
+import { billingJobsRowLevelEnabled, usageSettlementHealthRowLevel } from '../repositories/billingJobsRepository.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -196,6 +197,15 @@ async function persistFinanceWrite(result) {
   if (!financeWrites() || !result?.ok) return result
   try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', error: error.message })); if (financeWriteFallback()) return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
 }
+// Row-level (§5) wrapper — usage-settlement health. Counts the usage
+// collections directly instead of loading the whole-DB snapshot. Gated by
+// FINANCE_WRITE_SOURCE/BILLING_JOBS_SOURCE=postgres; usageSettlementHealth above
+// stays the fallback.
+export async function usageSettlementHealthAsync() {
+  if (!billingJobsRowLevelEnabled()) return usageSettlementHealth()
+  return usageSettlementHealthRowLevel()
+}
+
 export async function reserveUsageAsync(facts) {
   if (facts.fundingSource === 'organization') return persistFinanceWrite(reserveUsage(facts))
   if (financePostgresEnabled()) {

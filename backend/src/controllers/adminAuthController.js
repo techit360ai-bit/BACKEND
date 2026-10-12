@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs'
 import { signJwt } from '../services/jwtKeyService.js'
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { isAdminRole, normalizeEmail } from '../utils/authInputs.js'
 import { createId, nowIso } from '../utils/api.js'
 import { getDiscoveryAnalyticsAsync, getDiscoveryConfigAsync, updateDiscoveryConfigAsync } from '../services/discoveryService.js'

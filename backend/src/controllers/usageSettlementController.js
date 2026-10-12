@@ -1,4 +1,4 @@
-import { reserveUsageAsync, settleUsageAsync, usageSettlementHealth } from '../services/usageSettlementService.js'
+import { reserveUsageAsync, settleUsageAsync, usageSettlementHealthAsync } from '../services/usageSettlementService.js'
 
 export async function usageReserve(req, res) {
   const result = await reserveUsageAsync(req.body || {})
@@ -15,6 +15,6 @@ export async function usageSettle(req, res) {
   ].includes(result.error) ? 409 : 400).json(result)
 }
 
-export function usageHealth(_req, res) {
-  return res.json(usageSettlementHealth())
+export async function usageHealth(_req, res) {
+  return res.json(await usageSettlementHealthAsync())
 }

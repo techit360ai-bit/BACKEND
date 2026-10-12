@@ -6,12 +6,12 @@ import app from '../app.js'
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
 }))
 
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 function validToken(userId = 'user-uuid-1') {
   return jwt.sign({ sub: userId }, TEST_SECRET, { expiresIn: '1h' })
@@ -64,12 +64,12 @@ const BASE_PROFILE = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => {
-    const db = readDb()
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => {
+    const db = readAuthorityDb()
     const before = JSON.stringify(db)
     const result = mutator(db)
-    if (JSON.stringify(db) !== before) writeDb(db)
+    if (JSON.stringify(db) !== before) writeAuthorityDb(db)
     return result
   })
 })
@@ -78,7 +78,7 @@ beforeEach(() => {
 
 describe('GET /api/users/me', () => {
   it('returns the full profile for an authenticated user', async () => {
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [BASE_PROFILE] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [BASE_PROFILE] })
 
     const res = await request(app)
       .get('/api/users/me')
@@ -92,7 +92,7 @@ describe('GET /api/users/me', () => {
   })
 
   it('returns all expected profile fields', async () => {
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [BASE_PROFILE] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [BASE_PROFILE] })
 
     const res = await request(app)
       .get('/api/users/me')
@@ -123,7 +123,7 @@ describe('GET /api/users/me', () => {
   })
 
   it('returns 404 when profile is missing for a valid user', async () => {
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [] })
 
     const res = await request(app)
       .get('/api/users/me')
@@ -157,7 +157,7 @@ describe('GET /api/users', () => {
       credibilityScore: 81,
       isVerified: true,
     }
-    readDb.mockReturnValue({
+    readAuthorityDb.mockReturnValue({
       users: [BASE_USER, { ...BASE_USER, id: collaborator.id, email: collaborator.email }],
       profiles: [BASE_PROFILE, collaborator],
       feedPosts: [],
@@ -214,7 +214,7 @@ describe('GET /api/users', () => {
 
   it('searches members by human name and returns deterministic messaging identity signals', async () => {
     const target = { ...BASE_PROFILE, id: 'user-uuid-2', firstName: 'Ada', lastName: 'Okafor', username: 'ada.builds', isVerified: false, credibilityScore: 64 }
-    readDb.mockReturnValue({ users: [BASE_USER, { ...BASE_USER, id: target.id }], profiles: [BASE_PROFILE, target], subscriptions: [{ id: 'sub-1', userId: target.id, status: 'active', planName: 'Pro' }], workspaceMembers: [], organizationMemberships: [], networkEdges: [] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER, { ...BASE_USER, id: target.id }], profiles: [BASE_PROFILE, target], subscriptions: [{ id: 'sub-1', userId: target.id, status: 'active', planName: 'Pro' }], workspaceMembers: [], organizationMemberships: [], networkEdges: [] })
     const res = await request(app).get('/api/users?q=ada&limit=10').set('Authorization', `Bearer ${validToken()}`)
     expect(res.status).toBe(200)
     expect(res.body.users).toHaveLength(1)
@@ -227,7 +227,7 @@ describe('POST /api/users/:id/connect', () => {
   it('persists a factual structured collaboration invitation', async () => {
     const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator', firstName: 'Live', lastName: 'Builder' }
     const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .post('/api/users/user-uuid-2/connect')
@@ -269,7 +269,7 @@ describe('POST /api/users/:id/connect', () => {
   it('sanitizes and bounds untrusted invitation fields', async () => {
     const target = { ...BASE_PROFILE, id: 'user-uuid-2', role: 'collaborator' }
     const db = { users: [BASE_USER], profiles: [BASE_PROFILE, target], notifications: [], feedPosts: [], feedComments: [] }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .post('/api/users/user-uuid-2/connect')
@@ -309,7 +309,7 @@ describe('POST /api/users/:id/connect', () => {
       networkEdges: [],
       connectionRequests: [],
     }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const sent = await request(app)
       .post('/api/users/user-uuid-2/connect')
@@ -354,7 +354,7 @@ describe('POST /api/users/:id/connect', () => {
       networkEdges: [],
       connectionRequests: [{ id: 'connreq-1', fromUserId: 'user-uuid-2', toUserId: 'user-uuid-1', status: 'pending', createdAt: '2026-01-01T00:00:00.000Z' }],
     }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const declined = await request(app)
       .post('/api/users/connections/requests/connreq-1/decline')
@@ -382,7 +382,7 @@ describe('POST /api/users/:id/connect', () => {
       ],
       connectionRequests: [],
     }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .get('/api/users/user-uuid-2')
@@ -399,7 +399,7 @@ describe('POST /api/users/:id/connect', () => {
 describe('PATCH /api/users/me', () => {
   it('updates allowed fields and returns the updated profile', async () => {
     const profile = { ...BASE_PROFILE }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -409,12 +409,12 @@ describe('PATCH /api/users/me', () => {
     expect(res.status).toBe(200)
     expect(res.body.bio).toBe('Building the future')
     expect(res.body.skills).toEqual(['React', 'Node'])
-    expect(writeDb).toHaveBeenCalledOnce()
+    expect(writeAuthorityDb).toHaveBeenCalledOnce()
   })
 
   it('updates isOnboarded flag', async () => {
     const profile = { ...BASE_PROFILE, isOnboarded: false }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -427,7 +427,7 @@ describe('PATCH /api/users/me', () => {
 
   it('silently ignores disallowed identity and authorization fields', async () => {
     const profile = { ...BASE_PROFILE }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -456,7 +456,7 @@ describe('PATCH /api/users/me', () => {
 
   it('updates the updatedAt timestamp', async () => {
     const profile = { ...BASE_PROFILE }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const before = new Date().toISOString()
     const res = await request(app)
@@ -474,7 +474,7 @@ describe('PATCH /api/users/me', () => {
 
   it('can update array fields like industries and skills', async () => {
     const profile = { ...BASE_PROFILE }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -488,7 +488,7 @@ describe('PATCH /api/users/me', () => {
 
   it('persists role-specific settings fields without allowing authorization changes', async () => {
     const profile = { ...BASE_PROFILE }
-    readDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
+    readAuthorityDb.mockReturnValue({ users: [BASE_USER], profiles: [profile] })
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -544,7 +544,7 @@ describe('GET /api/users/:id', () => {
   }
 
   it('does not disclose a verified member email address to another member', async () => {
-    readDb.mockReturnValue(makeDirectoryDb())
+    readAuthorityDb.mockReturnValue(makeDirectoryDb())
 
     const res = await request(app)
       .get('/api/users/user-uuid-2')
@@ -556,7 +556,7 @@ describe('GET /api/users/:id', () => {
   })
 
   it('still returns the owner their own email address', async () => {
-    readDb.mockReturnValue(makeDirectoryDb())
+    readAuthorityDb.mockReturnValue(makeDirectoryDb())
 
     const res = await request(app)
       .get('/api/users/user-uuid-1')

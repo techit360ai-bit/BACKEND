@@ -6,12 +6,12 @@ import app from '../app.js'
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
 }))
 
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 function validToken(userId = 'user-uuid-1', role = 'founder') {
   return jwt.sign({ sub: userId, role }, TEST_SECRET, { expiresIn: '1h' })
@@ -83,11 +83,11 @@ function makeDb(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => {
-    const db = readDb()
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => {
+    const db = readAuthorityDb()
     const result = mutator(db)
-    writeDb(db)
+    writeAuthorityDb(db)
     return result
   })
 })
@@ -100,7 +100,7 @@ describe('domain live-data endpoints', () => {
 
   it('returns empty live states instead of fake projects, equity, and wallet usage', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const token = validToken()
     const projects = await request(app).get('/api/domain/founder/projects').set('Authorization', `Bearer ${token}`)
@@ -124,7 +124,7 @@ describe('domain live-data endpoints', () => {
 
   it('persists founder projects and scopes them to the authenticated owner', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const create = await request(app)
       .post('/api/domain/founder/projects')
@@ -145,7 +145,7 @@ describe('domain live-data endpoints', () => {
 
   it('persists organization projects in an organization-owned scope', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const create = await request(app)
       .post('/api/domain/organization/projects')
@@ -215,7 +215,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .get('/api/domain/organization/cohort-health')
@@ -241,7 +241,7 @@ describe('domain live-data endpoints', () => {
 
   it('returns an empty cohort for an org with no projects', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const res = await request(app)
       .get('/api/domain/organization/cohort-health')
       .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
@@ -258,7 +258,7 @@ describe('domain live-data endpoints', () => {
         marketReadyScore: 20, updatedAt: new Date(Date.now() - 40 * 86400000).toISOString(),
       }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     // ai-router is not running in tests -> computeGsisNarrative returns null.
     const res = await request(app)
       .get('/api/domain/organization/interventions')
@@ -278,7 +278,7 @@ describe('domain live-data endpoints', () => {
         { id: 'pX', organizationId: 'user-uuid-2', title: 'Other', stage: 'growth', mrr: 9000, memberCount: 9 },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const res = await request(app)
       .get('/api/domain/organization/impact')
       .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
@@ -291,7 +291,7 @@ describe('domain live-data endpoints', () => {
     const db = makeDb({
       projects: [{ id: 'p1', organizationId: 'user-uuid-1', title: 'A', industry: 'SaaS', gsisScore: 80, mrr: 1000, marketReadyScore: 65 }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const first = await request(app)
       .post('/api/domain/organization/demo-day/publish')
       .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
@@ -310,7 +310,7 @@ describe('domain live-data endpoints', () => {
     const db = makeDb({
       projects: [{ id: 'p1', organizationId: 'user-uuid-1', title: 'A', gsisScore: 75, marketReadyScore: 60, mrr: 500, progress: 55, hasWorkspace: true }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const res = await request(app)
       .get('/api/domain/organization/demo-day/pipeline?threshold=70')
       .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organisation')}`)
@@ -328,7 +328,7 @@ describe('domain live-data endpoints', () => {
         createdAt: '2026-01-01T00:00:00.000Z',
       }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const create = await request(app)
       .post('/api/domain/endorsements')
@@ -359,7 +359,7 @@ describe('domain live-data endpoints', () => {
 
   it('rejects self-endorsements and unknown endorsement targets', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const token = validToken()
 
     const self = await request(app)
@@ -385,7 +385,7 @@ describe('domain live-data endpoints', () => {
 
   it('persists incubation intake and promotes it into a real project', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const intake = await request(app)
       .post('/api/domain/incubation/intakes')
@@ -417,7 +417,7 @@ describe('domain live-data endpoints', () => {
         createdAt: '2026-01-02T00:00:00.000Z',
       }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const provision = await request(app)
       .post('/api/domain/workspaces/provision')
@@ -442,7 +442,7 @@ describe('domain live-data endpoints', () => {
       workspaces: [{ id: 'workspace_1', ownerId: 'user-uuid-1', projectId: 'project_live', name: 'LedgerCare Workspace' }],
       workspaceConnectors: [{ id: 'connector_1', ownerId: 'user-uuid-1', workspaceId: 'workspace_1', provider: 'github' }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const invite = await request(app)
       .post('/api/domain/workspaces/workspace_1/invitations')
@@ -532,7 +532,7 @@ describe('domain live-data endpoints', () => {
         status: 'open',
       }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const taskPatch = await request(app)
       .patch('/api/domain/workspaces/workspace_1/tasks/task_1')
@@ -563,7 +563,7 @@ describe('domain live-data endpoints', () => {
 
   it('publishes an ownership-first collaboration call to selected role hubs', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .post('/api/domain/opportunities/collaboration-calls')
@@ -612,7 +612,7 @@ describe('domain live-data endpoints', () => {
 
   it('rejects an ownership-first call with no ownership proposal', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .post('/api/domain/opportunities/collaboration-calls')
@@ -635,7 +635,7 @@ describe('domain live-data endpoints', () => {
 
   it('aggregates hackathon command-center metrics from persisted team activity', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const token = validToken('user-uuid-1', 'organisation')
 
     const hack = await request(app)
@@ -686,7 +686,7 @@ describe('domain live-data endpoints', () => {
         { ...makeProfile('user-uuid-3', 'builder@example.com', 'collaborator'), firstName: 'Live', lastName: 'Builder' },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const created = await request(app)
       .post('/api/domain/hackathons')
@@ -912,7 +912,7 @@ describe('domain live-data endpoints', () => {
 
   it('persists wallet payment intents and derives pending payment counts from storage', async () => {
     const db = makeDb({ walletAccounts: [{ id: 'wallet_1', userId: 'user-uuid-1', creditBalance: 25 }] })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const intent = await request(app)
       .post('/api/domain/wallet/payment-intents')
@@ -933,7 +933,7 @@ describe('domain live-data endpoints', () => {
       creditLedger: [{ id: 'debit_1', userId: 'user-uuid-1', deltaCredits: -5, type: 'usage_settlement' }],
       usageEvents: [{ id: 'usage_1', userId: 'user-uuid-1', credits: 5, status: 'completed' }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
     expect(summary.body.creditBalance).toBe(20)
     expect(summary.body.lifetimeCreditsUsed).toBe(5)
@@ -951,7 +951,7 @@ describe('domain live-data endpoints', () => {
       subscriptions: [{ id: 'sub_1', userId: 'user-uuid-1', planId: 'plan_pro', status: 'active', currentPeriodEnd: '2030-01-01T00:00:00.000Z' }],
       billingPlans: [{ id: 'plan_pro', credits: 100 }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const summary = await request(app).get('/api/domain/wallet/summary').set('Authorization', `Bearer ${validToken()}`)
     expect(summary.body.sourceTotals).toEqual({ subscription: 4, platform_subsidy: 9 })
     expect(summary.body.deductionOrder).toEqual(['platform_subsidy', 'subscription'])
@@ -967,7 +967,7 @@ describe('domain live-data endpoints', () => {
         { id: 'usage_2', userId: 'user-uuid-1', credits: 7, status: 'completed', fundingSource: 'subscription', createdAt: now },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const res = await request(app).get('/api/domain/wallet/analytics?period=daily').set('Authorization', `Bearer ${validToken()}`)
     expect(res.status).toBe(200)
     expect(res.body.period).toBe('daily')
@@ -993,7 +993,7 @@ describe('domain live-data endpoints', () => {
         { id: 'inv_3', workspaceId: 'ws_2', collaboratorId: 'user-uuid-3', status: 'accepted', requestedRole: 'Engineer', equityProposal: 30 },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const res = await request(app).get('/api/domain/founder/equity').set('Authorization', `Bearer ${validToken()}`)
     expect(res.status).toBe(200)
     expect(res.body.ventures).toHaveLength(1)
@@ -1010,7 +1010,7 @@ describe('domain live-data endpoints', () => {
 
   it('registers file metadata and lets the owner remove it', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const token = validToken()
 
     const created = await request(app)
@@ -1035,7 +1035,7 @@ describe('domain live-data endpoints', () => {
 
   it('persists role-scoped notification preferences without overwriting another role', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     const token = validToken()
 
     await request(app)
@@ -1056,7 +1056,7 @@ describe('domain live-data endpoints', () => {
 
   it('creates a contract draft with correct shape and ownership', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const create = await request(app)
       .post('/api/domain/contracts')
@@ -1120,7 +1120,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const founderView = await request(app)
       .get('/api/domain/contracts')
@@ -1169,7 +1169,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const sign = await request(app)
       .patch('/api/domain/contracts/contract_1/sign')
@@ -1207,7 +1207,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const countersign = await request(app)
       .patch('/api/domain/contracts/contract_1/countersign')
@@ -1245,7 +1245,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     await request(app)
       .patch('/api/domain/contracts/contract_1/countersign')
@@ -1287,7 +1287,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const unauthorizedSign = await request(app)
       .patch('/api/domain/contracts/contract_1/sign')
@@ -1299,7 +1299,7 @@ describe('domain live-data endpoints', () => {
 
   it('rejects self-contract creation', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const selfContract = await request(app)
       .post('/api/domain/contracts')
@@ -1321,7 +1321,7 @@ describe('domain live-data endpoints', () => {
 
   it('rejects contract creation with unknown collaborator', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const unknownCollaborator = await request(app)
       .post('/api/domain/contracts')
@@ -1366,7 +1366,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const founderGet = await request(app)
       .get('/api/domain/contracts/contract_1')
@@ -1389,7 +1389,7 @@ describe('domain live-data endpoints', () => {
 
   it('returns empty contributions and zero scores for new collaborators', async () => {
     const db = makeDb()
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const token = validToken()
     const contributions = await request(app)
@@ -1457,7 +1457,7 @@ describe('domain live-data endpoints', () => {
         },
       ],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const contributions = await request(app)
       .get('/api/domain/collaborator/contributions')
@@ -1491,7 +1491,7 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
 
   it('does not let another founder patch a project they do not own', async () => {
     const db = makeDb({ projects: [{ id: 'proj-a', ownerId: A, title: 'Alice project', stage: 'idea' }] })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .patch('/api/domain/founder/projects/proj-a')
@@ -1504,7 +1504,7 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
 
   it('does not let another investor remove a watchlist entry they do not own', async () => {
     const db = makeDb({ investorWatchlists: [{ id: 'w-a', investorId: A, projectId: 'proj-a' }] })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .delete('/api/domain/investor/watchlist/proj-a')
@@ -1520,7 +1520,7 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
       hackathonTeams: [{ id: 'team-a', hackathonId: 'h-a', leaderId: A }],
       hackathonMembers: [{ id: 'm-a', hackathonId: 'h-a', teamId: 'team-a', userId: A }],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .get('/api/domain/hackathons/h-a/teams/team-a/status')
@@ -1536,7 +1536,7 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
       projects: [{ id: 'proj-org-a', organizationId: 'org-a', ownerId: A, title: 'Org A project' }],
       profiles: [makeProfile(A, 'alice@example.com', 'organisation'), makeProfile(B, 'bob@example.com', 'organisation')],
     })
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
 
     const res = await request(app)
       .patch('/api/domain/organization/projects/proj-org-a')

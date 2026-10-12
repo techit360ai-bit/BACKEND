@@ -8,13 +8,13 @@ const store = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   accessEnabled: vi.fn(() => true),
   programEnabled: vi.fn(() => true),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/organizationAccessRepository.js', () => ({
   organizationAccessEnabled: () => mocks.accessEnabled(),
   organizationAccessFallbackEnabled: () => true,
@@ -53,15 +53,15 @@ describe('organization program row-level store (§5 cutover)', () => {
     store.organizationSponsorshipPackages.push({ id: 'pkg-1', organizationId: 'org-1', name: 'Gold', status: 'active' })
     const result = await listSponsorshipPackagesAsync('org-user')
     expect(result.packages.map(row => row.id)).toEqual(['pkg-1'])
-    expect(mocks.readDb).not.toHaveBeenCalled()
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('creates a sponsorship package row-level', async () => {
     const result = await createSponsorshipPackageAsync('org-user', { organizationId: 'org-1', name: 'Silver', packageType: 'community' })
     expect(result.ok).toBe(true)
     expect(store.organizationSponsorshipPackages.some(row => row.name === 'Silver')).toBe(true)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('denies a package when the membership lacks program permission', async () => {
@@ -98,13 +98,13 @@ describe('organization program row-level store (§5 cutover)', () => {
   it('falls back to the snapshot when the source is sqlite', async () => {
     mocks.accessEnabled.mockReturnValue(false)
     mocks.programEnabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({
+    mocks.readAuthorityDb.mockReturnValue({
       activeContexts: [{ userId: 'org-user', organizationId: 'org-1', status: 'active' }],
       organizationMemberships: [{ organizationId: 'org-1', userId: 'org-user', role: 'program_manager', status: 'active' }],
       organizations: [{ id: 'org-1' }], projects: [], organizationSponsorshipPackages: [{ id: 'pkg-1', organizationId: 'org-1', status: 'active' }],
     })
     const result = await listSponsorshipPackagesAsync('org-user')
     expect(result.packages.map(row => row.id)).toEqual(['pkg-1'])
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

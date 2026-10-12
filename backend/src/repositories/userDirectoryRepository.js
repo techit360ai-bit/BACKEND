@@ -10,7 +10,7 @@
 // read from); the controllers keep the snapshot read as the fallback until the
 // authority is deleted.
 import { withPlatformTransaction, listRecordsByField, listRecordsByFieldIn, listRecordsByIds, upsertRecord } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
 export function userDirectoryEnabled() {
@@ -162,7 +162,7 @@ export async function applyConnectionMutation({ userId, peerId = null }, mutate)
     }
     const originals = new Map()
     for (const name of CONNECTION_WRITE_COLLECTIONS) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate(db))
+    const result = await runBoundedDatabase(db, async () => mutate(db))
     for (const name of CONNECTION_WRITE_COLLECTIONS) {
       for (const row of db[name] || []) {
         if (!row) continue

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'crypto'
 import { createId, nowIso, userName } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createMentorshipMessage as createMentorshipMessagePostgres, createFeedPost as createFeedPostPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 import { mentorshipEnabled, mentorshipFallbackEnabled, readMentorshipSources, readMentorshipInviteSource, applyMentorshipMutation } from '../repositories/mentorshipRepository.js'
 

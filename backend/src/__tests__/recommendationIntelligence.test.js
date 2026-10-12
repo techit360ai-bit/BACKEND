@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 vi.mock('../services/organizationIntelligenceService.js', () => ({ requireOrganizationPermission: vi.fn((userId, _permission, organizationId) => ({ ok: true, organizationId: organizationId || 'org-1', role: 'owner' })), organizationOverview: vi.fn(() => ({ ok: true, health: { score: 70 } })), organizationPulse: vi.fn(() => ({ activity: [] })), organizationRisks: vi.fn(() => ({ risks: [] })) }))
 vi.mock('../services/investorIntelligenceService.js', () => ({ investorIntelligenceOverview: vi.fn(() => ({ startups: [] })) }))
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { collaboratorRecommendations, founderCollaboratorRecommendations, organizationTalentRecommendations, mentorRecommendations, investorThesisRecommendations, continuousIntelligence } from '../services/recommendationIntelligenceService.js'
 
 let db
@@ -22,7 +22,7 @@ beforeEach(() => {
     ],
     executionScores: [], collaboratorScores: [], workspaceTasks: [], recommendationEvents: [], workspaceMembers: [], milestones: [], projectActivities: [], startupActivities: [], mentorshipRooms: [{ id: 'room-1', mentorId: 'mentor-1', capacity: 2 }], mentorshipMentees: [], mentorshipApplications: [], dealFlowSnapshots: [{ projectId: 'project-2', visibility: 'public', stage: 'pre-seed', executionVelocity: 75, region: 'NG' }], investments: [], investorWatchlists: [], organizationMemberships: [{ organizationId: 'org-1', userId: 'org-1', status: 'active' }], organizationRiskSignals: [], organizationActions: [], continuousIntelligenceSnapshots: [],
   }
-  readDb.mockReturnValue(db); updateDb.mockImplementation(fn => fn(db))
+  readAuthorityDb.mockReturnValue(db); updateAuthorityDb.mockImplementation(fn => fn(db))
 })
 
 describe('recommendation intelligence', () => {

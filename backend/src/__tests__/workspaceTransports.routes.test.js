@@ -5,13 +5,13 @@ import app from '../app.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 vi.mock('../services/aiRouterClient.js', async (importOriginal) => ({
   ...(await importOriginal()),
   requestWorkspaceConversation: vi.fn(),
 }))
 
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { requestWorkspaceConversation } from '../services/aiRouterClient.js'
 
 const token = (userId = 'owner') => jwt.sign({ sub: userId, role: 'founder' }, TEST_SECRET, { expiresIn: '1h' })
@@ -32,9 +32,9 @@ function makeDb() {
 beforeEach(() => {
   vi.clearAllMocks()
   const db = makeDb()
-  readDb.mockReturnValue(db)
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => { const result = mutator(db); return result })
+  readAuthorityDb.mockReturnValue(db)
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => { const result = mutator(db); return result })
 })
 
 describe('workspace agent task transport', () => {

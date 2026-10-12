@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { videoStoreEnabled, videoFallbackEnabled, runVideoRead, applyVideoMutation } from '../repositories/videoRepository.js'
 

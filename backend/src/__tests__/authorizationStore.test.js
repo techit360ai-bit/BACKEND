@@ -9,12 +9,12 @@ const store = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   enabled: vi.fn(() => true),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 
 function loadDb(userId, collections) {
   const db = { profiles: store.profiles[userId] ? [store.profiles[userId]] : [] }
@@ -87,7 +87,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     const decision = await authorizeCapabilityAsync('u1', 'mentorship.hub.view', {})
     expect(decision.allowed).toBe(true)
     expect(decision.activeRole).toBe('founder')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('derives the trust profile row-level', async () => {
@@ -95,7 +95,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     const trust = await trustProfileForAsync('u1')
     expect(trust.activeRole).toBe('founder')
     expect(trust.roles).toContain('founder')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('repairs the base context row-level', async () => {
@@ -104,7 +104,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     expect(result.contexts.some(row => row.role === 'founder')).toBe(true)
     expect(store.userRoles.some(row => row.userId === 'u1' && row.role === 'explorer')).toBe(true)
     expect(store.activeContexts.some(row => row.userId === 'u1' && row.status === 'active')).toBe(true)
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('switches the active context row-level', async () => {
@@ -114,7 +114,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(store.activeContexts.find(row => row.userId === 'u1' && row.status === 'active').role).toBe('founder')
     expect(store.contextHistory).toHaveLength(1)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('activates a role row-level (profile + userRole + trust)', async () => {
@@ -124,7 +124,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     expect(store.userRoles.some(row => row.userId === 'u1' && row.role === 'investor' && row.status === 'active')).toBe(true)
     expect(store.profiles.u1.secondaryRoles).toContain('investor')
     expect(store.trustProfiles.some(row => row.userId === 'u1')).toBe(true)
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('switches the active role row-level', async () => {
@@ -133,7 +133,7 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(store.profiles.u1.activeRole).toBe('founder')
     expect(store.verificationAuditLogs.some(row => row.userId === 'u1' && row.action === 'active_role_switched')).toBe(true)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('activates and deactivates a role assignment row-level', async () => {
@@ -144,21 +144,21 @@ describe('authorization / role-context row-level store (§5 cutover)', () => {
     const deactivated = await deactivateRoleAssignmentAsync('u1', 'collaborator')
     expect(deactivated.ok).toBe(true)
     expect(store.userRoles.find(row => row.userId === 'u1' && row.role === 'collaborator').status).toBe('revoked')
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('resolves capability policies row-level', async () => {
     store.capabilityPolicies = [{ id: 'c1', capability: 'mentorship.hub.view', policy: { assurance: 'PROFILED' }, active: true }]
     const policies = await capabilityPoliciesForAdmin()
     expect(policies.find(row => row.capability === 'mentorship.hub.view').policy.assurance).toBe('PROFILED')
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('falls back to the snapshot when the authorization source is sqlite', async () => {
     mocks.enabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({ profiles: [{ id: 'u1', role: 'founder', isOnboarded: true }], userRoles: [], trustProfiles: [], verificationProfiles: [], riskProfiles: [] })
+    mocks.readAuthorityDb.mockReturnValue({ profiles: [{ id: 'u1', role: 'founder', isOnboarded: true }], userRoles: [], trustProfiles: [], verificationProfiles: [], riskProfiles: [] })
     const trust = await trustProfileForAsync('u1')
     expect(trust.activeRole).toBe('founder')
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

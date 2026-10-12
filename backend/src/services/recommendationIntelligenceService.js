@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 import { requireOrganizationPermission, organizationOverview, organizationPulse, organizationRisks, requireOrganizationPermissionAsync, organizationOverviewAsync, organizationPulseAsync, organizationRisksAsync } from './organizationIntelligenceService.js'
 import { investorIntelligenceOverview, investorIntelligenceOverviewFrom } from './investorIntelligenceService.js'

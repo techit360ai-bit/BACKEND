@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'

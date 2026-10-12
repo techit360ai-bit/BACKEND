@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
 import { signJwt, verifyJwt } from './jwtKeyService.js'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
+import { identitySecurityEnabled, listIdentitySecurityForOwner, saveIdentitySecurityRow } from '../repositories/identitySecurityRepository.js'
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 const issuer = encodeURIComponent(process.env.MFA_ISSUER || 'TechIT Network')
@@ -58,3 +59,41 @@ export function verifyMfaAssertion(userId, assertion) {
   try { const claims = verifyJwt(assertion); return claims.sub === userId && claims.purpose === 'mfa' } catch { return false }
 }
 export function mfaStatus(userId) { const profile = (readAuthorityDb().mfaProfiles || []).find(row => row.userId === userId); return { enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null } }
+
+// Row-level (§5) wrappers — MFA. The profile row is read/written through the
+// identity-security store instead of the whole-DB snapshot. Gated by
+// IDENTITY_SECURITY_*_SOURCE=postgres; the synchronous functions above remain
+// the fallback.
+const otpauthUrl = (secret, email) => `otpauth://totp/${issuer}:${encodeURIComponent(email)}?secret=${secret}&issuer=${issuer}&digits=6&period=30`
+const codeMatches = (profile, normalizedCode) => {
+  let valid = false
+  for (const skew of [-30000, 0, 30000]) valid ||= crypto.timingSafeEqual(Buffer.from(totp(decrypt(profile.encryptedSecret), Date.now() + skew)), Buffer.from(normalizedCode))
+  return valid
+}
+
+export async function beginMfaEnrollmentAsync(userId, email) {
+  if (!identitySecurityEnabled()) return beginMfaEnrollment(userId, email)
+  const existing = (await listIdentitySecurityForOwner('mfaProfiles', userId, ['userId'])).find(row => row.userId === userId)
+  const secret = base32(crypto.randomBytes(20))
+  const now = nowIso()
+  await saveIdentitySecurityRow('mfaProfiles', { id: existing?.id || createId('mfa'), userId, encryptedSecret: encrypt(secret), enabled: false, createdAt: existing?.createdAt || now, updatedAt: now })
+  return { ok: true, secret, otpauthUrl: otpauthUrl(secret, email) }
+}
+
+export async function verifyMfaAsync(userId, code, enable = false) {
+  if (!identitySecurityEnabled()) return verifyMfa(userId, code, enable)
+  const profile = (await listIdentitySecurityForOwner('mfaProfiles', userId, ['userId'])).find(row => row.userId === userId)
+  if (!profile) return { ok: false, error: 'mfa_not_enrolled' }
+  const normalizedCode = String(code || '').replace(/\D/g, '')
+  if (normalizedCode.length !== 6) return { ok: false, error: 'invalid_mfa_code' }
+  if (!codeMatches(profile, normalizedCode)) return { ok: false, error: 'invalid_mfa_code' }
+  if (enable) await saveIdentitySecurityRow('mfaProfiles', { ...profile, enabled: true, verifiedAt: nowIso(), updatedAt: nowIso() })
+  const token = signJwt({ sub: userId, purpose: 'mfa', amr: ['pwd', 'otp'] }, { expiresIn: '10m' })
+  return { ok: true, enabled: enable ? true : Boolean(profile.enabled), assertion: token, expiresIn: 600 }
+}
+
+export async function mfaStatusAsync(userId) {
+  if (!identitySecurityEnabled()) return mfaStatus(userId)
+  const profile = (await listIdentitySecurityForOwner('mfaProfiles', userId, ['userId'])).find(row => row.userId === userId)
+  return { enabled: Boolean(profile?.enabled), verifiedAt: profile?.verifiedAt || null }
+}

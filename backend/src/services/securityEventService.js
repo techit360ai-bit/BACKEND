@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { insertSecurityEvent, listRecentSecurityEvents, securityEventStoreEnabled } from '../repositories/securityEventRepository.js'
 
 export function recordSecurityEvent(event = {}) {
@@ -15,5 +15,5 @@ export function recordSecurityEvent(event = {}) {
 
 export async function listSecurityEvents(limit = 100) {
   if (securityEventStoreEnabled()) return listRecentSecurityEvents(limit)
-  try { const rows = readDb().securityEvents || []; return rows.slice(-Math.max(1, Math.min(1000, Number(limit) || 100))).reverse() } catch { return [] }
+  try { const rows = readAuthorityDb().securityEvents || []; return rows.slice(-Math.max(1, Math.min(1000, Number(limit) || 100))).reverse() } catch { return [] }
 }

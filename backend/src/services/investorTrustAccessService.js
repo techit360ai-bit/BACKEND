@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
 import { createId, nowIso } from '../utils/api.js'
 

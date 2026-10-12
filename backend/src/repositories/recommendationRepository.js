@@ -9,7 +9,7 @@
 // whole snapshot. Gated by INTELLIGENCE_SOURCE=postgres; the snapshot path
 // stays as the fallback until the authority is deleted.
 import { withPlatformTransaction, listRecordsByIds, listRecordsLimited, listRecordsByFieldIn, listRecordsForOwner, upsertRecord, deleteRecord } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 
 export function recommendationStoreEnabled() {
   return process.env.INTELLIGENCE_SOURCE === 'postgres' || process.env.INTELLIGENCE_WRITE_SOURCE === 'postgres' || process.env.INTELLIGENCE_READ_SOURCE === 'postgres'
@@ -119,7 +119,7 @@ async function persistChanges(client, db, originals, collections) {
 export async function runRecommendationRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildRecommendationDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -129,7 +129,7 @@ export async function applyRecommendationMutation(options, mutate) {
     const collections = writeCollections()
     const originals = new Map()
     for (const name of collections) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals, collections)
     return result
   }, { userId: options.userId || null })

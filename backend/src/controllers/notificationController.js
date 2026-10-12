@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, timeAgo, userName } from '../utils/api.js'
 import { recordActivityInDb, noteUserActivityAsync } from '../services/discoveryService.js'
 import { listProfilesByIds } from '../repositories/identityRepository.js'

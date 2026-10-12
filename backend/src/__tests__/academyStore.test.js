@@ -8,12 +8,12 @@ const store = vi.hoisted(() => ({
 }))
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(),
   enabled: vi.fn(() => true),
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/academyRepository.js', () => ({
   academyEnabled: () => mocks.enabled(),
   academyFallbackEnabled: () => true,
@@ -34,7 +34,7 @@ describe('academy row-level store (§5 cutover)', () => {
     store.projects.push({ id: 'p1', ownerId: 'u1', title: 'Founder venture', stage: 'idea' }, { id: 'p2', ownerId: 'u2', title: 'Someone else', stage: 'mvp' })
     const result = await academyProjectsAsync('u1', 'founder')
     expect(result.projects.map(row => row.id)).toEqual(['p1'])
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('generates a curriculum row-level', async () => {
@@ -43,7 +43,7 @@ describe('academy row-level store (§5 cutover)', () => {
     expect(result.ok).toBe(true)
     expect(store.academyCurricula).toHaveLength(1)
     expect(store.academyModules.length).toBeGreaterThan(0)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('starts a module and records progress row-level', async () => {
@@ -53,7 +53,7 @@ describe('academy row-level store (§5 cutover)', () => {
     const started = await startAcademyModuleAsync('u1', curriculum.id, unlockedModule.id)
     expect(started.ok).toBe(true)
     expect(store.academyProgress.some(row => row.moduleId === unlockedModule.id)).toBe(true)
-    expect(mocks.updateDb).not.toHaveBeenCalled()
+    expect(mocks.updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('saves a reflection row-level', async () => {
@@ -70,14 +70,14 @@ describe('academy row-level store (§5 cutover)', () => {
     store.academyBadges.push({ id: 'b1', userId: 'u1', badgeId: 'founder-project-certified' })
     const result = await academyBadgesAsync('u1')
     expect(result.badges.map(row => row.id)).toEqual(['b1'])
-    expect(mocks.readDb).not.toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('falls back to the snapshot when the source is sqlite', async () => {
     mocks.enabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({ projects: [{ id: 'p1', ownerId: 'u1', title: 'Snapshot venture', stage: 'idea' }] })
+    mocks.readAuthorityDb.mockReturnValue({ projects: [{ id: 'p1', ownerId: 'u1', title: 'Snapshot venture', stage: 'idea' }] })
     const result = await academyProjectsAsync('u1', 'founder')
     expect(result.projects.map(row => row.id)).toEqual(['p1'])
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })

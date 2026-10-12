@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import {
   workspaceCodeEnabled,
@@ -43,7 +43,7 @@ export function codeWorkspaceAccess(db, userId, workspaceId, write = false) {
 
 // Row-level access resolution (§5). Mirrors codeWorkspaceAccess against scoped
 // queries instead of the whole-database snapshot.
-async function codeWorkspaceAccessRow(userId, workspaceId, write = false) {
+export async function codeWorkspaceAccessRow(userId, workspaceId, write = false) {
   const workspace = await loadWorkspace(workspaceId)
   if (!workspace) return null
   if (workspace.ownerId === userId) return { workspace, level: 'owner' }
@@ -77,7 +77,7 @@ export function appendCodeEvent(db, input) {
 }
 
 // Row-level event append: reads only this workspace's event chain.
-async function appendEventRow(input) {
+export async function appendEventRow(input) {
   const events = await listByWorkspace('codeChangeEvents', input.workspaceId)
   const previous = [...events].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0)).at(-1)?.eventHash || 'GENESIS'
   const createdAt = nowIso(); const body = { ...input, createdAt }; const eventHash = sha(`${previous}|${JSON.stringify(body)}`)

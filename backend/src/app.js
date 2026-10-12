@@ -32,7 +32,7 @@ import tvceRoutes from './routes/tvce.js'
 import billingWebhookRoutes from './routes/billingWebhooks.js'
 import distributionRoutes from './routes/distribution.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
-import { readDb as readAuthorityDb } from './config/database.js'
+import { readAuthorityDb } from './config/database.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import {
@@ -43,7 +43,6 @@ import {
   EXPECTED_PRODUCTION_ORIGIN,
   isProdLike,
 } from './config/runtimeConfig.js'
-import { postgresAuthority } from './middlewares/postgresAuthority.js'
 import { requireInternalMetricsAuth } from './middlewares/internalMetricsAuth.js'
 import { platformAuthorityMetrics } from './controllers/platformMetricsController.js'
 import { csrfProtection } from './middlewares/csrf.js'
@@ -142,9 +141,9 @@ app.use(csrfProtection)
 // credential, OTP, authorization, and other sensitive operations.
 app.use(globalRateLimit())
 
-// Liveness + readiness. Mounted before postgresAuthority/CSRF so probes never
-// load a full DB snapshot; the global limiter already exempts these paths. The
-// deep config check doubles as the codebase-level contract for AWS deploys.
+// Liveness + readiness. Mounted early (before CSRF) so probes never do extra
+// work; the global limiter already exempts these paths. The deep config check
+// doubles as the codebase-level contract for AWS deploys.
 app.get('/health', (_req, res) => res.json({ status: 'ok', ...buildInfo() }))
 
 app.get('/ready', (_req, res) => {
@@ -195,17 +194,11 @@ app.get('/ready', (_req, res) => {
 })
 
 // §5 scaling gate: query-instrumentation evidence that the request path does no
-// whole-database reads. Mounted BEFORE postgresAuthority so that scraping it can
-// never itself load a snapshot (which would make the gate self-defeating) and it
-// stays scrapeable even when the snapshot authority is eventually deleted.
+// whole-database reads. Kept scrapeable without loading a snapshot.
 app.get('/internal/metrics/platform-authority', requireInternalMetricsAuth, platformAuthorityMetrics)
 
-// When enabled, legacy synchronous services execute against a PostgreSQL
-// snapshot and their mutations are flushed as versioned records. This bridge
-// keeps every request path on the same authority while domain repositories are
-// converted incrementally. §5.3 step 3 deletes it once every handler reads
-// row-level (the eager `readDb()` sites listed in the plan's open item).
-app.use(postgresAuthority)
+// §5.3 step 3: the whole-DB snapshot authority middleware is removed — every
+// request path resolves its data row-level through the domain repositories.
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))
 app.use('/api/admin', adminRoutes)

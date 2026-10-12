@@ -2,7 +2,7 @@
 //
 // The grant read path already travels on the scoped finance snapshot
 // (`loadFinanceSnapshotPostgres` includes workspaceTeamEntitlements); this
-// repository removes the write-side whole-DB `updateDb` by validating workspace
+// repository removes the write-side whole-DB `updateAuthorityDb` by validating workspace
 // ownership/membership through the workspace repository and upserting the grant
 // row-level. Enabled with FINANCE_WRITE_SOURCE=postgres (or the explicit
 // WORKSPACE_TEAM_WRITE_SOURCE).

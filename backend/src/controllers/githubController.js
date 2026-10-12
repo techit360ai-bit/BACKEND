@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto'
-import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, writeAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { addVerifiedSkill, appendTrustProof } from '../services/trustAuthority.js'
 import { GITHUB_OAUTH_SCOPES_CONNECT, hasScopes, parseGrantedScopes } from '../config/github.js'

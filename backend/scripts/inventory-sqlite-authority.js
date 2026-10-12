@@ -11,7 +11,7 @@ async function walk(dir) {
     if (entry.isDirectory()) await walk(full)
     else if (entry.name.endsWith('.js') && !full.includes(`${path.sep}__tests__${path.sep}`)) {
       const text = await fs.readFile(full, 'utf8')
-      const matches = [...text.matchAll(/\b(readDb|updateDb|writeDb)\s*\(/g)]
+      const matches = [...text.matchAll(/\b(readAuthorityDb|updateAuthorityDb|writeAuthorityDb)\s*\(/g)]
       if (matches.length) {
         const relative = path.relative(root, full)
         const nonRequest = relative.startsWith('repositories/') || relative.startsWith('services/') && (/PostgresProjection|migrationOutboxService/.test(relative))

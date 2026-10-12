@@ -13,7 +13,7 @@ import { trustReverificationDue } from './trustReverificationService.js'
 import { trustSloConfig } from '../config/trustSlo.js'
 import * as database from '../config/database.js'
 
-const readDb = () => database.readDb()
+const readAuthorityDb = () => database.readAuthorityDb()
 
 async function safely(loader) {
   try {
@@ -30,7 +30,7 @@ async function outboxDepth() {
     const repo = await import('../repositories/trustRepository.js')
     return { value: await repo.countPendingOutbox(), source: 'postgres' }
   }
-  const db = readDb()
+  const db = readAuthorityDb()
   return { value: rows(db, 'trustProjectionOutbox').filter(row => !row.deliveredAt).length, source: 'sqlite' }
 }
 
@@ -39,7 +39,7 @@ async function expiredSourceCount() {
     const repo = await import('../repositories/trustRepository.js')
     return { value: await repo.countExpiredProofs(), source: 'postgres' }
   }
-  const db = readDb()
+  const db = readAuthorityDb()
   return { value: rows(db, 'trustVerificationProofs').filter(row => row.status === 'expired').length, source: 'sqlite' }
 }
 
@@ -48,7 +48,7 @@ async function anomalyWindow(sinceHours) {
     const repo = await import('../repositories/trustRepository.js')
     return { ...(await repo.anomalyStats({ sinceHours })), source: 'postgres' }
   }
-  const db = readDb()
+  const db = readAuthorityDb()
   const since = Date.now() - sinceHours * 3600 * 1000
   const events = rows(db, 'trustAnomalyEvents').filter(row => new Date(row.createdAt || row.created_at || 0).getTime() >= since)
   const bySeverity = {}

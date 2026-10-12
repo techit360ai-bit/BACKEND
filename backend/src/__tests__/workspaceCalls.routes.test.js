@@ -4,10 +4,10 @@ import jwt from 'jsonwebtoken'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 
 import app from '../app.js'
-import { readDb, updateDb, writeDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const token = (userId = 'owner', role = 'founder') => jwt.sign({ sub: userId, role }, TEST_SECRET, { expiresIn: '1h' })
 
@@ -30,9 +30,9 @@ function makeDb() {
 beforeEach(() => {
   vi.clearAllMocks()
   const db = makeDb()
-  readDb.mockReturnValue(db)
-  writeDb.mockImplementation(() => {})
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  writeAuthorityDb.mockImplementation(() => {})
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
 })
 
 afterEach(() => {

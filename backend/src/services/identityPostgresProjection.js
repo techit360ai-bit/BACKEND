@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises'
-import { loadAuthoritySnapshot, currentDatabaseAuthority, runDatabaseAuthority, currentDriver } from '../config/database.js'
+import { loadAuthoritySnapshot, currentBoundedDatabase, runBoundedDatabase, currentDriver } from '../config/database.js'
 import { pendingMigrationEvents, markMigrationEvent } from './migrationOutboxService.js'
 import { getPlatformPool, hasPlatformDatabaseUrl, closePlatformPool } from '../repositories/platformCollectionRepository.js'
 
@@ -90,9 +90,9 @@ export async function syncMigrationOutbox() {
   // This sync both reads and marks events on the authority store; outside a
   // request under postgres there is no snapshot, so seed one (post-cutover the
   // legacy outbox is empty, making this a no-op).
-  if (!currentDatabaseAuthority() && currentDriver() === 'postgres') {
+  if (!currentBoundedDatabase() && currentDriver() === 'postgres') {
     const snapshot = await loadAuthoritySnapshot()
-    return runDatabaseAuthority(snapshot, () => syncMigrationOutbox())
+    return runBoundedDatabase(snapshot, () => syncMigrationOutbox())
   }
   const events = pendingMigrationEvents({ limit: Number(process.env.MIGRATION_OUTBOX_BATCH_SIZE || 100) })
   if (!events.length) return { enabled: true, processed: 0 }

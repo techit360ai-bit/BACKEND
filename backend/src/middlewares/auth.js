@@ -1,5 +1,5 @@
 import { verifyJwt } from '../services/jwtKeyService.js'
-import { readDb as readAuthorityDb } from '../config/database.js'
+import { readAuthorityDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
 import { accountEntitlementAsync } from '../services/tvceService.js'

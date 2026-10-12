@@ -1,5 +1,5 @@
 import { createId, nowIso, userName } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { domainStoreEnabled, domainFallbackEnabled, runDomainRead, applyDomainMutation } from '../repositories/domainRepository.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'

@@ -4,8 +4,8 @@ const db = {
   workspaces: [], workspaceMembers: [], workspaceTasks: [], workspaceConnectors: [], connectorCredentials: [],
 }
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(() => db),
-  updateDb: vi.fn(mutator => mutator(db)),
+  readAuthorityDb: vi.fn(() => db),
+  updateAuthorityDb: vi.fn(mutator => mutator(db)),
 }))
 vi.mock('../services/aiRouterClient.js', () => ({
   requestWorkspaceConversation: vi.fn(),

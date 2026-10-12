@@ -6,12 +6,12 @@ import app from '../app.js'
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(),
-  writeDb: vi.fn(),
-  updateDb: vi.fn(),
+  readAuthorityDb: vi.fn(),
+  writeAuthorityDb: vi.fn(),
+  updateAuthorityDb: vi.fn(),
 }))
 
-import { readDb, updateDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 
 function token(claims = {}) {
   return jwt.sign({ sub: 'user-1', ...claims }, TEST_SECRET, { expiresIn: '1h' })
@@ -19,11 +19,11 @@ function token(claims = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  readDb.mockReturnValue({
+  readAuthorityDb.mockReturnValue({
     users: [{ id: 'user-1', email: 'alice@example.com' }],
     profiles: [{ id: 'user-1', email: 'alice@example.com', role: 'founder' }],
   })
-  updateDb.mockImplementation(mutator => mutator(readDb()))
+  updateAuthorityDb.mockImplementation(mutator => mutator(readAuthorityDb()))
 })
 
 afterEach(() => {
@@ -114,7 +114,7 @@ describe('security and observability gates', () => {
   })
 
   it('rejects a normal user token carrying forged admin claims on admin routes', async () => {
-    readDb.mockReturnValue({
+    readAuthorityDb.mockReturnValue({
       users: [{ id: 'user-1', email: 'alice@example.com' }],
       profiles: [{ id: 'user-1', role: 'founder' }],
       adminUsers: [],
@@ -134,7 +134,7 @@ describe('security and observability gates', () => {
       users: [], profiles: [],
       adminUsers: [{ id: 'admin-1', email: 'admin@example.com', role: 'super_admin', active: true, permissions: ['all'] }],
     }
-    readDb.mockReturnValue(db)
+    readAuthorityDb.mockReturnValue(db)
     process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET = 'admin-telemetry-test-secret-at-least-32-characters'
     process.env.ADMIN_AI_ROUTER_TELEMETRY_SERVICE_ID = 'platform-backend'
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ counters: { provider_attempts: 2 } }) })
@@ -154,7 +154,7 @@ describe('security and observability gates', () => {
 
   it('returns and logs the same request id for unhandled errors', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    readDb.mockImplementation(() => {
+    readAuthorityDb.mockImplementation(() => {
       throw new Error('database unavailable')
     })
 

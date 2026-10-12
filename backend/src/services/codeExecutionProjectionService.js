@@ -1,6 +1,7 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import crypto from 'node:crypto'
+import { workspaceCodeEnabled, loadById, listByField, listByWorkspace, insertRow } from '../repositories/workspaceCodeRepository.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const normalizeRepo = value => String(value || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
@@ -82,4 +83,39 @@ export function reconcileGithubPush(headers = {}, body = {}, rawBody = '') {
     }
     return { ok: true, recorded }
   })
+}
+
+// Row-level (§5) wrapper — GitHub push reconciliation. The webhook resolves the
+// connected workspaces and existing contributions from scoped queries and
+// inserts the projection rows directly, instead of loading the whole-DB
+// snapshot. Gated by WORKSPACE_CODE_*_SOURCE=postgres; the synchronous
+// reconcileGithubPush above stays the fallback.
+export async function reconcileGithubPushAsync(headers = {}, body = {}, rawBody = '') {
+  const secret = process.env.GITHUB_WEBHOOK_SECRET || ''
+  if (!secret) return { ok: false, status: 503, error: 'github_webhook_not_configured' }
+  const raw = rawBody || (typeof body === 'string' ? body : JSON.stringify(body))
+  const received = String(headers['x-hub-signature-256'] || headers['X-Hub-Signature-256'] || '')
+  const expected = `sha256=${crypto.createHmac('sha256', secret).update(raw).digest('hex')}`
+  if (!received || received.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(received), Buffer.from(expected))) return { ok: false, status: 401, error: 'github_signature_invalid' }
+  if (!workspaceCodeEnabled()) return reconcileGithubPush(headers, body, rawBody)
+  const payload = typeof body === 'string' ? JSON.parse(body) : body
+  const repo = normalizeRepo(payload?.repository?.full_name); const branch = String(payload?.ref || '').replace('refs/heads/', '')
+  const commits = Array.isArray(payload?.commits) ? payload.commits.slice(0, 100) : []
+  const connectors = (await listByField('workspaceConnectors', 'status', 'connected'))
+    .filter(row => isGithubConnector(row) && (row.resources || []).some(resource => normalizeRepo(resource) === repo))
+  let recorded = 0
+  for (const connector of connectors) {
+    const workspace = await loadById('workspaces', connector.workspaceId); if (!workspace?.projectId) continue
+    const existing = await listByWorkspace('contributions', workspace.id)
+    for (const commit of commits) {
+      const commitSha = String(commit.id || ''); if (!commitSha || existing.some(row => row.projectId === workspace.projectId && row.commitSha === commitSha)) continue
+      const createdAt = commit.timestamp || nowIso(); const actorId = String(commit.author?.username || commit.author?.email || payload.pusher?.name || 'github-external')
+      await insertRow('contributions', { id: createId('contribution'), collaboratorId: null, userId: null, externalActor: actorId, projectId: workspace.projectId, workspaceId: workspace.id, kind: 'code_commit', source: 'github_webhook', repo, branch, commitSha, commitUrl: String(commit.url || ''), message: String(commit.message || '').slice(0, 500), filesChanged: [...(commit.added || []), ...(commit.modified || []), ...(commit.removed || [])].length, verified: true, status: 'verified', createdAt, updatedAt: createdAt })
+      await insertRow('projectActivities', { id: createId('project_activity'), projectId: workspace.projectId, workspaceId: workspace.id, actorId, type: 'code_commit_pushed', source: 'github_webhook', sourceId: commitSha, metadata: { repo, branch, commitSha, external: true }, createdAt })
+      await insertRow('workspaceReports', { id: createId('workspace_report'), workspaceId: workspace.id, projectId: workspace.projectId, connectorId: 'github', kind: 'sync', summary: `${actorId} pushed ${commitSha.slice(0, 7)} to ${repo}:${branch}`, commitSha, repo, branch, createdAt })
+      existing.push({ projectId: workspace.projectId, commitSha })
+      recorded += 1
+    }
+  }
+  return { ok: true, recorded }
 }

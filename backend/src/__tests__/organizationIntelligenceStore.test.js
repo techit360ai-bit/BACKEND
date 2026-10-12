@@ -9,13 +9,13 @@ const store = vi.hoisted(() => {
 
 // Minimal in-process stand-in for the AsyncLocalStorage authority: the repository
 // builds a bounded scope and runs the synchronous service logic against it, while
-// `readDb`/`updateDb` resolve that same scope.
+// `readAuthorityDb`/`updateAuthorityDb` resolve that same scope.
 const mocks = vi.hoisted(() => ({ authority: { snapshot: null }, fallback: {}, fallbackReads: 0 }))
 
 vi.mock('../config/database.js', () => ({
-  readDb: vi.fn(() => { if (!mocks.authority.snapshot) mocks.fallbackReads += 1; return mocks.authority.snapshot || mocks.fallback }),
-  updateDb: vi.fn(fn => fn(mocks.authority.snapshot || mocks.fallback)),
-  runDatabaseAuthority: (snapshot, callback) => { const previous = mocks.authority.snapshot; mocks.authority.snapshot = snapshot; try { return callback() } finally { mocks.authority.snapshot = previous } },
+  readAuthorityDb: vi.fn(() => { if (!mocks.authority.snapshot) mocks.fallbackReads += 1; return mocks.authority.snapshot || mocks.fallback }),
+  updateAuthorityDb: vi.fn(fn => fn(mocks.authority.snapshot || mocks.fallback)),
+  runBoundedDatabase: (snapshot, callback) => { const previous = mocks.authority.snapshot; mocks.authority.snapshot = snapshot; try { return callback() } finally { mocks.authority.snapshot = previous } },
 }))
 vi.mock('../repositories/platformCollectionRepository.js', () => ({
   withPlatformTransaction: vi.fn(async fn => fn({})),
@@ -29,7 +29,7 @@ vi.mock('../repositories/platformCollectionRepository.js', () => ({
 }))
 
 const { organizationOverviewAsync, organizationProgramHealthAsync, organizationCohortBenchmarksAsync, organizationRisksAsync, createOrganizationActionAsync, runOrganizationIntelligenceMaintenanceAsync } = await import('../services/organizationIntelligenceService.js')
-const { updateDb } = await import('../config/database.js')
+const { updateAuthorityDb } = await import('../config/database.js')
 const { withPlatformTransaction } = await import('../repositories/platformCollectionRepository.js')
 
 const ENV_KEYS = ['ORGANIZATION_SOURCE', 'ORGANIZATION_READ_SOURCE', 'ORGANIZATION_WRITE_SOURCE', 'AUTHORIZATION_SOURCE', 'ORGANIZATION_FALLBACK_SQLITE']
@@ -80,7 +80,7 @@ describe('organization intelligence row-level store (§5 cutover)', () => {
     expect(result.metrics.activePrograms).toBe(1)
     expect(result.risks.total).toBe(1)
     expect(mocks.fallbackReads).toBe(0)
-    expect(updateDb).not.toHaveBeenCalled()
+    expect(updateAuthorityDb).not.toHaveBeenCalled()
   })
 
   it('derives program health from program-scoped cohorts, mentors, and startups', async () => {

@@ -1,5 +1,5 @@
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { trustReadEnabled } from '../repositories/trustRepository.js'
 import { getTrustHistory } from './trustAuthorityAsync.js'
 import { ensureTrustProfile } from './capabilityAuthorization.js'

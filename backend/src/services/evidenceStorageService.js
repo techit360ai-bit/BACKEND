@@ -1,8 +1,9 @@
 import crypto from 'node:crypto'
 import net from 'node:net'
 import { createId, nowIso } from '../utils/api.js'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { safeFetch } from './outboundHttpService.js'
+import { operationalStateEnabled, loadOperationalStateById, listOperationalStateForOwner, saveOperationalStateRow } from '../repositories/operationalStateRepository.js'
 
 const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
 const maxBytes = () => Math.max(1024, Number(process.env.EVIDENCE_MAX_BYTES || 25 * 1024 * 1024))
@@ -60,6 +61,25 @@ async function validatePrivateObject({ objectKey, contentType, expectedSizeBytes
   } catch { return { ok: false, error: 'evidence_scan_failed' } }
 }
 
+// Row-level (§5) wrapper — evidence upload. The request row is read and the
+// object row is written through the operational-state store instead of the
+// whole-DB snapshot. Gated by OPERATIONAL_*_SOURCE=postgres; createEvidenceUpload
+// above stays the fallback.
+export async function createEvidenceUploadAsync(userId, requestId, input = {}) {
+  const contentType = String(input.contentType || '').toLowerCase(); const sizeBytes = Number(input.sizeBytes || 0)
+  if (!allowedTypes.has(contentType)) return { ok: false, error: 'unsupported_evidence_type' }
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > maxBytes()) return { ok: false, error: 'invalid_evidence_size', maxBytes: maxBytes() }
+  if (!operationalStateEnabled()) return createEvidenceUpload(userId, requestId, input)
+  const request = (await listOperationalStateForOwner('verificationRequests', userId, ['userId'])).find(row => row.id === requestId && row.userId === userId)
+  if (!request) return { ok: false, error: 'verification_request_not_found' }
+  const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
+  const uploadUrl = presign('PUT', objectKey); if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
+  const now = nowIso()
+  const row = { id: objectId, userId, requestId, objectKey, contentType, sizeBytes, status: 'upload_pending', malwareStatus: 'pending', createdAt: now, updatedAt: now }
+  await saveOperationalStateRow('evidenceObjects', row)
+  return { ok: true, object: row, uploadUrl, requiredHeaders: { 'Content-Type': contentType } }
+}
+
 export function createPrivateUpload({ namespace, ownerId, objectId, contentType, sizeBytes }) {
   const normalizedType = String(contentType || '').toLowerCase(); const bytes = Number(sizeBytes || 0)
   if (!allowedTypes.has(normalizedType)) return { ok: false, error: 'unsupported_evidence_type' }
@@ -79,6 +99,15 @@ export async function finalizePrivateUpload({ objectKey, contentType, expectedSi
 export function privateDownloadUrl(objectKey, expires = 300) { return presign('GET', objectKey, expires) }
 
 export async function finalizeEvidenceUpload(userId, objectId) {
+  if (operationalStateEnabled()) {
+    const object = await loadOperationalStateById('evidenceObjects', objectId)
+    if (!object || object.userId !== userId) return { ok: false, error: 'evidence_object_not_found' }
+    const downloadUrl = presign('GET', object.objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
+    const result = await validatePrivateObject({ objectKey: object.objectKey, contentType: object.contentType, expectedSizeBytes: object.sizeBytes })
+    const row = { ...object, status: result.ok ? 'available' : 'quarantined', malwareStatus: result.ok ? 'clean' : 'infected_or_unavailable', sha256: result.sha256 || null, scan: result.scan || null, updatedAt: nowIso() }
+    await saveOperationalStateRow('evidenceObjects', row)
+    return result.ok ? { ok: true, object: row } : { ok: false, error: result.error, object: row }
+  }
   const object = (readAuthorityDb().evidenceObjects || []).find(row => row.id === objectId && row.userId === userId); if (!object) return { ok: false, error: 'evidence_object_not_found' }
   const downloadUrl = presign('GET', object.objectKey, 300); if (!downloadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   const result = await validatePrivateObject({ objectKey: object.objectKey, contentType: object.contentType, expectedSizeBytes: object.sizeBytes })

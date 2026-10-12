@@ -18,7 +18,7 @@ import {
   listRecordsByFieldIn,
   listRecordsLimited,
 } from './platformCollectionRepository.js'
-import { runDatabaseAuthority } from '../config/database.js'
+import { runBoundedDatabase } from '../config/database.js'
 
 export function investorStoreEnabled() {
   return ['INVESTOR_SOURCE', 'INVESTOR_READ_SOURCE', 'INVESTOR_WRITE_SOURCE'].some(key => process.env[key] === 'postgres')
@@ -142,7 +142,7 @@ async function persistChanges(client, db, originals, collections) {
 export async function runInvestorRead(options, read) {
   return withPlatformTransaction(async client => {
     const db = await buildInvestorDb(client, options)
-    return runDatabaseAuthority(db, async () => read())
+    return runBoundedDatabase(db, async () => read())
   }, { userId: options.userId || null })
 }
 
@@ -152,7 +152,7 @@ export async function applyInvestorMutation(options, mutate) {
     const collections = writeCollectionsFor(options)
     const originals = new Map()
     for (const name of collections) for (const row of db[name] || []) if (row?.id) originals.set(`${name}:${row.id}`, JSON.stringify(row))
-    const result = await runDatabaseAuthority(db, async () => mutate())
+    const result = await runBoundedDatabase(db, async () => mutate())
     await persistChanges(client, db, originals, collections)
     return result
   }, { userId: options.userId || null })

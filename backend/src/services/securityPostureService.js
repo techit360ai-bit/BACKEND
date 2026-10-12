@@ -1,4 +1,4 @@
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId } from '../utils/api.js'
 import { postureStoreEnabled, hasCollectionRows, listPostureHistory, insertPostureHistory } from '../repositories/securityPostureRepository.js'
 

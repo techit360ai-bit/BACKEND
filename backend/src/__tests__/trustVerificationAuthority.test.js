@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), updateDb: vi.fn(), writeDb: vi.fn() }))
-import { readDb, updateDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { addVerifiedSkill, appendTrustProof, createDomainProofChallenge, publicTrustFor, reviewTrustProof } from '../services/trustVerificationAuthority.js'
 
 let db
 beforeEach(() => {
   db = { users: [{ id: 'u1' }], profiles: [{ id: 'u1', role: 'founder' }], trustProfiles: [], trustVerificationProofs: [], trustVerificationHistory: [], trustVerificationChallenges: [], verifiedSkills: [], trustScoreSnapshots: [], trustProjectionOutbox: [] }
-  readDb.mockReturnValue(db)
-  updateDb.mockImplementation(mutator => mutator(db))
+  readAuthorityDb.mockReturnValue(db)
+  updateAuthorityDb.mockImplementation(mutator => mutator(db))
 })
 
 describe('proof-bound trust authority', () => {

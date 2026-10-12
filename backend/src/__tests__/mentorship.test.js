@@ -3,8 +3,8 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import app from '../app.js'
 
-vi.mock('../config/database.js', () => ({ readDb: vi.fn(), writeDb: vi.fn(), updateDb: vi.fn() }))
-import { readDb, updateDb, writeDb } from '../config/database.js'
+vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), writeAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
+import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
 
 const SECRET = 'test_jwt_secret_do_not_use_in_production'
 const token = (id, role) => jwt.sign({ sub: id, role }, SECRET, { expiresIn: '1h' })
@@ -15,7 +15,7 @@ const empty = () => ({
   mentorshipRooms: [], mentorshipMentees: [], mentorshipTasks: [], mentorshipApplications: [], mentorshipMessages: [], mentorshipInvitations: [], notifications: [], feedPosts: [], opportunities: [],
 })
 let db
-beforeEach(() => { db = empty(); vi.clearAllMocks(); readDb.mockReturnValue(db); writeDb.mockImplementation(() => {}); updateDb.mockImplementation(fn => fn(db)) })
+beforeEach(() => { db = empty(); vi.clearAllMocks(); readAuthorityDb.mockReturnValue(db); writeAuthorityDb.mockImplementation(() => {}); updateAuthorityDb.mockImplementation(fn => fn(db)) })
 
 describe('live mentorship hub', () => {
   it('persists rooms and enforces deterministic capacity during review', async () => {

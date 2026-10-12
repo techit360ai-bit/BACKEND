@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  readDb: vi.fn(() => ({})),
-  updateDb: vi.fn(fn => fn({})),
+  readAuthorityDb: vi.fn(() => ({})),
+  updateAuthorityDb: vi.fn(fn => fn({})),
   storeEnabled: vi.fn(() => true),
   fallbackEnabled: vi.fn(() => true),
   runDomainRead: vi.fn(),
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   lastWriteOptions: null,
 }))
 
-vi.mock('../config/database.js', () => ({ readDb: mocks.readDb, updateDb: mocks.updateDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
 vi.mock('../repositories/domainRepository.js', () => ({
   domainStoreEnabled: mocks.storeEnabled,
   domainFallbackEnabled: mocks.fallbackEnabled,
@@ -29,8 +29,8 @@ vi.mock('../services/financePostgresProjection.js', () => ({ syncFinanceProjecti
 const svc = await import('../services/domainService.js')
 
 function usedBounded(db) {
-  mocks.readDb.mockReturnValue(db)
-  mocks.updateDb.mockImplementation(fn => fn(db))
+  mocks.readAuthorityDb.mockReturnValue(db)
+  mocks.updateAuthorityDb.mockImplementation(fn => fn(db))
   mocks.runDomainRead.mockImplementation(async (options, read) => { mocks.lastReadOptions = options; return read() })
   mocks.applyDomainMutation.mockImplementation(async (options, mutate) => { mocks.lastWriteOptions = options; return mutate() })
 }
@@ -102,7 +102,7 @@ describe('domain row-level store — endorsements + investor (§5 sub-slice 1)',
     const result = await svc.listEndorsementsAsync('u1')
     expect(result.endorsements).toHaveLength(1)
     expect(mocks.runDomainRead).not.toHaveBeenCalled()
-    expect(mocks.readDb).toHaveBeenCalled()
+    expect(mocks.readAuthorityDb).toHaveBeenCalled()
   })
 })
 
@@ -503,7 +503,7 @@ describe('domain row-level store — generic bound collections (§5 sub-slice 7)
   })
 
   it('keeps a surface on the snapshot when no scope is bound', async () => {
-    mocks.readDb.mockReturnValue({ opportunities: [{ id: 'o1', ownerId: 'other', visibility: 'public' }, { id: 'o2', ownerId: 'u1' }] })
+    mocks.readAuthorityDb.mockReturnValue({ opportunities: [{ id: 'o1', ownerId: 'other', visibility: 'public' }, { id: 'o2', ownerId: 'u1' }] })
     const rows = await svc.genericListAsync('u1', 'opportunities')
     expect(rows.map(row => row.id)).toEqual(['o1', 'o2'])
     expect(mocks.runDomainRead).not.toHaveBeenCalled()
@@ -511,7 +511,7 @@ describe('domain row-level store — generic bound collections (§5 sub-slice 7)
 
   it('falls back to the snapshot when the row-level store is disabled', async () => {
     mocks.storeEnabled.mockReturnValue(false)
-    mocks.readDb.mockReturnValue({ organizationMarketplace: [{ id: 'm1', ownerId: 'u1', updatedAt: '2024-01-01T00:00:00Z' }] })
+    mocks.readAuthorityDb.mockReturnValue({ organizationMarketplace: [{ id: 'm1', ownerId: 'u1', updatedAt: '2024-01-01T00:00:00Z' }] })
     const rows = await svc.genericListAsync('u1', 'organizationMarketplace', { field: 'ownerId' })
     expect(rows).toHaveLength(1)
     expect(mocks.runDomainRead).not.toHaveBeenCalled()
