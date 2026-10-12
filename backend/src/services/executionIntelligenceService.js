@@ -1,5 +1,5 @@
 import { findIdentityById } from '../repositories/identityRepository.js'
-import { getPublicTrust } from './trustAuthority.js'
+import { publicTrustFor } from './trustAuthority.js'
 
 const SCOPE_KEYS = ['projectId', 'organizationId', 'programId', 'cohortId', 'hackathonId']
 
@@ -52,7 +52,7 @@ export async function executionIntelligenceFor(user, query = {}) {
     const view = await svc.executionIntelligence(scope)
     // Compose the canonical Trust Engine — this route owns no trust formula.
     const subjects = (view.trustSubjects || []).filter((subject) => subject.kind === 'actor')
-    const trust = await Promise.all(subjects.map(async (subject) => ({ subjectId: subject.id, kind: 'actor', ...(await getPublicTrust(subject.id, null)) })))
+    const trust = await Promise.all(subjects.map(async (subject) => ({ subjectId: subject.id, kind: 'actor', ...(await publicTrustFor(subject.id, null)) })))
     return { ok: true, ...view, trust }
   } catch (error) {
     return { ok: false, error: 'execution_intelligence_unavailable', detail: String(error?.message || error) }

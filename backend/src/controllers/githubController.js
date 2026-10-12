@@ -3,6 +3,7 @@ import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../confi
 import { createId, nowIso } from '../utils/api.js'
 import { addVerifiedSkill, appendTrustProof } from '../services/trustAuthority.js'
 import { GITHUB_OAUTH_SCOPES_CONNECT, hasScopes, parseGrantedScopes } from '../config/github.js'
+import { githubStoreEnabled, githubFallbackEnabled, loadGithubConnection, saveGithubConnection, saveGithubOauthState, consumeGithubOauthState, loadProfileWorkspaceId } from '../repositories/githubRepository.js'
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || 'test-github-client-id'
 const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || 'test-github-client-secret'
@@ -44,15 +45,50 @@ function pruneOauthStates(states = []) {
   return states.filter(entry => new Date(entry.createdAt).getTime() >= cutoff)
 }
 
-export function githubAuthorize(req, res) {
-  const state = createId('ghstate')
-  const db = readAuthorityDb()
-  db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
-  // `purpose` records which surface started the flow. Both surfaces share this
-  // one array and this one callback, so without it the callback cannot tell a
-  // connect attempt from a trust attempt and must guess at what to enrich.
-  db.githubOauthStates.push({ state, userId: req.user.id, createdAt: nowIso(), purpose: 'connect' })
+// Row-level connector access with the snapshot kept as the fallback. These
+// handlers previously read the whole-DB snapshot just to find one connector.
+async function githubConnectionFor(userId) {
+  const fromSnapshot = () => (readAuthorityDb().githubConnections || []).find(c => c.userId === userId) || null
+  if (!githubStoreEnabled()) return fromSnapshot()
+  try { return await loadGithubConnection(userId) } catch (error) {
+    console.error(JSON.stringify({ event: 'github_postgres_read_failed', error: error.message }))
+    if (!githubFallbackEnabled()) throw error
+    return fromSnapshot()
+  }
+}
+
+async function persistOauthState(row) {
+  if (!githubStoreEnabled()) {
+    const db = readAuthorityDb()
+    db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
+    db.githubOauthStates.push(row)
+    writeAuthorityDb(db)
+    return
+  }
+  try { return await saveGithubOauthState(row) } catch (error) {
+    console.error(JSON.stringify({ event: 'github_postgres_write_failed', operation: 'save_oauth_state', error: error.message }))
+    if (!githubFallbackEnabled()) throw error
+    const db = readAuthorityDb()
+    db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
+    db.githubOauthStates.push(row)
+    writeAuthorityDb(db)
+  }
+}
+
+async function persistConnection(connection, db) {
+  if (githubStoreEnabled()) return saveGithubConnection(connection)
+  if (!db.githubConnections) db.githubConnections = []
+  db.githubConnections = db.githubConnections.filter(c => c.userId !== connection.userId)
+  db.githubConnections.push(connection)
   writeAuthorityDb(db)
+}
+
+export async function githubAuthorize(req, res) {
+  const state = createId('ghstate')
+  // `purpose` records which surface started the flow. Both surfaces share this
+  // one callback, so without it the callback cannot tell a connect attempt from
+  // a trust attempt and must guess at what to enrich.
+  await persistOauthState({ id: createId('ghstate_row'), state, userId: req.user.id, createdAt: nowIso(), purpose: 'connect' })
 
   const params = new URLSearchParams({
     client_id: GITHUB_CLIENT_ID,
@@ -70,15 +106,18 @@ export async function githubCallback(req, res) {
   const { code, state } = req.query
   if (!code || !state) return res.status(400).json({ error: 'Missing code or state' })
 
-  const db = readAuthorityDb()
-  db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
-  const stateEntry = db.githubOauthStates.find(s => s.state === state)
+  // Consume the state before making the external token exchange. This makes the
+  // callback single-use even when two requests race while GitHub is slow.
+  const db = githubStoreEnabled() ? null : readAuthorityDb()
+  let stateEntry
+  if (db) {
+    db.githubOauthStates = pruneOauthStates(db.githubOauthStates || [])
+    stateEntry = db.githubOauthStates.find(s => s.state === state)
+    if (stateEntry) { db.githubOauthStates = db.githubOauthStates.filter(s => s.state !== state); writeAuthorityDb(db) }
+  } else {
+    stateEntry = await consumeGithubOauthState(state)
+  }
   if (!stateEntry) return res.status(400).json({ error: 'Invalid state' })
-
-  // Consume the state before making the external token exchange. This makes
-  // the callback single-use even when two requests race while GitHub is slow.
-  db.githubOauthStates = db.githubOauthStates.filter(s => s.state !== state)
-  writeAuthorityDb(db)
 
   try {
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
@@ -103,10 +142,7 @@ export async function githubCallback(req, res) {
           username: 'test-user',
           connectedAt: nowIso(),
         }
-        if (!db.githubConnections) db.githubConnections = []
-        db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-        db.githubConnections.push(connection)
-        writeAuthorityDb(db)
+        await persistConnection(connection, db)
         return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
       }
       return res.status(400).json({ error: tokenData.error_description || 'Token exchange failed' })
@@ -159,10 +195,7 @@ export async function githubCallback(req, res) {
         connectedVia: stateEntry.purpose || 'connect',
         connectedAt: nowIso(),
       }
-      if (!db.githubConnections) db.githubConnections = []
-      db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-      db.githubConnections.push(connection)
-      writeAuthorityDb(db)
+      await persistConnection(connection, db)
       // WS-J4: feed the platform OAuth result into the MCP workspace vault so a
       // single connect powers the GitHub MCP tools too. Best-effort — a vault
       // failure must never break the OAuth redirect.
@@ -182,10 +215,7 @@ export async function githubCallback(req, res) {
         username: 'test-user',
         connectedAt: nowIso(),
       }
-      if (!db.githubConnections) db.githubConnections = []
-      db.githubConnections = db.githubConnections.filter(c => c.userId !== stateEntry.userId)
-        db.githubConnections.push(connection)
-        writeAuthorityDb(db)
+      await persistConnection(connection, db)
         const proof = await appendTrustProof(stateEntry.userId, { source: 'github', method: 'github_oauth_test', status: 'verified', providerSubjectId: 'test-user', confidence: 0.5, metadata: { providerSubjectId: 'test-user', username: 'test-user', repoCount: 2, languages: ['TypeScript', 'Python'] } })
         for (const language of ['TypeScript', 'Python']) await addVerifiedSkill(stateEntry.userId, { skill: language, source: 'github', proofId: proof.proof?.id, confidence: 0.6 })
       return res.redirect(`${FRONTEND_URL}/founder/trust?github=connected`)
@@ -204,9 +234,16 @@ export async function githubCallback(req, res) {
 async function bridgeGithubToMcpVault(userId, accessToken, scopes) {
   if (process.env.MCP_ENABLED !== 'true') return
   try {
-    const db = readAuthorityDb()
-    const profile = (db.profiles || []).find(p => p.id === userId)
-    const workspaceId = typeof profile?.workspaceId === 'string' ? profile.workspaceId : `user-${userId}`
+    let workspaceId = null
+    if (githubStoreEnabled()) {
+      try { workspaceId = await loadProfileWorkspaceId(userId) } catch (error) {
+        console.error(JSON.stringify({ event: 'github_postgres_read_failed', operation: 'profile_workspace', error: error.message }))
+        workspaceId = (readAuthorityDb().profiles || []).find(p => p.id === userId)?.workspaceId || null
+      }
+    } else {
+      workspaceId = (readAuthorityDb().profiles || []).find(p => p.id === userId)?.workspaceId || null
+    }
+    if (typeof workspaceId !== 'string' || !workspaceId) workspaceId = `user-${userId}`
     const { getTechitService } = await import('../../../Plugins-MCP/server/techit-service.ts')
     const svc = await getTechitService()
     await svc.importCredential(workspaceId, 'github', accessToken, scopes)
@@ -219,10 +256,8 @@ async function bridgeGithubToMcpVault(userId, accessToken, scopes) {
   }
 }
 
-export function githubStatus(req, res) {
-  const db = readAuthorityDb()
-  const connections = db.githubConnections || []
-  const connection = connections.find(c => c.userId === req.user.id)
+export async function githubStatus(req, res) {
+  const connection = await githubConnectionFor(req.user.id)
   if (!connection) return res.json({ connected: false })
   const grantedScopes = connection.scopes || []
   return res.json({
@@ -242,9 +277,7 @@ export function githubStatus(req, res) {
 }
 
 export async function githubRepos(req, res) {
-  const db = readAuthorityDb()
-  const connections = db.githubConnections || []
-  const connection = connections.find(c => c.userId === req.user.id)
+  const connection = await githubConnectionFor(req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })
 
   if (connection.accessToken === 'test-token-placeholder') {
@@ -271,9 +304,7 @@ export async function githubRepos(req, res) {
 }
 
 export async function githubCreateRepo(req, res) {
-  const db = readAuthorityDb()
-  const connections = db.githubConnections || []
-  const connection = connections.find(c => c.userId === req.user.id)
+  const connection = await githubConnectionFor(req.user.id)
   if (!connection) return res.status(401).json({ error: 'GitHub not connected' })
 
   const name = String(req.body.name || '').trim()

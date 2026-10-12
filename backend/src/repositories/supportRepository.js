@@ -17,6 +17,13 @@ export function supportStoreEnabled() {
 }
 export function supportFallbackEnabled() { return process.env.SUPPORT_FALLBACK_SQLITE !== 'false' }
 
+// User contact row (email/phone) for support notifications, resolved row-level
+// instead of from the whole-database snapshot.
+export async function loadUserContact(userId) {
+  if (!userId) return null
+  return withPlatformTransaction(client => getRecord(client, 'users', userId))
+}
+
 // Child rows keyed by the parent case id.
 const CASE_CHILD_COLLECTIONS = ['supportMessages', 'supportEvents', 'supportAuditLogs', 'supportAttachments', 'supportAssignments', 'supportFeedback']
 // Admin-global configuration, catalogue and incident rows.

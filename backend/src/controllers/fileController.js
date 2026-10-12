@@ -13,26 +13,30 @@ function toFile(item) {
 }
 
 export async function listFiles(req, res) {
-  const db = readAuthorityDb()
   const workspaceId = req.query.workspaceId || 'default'
-  let files
   if (contentReadEnabled()) {
-    try { files = (await listFilesPostgres(req.user.id, workspaceId)).map(toFile) } catch (error) {
+    try {
+      return res.json(fileListPayload((await listFilesPostgres(req.user.id, workspaceId)).map(toFile)))
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_read_failed', operation: 'list_files', error: error.message }))
       if (!contentReadFallbackEnabled()) throw error
-      files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
     }
-  } else files = db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)
-  return res.json({
+  }
+  const db = readAuthorityDb()
+  return res.json(fileListPayload(db.files.filter(f => f.ownerId === req.user.id && f.workspaceId === workspaceId).sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)).map(toFile)))
+}
+
+function fileListPayload(files) {
+  return {
     files,
     storage: {
       usedBytes: files.reduce((sum, f) => sum + (Number(f.sizeBytes) || 0), 0),
       limitBytes: 100 * 1024 * 1024 * 1024,
     },
-  })
+  }
 }
 
 export async function createFile(req, res) {
-  const db = readAuthorityDb()
   const name = requireBodyString(res, req.body.name, 'Name')
   if (!name) return
   const type = ITEM_TYPES.has(req.body.type) ? req.body.type : 'file'
@@ -51,29 +55,37 @@ export async function createFile(req, res) {
     createdAt: now,
     updatedAt: now,
   }
-  db.files.push(file)
-  writeAuthorityDb(db)
   if (contentWriteEnabled()) {
-    try { await createFilePostgres(file) } catch (error) {
+    try {
+      await createFilePostgres(file)
+      return res.status(201).json(toFile(file))
+    } catch (error) {
       console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'create_file', error: error.message }))
       if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
     }
   }
+  const db = readAuthorityDb()
+  db.files.push(file)
+  writeAuthorityDb(db)
   return res.status(201).json(toFile(file))
 }
 
 export async function deleteFile(req, res) {
+  if (contentWriteEnabled()) {
+    try {
+      const deleted = await deleteFilePostgres(req.user.id, req.params.id)
+      if (!deleted) return res.status(404).json({ error: 'File not found' })
+      return res.json({ ok: true })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'delete_file', error: error.message }))
+      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
+    }
+  }
   const db = readAuthorityDb()
   const before = db.files.length
   db.files = db.files.filter(f => !(f.id === req.params.id && f.ownerId === req.user.id))
   if (db.files.length === before) return res.status(404).json({ error: 'File not found' })
   writeAuthorityDb(db)
-  if (contentWriteEnabled()) {
-    try { await deleteFilePostgres(req.user.id, req.params.id) } catch (error) {
-      console.error(JSON.stringify({ event: 'content_postgres_write_failed', operation: 'delete_file', error: error.message }))
-      if (!contentWriteFallbackEnabled()) return res.status(503).json({ error: 'content_write_temporarily_unavailable' })
-    }
-  }
   return res.json({ ok: true })
 }
 

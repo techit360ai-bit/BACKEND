@@ -1,6 +1,7 @@
 import { Resend } from 'resend'
 import { createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'crypto'
 import { readDb as readAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { otpStoreEnabled, otpFallbackEnabled, loadOtp, replaceOtp, deleteOtp, saveEmailVerification } from '../repositories/otpRepository.js'
 import { normalizeEmail } from '../utils/authInputs.js'
 import {
   assertEmailAccepted,
@@ -81,15 +82,25 @@ export async function sendOtp(req, res) {
     return res.status(400).json({ error: 'A valid email is required' })
   }
 
-  const db  = readAuthorityDb()
   const now = Date.now()
 
-  // Purge expired records first
-  db.otps = cleanExpired(db.otps)
-  db.emailVerifications = cleanExpiredVerifications(db.emailVerifications || [])
+  // Row-level read (email-keyed) with the snapshot kept as the fallback.
+  const snapshotRecent = () => {
+    const db = readAuthorityDb()
+    db.otps = cleanExpired(db.otps)
+    return db.otps.find(o => o.email === email) || null
+  }
+  let recent = null
+  let rowLevel = false
+  if (otpStoreEnabled()) {
+    try { recent = await loadOtp(email); rowLevel = true } catch (error) {
+      console.error(JSON.stringify({ event: 'otp_postgres_read_failed', operation: 'send_otp', error: error.message }))
+      if (!otpFallbackEnabled()) throw error
+      recent = snapshotRecent()
+    }
+  } else recent = snapshotRecent()
 
   // Cooldown check — prevent spamming
-  const recent = db.otps.find(o => o.email === email)
   if (recent) {
     const sentAt   = new Date(recent.sentAt).getTime()
     const waitSecs = Math.ceil((RESEND_COOLDOWN_SECONDS * 1000 - (now - sentAt)) / 1000)
@@ -99,8 +110,6 @@ export async function sendOtp(req, res) {
         retryAfter: waitSecs,
       })
     }
-    // Remove the old record so we replace it
-    db.otps = db.otps.filter(o => o.email !== email)
   }
 
   const code      = generateCode()
@@ -171,33 +180,74 @@ export async function sendOtp(req, res) {
 
   // Never persist the six-digit OTP itself. A database read must not be
   // sufficient to complete email verification.
-  db.otps.push({ email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 })
-  writeAuthorityDb(db)
+  const otpRow = { id: randomUUID(), email, codeHmac: codeHmac(code), expiresAt, sentAt, attempts: 0 }
+  if (rowLevel) {
+    try { await replaceOtp(otpRow) } catch (error) {
+      console.error(JSON.stringify({ event: 'otp_postgres_write_failed', operation: 'send_otp', error: error.message }))
+      if (!otpFallbackEnabled()) throw error
+      const db = readAuthorityDb()
+      db.otps = cleanExpired(db.otps).filter(o => o.email !== email)
+      db.otps.push(otpRow)
+      writeAuthorityDb(db)
+    }
+  } else {
+    const db = readAuthorityDb()
+    db.otps = cleanExpired(db.otps).filter(o => o.email !== email)
+    db.otps.push(otpRow)
+    writeAuthorityDb(db)
+  }
 
   return res.json({ message: 'Verification code sent', expiresIn: EXPIRES * 60 })
 }
 
 // ── POST /api/auth/verify-otp ─────────────────────────────────────────────────
-export function verifyOtp(req, res) {
+export async function verifyOtp(req, res) {
   const email = normalizeEmail(req.body.email)
   const { code } = req.body
   if (!email || !code) {
     return res.status(400).json({ error: 'Email and code are required' })
   }
 
-  const db  = readAuthorityDb()
-  db.otps   = cleanExpired(db.otps)
+  // Snapshot fallback (non-Postgres deployments, or a failed row-level read):
+  // the email-keyed OTP row scoped out of the whole-DB snapshot.
+  const snapshotRecord = () => {
+    const db = readAuthorityDb()
+    return cleanExpired(db.otps).find(o => o.email === email) || null
+  }
 
-  const record = db.otps.find(o => o.email === email)
+  let record = null
+  let rowLevel = false
+  if (otpStoreEnabled()) {
+    try { record = await loadOtp(email); rowLevel = true } catch (error) {
+      console.error(JSON.stringify({ event: 'otp_postgres_read_failed', operation: 'verify_otp', error: error.message }))
+      if (!otpFallbackEnabled()) throw error
+      record = snapshotRecord()
+    }
+  } else record = snapshotRecord()
+
   if (!record) {
     return res.status(400).json({ error: 'Code expired or not found. Please request a new one.' })
   }
 
-  record.attempts += 1
-
-  if (record.attempts > MAX_ATTEMPTS) {
-    db.otps = db.otps.filter(o => o.email !== email)
+  // Persist the attempt counter / deletion. `next === null` deletes the row
+  // (used on success and once the attempt ceiling is crossed); otherwise the
+  // row is replaced so the incremented counter can't be reset by a fresh read.
+  const persistOtp = async next => {
+    if (rowLevel) {
+      try { await (next === null ? deleteOtp(email) : replaceOtp(next)); return } catch (error) {
+        console.error(JSON.stringify({ event: 'otp_postgres_write_failed', operation: 'verify_otp', error: error.message }))
+        if (!otpFallbackEnabled()) throw error
+      }
+    }
+    const db = readAuthorityDb()
+    db.otps = cleanExpired(db.otps).filter(o => o.email !== email)
+    if (next !== null) db.otps.push(next)
     writeAuthorityDb(db)
+  }
+
+  const attempts = Number(record.attempts || 0) + 1
+  if (attempts > MAX_ATTEMPTS) {
+    await persistOtp(null)
     return res.status(400).json({ error: 'Too many attempts. Please request a new code.' })
   }
 
@@ -211,32 +261,41 @@ export function verifyOtp(req, res) {
   const legacyMatches = typeof record.code === 'string'
     && constantTimeEqual(record.code, submittedCode)
   if (!keyedHashMatches && !legacyHashMatches && !legacyMatches) {
-    writeAuthorityDb(db)
-    const left = MAX_ATTEMPTS - record.attempts
+    await persistOtp({ ...record, attempts })
+    const left = MAX_ATTEMPTS - attempts
     return res.status(400).json({
       error: `Incorrect code. ${left} attempt${left !== 1 ? 's' : ''} remaining.`,
       attemptsLeft: left,
     })
   }
 
-  // ✅ Valid — remove it so it can't be reused
-  db.otps = db.otps.filter(o => o.email !== email)
-  db.emailVerifications = cleanExpiredVerifications(db.emailVerifications || [])
+  // ✅ Valid — remove it so it can't be reused, then mint the verification token.
+  await persistOtp(null)
 
   const verificationToken = `${randomUUID()}.${randomBytes(32).toString('base64url')}`
   const now = Date.now()
-  db.emailVerifications = [
-    ...db.emailVerifications.filter(r => r.email !== email),
-    {
-      id: randomUUID(),
-      email,
-      tokenHash: tokenHash(verificationToken),
-      expiresAt: new Date(now + VERIFICATION_EXPIRES_MINUTES * 60 * 1000).toISOString(),
-      consumedAt: null,
-      createdAt: new Date(now).toISOString(),
-    },
-  ]
-  writeAuthorityDb(db)
+  const verification = {
+    id: randomUUID(),
+    email,
+    tokenHash: tokenHash(verificationToken),
+    expiresAt: new Date(now + VERIFICATION_EXPIRES_MINUTES * 60 * 1000).toISOString(),
+    consumedAt: null,
+    createdAt: new Date(now).toISOString(),
+  }
+
+  const persistVerificationSnapshot = () => {
+    const db = readAuthorityDb()
+    db.emailVerifications = cleanExpiredVerifications(db.emailVerifications || []).filter(r => r.email !== email)
+    db.emailVerifications.push(verification)
+    writeAuthorityDb(db)
+  }
+  if (rowLevel) {
+    try { await saveEmailVerification(verification) } catch (error) {
+      console.error(JSON.stringify({ event: 'otp_postgres_write_failed', operation: 'verify_otp.verification', error: error.message }))
+      if (!otpFallbackEnabled()) throw error
+      persistVerificationSnapshot()
+    }
+  } else persistVerificationSnapshot()
 
   return res.json({
     verified: true,

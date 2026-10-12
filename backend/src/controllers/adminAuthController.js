@@ -9,6 +9,7 @@ import { upsertComparableAsync } from '../services/investorDealRoomCompletionSer
 import { requestAdminRouterTelemetry } from '../services/aiRouterClient.js'
 import { securityPostureSnapshot } from '../services/securityPostureService.js'
 import { listSecurityEvents } from '../services/securityEventService.js'
+import { adminAuthEnabled, findAdminById, findAdminByEmail, listAdminRecords, saveAdmin, deleteAdminRecord, adminTelemetryCollections, appendAdminTelemetry } from '../repositories/adminAuthRepository.js'
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -20,14 +21,48 @@ const INITIAL_SUPER_ADMIN_PASSWORD = process.env.ADMIN_SUPER_PASSWORD
 const ADMIN_PASSWORD_MIN_LENGTH = 14
 
 function makeAdminToken(userId, role) {
-  return signJwt(
-    { sub: userId, role, workspaceId: `admin-${userId}` },
-    {
-      expiresIn: JWT_EXPIRES_IN,
-      ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
-      ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
-    },
-  )
+    return signJwt(
+      { sub: userId, role, workspaceId: `admin-${userId}` },
+      {
+        expiresIn: JWT_EXPIRES_IN,
+        ...(JWT_ISSUER ? { issuer: JWT_ISSUER } : {}),
+        ...(JWT_AUDIENCE ? { audience: JWT_AUDIENCE } : {}),
+      },
+    )
+  }
+
+function publicAdmin(admin) {
+  return {
+    id: admin.id,
+    email: admin.email,
+    role: admin.role,
+    firstName: admin.firstName,
+    lastName: admin.lastName,
+    permissions: admin.permissions,
+  }
+}
+
+// Row-level super-admin bootstrap (§5): mirrors ensureSuperAdmin without the
+// whole-database request snapshot.
+async function ensureSuperAdminRow() {
+  if (!INITIAL_SUPER_ADMIN_EMAIL || !INITIAL_SUPER_ADMIN_PASSWORD) return
+  if (INITIAL_SUPER_ADMIN_PASSWORD.length < ADMIN_PASSWORD_MIN_LENGTH) {
+    throw new Error(`ADMIN_SUPER_PASSWORD must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters`)
+  }
+  if (await findAdminByEmail(INITIAL_SUPER_ADMIN_EMAIL)) return
+  await saveAdmin({
+    id: createId('admin'),
+    email: INITIAL_SUPER_ADMIN_EMAIL,
+    passwordHash: bcrypt.hashSync(INITIAL_SUPER_ADMIN_PASSWORD, SALT_ROUNDS),
+    role: 'super_admin',
+    firstName: 'Super',
+    lastName: 'Admin',
+    permissions: ['all'],
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+    lastLoginAt: null,
+    active: true,
+  })
 }
 
 function ensureSuperAdmin(db) {
@@ -56,10 +91,25 @@ function ensureSuperAdmin(db) {
   }
 }
 
-export function adminLogin(req, res) {
+export async function adminLogin(req, res) {
   const email = normalizeEmail(req.body.email)
   const password = String(req.body.password || '')
   if (!email || !password) return res.status(400).json({ error: 'Email and password are required' })
+
+  if (adminAuthEnabled()) {
+    try {
+      await ensureSuperAdminRow()
+    } catch {
+      return res.status(503).json({ error: 'Admin bootstrap configuration is invalid' })
+    }
+    const admin = await findAdminByEmail(email)
+    if (!admin || admin.active === false || !bcrypt.compareSync(password, admin.passwordHash)) {
+      return res.status(401).json({ error: 'Invalid credentials' })
+    }
+    const updated = { ...admin, lastLoginAt: nowIso(), updatedAt: nowIso() }
+    await saveAdmin(updated)
+    return res.json({ token: makeAdminToken(updated.id, updated.role), admin: publicAdmin(updated) })
+  }
 
   const db = readAuthorityDb()
   try {
@@ -78,36 +128,24 @@ export function adminLogin(req, res) {
   writeAuthorityDb(db)
 
   const token = makeAdminToken(admin.id, admin.role)
-  return res.json({
-    token,
-    admin: {
-      id: admin.id,
-      email: admin.email,
-      role: admin.role,
-      firstName: admin.firstName,
-      lastName: admin.lastName,
-      permissions: admin.permissions,
-    },
-  })
+  return res.json({ token, admin: publicAdmin(admin) })
 }
 
-export function adminMe(req, res) {
+export async function adminMe(req, res) {
+  if (adminAuthEnabled()) {
+    const admin = await findAdminById(req.user.id)
+    if (!admin) return res.status(404).json({ error: 'Admin not found' })
+    return res.json({ ...publicAdmin(admin), lastLoginAt: admin.lastLoginAt })
+  }
   const db = readAuthorityDb()
   const admin = (db.adminUsers || []).find(u => u.id === req.user.id)
   if (!admin) return res.status(404).json({ error: 'Admin not found' })
-  return res.json({
-    id: admin.id,
-    email: admin.email,
-    role: admin.role,
-    firstName: admin.firstName,
-    lastName: admin.lastName,
-    permissions: admin.permissions,
-    lastLoginAt: admin.lastLoginAt,
-  })
+  return res.json({ ...publicAdmin(admin), lastLoginAt: admin.lastLoginAt })
 }
 
-export function adminIntelligenceTelemetry(_req, res) {
-  const db = readAuthorityDb()
+export async function adminIntelligenceTelemetry(_req, res) {
+  const rowLevel = adminAuthEnabled()
+  const db = rowLevel ? await adminTelemetryCollections() : readAuthorityDb()
   const count = name => Array.isArray(db[name]) ? db[name].length : 0
   const telemetry = migrationTelemetrySnapshot()
   const platform = {
@@ -142,9 +180,15 @@ export function adminIntelligenceTelemetry(_req, res) {
     organizationOverdueActions: (db.organizationActions || []).filter(row => row.dueDate && new Date(row.dueDate).getTime() < Date.now() && !['completed', 'dismissed'].includes(row.status)).length,
     generatedAt: new Date().toISOString(),
   }
+  const snapshot = { id: createId('admin_telemetry'), ...platform }
+  if (rowLevel) {
+    const history = [...(db.adminTelemetrySnapshots || []), snapshot].slice(-100)
+    await appendAdminTelemetry(snapshot)
+    return res.json({ telemetry, platform, history })
+  }
   updateAuthorityDb(current => {
     if (!Array.isArray(current.adminTelemetrySnapshots)) current.adminTelemetrySnapshots = []
-    current.adminTelemetrySnapshots.push({ id: createId('admin_telemetry'), ...platform })
+    current.adminTelemetrySnapshots.push(snapshot)
     if (current.adminTelemetrySnapshots.length > 1000) current.adminTelemetrySnapshots.splice(0, current.adminTelemetrySnapshots.length - 1000)
     return current
   })
@@ -159,23 +203,13 @@ export async function adminSecurityPosture(_req, res) { return res.json(await se
 export async function adminSecurityEvents(req, res) { return res.json({ events: await listSecurityEvents(req.query.limit) }) }
 export async function adminComparableUpsert(req, res) { const value = await upsertComparableAsync(req.user.id, req.body); return value.ok ? res.status(req.body.id ? 200 : 201).json(value) : res.status(400).json(value) }
 
-export function adminList(req, res) {
-  const db = readAuthorityDb()
-  const admins = (db.adminUsers || []).map(u => ({
-    id: u.id,
-    email: u.email,
-    role: u.role,
-    firstName: u.firstName,
-    lastName: u.lastName,
-    permissions: u.permissions,
-    active: u.active,
-    lastLoginAt: u.lastLoginAt,
-    createdAt: u.createdAt,
-  }))
+export async function adminList(req, res) {
+  const records = adminAuthEnabled() ? await listAdminRecords() : (readAuthorityDb().adminUsers || [])
+  const admins = records.map(u => ({ ...publicAdmin(u), active: u.active, lastLoginAt: u.lastLoginAt, createdAt: u.createdAt }))
   return res.json({ admins })
 }
 
-export function adminCreate(req, res) {
+export async function adminCreate(req, res) {
   const email = normalizeEmail(req.body.email)
   const password = String(req.body.password || '')
   const role = req.body.role || 'admin'
@@ -187,13 +221,6 @@ export function adminCreate(req, res) {
   if (!isAdminRole(role)) return res.status(400).json({ error: 'Invalid admin role' })
   if (password.length < ADMIN_PASSWORD_MIN_LENGTH) {
     return res.status(400).json({ error: `Password must be at least ${ADMIN_PASSWORD_MIN_LENGTH} characters` })
-  }
-
-  const db = readAuthorityDb()
-  if (!db.adminUsers) db.adminUsers = []
-
-  if (db.adminUsers.some(u => u.email === email)) {
-    return res.status(409).json({ error: 'Admin with this email already exists' })
   }
 
   const hash = bcrypt.hashSync(password, SALT_ROUNDS)
@@ -210,28 +237,27 @@ export function adminCreate(req, res) {
     lastLoginAt: null,
     active: true,
   }
+  if (adminAuthEnabled()) {
+    if (await findAdminByEmail(email)) return res.status(409).json({ error: 'Admin with this email already exists' })
+    await saveAdmin(admin)
+    return res.status(201).json({ admin: publicAdmin(admin) })
+  }
+  const db = readAuthorityDb()
+  if (!db.adminUsers) db.adminUsers = []
+  if (db.adminUsers.some(u => u.email === email)) {
+    return res.status(409).json({ error: 'Admin with this email already exists' })
+  }
   db.adminUsers.push(admin)
   writeAuthorityDb(db)
-
-  return res.status(201).json({
-    admin: {
-      id: admin.id,
-      email: admin.email,
-      role: admin.role,
-      firstName: admin.firstName,
-      lastName: admin.lastName,
-      permissions: admin.permissions,
-    },
-  })
+  return res.status(201).json({ admin: publicAdmin(admin) })
 }
 
-export function adminUpdate(req, res) {
-  const db = readAuthorityDb()
-  if (!db.adminUsers) return res.status(404).json({ error: 'Admin not found' })
+export async function adminUpdate(req, res) {
+  const rowLevel = adminAuthEnabled()
+  const current = rowLevel ? await findAdminById(req.params.id) : (readAuthorityDb().adminUsers || []).find(u => u.id === req.params.id)
+  if (!current) return res.status(404).json({ error: 'Admin not found' })
 
-  const admin = db.adminUsers.find(u => u.id === req.params.id)
-  if (!admin) return res.status(404).json({ error: 'Admin not found' })
-
+  const admin = { ...current }
   if (req.body.role && isAdminRole(req.body.role)) admin.role = req.body.role
   if (req.body.firstName) admin.firstName = String(req.body.firstName).trim()
   if (req.body.lastName) admin.lastName = String(req.body.lastName).trim()
@@ -245,22 +271,24 @@ export function adminUpdate(req, res) {
     admin.passwordHash = bcrypt.hashSync(password, SALT_ROUNDS)
   }
   admin.updatedAt = nowIso()
-  writeAuthorityDb(db)
-
-  return res.json({
-    admin: {
-      id: admin.id,
-      email: admin.email,
-      role: admin.role,
-      firstName: admin.firstName,
-      lastName: admin.lastName,
-      permissions: admin.permissions,
-      active: admin.active,
-    },
-  })
+  if (rowLevel) {
+    await saveAdmin(admin)
+  } else {
+    const db = readAuthorityDb()
+    const idx = (db.adminUsers || []).findIndex(u => u.id === req.params.id)
+    if (idx === -1) return res.status(404).json({ error: 'Admin not found' })
+    db.adminUsers[idx] = admin
+    writeAuthorityDb(db)
+  }
+  return res.json({ admin: { ...publicAdmin(admin), active: admin.active } })
 }
 
-export function adminDelete(req, res) {
+export async function adminDelete(req, res) {
+  if (adminAuthEnabled()) {
+    const deleted = await deleteAdminRecord(req.params.id)
+    if (!deleted) return res.status(404).json({ error: 'Admin not found' })
+    return res.json({ ok: true })
+  }
   const db = readAuthorityDb()
   if (!db.adminUsers) return res.status(404).json({ error: 'Admin not found' })
   const before = db.adminUsers.length

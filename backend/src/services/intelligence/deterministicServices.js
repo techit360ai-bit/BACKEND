@@ -1,4 +1,5 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../../config/database.js'
+import { deterministicIntelligenceInputs } from '../../repositories/intelligenceStateRepository.js'
 import {
   computeCis,
   computeComplianceScore,
@@ -92,16 +93,23 @@ export function calculateEvidence(input = {}) {
   return intelligenceEnvelope({ result: checks, score, status: statusForEvidence(evidence), evidence })
 }
 
-export function getDeterministicIntelligenceSnapshot(userId) {
-  const db = readAuthorityDb()
-  const profile = Array.isArray(db.profiles) ? db.profiles.find(item => item.id === userId) : null
-  const recommendationProfile = Array.isArray(db.recommendationProfiles) ? db.recommendationProfiles.find(item => item.userId === userId) : null
-  const activity = Array.isArray(db.userActivityStates) ? db.userActivityStates.find(item => item.userId === userId) : null
+function buildDeterministicIntelligenceSnapshot({ profile, recommendationProfile, activity }) {
   return intelligenceEnvelope({
     result: { profile: profile || null, recommendationProfile: recommendationProfile || null, activity: activity || null },
     status: profile ? 'sufficient' : 'insufficient_evidence',
     evidence: createEvidence({ sources: profile ? ['profiles'] : [], missingFields: profile ? [] : ['profile'], confidence: profile ? 1 : 0 }),
     metadata: { deterministic_enabled: intelligenceFlags.deterministicEnabled, embedding_refresh_mode: intelligenceFlags.embeddingRefreshMode },
+  })
+}
+
+export async function getDeterministicIntelligenceSnapshot(userId) {
+  const inputs = await deterministicIntelligenceInputs(userId)
+  if (inputs) return buildDeterministicIntelligenceSnapshot(inputs)
+  const db = readAuthorityDb()
+  return buildDeterministicIntelligenceSnapshot({
+    profile: Array.isArray(db.profiles) ? db.profiles.find(item => item.id === userId) : null,
+    recommendationProfile: Array.isArray(db.recommendationProfiles) ? db.recommendationProfiles.find(item => item.userId === userId) : null,
+    activity: Array.isArray(db.userActivityStates) ? db.userActivityStates.find(item => item.userId === userId) : null,
   })
 }
 

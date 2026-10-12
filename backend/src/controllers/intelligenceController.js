@@ -10,7 +10,7 @@ export function investorSignals(req, res) { return res.json(calculateInvestorSig
 export function match(req, res) { return res.json(calculateMatch(body(req))) }
 export function profileQuality(req, res) { return res.json(calculateProfileQuality(body(req))) }
 export function evidence(req, res) { return res.json(calculateEvidence(body(req))) }
-export function snapshot(req, res) { return res.json(getDeterministicIntelligenceSnapshot(req.user.id)) }
+export async function snapshot(req, res) { return res.json(await getDeterministicIntelligenceSnapshot(req.user.id)) }
 export function training(req, res) { return res.json(buildTrainingPlan(body(req))) }
 export function trust(req, res) { return res.json(evaluateTrust(body(req))) }
 export function activity(req, res) { return res.json(calculateActivityMomentum(body(req))) }

@@ -1,6 +1,7 @@
 import { previewTrustSurfaceNotifications } from '../services/trustSurfaceService.js'
 import { appendTrustProof, beginProviderVerification, createDomainProofChallenge, disconnectTrustSource, publicTrustFor, reviewTrustProof, trustHistoryFor, trustOperations, trustProofsFor, verifyDomainProofChallenge } from '../services/trustAuthority.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { linkedinStoreEnabled, linkedinFallbackEnabled, consumeLinkedinOauthState, saveLinkedinConnection } from '../repositories/linkedinRepository.js'
 import { safeFetch } from '../services/outboundHttpService.js'
 import { findTrustSourceByProvider, listTrustSources } from '../config/trustSources.js'
 import { getTrustRefreshPlan, inviteTrustTeamMember, previewTrustShareProfile, runTrustContinuousVerification, verifyTrustAdapter, verifyTrustTeamMember } from '../services/trustAdapterClient.js'
@@ -400,8 +401,21 @@ export async function shareProfilePreview(req, res) {
 
 export async function linkedinCallback(req, res) {
   const { code, state } = req.query; if (!code || !state) return res.status(400).json({ error: 'linkedin_callback_invalid' })
-  const db = readAuthorityDb(); const entry = (db.linkedinOauthStates || []).find(row => row.state === state && new Date(row.createdAt).getTime() > Date.now() - 10 * 60 * 1000); if (!entry) return res.status(400).json({ error: 'linkedin_state_invalid' })
-  updateAuthorityDb(current => { current.linkedinOauthStates = (current.linkedinOauthStates || []).filter(row => row.state !== state); return current })
+  const consumeFromSnapshot = () => {
+    const db = readAuthorityDb()
+    const entry = (db.linkedinOauthStates || []).find(row => row.state === state && new Date(row.createdAt).getTime() > Date.now() - 10 * 60 * 1000)
+    if (entry) updateAuthorityDb(current => { current.linkedinOauthStates = (current.linkedinOauthStates || []).filter(row => row.state !== state); return current })
+    return entry || null
+  }
+  let entry
+  if (linkedinStoreEnabled()) {
+    try { entry = await consumeLinkedinOauthState(state) } catch (error) {
+      console.error(JSON.stringify({ event: 'linkedin_postgres_read_failed', error: error.message }))
+      if (!linkedinFallbackEnabled()) throw error
+      entry = consumeFromSnapshot()
+    }
+  } else entry = consumeFromSnapshot()
+  if (!entry) return res.status(400).json({ error: 'linkedin_state_invalid' })
   const clientId = process.env.LINKEDIN_CLIENT_ID; const clientSecret = process.env.LINKEDIN_CLIENT_SECRET; const redirectUri = process.env.LINKEDIN_REDIRECT_URI || `${process.env.PUBLIC_API_URL || 'http://localhost:3000'}/api/trust/linkedin/callback`
   if (!clientId || !clientSecret) return res.redirect(`${FRONTEND_URL}/founder/trust?linkedin=manual_review_required`)
   try {
@@ -409,7 +423,15 @@ export async function linkedinCallback(req, res) {
     const tokenPayload = await tokenResponse.json().catch(() => ({})); if (!tokenResponse.ok || !tokenPayload.access_token) throw new Error('linkedin_token_exchange_failed')
     const profileResponse = await safeFetch('https://api.linkedin.com/v2/userinfo', { headers: { authorization: `Bearer ${tokenPayload.access_token}`, accept: 'application/json' } }, { schemes: ['https'], allowHosts: ['api.linkedin.com'] })
     const profile = await profileResponse.json().catch(() => ({})); if (!profileResponse.ok || !profile.sub) throw new Error('linkedin_profile_lookup_failed')
-    updateAuthorityDb(current => { const connections = current.linkedinConnections || []; current.linkedinConnections = [...connections.filter(row => row.userId !== entry.userId), { id: `li_${profile.sub}`, userId: entry.userId, providerSubjectId: String(profile.sub), connectedAt: nowIso(), status: 'connected' }]; return current })
+    const connection = { id: `li_${profile.sub}`, userId: entry.userId, providerSubjectId: String(profile.sub), connectedAt: nowIso(), status: 'connected' }
+    const saveToSnapshot = () => updateAuthorityDb(current => { const connections = current.linkedinConnections || []; current.linkedinConnections = [...connections.filter(row => row.userId !== entry.userId), connection]; return current })
+    if (linkedinStoreEnabled()) {
+      try { await saveLinkedinConnection(connection) } catch (error) {
+        console.error(JSON.stringify({ event: 'linkedin_postgres_write_failed', error: error.message }))
+        if (!linkedinFallbackEnabled()) throw error
+        saveToSnapshot()
+      }
+    } else saveToSnapshot()
     appendTrustProof(entry.userId, { source: 'linkedin', method: 'linkedin_oidc', status: 'verified', providerSubjectId: String(profile.sub), confidence: 0.96, metadata: { providerSubjectId: String(profile.sub), username: cleanLinkedinName(profile), profileUrl: typeof profile.profile === 'string' ? profile.profile : '' } })
     return res.redirect(`${FRONTEND_URL}/founder/trust?linkedin=connected`)
   } catch { return res.redirect(`${FRONTEND_URL}/founder/trust?linkedin=manual_review_required`) }

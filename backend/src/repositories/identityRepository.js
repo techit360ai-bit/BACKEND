@@ -62,7 +62,12 @@ async function withRollbackFallback(postgresCall, localCall) {
     if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'true') return localCall()
     throw error
   }
-  recordCutoverComparison('identity', primary?.user?.id || primary?.user?.email || 'missing', primary, safeShadowRead(localCall))
+  // The snapshot shadow read is a cutover comparison only. Skip it (and its
+  // now-meaningless snapshot load) unless shadow reads are explicitly enabled;
+  // the request authority snapshot no longer exists post-cutover.
+  if (process.env.IDENTITY_SHADOW_READS === 'true') {
+    recordCutoverComparison('identity', primary?.user?.id || primary?.user?.email || 'missing', primary, safeShadowRead(localCall))
+  }
   return primary
 }
 
@@ -96,6 +101,15 @@ export async function updateIdentityPassword(userId, passwordHash) {
 }
 export async function listIdentityProfiles() {
   const result = await getPool().query('SELECT id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at FROM core_profiles ORDER BY created_at DESC')
+  return result.rows.map(row => ({ ...(row.payload || {}), id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, username: row.username, role: row.role, workspaceId: row.workspace_id, isVerified: row.is_verified, isOnboarded: row.is_onboarded, createdAt: row.created_at, updatedAt: row.updated_at }))
+}
+
+// Bounded profile lookup for callers that need actor display data (e.g. the
+// notification feed) without loading the whole-database snapshot.
+export async function listProfilesByIds(ids = []) {
+  const unique = [...new Set(ids.filter(Boolean).map(String))]
+  if (!unique.length) return []
+  const result = await getPool().query('SELECT id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at FROM core_profiles WHERE id=ANY($1)', [unique])
   return result.rows.map(row => ({ ...(row.payload || {}), id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, username: row.username, role: row.role, workspaceId: row.workspace_id, isVerified: row.is_verified, isOnboarded: row.is_onboarded, createdAt: row.created_at, updatedAt: row.updated_at }))
 }
 export async function findSessionByIdentifier(identifier) {

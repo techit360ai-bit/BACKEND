@@ -2,11 +2,11 @@ import bcrypt from 'bcryptjs'
 import { signJwt } from '../services/jwtKeyService.js'
 import { Resend } from 'resend'
 import { createHash, randomBytes, randomUUID } from 'crypto'
-import { readDb as readAuthorityDb, updateDb as updateAuthorityDb, writeDb as writeAuthorityDb } from '../config/database.js'
+import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { isAllowedRole, normalizeEmail } from '../utils/authInputs.js'
 import { getActiveContextAsync, normalizeRole, roleAssignmentsAsync } from '../services/multiRoleContextService.js'
 import { assertEmailAccepted, configuredFromEmail } from '../utils/emailDelivery.js'
-import { recordActivityInDb } from '../services/discoveryService.js'
+import { noteUserActivityAsync } from '../services/discoveryService.js'
 import { browserBodyTokenAllowed, clearSessionCookies, issueSessionAsync, listSessionsAsync, mobileClient, refreshTokenFromRequest, revokeAllSessionsAsync, revokeSessionAsync, rotateSessionAsync, setSessionCookies } from '../services/sessionService.js'
 import { projectOwnProfile } from '../utils/api.js'
 
@@ -21,6 +21,7 @@ import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
 import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
 import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
+import { contextFallbackEnabled, contextStoreEnabled, listContextCheckpoints } from '../repositories/contextRepository.js'
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d'
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -269,9 +270,7 @@ export async function signin(req, res) {
   }
 
   const profile = identity.profile
-  const db = readAuthorityDb()
-  recordActivityInDb(db, user.id, 'login', 'auth')
-  writeAuthorityDb(db)
+  await noteUserActivityAsync(user.id, 'login', 'auth')
   await roleAssignmentsAsync(user.id)
 
   const credentials = await issueSessionAsync(user, profile, req, { rememberMe: req.body.rememberMe !== false })
@@ -286,11 +285,17 @@ export async function signin(req, res) {
 
 export async function session(req, res) {
   const identity = await findIdentityById(req.user.id)
-  const db = readAuthorityDb()
   const profile = identity?.profile || null
-  const lastContext = (db.userContextCheckpoints || []).filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
-  recordActivityInDb(db, req.user.id, 'session', 'auth')
-  writeAuthorityDb(db)
+  let checkpoints
+  if (contextStoreEnabled()) {
+    try { checkpoints = await listContextCheckpoints(req.user.id) } catch (error) {
+      console.error(JSON.stringify({ event: 'context_postgres_read_failed', operation: 'session_checkpoints', error: error.message }))
+      if (!contextFallbackEnabled()) throw error
+    }
+  }
+  checkpoints ||= readAuthorityDb().userContextCheckpoints || []
+  const lastContext = checkpoints.filter(row => row.userId === req.user.id && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null
+  await noteUserActivityAsync(req.user.id, 'session', 'auth')
   const assignments = await roleAssignmentsAsync(req.user.id)
   return res.json({ user: sessionUser(req.user), profile: projectOwnProfile(profile), session: req.user.sessionId ? { id: req.user.sessionId } : null, lastContext, roleAssignments: assignments.contexts, activeContext: assignments.activeContext || await getActiveContextAsync(req.user.id), availableContexts: assignments.contexts })
 }

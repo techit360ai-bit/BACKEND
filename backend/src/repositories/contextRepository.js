@@ -45,6 +45,12 @@ export async function loadProfile(userId) {
   return withPlatformTransaction(client => getRecord(client, 'profiles', userId))
 }
 
+// Bounded reader for the caller's session-context checkpoints only (used by the
+// auth session endpoint) so it never loads the whole snapshot.
+export async function listContextCheckpoints(userId) {
+  return withPlatformTransaction(client => listRecordsForOwner(client, 'userContextCheckpoints', userId, { ownerFields: ['userId'] }), { userId })
+}
+
 export async function saveContextRow(collection, row) {
   return withPlatformTransaction(async client => {
     const current = await getRecord(client, collection, row.id)

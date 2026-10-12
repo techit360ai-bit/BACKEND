@@ -1,5 +1,5 @@
 import { readDb as readAuthorityDb } from '../config/database.js'
-import { withPlatformTransaction, upsertRecord, listRecords } from './platformCollectionRepository.js'
+import { withPlatformTransaction, upsertRecord, listRecords, getRecord, listRecordsForOwner } from './platformCollectionRepository.js'
 
 const collections = [
   'recommendationProfiles', 'recommendationPreferences', 'recommendationConfigs',
@@ -25,6 +25,18 @@ export async function syncIntelligenceState(userId) {
 export async function listIntelligenceState(userId, collectionName) {
   if (!enabled()) return null
   return withPlatformTransaction(client => listRecords(client, collectionName, { ownerId: userId }))
+}
+
+// Row-level inputs for the deterministic intelligence snapshot (profile,
+// recommendation profile, activity state) without loading the whole snapshot.
+export async function deterministicIntelligenceInputs(userId) {
+  if (!enabled()) return null
+  return withPlatformTransaction(async client => {
+    const profile = await getRecord(client, 'profiles', userId)
+    const recommendationProfiles = await listRecordsForOwner(client, 'recommendationProfiles', userId, { ownerFields: ['userId'] })
+    const activities = await listRecordsForOwner(client, 'userActivityStates', userId, { ownerFields: ['userId'] })
+    return { profile: profile || null, recommendationProfile: recommendationProfiles[0] || null, activity: activities[0] || null }
+  }, { userId })
 }
 export function intelligenceStateEnabled() { return enabled() }
 export function intelligenceStateFallbackEnabled() { return fallback() }

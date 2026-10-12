@@ -6,6 +6,7 @@ import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 import { publicTrustFor } from '../services/trustAuthority.js'
 import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
+import { userDirectoryEnabled, userDirectoryFallbackEnabled, loadMemberDirectorySources, loadConnectionRequestSources, loadConnectionSources, loadProfileByRef, applyConnectionMutation } from '../repositories/userDirectoryRepository.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -22,12 +23,11 @@ const UPDATABLE = new Set([
 ])
 
 export async function getMe(req, res) {
-  const db = readAuthorityDb()
   let profile
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { profile = (await findIdentityById(req.user.id))?.profile } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
   }
-  profile ||= db.profiles.find(p => p.id === req.user.id)
+  profile ||= readAuthorityDb().profiles.find(p => p.id === req.user.id)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   const response = projectOwnProfile(profile)
   if (profile.avatarObjectKey) response.avatarUrl = privateDownloadUrl(profile.avatarObjectKey, 900)
@@ -282,12 +282,21 @@ export async function listUsers(req, res) {
   const requestedRole = String(req.query.role || '').trim().toLowerCase()
   const query = plainText(String(req.query.q || ''), 80).toLowerCase().replace(/^@/, '')
   const limit = Math.min(50, Math.max(1, Number(req.query.limit || 20) || 20))
-  const db = readAuthorityDb()
-  let profiles = db.profiles
-  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
-    try { profiles = await listIdentityProfiles() } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  let profiles
+  let db = null
+  if (userDirectoryEnabled()) {
+    try { profiles = await listIdentityProfiles() } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_read_failed', operation: 'list_users', error: error.message }))
+      if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error
+    }
   }
-  const users = (await Promise.all(profiles
+  if (!profiles) {
+    db = readAuthorityDb()
+    profiles = db.profiles
+  }
+  // Sort on the profile name (what the response exposes) before slicing so the
+  // bounded row-level bundle below is only loaded for the returned page.
+  const selected = profiles
     .filter(profile => profile.id !== req.user.id && hasDirectoryRole(profile, requestedRole))
     .filter(profile => {
       if (!query) return true
@@ -295,20 +304,36 @@ export async function listUsers(req, res) {
         .filter(Boolean).join(' ').toLowerCase()
       return haystack.includes(query)
     })
-    .map(profile => directoryProfile(profile, db, req.user.id))))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => userName(a).localeCompare(userName(b)))
     .slice(0, limit)
+  if (!db) {
+    try { db = await loadMemberDirectorySources(req.user.id, selected.map(profile => profile.id)) } catch (error) {
+      console.error(JSON.stringify({ event: 'user_directory_postgres_read_failed', operation: 'list_users', error: error.message }))
+      if (!userDirectoryFallbackEnabled()) throw error
+      db = readAuthorityDb()
+    }
+  }
+  const users = await Promise.all(selected.map(profile => directoryProfile(profile, db, req.user.id)))
   return res.json({ users })
 }
 
 export async function getUserProfile(req, res) {
-  const db = readAuthorityDb()
   const id = req.params.id === 'me' ? req.user.id : req.params.id
   let profile
-  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
-    try { profile = (await listIdentityProfiles()).find(p => p.id === id || p.username === id) } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  let db = null
+  if (userDirectoryEnabled()) {
+    try {
+      profile = (await listIdentityProfiles()).find(p => p.id === id || p.username === id)
+      if (profile) db = await loadMemberDirectorySources(req.user.id, [profile.id], { activity: true, fullEdgeIds: [profile.id] })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_read_failed', operation: 'get_user_profile', error: error.message }))
+      if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error
+    }
   }
-  profile ||= db.profiles.find(p => p.id === id || p.username === id)
+  if (!db) {
+    db = readAuthorityDb()
+    profile ||= db.profiles.find(p => p.id === id || p.username === id)
+  }
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   return res.json(await publicProfile(profile, db, req.user.id))
 }
@@ -423,77 +448,78 @@ async function persistNotificationToContent(notification) {
   }
 }
 
-export async function connectUser(req, res) {
-  const normalized = normalizeInvitation(req.body?.invitation)
-  if (normalized.error) return res.status(400).json({ error: normalized.error })
-  const invitation = normalized.invitation
-  const result = updateAuthorityDb(db => {
-    const target = db.profiles.find(p => p.id === req.params.id || p.username === req.params.id)
-    const actor = db.profiles.find(p => p.id === req.user.id)
-    if (!target) return { status: 404, error: 'Profile not found' }
-    if (target.id === req.user.id) return { status: 400, error: 'Cannot connect with yourself' }
-    const requests = connectionRequests(db)
-    const now = nowIso()
-    // If the target already invited us, this is an acceptance: connect both
-    // directions immediately rather than leaving two dangling pending rows.
-    const inbound = requests.find(row => row.fromUserId === target.id && row.toUserId === req.user.id && row.status === 'pending')
-    const existing = requests.find(row => row.fromUserId === req.user.id && row.toUserId === target.id)
-    const request = existing || { id: createId('connreq'), fromUserId: req.user.id, toUserId: target.id, status: 'pending', createdAt: now, updatedAt: now }
-    if (!existing) requests.push(request)
-    if (existing && existing.status !== 'active') { existing.status = 'pending'; existing.updatedAt = now }
-    if (inbound) { inbound.status = 'active'; inbound.respondedAt = now; inbound.updatedAt = now; request.status = 'active'; request.respondedAt = now }
-    const connected = request.status === 'active'
-    const event = appendPlatformEventInDb(db, {
-      userId: req.user.id,
-      actorId: req.user.id,
+// Pure connection mutators shared by the snapshot fallback and the bounded
+// row-level store: they run against the db-shaped bundle handed in by either
+// updateAuthorityDb (snapshot) or applyConnectionMutation (row-level).
+function applyConnectionRequest(db, { actorId, targetRef, target: preloadedTarget, invitation }) {
+  const target = preloadedTarget || db.profiles.find(p => p.id === targetRef || p.username === targetRef)
+  const actor = db.profiles.find(p => p.id === actorId)
+  if (!target) return { status: 404, error: 'Profile not found' }
+  if (target.id === actorId) return { status: 400, error: 'Cannot connect with yourself' }
+  const requests = connectionRequests(db)
+  const now = nowIso()
+  // If the target already invited us, this is an acceptance: connect both
+  // directions immediately rather than leaving two dangling pending rows.
+  const inbound = requests.find(row => row.fromUserId === target.id && row.toUserId === actorId && row.status === 'pending')
+  const existing = requests.find(row => row.fromUserId === actorId && row.toUserId === target.id)
+  const request = existing || { id: createId('connreq'), fromUserId: actorId, toUserId: target.id, status: 'pending', createdAt: now, updatedAt: now }
+  if (!existing) requests.push(request)
+  if (existing && existing.status !== 'active') { existing.status = 'pending'; existing.updatedAt = now }
+  if (inbound) { inbound.status = 'active'; inbound.respondedAt = now; inbound.updatedAt = now; request.status = 'active'; request.respondedAt = now }
+  const connected = request.status === 'active'
+  const event = appendPlatformEventInDb(db, {
+    userId: actorId,
+    actorId,
+    eventType: 'connect',
+    entityType: 'person',
+    entityId: target.id,
+    importance: 'HIGH',
+    metadata: { targetName: userName(target) },
+  })
+  appendRelationshipInDb(db, actorId, event)
+  if (connected) {
+    const reciprocal = appendPlatformEventInDb(db, {
+      userId: target.id,
+      actorId: target.id,
       eventType: 'connect',
       entityType: 'person',
-      entityId: target.id,
+      entityId: actorId,
       importance: 'HIGH',
-      metadata: { targetName: userName(target) },
+      metadata: { targetName: userName(actor) },
     })
-    appendRelationshipInDb(db, req.user.id, event)
-    if (connected) {
-      const reciprocal = appendPlatformEventInDb(db, {
+    appendRelationshipInDb(db, target.id, reciprocal)
+  }
+  let notification = null
+  if (!connected) {
+    const exists = db.notifications.some(n =>
+      n.userId === target.id
+      && n.actorId === actorId
+      && n.type === 'collab'
+      && n.metadata?.connectionRequestId === request.id
+    )
+    if (!exists) {
+      notification = {
+        id: createId('notif'),
         userId: target.id,
-        actorId: target.id,
-        eventType: 'connect',
-        entityType: 'person',
-        entityId: req.user.id,
-        importance: 'HIGH',
-        metadata: { targetName: userName(actor) },
-      })
-      appendRelationshipInDb(db, target.id, reciprocal)
-    }
-    let notification = null
-    if (!connected) {
-      const exists = db.notifications.some(n =>
-        n.userId === target.id
-        && n.actorId === req.user.id
-        && n.type === 'collab'
-        && n.metadata?.connectionRequestId === request.id
-      )
-      if (!exists) {
-        notification = {
-          id: createId('notif'),
-          userId: target.id,
-          actorId: req.user.id,
-          type: 'collab',
-          read: false,
-          content: invitation ? invitationContent(invitation) : 'wants to connect with you',
-          author: userName(actor),
-          avatar: avatarGradient(req.user.id),
-          linkTo: `/feed/profile/${req.user.id}`,
-          metadata: invitation
-            ? { invitation, connectionRequestId: request.id, connectionRequest: true }
-            : { connectionRequestId: request.id, connectionRequest: true },
-          createdAt: now,
-        }
-        db.notifications.push(notification)
+        actorId,
+        type: 'collab',
+        read: false,
+        content: invitation ? invitationContent(invitation) : 'wants to connect with you',
+        author: userName(actor),
+        avatar: avatarGradient(actorId),
+        linkTo: `/feed/profile/${actorId}`,
+        metadata: invitation
+          ? { invitation, connectionRequestId: request.id, connectionRequest: true }
+          : { connectionRequestId: request.id, connectionRequest: true },
+        createdAt: now,
       }
+      db.notifications.push(notification)
     }
-    return { status: 200, notification, requestId: request.id, targetId: target.id, connectionStatus: connected ? 'connected' : 'pending' }
-  })
+  }
+  return { status: 200, notification, requestId: request.id, targetId: target.id, connectionStatus: connected ? 'connected' : 'pending' }
+}
+
+async function finishConnect(req, res, result) {
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
   await persistNotificationToContent(result.notification)
   // Targeted recommendation invalidation: a new connection changes the graph for
@@ -503,62 +529,91 @@ export async function connectUser(req, res) {
   return res.json({ ok: true, connectionRequestId: result.requestId, status: result.connectionStatus })
 }
 
-export function listConnectionRequests(req, res) {
-  const db = readAuthorityDb()
-  const requests = connectionRequests(db)
-    .filter(row => row.toUserId === req.user.id && row.status === 'pending')
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .map(row => connectionRequestSummary(db, row))
-  return res.json({ requests })
+export async function connectUser(req, res) {
+  const normalized = normalizeInvitation(req.body?.invitation)
+  if (normalized.error) return res.status(400).json({ error: normalized.error })
+  const invitation = normalized.invitation
+  if (userDirectoryEnabled()) {
+    try {
+      const target = await loadProfileByRef(req.params.id)
+      if (!target) return res.status(404).json({ error: 'Profile not found' })
+      if (target.id === req.user.id) return res.status(400).json({ error: 'Cannot connect with yourself' })
+      const result = await applyConnectionMutation({ userId: req.user.id, peerId: target.id }, db => applyConnectionRequest(db, { actorId: req.user.id, target, invitation }))
+      return finishConnect(req, res, result)
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'user_directory_postgres_write_failed', operation: 'connect_user', error: error.message }))
+      if (!userDirectoryFallbackEnabled()) throw error
+    }
+  }
+  return finishConnect(req, res, updateAuthorityDb(db => applyConnectionRequest(db, { actorId: req.user.id, targetRef: req.params.id, invitation })))
 }
 
-export async function respondConnectionRequest(req, res) {
-  const decision = String(req.body?.decision || '').trim().toLowerCase()
-  if (!['accept', 'decline'].includes(decision)) return res.status(400).json({ error: 'decision must be accept or decline' })
-  const result = updateAuthorityDb(db => {
-    const request = connectionRequests(db).find(row => row.id === req.params.requestId && row.toUserId === req.user.id)
-    if (!request) return { status: 404, error: 'Connection request not found' }
-    if (request.status !== 'pending') return { status: 409, error: 'Connection request already resolved' }
-    const now = nowIso()
-    const actor = db.profiles.find(p => p.id === req.user.id)
-    const sender = db.profiles.find(p => p.id === request.fromUserId)
-    request.status = decision === 'accept' ? 'active' : 'declined'
-    request.respondedAt = now
-    request.updatedAt = now
-    let notification = null
-    if (decision === 'accept') {
-      for (const [userId, counterparty] of [[req.user.id, sender], [request.fromUserId, actor]]) {
-        if (!counterparty) continue
-        const event = appendPlatformEventInDb(db, {
-          userId,
-          actorId: userId,
-          eventType: 'connect',
-          entityType: 'person',
-          entityId: counterparty.id,
-          importance: 'HIGH',
-          metadata: { targetName: userName(counterparty) },
-        })
-        appendRelationshipInDb(db, userId, event)
-      }
-      const reciprocal = connectionRequests(db).find(row => row.fromUserId === req.user.id && row.toUserId === request.fromUserId)
-      if (reciprocal) { reciprocal.status = 'active'; reciprocal.updatedAt = now }
-      notification = {
-        id: createId('notif'),
-        userId: request.fromUserId,
-        actorId: req.user.id,
-        type: 'collab',
-        read: false,
-        content: 'accepted your connection request',
-        author: userName(actor),
-        avatar: avatarGradient(req.user.id),
-        linkTo: `/feed/profile/${req.user.id}`,
-        metadata: { connectionRequestId: request.id, connectionAccepted: true },
-        createdAt: now,
-      }
-      db.notifications.push(notification)
+function renderConnectionRequests(db, userId) {
+  return connectionRequests(db)
+    .filter(row => row.toUserId === userId && row.status === 'pending')
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .map(row => connectionRequestSummary(db, row))
+}
+
+export async function listConnectionRequests(req, res) {
+  if (userDirectoryEnabled()) {
+    try {
+      const db = await loadConnectionRequestSources(req.user.id)
+      return res.json({ requests: renderConnectionRequests(db, req.user.id) })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'user_directory_postgres_read_failed', operation: 'list_connection_requests', error: error.message }))
+      if (!userDirectoryFallbackEnabled()) throw error
     }
-    return { status: 200, notification, decision, fromUserId: request.fromUserId }
-  })
+  }
+  return res.json({ requests: renderConnectionRequests(readAuthorityDb(), req.user.id) })
+}
+
+function applyConnectionResponse(db, { actorId, requestId, decision }) {
+  const request = connectionRequests(db).find(row => row.id === requestId && row.toUserId === actorId)
+  if (!request) return { status: 404, error: 'Connection request not found' }
+  if (request.status !== 'pending') return { status: 409, error: 'Connection request already resolved' }
+  const now = nowIso()
+  const actor = db.profiles.find(p => p.id === actorId)
+  const sender = db.profiles.find(p => p.id === request.fromUserId)
+  request.status = decision === 'accept' ? 'active' : 'declined'
+  request.respondedAt = now
+  request.updatedAt = now
+  let notification = null
+  if (decision === 'accept') {
+    for (const [userId, counterparty] of [[actorId, sender], [request.fromUserId, actor]]) {
+      if (!counterparty) continue
+      const event = appendPlatformEventInDb(db, {
+        userId,
+        actorId: userId,
+        eventType: 'connect',
+        entityType: 'person',
+        entityId: counterparty.id,
+        importance: 'HIGH',
+        metadata: { targetName: userName(counterparty) },
+      })
+      appendRelationshipInDb(db, userId, event)
+    }
+    const reciprocal = connectionRequests(db).find(row => row.fromUserId === actorId && row.toUserId === request.fromUserId)
+    if (reciprocal) { reciprocal.status = 'active'; reciprocal.updatedAt = now }
+    notification = {
+      id: createId('notif'),
+      userId: request.fromUserId,
+      actorId,
+      type: 'collab',
+      read: false,
+      content: 'accepted your connection request',
+      author: userName(actor),
+      avatar: avatarGradient(actorId),
+      linkTo: `/feed/profile/${actorId}`,
+      metadata: { connectionRequestId: request.id, connectionAccepted: true },
+      createdAt: now,
+    }
+    db.notifications.push(notification)
+  }
+  return { status: 200, notification, decision, fromUserId: request.fromUserId }
+}
+
+async function finishRespond(req, res, result) {
   if (result.status !== 200) return res.status(result.status).json({ error: result.error })
   await persistNotificationToContent(result.notification)
   if (result.decision === 'accept') {
@@ -568,9 +623,24 @@ export async function respondConnectionRequest(req, res) {
   return res.json({ ok: true, status: result.decision === 'accept' ? 'connected' : 'declined' })
 }
 
-export function listConnections(req, res) {
-  const db = readAuthorityDb()
-  const connections = [...distinctConnectionIds(db, req.user.id)]
+export async function respondConnectionRequest(req, res) {
+  const decision = String(req.body?.decision || '').trim().toLowerCase()
+  if (!['accept', 'decline'].includes(decision)) return res.status(400).json({ error: 'decision must be accept or decline' })
+  const requestId = req.params.requestId
+  if (userDirectoryEnabled()) {
+    try {
+      const result = await applyConnectionMutation({ userId: req.user.id }, db => applyConnectionResponse(db, { actorId: req.user.id, requestId, decision }))
+      return finishRespond(req, res, result)
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'user_directory_postgres_write_failed', operation: 'respond_connection_request', error: error.message }))
+      if (!userDirectoryFallbackEnabled()) throw error
+    }
+  }
+  return finishRespond(req, res, updateAuthorityDb(db => applyConnectionResponse(db, { actorId: req.user.id, requestId, decision })))
+}
+
+function renderConnections(db, userId) {
+  const connections = [...distinctConnectionIds(db, userId)]
     .map(id => db.profiles.find(p => p.id === id))
     .filter(Boolean)
     .map(profile => ({
@@ -581,5 +651,18 @@ export function listConnections(req, res) {
       avatar: profile.avatarUrl || avatarGradient(profile.id),
       headline: profile.oneLiner || profile.bio || '',
     }))
-  return res.json({ connections })
+  return connections
+}
+
+export async function listConnections(req, res) {
+  if (userDirectoryEnabled()) {
+    try {
+      const db = await loadConnectionSources(req.user.id)
+      return res.json({ connections: renderConnections(db, req.user.id) })
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'user_directory_postgres_read_failed', operation: 'list_connections', error: error.message }))
+      if (!userDirectoryFallbackEnabled()) throw error
+    }
+  }
+  return res.json({ connections: renderConnections(readAuthorityDb(), req.user.id) })
 }

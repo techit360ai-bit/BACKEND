@@ -186,7 +186,8 @@ app.get('/internal/metrics/platform-authority', requireInternalMetricsAuth, plat
 // When enabled, legacy synchronous services execute against a PostgreSQL
 // snapshot and their mutations are flushed as versioned records. This bridge
 // keeps every request path on the same authority while domain repositories are
-// converted incrementally.
+// converted incrementally. §5.3 step 3 deletes it once every handler reads
+// row-level (the eager `readDb()` sites listed in the plan's open item).
 app.use(postgresAuthority)
 
 app.get('/', (_req, res) => res.json({ status: 'TechIT API running' }))

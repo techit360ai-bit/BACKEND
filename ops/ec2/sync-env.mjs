@@ -80,24 +80,53 @@ if (canonical) {
 const driver = (merged.get('DB_DRIVER') || 'sqlite').trim().toLowerCase()
 if (templateKeys.has('DB_DRIVER')) {
 const postgres = driver === 'postgres'
-setKey('PLATFORM_REQUEST_AUTHORITY', postgres ? 'postgres' : 'sqlite')
-setKey('PLATFORM_AUTHORITY_FALLBACK_SQLITE', postgres ? 'false' : 'true')
+const source = postgres ? 'postgres' : 'sqlite'
+const fallback = postgres ? 'false' : 'true'
+setKey('PLATFORM_REQUEST_AUTHORITY', source)
+setKey('PLATFORM_AUTHORITY_FALLBACK_SQLITE', fallback)
 
-const domains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE']
-for (const domain of domains) {
-  setKey(`${domain}_READ_SOURCE`, postgres ? 'postgres' : 'sqlite')
-  setKey(`${domain}_WRITE_SOURCE`, postgres ? 'postgres' : 'sqlite')
-  setKey(`${domain}_READ_FALLBACK_SQLITE`, postgres ? 'false' : 'true')
-  setKey(`${domain}_WRITE_FALLBACK_SQLITE`, postgres ? 'false' : 'true')
+// Domains with split read/write sources (each keeps its own fallback switch).
+const readWriteDomains = ['IDENTITY', 'WORKSPACE', 'CONTENT', 'INVESTOR', 'ORGANIZATION', 'FINANCE', 'TRUST']
+for (const domain of readWriteDomains) {
+  setKey(`${domain}_READ_SOURCE`, source)
+  setKey(`${domain}_WRITE_SOURCE`, source)
+  setKey(`${domain}_READ_FALLBACK_SQLITE`, fallback)
+  setKey(`${domain}_WRITE_FALLBACK_SQLITE`, fallback)
 }
-setKey('WORKSPACE_CODE_SOURCE', postgres ? 'postgres' : 'sqlite')
-setKey('WORKSPACE_CODE_FALLBACK_SQLITE', postgres ? 'false' : 'true')
-for (const domain of ['INTELLIGENCE', 'OPERATIONAL']) {
-  setKey(`${domain}_SOURCE`, postgres ? 'postgres' : 'sqlite')
-  setKey(`${domain}_READ_SOURCE`, postgres ? 'postgres' : 'sqlite')
-  setKey(`${domain}_WRITE_SOURCE`, postgres ? 'postgres' : 'sqlite')
-  setKey(`${domain}_FALLBACK_SQLITE`, postgres ? 'false' : 'true')
+
+// Domains with a single source switch mirrored onto read/write + one fallback.
+const singleSourceDomains = [
+  'INTELLIGENCE', 'OPERATIONAL', 'SUPPORT', 'MOMENTS', 'CONTEXT', 'DOMAIN', 'COMPLIANCE',
+  'DISCOVERY', 'DISTRIBUTION', 'REGISTRY', 'VERIFICATION', 'WORKSPACE_CAPABILITY',
+  'VIDEO', 'GITHUB', 'OTP',
+]
+for (const domain of singleSourceDomains) {
+  setKey(`${domain}_SOURCE`, source)
+  setKey(`${domain}_READ_SOURCE`, source)
+  setKey(`${domain}_WRITE_SOURCE`, source)
+  setKey(`${domain}_FALLBACK_SQLITE`, fallback)
 }
+
+// Domains with only a single `<DOMAIN>_SOURCE` + fallback switch.
+for (const domain of ['ACADEMY', 'MENTORSHIP', 'AUTHORIZATION']) {
+  setKey(`${domain}_SOURCE`, source)
+  setKey(`${domain}_FALLBACK_SQLITE`, fallback)
+}
+
+// Workspace code/team + security/posture/billing switches that key off a peer
+// domain's authority. Set explicitly so DB_DRIVER remains the only cutover lever.
+setKey('WORKSPACE_CODE_SOURCE', source)
+setKey('WORKSPACE_CODE_READ_SOURCE', source)
+setKey('WORKSPACE_CODE_WRITE_SOURCE', source)
+setKey('WORKSPACE_CODE_FALLBACK_SQLITE', fallback)
+setKey('WORKSPACE_TEAM_WRITE_SOURCE', source)
+setKey('IDENTITY_SECURITY_SOURCE', source)
+setKey('SECURITY_EVENT_SOURCE', source)
+setKey('SECURITY_EVENTS_SOURCE', source)
+setKey('POSTURE_SOURCE', source)
+setKey('SECURITY_POSTURE_SOURCE', source)
+setKey('BILLING_JOBS_SOURCE', source)
+setKey('USER_DIRECTORY_FALLBACK_SQLITE', fallback)
 } // end platform-driver derivation
 
 // Merge into the existing target, preserving unmanaged keys and deduplicating.

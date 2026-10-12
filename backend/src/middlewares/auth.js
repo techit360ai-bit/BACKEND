@@ -2,9 +2,10 @@ import { verifyJwt } from '../services/jwtKeyService.js'
 import { readDb as readAuthorityDb } from '../config/database.js'
 import { accessTokenFromRequest, touchSessionAsync } from '../services/sessionService.js'
 import { normalizeRole } from '../services/multiRoleContextService.js'
-import { accountEntitlement } from '../services/tvceService.js'
+import { accountEntitlementAsync } from '../services/tvceService.js'
 import { compareIdentityProjection } from '../services/identityPostgresProjection.js'
 import { findIdentityById, validateSessionBindingAsync } from '../repositories/identityRepository.js'
+import { adminAuthEnabled, findAdminById } from '../repositories/adminAuthRepository.js'
 import { verifyMfaAssertion } from '../services/mfaService.js'
 
 const JWT_ISSUER = process.env.JWT_ISSUER
@@ -53,7 +54,7 @@ export async function requireAuth(req, res, next) {
     roles: process.env.NODE_ENV === 'test' ? [...new Set([payload.role, ...persistedRoles].filter(Boolean))] : persistedRoles,
     workspaceId: profile?.workspaceId || `user-${user.id}`,
     activeContext: activeContext || { role: activeRole, workspaceId: null, organizationId: null, resourceType: null, resourceId: null },
-    accountEntitlement: accountEntitlement(user.id),
+    accountEntitlement: await accountEntitlementAsync(user.id),
     // Raw platform JWT, so controllers can forward it to ai-router
     // (which verifies the same JWT_SECRET). See aiRouterClient.js.
     token,
@@ -69,7 +70,7 @@ export async function requireAuth(req, res, next) {
   return next()
 }
 
-export function requireAdminAuth(req, res, next) {
+export async function requireAdminAuth(req, res, next) {
   const authHeader = req.headers.authorization
   if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'No token provided' })
   const token = authHeader.slice(7)
@@ -82,9 +83,11 @@ export function requireAdminAuth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
-  const db = readAuthorityDb()
-  const admin = (db.adminUsers || []).find(row => row.id === payload.sub && row.active !== false)
+  const admin = adminAuthEnabled()
+    ? await findAdminById(payload.sub)
+    : (readAuthorityDb().adminUsers || []).find(row => row.id === payload.sub)
   if (!admin) return res.status(401).json({ error: 'Admin not found or inactive' })
+  if (admin.active === false) return res.status(401).json({ error: 'Admin not found or inactive' })
   if (process.env.NODE_ENV === 'production' || process.env.REQUIRE_ADMIN_MFA === 'true') {
     if (!verifyMfaAssertion(admin.id, req.get('x-mfa-assertion'))) return res.status(403).json({ error: 'mfa_required' })
   }
