@@ -1,6 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { getPlatformPool, upsertRecord, deleteRecord } from './platformCollectionRepository.js'
 import { recordWholeDbRead, recordWholeDbFlush } from '../services/platformAuthorityInstrumentation.js'
+import { runDatabaseAuthority, currentDatabaseAuthority } from '../config/database.js'
 
 const CONFIG_COLLECTIONS = new Set(['tvceConfig'])
 const stable = value => JSON.stringify(value, Object.keys(value || {}).sort())
@@ -36,6 +37,10 @@ export async function flushPlatformDatabase(before, after, { userId = null, sour
       }
       const previousRows = Array.isArray(before?.[name]) ? before[name] : []
       const nextRows = Array.isArray(after?.[name]) ? after[name] : []
+      // The store is keyed by record_id, so a row without an id is silently
+      // lost. Surface it instead: an id-less write is always a bug (it is how
+      // the signup OTP failed to persist after the Postgres cutover).
+      if (nextRows.some(row => !row?.id)) console.error(JSON.stringify({ event: 'platform_row_missing_id', collection: name, dropped: nextRows.filter(row => !row?.id).length }))
       const previous = new Map(previousRows.filter(row => row?.id).map(row => [String(row.id), row]))
       const next = new Map(nextRows.filter(row => row?.id).map(row => [String(row.id), row]))
       for (const [recordId, row] of next) {
@@ -56,7 +61,14 @@ export async function flushPlatformDatabase(before, after, { userId = null, sour
 export async function runWithPlatformDatabase(callback, { userId = null, source = 'runWithPlatformDatabase' } = {}) {
   const before = await loadPlatformDatabase(source)
   const snapshot = structuredClone(before)
-  const result = await callback(snapshot)
-  await flushPlatformDatabase(before, snapshot, { userId, source })
+  // Run the callback INSIDE the request-authority context. Without it,
+  // readAuthorityDb()/writeAuthorityDb() throw "PostgreSQL request authority
+  // context is required" for every background job (support maintenance,
+  // session cleanup, deal-room / org-intelligence timers) that runs outside an
+  // HTTP request. Flush whatever the authority store ended up holding so a
+  // writeDb() inside the job is persisted too.
+  const result = await runDatabaseAuthority(snapshot, () => callback(snapshot))
+  const after = currentDatabaseAuthority()?.snapshot || snapshot
+  await flushPlatformDatabase(before, after, { userId, source })
   return result
 }

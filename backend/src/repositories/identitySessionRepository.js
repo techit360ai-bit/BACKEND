@@ -1,19 +1,10 @@
-import pg from 'pg'
-
-let pool = null
+import { getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const connectionUrl = () => process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL
-const poolSize = () => Math.max(1, Number(process.env.IDENTITY_WRITE_POOL_SIZE || process.env.IDENTITY_DB_POOL_SIZE || 5))
 
 function getPool() {
   if (!connectionUrl()) throw new Error('IDENTITY_DATABASE_URL or DATABASE_URL is required for PostgreSQL identity writes')
-  pool ||= new pg.Pool({
-    connectionString: connectionUrl(),
-    max: poolSize(),
-    connectionTimeoutMillis: Number(process.env.IDENTITY_DB_CONNECTION_TIMEOUT_MS || 5000),
-    ssl: /sslmode=require/.test(connectionUrl()) ? { rejectUnauthorized: process.env.IDENTITY_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined,
-  })
-  return pool
+  return getPlatformPool()
 }
 
 const eventValues = event => [event.id, event.userId || null, event.sessionIdentifier || null, event.eventType, event.ipAddress || null, event.userAgent || null, JSON.stringify(event.metadata || {}), event.createdAt || new Date().toISOString()]
@@ -91,4 +82,4 @@ export async function cleanup(cutoff) {
   return { removed: Number(result.rows[0]?.sessions_removed || 0), eventsRemoved: Number(result.rows[0]?.events_removed || 0) }
 }
 
-export async function closeIdentitySessionRepository() { if (pool) await pool.end(); pool = null }
+export async function closeIdentitySessionRepository() { await closePlatformPool() }

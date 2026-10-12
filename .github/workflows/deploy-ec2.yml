@@ -109,6 +109,34 @@ jobs:
               ')"
             fi
 
+            # --- PgBouncer (transaction pooling) in front of RDS -------------
+            # Collapse every client's connection fan-out (backend + ai-router +
+            # Celery workers + Go messaging) behind one transaction-pooling
+            # proxy, so RDS sees a fixed connection count no matter how many app
+            # processes exist. Best-effort: if provisioning fails the backend
+            # keeps talking to RDS directly (the pre-PgBouncer path), so a failed
+            # apt/pgbouncer start can never take the service down.
+            PGBOUNCER_READY=0
+            if [ -s "$HOME/.techit/platform-database-url" ]; then
+              if sudo bash ops/ec2/pgbouncer/setup.sh --credential-file "$HOME/.techit/platform-database-url" >/tmp/pgbouncer-setup.log 2>&1; then
+                PGBOUNCER_READY=1
+                echo "✅ PgBouncer up (transaction pooling); backend will use 127.0.0.1:6432"
+              else
+                echo "⚠️ PgBouncer provisioning failed; backend will use direct RDS"
+                tail -n 40 /tmp/pgbouncer-setup.log || true
+              fi
+            fi
+            if [ "$PGBOUNCER_READY" = "1" ]; then
+              PLATFORM_DATABASE_URL="$(CRED="$PLATFORM_DATABASE_URL" node -e '
+                const u = new URL(process.env.CRED);
+                u.hostname = "127.0.0.1";
+                u.port = "6432";
+                // Local loopback hop: plain. PgBouncer terminates TLS to RDS.
+                u.searchParams.set("sslmode", "disable");
+                process.stdout.write(u.toString());
+              ')"
+            fi
+
             # --- platform env (PostgreSQL + Redis + MCP) ---------------------
             # Merge the committed, secret-free production template with the
             # secrets injected above. DB_DRIVER drives every read/write source

@@ -31,8 +31,13 @@ export function validatePostgresMcpConfig(): void {
   if (!['postgres:', 'postgresql:'].includes(parsed.protocol)) {
     throw new Error('MCP_DATABASE_URL must use postgres:// or postgresql://.');
   }
-  if (productionLike() && ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
-    throw new Error('MCP_DATABASE_URL cannot target localhost in production/staging.');
+  // The platform runs one PgBouncer transaction proxy on the box loopback, so a
+  // loopback MCP target is expected in production. It must be opted into
+  // explicitly (never an accidental local dev database), and the test/prod
+  // guard stays in force without the flag.
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname);
+  if (productionLike() && loopback && process.env.MCP_DATABASE_ALLOW_LOOPBACK !== 'true') {
+    throw new Error('MCP_DATABASE_URL cannot target localhost in production/staging (set MCP_DATABASE_ALLOW_LOOPBACK=true for the in-box PgBouncer proxy).');
   }
   parseKey(process.env.MCP_SECRET_KEY || '', 'MCP_SECRET_KEY');
 }
@@ -46,8 +51,12 @@ export function createMcpPool(): Pool {
     connectionTimeoutMillis: Number(process.env.MCP_DATABASE_CONNECT_TIMEOUT_MS || 10_000),
     application_name: 'techit-plugins-mcp',
   };
-  const sslEnabled = process.env.MCP_DATABASE_SSL === 'true' ||
-    (productionLike() && process.env.MCP_DATABASE_SSL !== 'false');
+  // TLS terminates at the loopback proxy (PgBouncer then speaks TLS to RDS);
+  // a plain connection to a public host is never allowed in production.
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(new URL(mcpDatabaseUrl() as string).hostname);
+  const sslDisabled = /(?:^|[?&])sslmode=disable(?:&|$)/.test(mcpDatabaseUrl() as string);
+  const sslEnabled = !loopback && !sslDisabled && (process.env.MCP_DATABASE_SSL === 'true' ||
+    (productionLike() && process.env.MCP_DATABASE_SSL !== 'false'));
   if (sslEnabled) {
     config.ssl = { rejectUnauthorized: process.env.MCP_DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false' };
   }

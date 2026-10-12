@@ -8,9 +8,10 @@
 //
 // Privacy: only normalized metadata, aggregates, and hashes live here.
 
-import pg from 'pg'
+import { getPlatformPool, closePlatformPool, platformPoolStats } from './platformCollectionRepository.js'
 import { incTrustMetric } from '../services/trustMetrics.js'
 
+// Test seam only: production always uses the single shared platform pool.
 let pool = null
 
 const url = () => process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL
@@ -24,15 +25,11 @@ export function trustReadEnabled() { return process.env.TRUST_READ_SOURCE === 'p
 export function trustWriteEnabled() { return process.env.TRUST_WRITE_SOURCE === 'postgres' }
 
 export function getTrustPool() {
+  // Single shared pg.Pool (§5 scaling): trust rides the same pool as every other
+  // domain so per-domain fan-out can never exhaust RDS max_connections.
   if (pool) return pool
   if (!url()) throw new Error('TRUST_DATABASE_URL or DATABASE_URL is required for trust repository access')
-  pool = new pg.Pool({
-    connectionString: url(),
-    max: Math.max(1, Number(process.env.TRUST_DB_POOL_SIZE || 5)),
-    connectionTimeoutMillis: Number(process.env.TRUST_DB_CONNECTION_TIMEOUT_MS || 5000),
-    ssl: /sslmode=require/.test(url()) ? { rejectUnauthorized: process.env.TRUST_DB_SSL_REJECT_UNAUTHORIZED !== 'false' } : undefined,
-  })
-  return pool
+  return getPlatformPool()
 }
 
 // Test seam. Never used in production paths.
@@ -841,16 +838,19 @@ export async function anomalyStats({ sinceHours = 24 } = {}) {
 
 // Never creates a pool: saturation is only meaningful once traffic has opened one.
 export function trustPoolStats() {
-  if (!pool) return null
-  return {
-    total: pool.totalCount ?? null,
-    idle: pool.idleCount ?? null,
-    waiting: pool.waitingCount ?? null,
-    max: pool.options?.max ?? Number(process.env.TRUST_DB_POOL_SIZE || 5),
+  if (pool) {
+    return {
+      total: pool.totalCount ?? null,
+      idle: pool.idleCount ?? null,
+      waiting: pool.waitingCount ?? null,
+      max: pool.options?.max ?? null,
+    }
   }
+  const shared = platformPoolStats()
+  return shared ? { total: shared.totalCount, idle: shared.idleCount, waiting: shared.waitingCount, max: shared.max } : null
 }
 
 export async function closeTrustPool() {
-  if (pool) await pool.end()
-  pool = null
+  if (pool) { const current = pool; pool = null; if (current.end) await current.end(); return }
+  await closePlatformPool()
 }

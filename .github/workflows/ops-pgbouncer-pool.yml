@@ -1,0 +1,78 @@
+name: "Ops — PgBouncer (RDS transaction pool)"
+
+# Provision or inspect the in-box PgBouncer transaction-pooling proxy that sits
+# in front of RDS. Deploys provision it automatically (best-effort); this is the
+# out-of-band entry point for re-provisioning, rotating the credential, or
+# checking the pool without waiting for a full deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "provision (install/refresh config) or status (inspect only)"
+        required: true
+        default: "provision"
+        type: choice
+        options: [provision, status]
+
+concurrency:
+  group: ops-pgbouncer
+  cancel-in-progress: false
+
+jobs:
+  pgbouncer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: PgBouncer via SSH
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 10m
+          script: |
+            set -e
+            cd ~/BACKEND
+            git fetch --no-tags https://techit360ai-bit@github.com/techit360ai-bit/BACKEND.git main
+            git checkout main >/dev/null 2>&1 || true
+            git reset --hard FETCH_HEAD
+            echo "tree at $(git rev-parse --short HEAD)"
+
+            if [ "${{ inputs.mode }}" = "status" ]; then
+              echo "--- service ---"
+              systemctl is-active pgbouncer || true
+              echo "--- listen ---"
+              ss -ltn 2>/dev/null | grep 6432 || echo "nothing listening on 6432"
+              echo "--- effective config (comments stripped) ---"
+              grep -vE '^\s*(;|$)' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
+              echo "--- RDS capacity, seen through the proxy ---"
+              cd "$HOME/BACKEND"
+              node --input-type=module - <<'JS'
+import fs from 'node:fs'
+import pg from 'pg'
+const url = fs.readFileSync(process.env.HOME + '/.techit/platform-database-url', 'utf8').trim()
+const u = new URL(url)
+u.hostname = '127.0.0.1'; u.port = '6432'; u.searchParams.set('sslmode', 'disable')
+const c = new pg.Client({ connectionString: u.toString() })
+try {
+  await c.connect()
+  const max = await c.query('show max_connections')
+  const tot = await c.query('select count(*)::int n from pg_stat_activity where datname is not null')
+  const by = await c.query("select coalesce(application_name,'') app, coalesce(state,'?') state, count(*)::int n from pg_stat_activity where datname is not null group by 1,2 order by n desc limit 30")
+  console.log('max_connections=' + max.rows[0].max_connections + ' db_connections=' + tot.rows[0].n)
+  for (const r of by.rows) console.log(r.n + ' | ' + (r.app || '(none)') + ' | ' + r.state)
+} catch (error) {
+  console.log('connection probe error: ' + error.message)
+} finally {
+  await c.end().catch(() => {})
+}
+JS
+              exit 0
+            fi
+
+            if [ ! -s "$HOME/.techit/platform-database-url" ]; then
+              echo "❌ missing $HOME/.techit/platform-database-url"; exit 1
+            fi
+            sudo bash ops/ec2/pgbouncer/setup.sh --credential-file "$HOME/.techit/platform-database-url"
+            echo "--- service ---"
+            systemctl is-active pgbouncer || true
+            ss -ltn 2>/dev/null | grep 6432 || true

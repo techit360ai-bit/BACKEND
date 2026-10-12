@@ -1,10 +1,9 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import pg from 'pg'
 import { createClient } from 'redis'
+import { getPlatformPool, closePlatformPool } from '../repositories/platformCollectionRepository.js'
 
-const { Pool } = pg
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MIGRATION_PATH = path.join(__dirname, '../../migrations/postgres/001_discovery_intelligence.sql')
 const VECTOR_DIMENSIONS = 128
@@ -19,7 +18,6 @@ const PEOPLE_TYPES = new Set(['people', 'person', 'founder', 'collaborator', 'in
 const OPPORTUNITY_TYPES = new Set(['opportunities', 'opportunity'])
 const QUEUE_KEY = process.env.DISCOVERY_QUEUE_KEY || 'techit:discovery:refresh'
 
-let pool
 let redis
 
 export function discoveryPostgresEnabled() {
@@ -32,8 +30,7 @@ export function discoveryRedisEnabled() {
 
 function getPool() {
   if (!discoveryPostgresEnabled()) return null
-  pool ||= new Pool({ connectionString: process.env.DISCOVERY_DATABASE_URL, max: Number(process.env.DISCOVERY_DB_POOL_SIZE || 10), connectionTimeoutMillis: 5000 })
-  return pool
+  return getPlatformPool()
 }
 
 async function getRedis() {
@@ -224,7 +221,6 @@ export async function semanticEntitySearch(query, options = {}) {
 
 export async function closeDiscoveryInfrastructure() {
   if (redis?.isOpen) await redis.quit()
-  if (pool) await pool.end()
   redis = null
-  pool = null
+  await closePlatformPool()
 }
