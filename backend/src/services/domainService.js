@@ -300,7 +300,9 @@ export function walletAnalytics(userId, { period = 'daily' } = {}) {
   }
 }
 
-export async function walletAnalyticsAsync(userId, query) { return walletAnalytics(userId, query) }
+export async function walletAnalyticsAsync(userId, query) {
+  return domainRead({ userId, wallet: true }, () => walletAnalytics(userId, query), () => walletAnalytics(userId, query))
+}
 
 export function listProjects(userId) {
   const db = readAuthorityDb()
@@ -962,6 +964,10 @@ export function getWorkspaceInvitation(userId, invitationId) {
   return publicWorkspaceInvitation(db, expired ? { ...invitation, status: 'expired' } : invitation)
 }
 
+export async function getWorkspaceInvitationAsync(userId, invitationId) {
+  return domainRead({ userId, equity: true }, () => getWorkspaceInvitation(userId, invitationId), () => getWorkspaceInvitation(userId, invitationId))
+}
+
 export function acceptWorkspaceInvitation(userId, invitationId) {
   return updateAuthorityDb(db => {
     const invitation = collection(db, 'workspaceInvitations').find(row =>
@@ -1186,6 +1192,10 @@ export function collaboratorEquity(userId) {
   return { holdings, totals: equityTotals(holdings), vestingTimeline: holdings.map(vestingTimelineForGrant) }
 }
 
+export async function collaboratorEquityAsync(userId) {
+  return domainRead({ userId, equity: true }, () => collaboratorEquity(userId), () => collaboratorEquity(userId))
+}
+
 export function recordDilution(userId, body) {
   return updateAuthorityDb(db => {
     const holding = collection(db, 'equityGrants').find(row => row.collaboratorId === userId && row.projectId === body.projectId)
@@ -1307,11 +1317,19 @@ export function founderCapTable(userId) {
   }
 }
 
+export async function founderCapTableAsync(userId) {
+  return domainRead({ userId, equity: true }, () => founderCapTable(userId), () => founderCapTable(userId))
+}
+
 export function collaboratorEarnings(userId) {
   const db = readAuthorityDb()
   const earnings = listOwned(db, 'collaboratorEarnings', userId, 'collaboratorId')
   const payouts = listOwned(db, 'payouts', userId, 'collaboratorId')
   return { cashEarnings: earnings, payouts, totals: cashTotals(earnings, payouts) }
+}
+
+export async function collaboratorEarningsAsync(userId) {
+  return domainRead({ userId, equity: true }, () => collaboratorEarnings(userId), () => collaboratorEarnings(userId))
 }
 
 export function requestWithdrawal(userId, body) {

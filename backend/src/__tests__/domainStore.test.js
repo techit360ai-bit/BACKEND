@@ -524,3 +524,57 @@ describe('domain row-level store — generic bound collections (§5 sub-slice 7)
     expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', contributions: true })
   })
 })
+
+describe('domain row-level store — equity / earnings / cap table / wallet (§5)', () => {
+  it('reads the caller equity grants through the equity scope', async () => {
+    usedBounded({ ...base(), equityGrants: [{ id: 'g1', collaboratorId: 'u1', projectId: 'p1', equityPercent: 8, vestedPercent: 25 }] })
+    const result = await svc.collaboratorEquityAsync('u1')
+    expect(result.holdings).toHaveLength(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', equity: true })
+  })
+
+  it('reads earnings + payouts through the equity scope', async () => {
+    usedBounded({ ...base(), collaboratorEarnings: [{ id: 'e1', collaboratorId: 'u1', amountUSD: 100 }], payouts: [{ id: 'p1', collaboratorId: 'u1', amount: 20, status: 'processing' }] })
+    const result = await svc.collaboratorEarningsAsync('u1')
+    expect(result.cashEarnings).toHaveLength(1)
+    expect(result.payouts).toHaveLength(1)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', equity: true })
+  })
+
+  it('derives the founder cap table from the caller workspaces + invitations', async () => {
+    usedBounded({
+      ...base(),
+      workspaces: [{ id: 'w1', ownerId: 'u1', projectId: 'p1', name: 'Venture' }],
+      workspaceMembers: [{ id: 'm1', workspaceId: 'w1', userId: 'u2', status: 'active' }],
+      workspaceInvitations: [{ id: 'i1', workspaceId: 'w1', collaboratorId: 'u2', status: 'accepted', equityProposal: 5, acceptedAt: '2024-01-01T00:00:00Z' }],
+      projects: [{ id: 'p1', title: 'FinPay' }],
+      profiles: [{ id: 'u2', firstName: 'Ada', lastName: 'Lovelace' }],
+    })
+    const result = await svc.founderCapTableAsync('u1')
+    expect(result.ventures).toHaveLength(1)
+    expect(result.ventures[0].committedPercent).toBe(5)
+    expect(result.ventures[0].grants[0].collaboratorName).toBe('Ada Lovelace')
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', equity: true })
+  })
+
+  it('reads wallet analytics from the caller completed usage events', async () => {
+    usedBounded({ ...base(), usageEvents: [{ id: 'ev1', userId: 'u1', status: 'completed', fundingSource: 'credits', credits: 10, createdAt: new Date().toISOString() }] })
+    const result = await svc.walletAnalyticsAsync('u1', { period: 'daily' })
+    expect(result.sourceTotals.credits).toBe(10)
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', wallet: true })
+  })
+
+  it('resolves the addressed workspace invitation through the equity scope', async () => {
+    usedBounded({
+      ...base(),
+      workspaceInvitations: [{ id: 'i1', workspaceId: 'w1', collaboratorId: 'u1', invitedBy: 'u2', status: 'pending', expiresAt: '2999-01-01T00:00:00Z', requestedRole: 'Collaborator' }],
+      workspaces: [{ id: 'w1', ownerId: 'u2', name: 'Venture' }],
+      profiles: [{ id: 'u2', firstName: 'Owner' }],
+    })
+    const invitation = await svc.getWorkspaceInvitationAsync('u1', 'i1')
+    expect(invitation).not.toBeNull()
+    expect(invitation.workspaceName).toBe('Venture')
+    expect(invitation.inviterName).toBe('Owner')
+    expect(mocks.lastReadOptions).toMatchObject({ userId: 'u1', equity: true })
+  })
+})

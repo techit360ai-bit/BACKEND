@@ -19,6 +19,7 @@ function sessionUser(user) {
 }
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
+import { consumePasswordReset, passwordResetFallbackEnabled, passwordResetStoreEnabled, replacePasswordReset } from '../repositories/passwordResetRepository.js'
 import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
 import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
 import { contextFallbackEnabled, contextStoreEnabled, listContextCheckpoints } from '../repositories/contextRepository.js'
@@ -202,6 +203,10 @@ export async function signup(req, res) {
   const now = new Date().toISOString()
   const requestedRole = normalizeRole(role || 'founder')
   const profile = buildProfile({ id, email, firstName, lastName, phone, country, countryCode, role: requestedRole }, now)
+  // Built here (not read back from the snapshot) so the postgres bundle path
+  // below never has to load the whole-DB snapshot just to find these two rows.
+  const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
+  const activeContext = { id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now }
   const result = updateAuthorityDb(db => {
     if (db.users.find(u => u.email === email)) {
       return { status: 409, error: 'Email already in use' }
@@ -213,9 +218,8 @@ export async function signup(req, res) {
 
     db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
     db.profiles.push(profile)
-    const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
     ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
-    ;(db.activeContexts || (db.activeContexts = [])).push({ id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now })
+    ;(db.activeContexts || (db.activeContexts = [])).push(activeContext)
     recordMigrationEvent(db, { domain: 'identity', aggregateType: 'user', aggregateId: id, operation: 'upsert', payload: { userId: id, email, role: requestedRole }, version: 1 })
     return { status: 201, profile }
   })
@@ -231,10 +235,7 @@ export async function signup(req, res) {
 
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
     try {
-      const local = readAuthorityDb()
-      const roleAssignment = local.userRoles.find(row => row.userId === id)
-      const context = local.activeContexts.find(row => row.userId === id)
-      await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, context)
+      await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, activeContext)
     } catch (error) {
       console.error(JSON.stringify({ event: 'identity_postgres_signup_failed', error: error.message }))
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
@@ -327,12 +328,12 @@ export async function changePassword(req, res) {
     return res.status(400).json({ error: 'New password must be at least 8 characters' })
   }
 
-  const db = readAuthorityDb()
   let user
   if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
     try { user = (await findIdentityById(req.user.id))?.user } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
   }
-  user ||= db.users.find(row => row.id === req.user.id)
+  // Only load the snapshot when the row-level identity read missed.
+  if (!user) user = readAuthorityDb().users.find(row => row.id === req.user.id)
   if (!user || !await bcrypt.compare(currentPassword, user.passwordHash)) {
     return res.status(401).json({ error: 'Current password is incorrect' })
   }
@@ -341,7 +342,12 @@ export async function changePassword(req, res) {
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
     try {
       const persisted = await updateIdentityPassword(req.user.id, passwordHash)
-      if (!persisted && process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'User not found' })
+      if (persisted) {
+        // Revoke every session and emit the password_changed security event.
+        await revokeAllSessionsAsync(req.user.id, null, 'password_changed')
+        return res.json({ message: 'Password updated successfully' })
+      }
+      if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'User not found' })
     } catch (error) {
       console.error(JSON.stringify({ event: 'identity_postgres_password_write_failed', error: error.message }))
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
@@ -367,8 +373,12 @@ export async function forgotPassword(req, res) {
     return res.status(400).json({ error: 'Email is required' })
   }
 
-  const db = readAuthorityDb()
-  const user = db.users.find(u => u.email === email)
+  let user = null
+  if (process.env.IDENTITY_READ_SOURCE === 'postgres') {
+    try { user = (await findIdentityByEmail(email))?.user || null } catch (error) { if (process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') throw error }
+  }
+  // Only load the snapshot when the row-level identity read missed.
+  if (!user) user = readAuthorityDb().users.find(u => u.email === email) || null
   let resetToken = null
   if (user) {
     const reset = makePasswordResetRecord(user)
@@ -386,14 +396,24 @@ export async function forgotPassword(req, res) {
         })
       }
     }
-    const persisted = updateAuthorityDb(current => {
-      const freshUser = current.users.find(u => u.id === user.id && u.email === email)
-      if (!freshUser) return false
-      current.passwordResets = cleanPasswordResets(current.passwordResets)
-        .filter(r => r.userId !== user.id)
-      current.passwordResets.push(reset.record)
-      return true
-    })
+    let persisted = false
+    let rowLevel = false
+    if (passwordResetStoreEnabled()) {
+      try { await replacePasswordReset(reset.record); persisted = true; rowLevel = true } catch (error) {
+        console.error(JSON.stringify({ event: 'identity_postgres_password_reset_write_failed', operation: 'forgot_password', error: error.message }))
+        if (!passwordResetFallbackEnabled()) throw error
+      }
+    }
+    if (!rowLevel) {
+      persisted = updateAuthorityDb(current => {
+        const freshUser = current.users.find(u => u.id === user.id && u.email === email)
+        if (!freshUser) return false
+        current.passwordResets = cleanPasswordResets(current.passwordResets)
+          .filter(r => r.userId !== user.id)
+        current.passwordResets.push(reset.record)
+        return true
+      })
+    }
     if (!persisted) resetToken = null
   }
 
@@ -424,6 +444,24 @@ export async function resetPassword(req, res) {
 
   const now = new Date().toISOString()
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS)
+
+  // Row-level path: consume the email-keyed reset record and set the password
+  // on the identity row, without loading the whole-DB snapshot.
+  if (passwordResetStoreEnabled()) {
+    try {
+      const consumed = await consumePasswordReset(email, hashToken(token), now)
+      if (consumed) {
+        const persisted = await updateIdentityPassword(consumed.userId, passwordHash)
+        if (persisted) return res.json({ message: 'Password reset successfully' })
+      }
+      // No row-level match (or the identity row is gone): fall through to the
+      // snapshot while it still exists (rolling cutover).
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'identity_postgres_password_reset_failed', operation: 'reset_password', error: error.message }))
+      if (!passwordResetFallbackEnabled()) throw error
+    }
+  }
+
   const result = updateAuthorityDb(db => {
     db.passwordResets = cleanPasswordResets(db.passwordResets)
 

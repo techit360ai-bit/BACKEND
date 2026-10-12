@@ -70,6 +70,13 @@ const OWNER_FIELDS = {
   // Generic public surfaces slice (bounded owner + public windows).
   files: ['ownerId', 'userId', 'createdBy'],
   settingsEvents: ['userId', 'ownerId'],
+  // Equity / earnings / founder cap-table slice.
+  equityGrants: ['collaboratorId', 'ownerId', 'userId'],
+  collaboratorEarnings: ['collaboratorId', 'ownerId', 'userId'],
+  payouts: ['collaboratorId', 'ownerId', 'userId'],
+  workspaceInvitations: ['collaboratorId', 'inviterId', 'userId', 'ownerId'],
+  // Wallet analytics slice (completed usage events).
+  usageEvents: ['userId', 'ownerId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 
@@ -92,7 +99,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...namedCollections(collections), ...namedCollections(publicCollections)])
   for (const name of writeCollections) db[name] = []
@@ -188,6 +195,34 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   }
   if (userId && contributions) {
     mergeById(db.contributions, await listRecordsForOwner(client, 'contributions', userId, { ownerFields: OWNER_FIELDS.contributions }))
+  }
+
+  // Equity / earnings / founder cap-table: the caller's grants, earnings and
+  // payouts, plus the workspace + invitation + member rows the cap table derives
+  // from, and the referenced projects/profiles.
+  if (userId && equity) {
+    mergeById(db.equityGrants, await listRecordsForOwner(client, 'equityGrants', userId, { ownerFields: OWNER_FIELDS.equityGrants }))
+    mergeById(db.collaboratorEarnings, await listRecordsForOwner(client, 'collaboratorEarnings', userId, { ownerFields: OWNER_FIELDS.collaboratorEarnings }))
+    mergeById(db.payouts, await listRecordsForOwner(client, 'payouts', userId, { ownerFields: OWNER_FIELDS.payouts }))
+    mergeById(db.workspaces, await listRecordsForOwner(client, 'workspaces', userId, { ownerFields: ['ownerId', 'userId'] }))
+    const workspaceIds = db.workspaces.map(row => row.id)
+    mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', workspaceIds))
+    mergeById(db.workspaceInvitations, await listRecordsByFieldIn(client, 'workspaceInvitations', 'workspaceId', workspaceIds))
+    mergeById(db.workspaceInvitations, await listRecordsForOwner(client, 'workspaceInvitations', userId, { ownerFields: OWNER_FIELDS.workspaceInvitations }))
+    await loadByIds(client, 'projects', db.workspaces.map(row => row.projectId), db.projects)
+    // The addressed invitation's workspace + inviter (a collaborator does not
+    // own the workspace, so it is not in db.workspaces above).
+    await loadByIds(client, 'workspaces', db.workspaceInvitations.map(row => row.workspaceId), db.workspaces)
+    const profileIds = []
+    for (const row of db.workspaceMembers) profileIds.push(row.userId)
+    for (const row of db.workspaceInvitations) profileIds.push(row.collaboratorId)
+    for (const row of db.workspaceInvitations) profileIds.push(row.invitedBy)
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
+  }
+
+  // Wallet analytics only needs the caller's completed usage events.
+  if (userId && wallet) {
+    mergeById(db.usageEvents, await listRecordsForOwner(client, 'usageEvents', userId, { ownerFields: OWNER_FIELDS.usageEvents }))
   }
 
   for (const entry of collections) {

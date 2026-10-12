@@ -10,8 +10,8 @@ import {
   removeWatchlistAsync,
   listWatchlistPreferencesAsync,
   updateWatchlistPreferencesAsync,
-  collaboratorEarnings,
-  collaboratorEquity,
+  collaboratorEarningsAsync,
+  collaboratorEquityAsync,
   countersignContractAsync,
   createCollaborationCallAsync,
   createAnalysisAsync,
@@ -27,7 +27,7 @@ import {
   createProject,
   createWorkspaceCollectionItemAsync,
   createWorkspaceInvitation,
-  founderCapTable,
+  founderCapTableAsync,
   genericCreateAsync,
   genericDeleteAsync,
   genericListAsync,
@@ -71,7 +71,7 @@ import {
   patchWorkspaceCollectionItemAsync,
   acceptWorkspaceInvitation,
   declineWorkspaceInvitation,
-  getWorkspaceInvitation,
+  getWorkspaceInvitationAsync,
   removeWorkspaceMember,
   listWorkspaces,
   listWorkspacesAsync,
@@ -196,8 +196,8 @@ export async function workspaceInvitationCreate(req, res) {
   return created(res, result)
 }
 
-export function workspaceInvitationGet(req, res) {
-  const invitation = getWorkspaceInvitation(req.user.id, req.params.invitationId)
+export async function workspaceInvitationGet(req, res) {
+  const invitation = await getWorkspaceInvitationAsync(req.user.id, req.params.invitationId)
   if (!invitation) return notFound(res, 'Invitation not found')
   return res.json({ invitation })
 }
@@ -332,16 +332,16 @@ export async function workspaceItemPatch(req, res) {
   return res.json({ [req.itemKey]: row })
 }
 
-export function equity(req, res) {
-  return res.json(collaboratorEquity(req.user.id))
+export async function equity(req, res) {
+  return res.json(await collaboratorEquityAsync(req.user.id))
 }
 
 export function equityDilution(req, res) {
   return created(res, recordDilution(req.user.id, req.body))
 }
 
-export function earnings(req, res) {
-  return res.json(collaboratorEarnings(req.user.id))
+export async function earnings(req, res) {
+  return res.json(await collaboratorEarningsAsync(req.user.id))
 }
 
 export function earningsWithdraw(req, res) {
@@ -673,8 +673,8 @@ export async function genericDeleteItem(req, res) {
 }
 
 // Founder-facing cap table derived from committed workspace equity (see founderCapTable).
-export function founderEquity(req, res) {
-  return res.json(founderCapTable(req.user.id))
+export async function founderEquity(req, res) {
+  return res.json(await founderCapTableAsync(req.user.id))
 }
 
 export async function notificationPrefsGet(req, res) {
