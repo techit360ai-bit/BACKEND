@@ -2694,3 +2694,28 @@ export async function updateNotificationPreferencesAsync(userId, body = {}) {
 export async function getCollaboratorScoresAsync(userId) {
   return domainRead(contributionScope(userId), () => getCollaboratorScores(userId), () => getCollaboratorScores(userId))
 }
+
+// Row-level (§5) wrappers — sub-slice: generic owner-scoped collections.
+// `src/routes/domain.js` serves the org/settings/talent/marketplace/... surfaces
+// through the shared `generic*` handlers. Those bound collections are
+// owner-scoped, so `bindOwnedCollection` marks them with a `collectionField` and
+// the row-level store loads only the caller's rows (the `generic*` events append
+// a recommendationEvent, covered by the owner-scoped repository collections). A
+// null field keeps the public `opportunities`/`files`/`settingsEvents` surfaces
+// on the snapshot (they deliberately surface records owned by others) for a
+// follow-up slice.
+export async function genericListAsync(userId, name, field = null) {
+  if (!field) return genericList(userId, name)
+  return domainRead({ userId, collections: [{ name, field }] }, () => genericList(userId, name), () => genericList(userId, name))
+}
+export async function genericCreateAsync(userId, name, body, prefix, field = null) {
+  if (!field) return genericCreate(userId, name, body, prefix)
+  return domainWrite({ userId, collections: [{ name, field }] }, () => genericCreate(userId, name, body, prefix, field), () => genericCreate(userId, name, body, prefix, field))
+}
+export async function genericPatchAsync(userId, name, itemId, body, field = null) {
+  if (!field) return genericPatch(userId, name, itemId, body)
+  return domainWrite({ userId, collections: [{ name, field }] }, () => genericPatch(userId, name, itemId, body, field), () => genericPatch(userId, name, itemId, body, field))
+}
+export async function listContributionsAsync(userId) {
+  return domainRead(contributionScope(userId), () => listContributions(userId), () => listContributions(userId))
+}

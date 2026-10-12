@@ -61,6 +61,12 @@ const OWNER_FIELDS = {
   // Notification preferences + contributor scores slice.
   notificationPreferences: ['userId', 'ownerId'],
   contributions: ['collaboratorId', 'userId', 'ownerId'],
+  // Generic owner-scoped collections slice. `genericCreate`/`genericPatch`
+  // append a recommendationEvent for the caller, and the discovery helpers may
+  // touch the relationship edges (loaded explicitly by the generic wrappers).
+  recommendationEvents: ['userId'],
+  networkEdges: ['userId'],
+  entityRelationships: ['userId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
 

@@ -28,10 +28,10 @@ import {
   createWorkspaceCollectionItemAsync,
   createWorkspaceInvitation,
   founderCapTable,
-  genericCreate,
-  genericList,
+  genericCreateAsync,
   genericDelete,
-  genericPatch,
+  genericListAsync,
+  genericPatchAsync,
   getAnalysisAsync,
   getCollaboratorScoresAsync,
   getContractAsync,
@@ -45,7 +45,7 @@ import {
   investorDealFlowAsync,
   listAnalysesAsync,
   listContractsAsync,
-  listContributions,
+  listContributionsAsync,
   listEndorsementsAsync,
   listHackathonsAsync,
   listHackathonRegistrationsAsync,
@@ -350,8 +350,8 @@ export function earningsWithdraw(req, res) {
   return created(res, result)
 }
 
-export function contributions(req, res) {
-  return res.json(listContributions(req.user.id))
+export async function contributions(req, res) {
+  return res.json(await listContributionsAsync(req.user.id))
 }
 
 export async function collaboratorScores(req, res) {
@@ -642,8 +642,8 @@ export async function walletPaymentIntent(req, res) {
   return created(res, result)
 }
 
-export function genericListGet(req, res) {
-  return res.json({ [req.responseKey]: genericList(req.user.id, req.collectionName) })
+export async function genericListGet(req, res) {
+  return res.json({ [req.responseKey]: await genericListAsync(req.user.id, req.collectionName, req.collectionField || null) })
 }
 
 export async function collaborationCallCreate(req, res) {
@@ -652,16 +652,16 @@ export async function collaborationCallCreate(req, res) {
   return res.status(result.created === false ? 200 : 201).json({ opportunity: result.opportunity })
 }
 
-export function genericCreatePost(req, res) {
-  const entity = genericCreate(req.user.id, req.collectionName, req.body, req.itemPrefix)
+export async function genericCreatePost(req, res) {
+  const entity = await genericCreateAsync(req.user.id, req.collectionName, req.body, req.itemPrefix, req.collectionField || null)
   // A new opportunity changes the opportunities surface for matching users.
   // Targeted surface invalidation keeps people/general caches intact.
   if (req.collectionName === 'opportunities') void invalidateDiscoveryType('opportunities')
   return created(res, { [req.itemKey]: entity })
 }
 
-export function genericPatchItem(req, res) {
-  const row = genericPatch(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body)
+export async function genericPatchItem(req, res) {
+  const row = await genericPatchAsync(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body, req.collectionField || null)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
 }
