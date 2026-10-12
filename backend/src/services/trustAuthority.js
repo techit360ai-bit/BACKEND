@@ -55,8 +55,6 @@ export function verifyDomainProofChallenge(userId, challengeId) {
   return trustWriteEnabled() ? asyncAuthority.verifyDomainChallenge(userId, challengeId) : legacy.verifyDomainProofChallenge(userId, challengeId)
 }
 
-// Not yet ported to the row-level path; still snapshot-backed. Safe because it
-// only mints an OAuth state row, but it is tracked as remaining WS0 work.
 export function beginProviderVerification(userId, source) {
-  return legacy.beginProviderVerification(userId, source)
+  return trustWriteEnabled() ? asyncAuthority.beginProviderVerification(userId, source) : legacy.beginProviderVerification(userId, source)
 }

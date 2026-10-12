@@ -1,5 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { trustReadEnabled } from '../repositories/trustRepository.js'
+import { getTrustHistory } from './trustAuthorityAsync.js'
 import { ensureTrustProfile } from './capabilityAuthorization.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -37,6 +39,21 @@ export function trustSurfaceHistory(userId, limit = 25) {
 export function trustSurfaceIntegrations(userId) {
   const db = readAuthorityDb(); const history = rows(db, 'trustVerificationHistory').filter(row => row.userId === userId)
   return { integrations: sourceCatalog.map(([source, display_name, auth_method]) => ({ provider: source, source, display_name, auth_method, scopes: [], sync_frequency_seconds: 86400, stored_fields: ['status', 'metadata_hash', 'timestamps'], forbidden_fields: ['tokens', 'raw_payload'], access_description: 'Metadata-only verification source.', storage_description: 'Only verification metadata and hashes are retained.', token_policy: 'No provider secrets are persisted.', revocation_supported: true, manual_reverification_supported: true, raw_payload_stored: false, connected: history.some(row => row.source === source && row.status === 'verified') })) }
+}
+
+// Row-level notification preview: reads the caller's trust history through the
+// repository instead of the whole snapshot. Falls back while TRUST_READ_SOURCE
+// is not postgres.
+export async function previewTrustSurfaceNotificationsAsync(userId) {
+  if (!trustReadEnabled()) return previewTrustSurfaceNotifications(userId)
+  try {
+    const history = await getTrustHistory(userId, 100)
+    const notification_intents = history.filter(row => ['expired', 'failed', 'disconnected'].includes(row.status)).map(row => ({ notification_id: row.id, notification_type: row.eventType, source: row.source, severity: row.status === 'expired' ? 'critical' : 'warning', message: `${row.source} verification ${row.status}.`, action_required: true, created_at: row.createdAt, founder_visible: true, investor_visible: false, raw_payload_stored: false }))
+    return { notification_intents, summary: { events_seen: history.length, notifications_prepared: notification_intents.length }, privacy: { metadata_only: true }, owner_ids_exposed_to_investors: false }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'trust_surface_postgres_read_failed', operation: 'notifications_preview', error: error.message }))
+    return previewTrustSurfaceNotifications(userId)
+  }
 }
 
 export function refreshTrustSurface(userId, source, status = 'verified') {

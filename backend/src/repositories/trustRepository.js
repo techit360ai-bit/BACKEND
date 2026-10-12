@@ -816,6 +816,15 @@ export async function revokeOverride(id, adminId, { client } = {}) {
   return result.rows[0] ? mapOverride(result.rows[0]) : null
 }
 
+// Bounded planning counts for the reverification view: SQL COUNT/DISTINCT rather
+// than loading every due proof/skill. Read-only.
+export async function countDueReverification(now = nowIso(), { client } = {}) {
+  const proofs = await run(client, `SELECT COUNT(*)::int AS count FROM trust_verification_proofs WHERE status='verified' AND expires_at IS NOT NULL AND expires_at <= $1`, [now])
+  const skills = await run(client, `SELECT COUNT(*)::int AS count FROM trust_verified_skills WHERE status='verified' AND expires_at IS NOT NULL AND expires_at <= $1`, [now])
+  const sources = await run(client, `SELECT DISTINCT source FROM trust_verification_proofs WHERE status='verified' AND expires_at IS NOT NULL AND expires_at <= $1`, [now])
+  return { proofs: Number(proofs.rows[0]?.count || 0), skills: Number(skills.rows[0]?.count || 0), sources: sources.rows.map(row => row.source).filter(Boolean) }
+}
+
 // --- WS11 observability gauges (read-only, best-effort) ---
 
 export async function countPendingOutbox() {

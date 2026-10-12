@@ -5,7 +5,7 @@
 // helpers keep the state + connector rows bounded by owner. Gated by
 // TRUST_SOURCE=postgres (LinkedIn is a Trust Engine surface); snapshot fallback
 // stays until the authority is deleted.
-import { withPlatformTransaction, listRecordsByField, upsertRecord, deleteRecord, deleteRecordsForOwner } from './platformCollectionRepository.js'
+import { withPlatformTransaction, listRecords, listRecordsByField, upsertRecord, deleteRecord, deleteRecordsForOwner } from './platformCollectionRepository.js'
 
 export function linkedinStoreEnabled() {
   return process.env.TRUST_SOURCE === 'postgres' || process.env.TRUST_READ_SOURCE === 'postgres' || process.env.TRUST_WRITE_SOURCE === 'postgres'
@@ -22,6 +22,16 @@ export async function consumeLinkedinOauthState(state) {
     if (entry.id) await deleteRecord(client, 'linkedinOauthStates', entry.id)
     return entry
   })
+}
+
+export async function saveLinkedinOauthState(row) {
+  return withPlatformTransaction(async client => {
+    const cutoff = Date.now() - STATE_TTL_MS
+    for (const entry of await listRecords(client, 'linkedinOauthStates')) {
+      if (new Date(entry.createdAt).getTime() < cutoff) await deleteRecord(client, 'linkedinOauthStates', entry.id)
+    }
+    await upsertRecord(client, 'linkedinOauthStates', row, { operation: 'insert', idempotencyKey: `${row.id}:insert` })
+  }, { userId: row.userId })
 }
 
 export async function saveLinkedinConnection(connection) {

@@ -15,7 +15,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import * as database from '../config/database.js'
 import { trustScoreFor } from './trustVerificationAuthority.js'
-import { trustWriteEnabled, trustRepositoryEnabled } from '../repositories/trustRepository.js'
+import { trustWriteEnabled, trustRepositoryEnabled, trustReadEnabled, countDueReverification } from '../repositories/trustRepository.js'
 import { isExpired } from '../config/trustSyncIntervals.js'
 import { incTrustMetric } from './trustMetrics.js'
 
@@ -238,6 +238,20 @@ export function trustReverificationDue({ now = new Date() } = {}) {
     due_proof_count: proofs.length,
     due_skill_count: skills.length,
     sources: [...new Set(proofs.map(proof => proof.source))],
+  }
+}
+
+// Row-level planning view: SQL counts instead of loading every due row. Falls
+// back to the snapshot while TRUST_READ_SOURCE is not postgres.
+export async function trustReverificationDueAsync({ now = new Date() } = {}) {
+  if (!trustReadEnabled()) return trustReverificationDue({ now })
+  const nowIsoValue = toIso(now)
+  try {
+    const counts = await countDueReverification(nowIsoValue)
+    return { now: nowIsoValue, due_proof_count: counts.proofs, due_skill_count: counts.skills, sources: counts.sources, deterministic: true }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'trust_reverification_postgres_read_failed', error: error.message }))
+    return trustReverificationDue({ now })
   }
 }
 

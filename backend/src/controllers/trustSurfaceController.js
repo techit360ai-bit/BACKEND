@@ -1,4 +1,4 @@
-import { previewTrustSurfaceNotifications } from '../services/trustSurfaceService.js'
+import { previewTrustSurfaceNotificationsAsync } from '../services/trustSurfaceService.js'
 import { appendTrustProof, beginProviderVerification, createDomainProofChallenge, disconnectTrustSource, publicTrustFor, reviewTrustProof, trustHistoryFor, trustOperations, trustProofsFor, verifyDomainProofChallenge } from '../services/trustAuthority.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { linkedinStoreEnabled, linkedinFallbackEnabled, consumeLinkedinOauthState, saveLinkedinConnection } from '../repositories/linkedinRepository.js'
@@ -11,7 +11,7 @@ import { connectShippingSource, disconnectShippingSource, listShippingCredential
 import { connectTeamSource, disconnectTeamSource, listTeamCredentials, requestWorkEmailChallenge, runTeamRefresh, verifyHrisSource, verifyRegistrySource, verifyWorkEmailChallenge } from '../services/trustTeamService.js'
 import { createMilestoneEvidenceUpload, finalizeMilestoneEvidence, listMilestones, reviewMilestoneProof, submitMilestone } from '../services/trustMilestoneService.js'
 import { connectIdentitySource, disconnectIdentitySource, listIdentity, listIdentityCredentials, listSanctionsScreening, runIdentityRefresh, runSanctionsScreening, verifyBusinessRegistry, verifyIdentity } from '../services/trustIdentityService.js'
-import { runTrustReverificationTick, trustReverificationDue } from '../services/trustReverificationService.js'
+import { runTrustReverificationTick, trustReverificationDueAsync } from '../services/trustReverificationService.js'
 import { applyTrustOverride, listTrustOverrides, revokeTrustOverride } from '../services/trustOverrideService.js'
 import { syncIntervalMsFor } from '../config/trustSyncIntervals.js'
 import { incTrustMetric, observeTrustLatency } from '../services/trustMetrics.js'
@@ -109,7 +109,7 @@ export async function integrations(req, res) {
 export async function refresh(req, res) { return res.json(await beginProviderVerification(req.user.id, String(req.params.source).toLowerCase())) }
 export async function verify(req, res) { return res.json(await beginProviderVerification(req.user.id, String(req.params.source).toLowerCase())) }
 export async function disconnect(req, res) { return res.json(await disconnectTrustSource(req.user.id, String(req.params.source).toLowerCase())) }
-export function notificationsPreview(req, res) { return res.json(previewTrustSurfaceNotifications(req.user.id)) }
+export async function notificationsPreview(req, res) { return res.json(await previewTrustSurfaceNotificationsAsync(req.user.id)) }
 export async function domainChallenge(req, res) { const result = await createDomainProofChallenge(req.user.id, req.body || {}); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
 export async function domainVerify(req, res) { const result = await verifyDomainProofChallenge(req.user.id, req.params.challengeId); return result.ok ? res.json(result) : res.status(result.error === 'challenge_not_found' ? 404 : 400).json(result) }
 export async function proofSubmit(req, res) { const result = await appendTrustProof(req.user.id, { ...req.body, status: 'pending', method: 'user_submitted' }); return result.ok ? res.status(201).json(result) : res.status(400).json(result) }
@@ -443,8 +443,8 @@ export async function reverificationRun(req, res) {
   return res.json(result)
 }
 
-export function reverificationDue(_req, res) {
-  return res.json(trustReverificationDue())
+export async function reverificationDue(_req, res) {
+  return res.json(await trustReverificationDueAsync())
 }
 
 // --- WS9 manual score overrides (admin-only; reason code + expiry mandatory) ---

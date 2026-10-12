@@ -18,6 +18,9 @@ import { applyScoreOverrides } from './trustScoreOverrides.js'
 import { expiryForSource } from '../config/trustSyncIntervals.js'
 import * as repo from '../repositories/trustRepository.js'
 import { incTrustMetric, observeTrustLatency } from './trustMetrics.js'
+import { GITHUB_OAUTH_SCOPES_TRUST } from '../config/github.js'
+import { saveGithubOauthState } from '../repositories/githubRepository.js'
+import { saveLinkedinOauthState } from '../repositories/linkedinRepository.js'
 
 const { sourceWeights, supportedSources, clean, hash, token, publicMetadata, normalizeDomain, attestationFromMethod } = trustCore
 
@@ -420,6 +423,31 @@ export async function verifyDomainChallenge(userId, challengeId) {
   })
   const row = await repo.updateChallenge(challengeId, { status: 'verified' })
   return { ok: true, verified: true, proof: proof.proof, challenge: { ...row, tokenHash: undefined } }
+}
+
+// Mints a short-lived OAuth state row for a provider connection and returns the
+// authorization URL. Row-level parity with legacy.beginProviderVerification: the
+// state row goes to the same githubOauthStates / linkedinOauthStates collection
+// the shared callbacks consume, so the trust and connect flows cannot diverge.
+export async function beginProviderVerification(userId, source) {
+  const provider = String(source || '').toLowerCase()
+  if (!supportedSources.has(provider)) return { ok: false, error: 'unsupported_trust_source' }
+  if (provider === 'github' || provider === 'linkedin') {
+    const configured = provider === 'github'
+      ? Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET)
+      : Boolean(process.env.LINKEDIN_CLIENT_ID && process.env.LINKEDIN_CLIENT_SECRET)
+    if (!configured) return { ok: true, status: 'manual_review_required', manualReviewRequired: true, next_action: `${provider} credentials are not configured; submit private evidence for admin review.` }
+    const state = token()
+    const row = { id: state, state, userId, createdAt: nowIso(), purpose: 'trust' }
+    if (provider === 'github') await saveGithubOauthState(row)
+    else await saveLinkedinOauthState(row)
+    const base = provider === 'github' ? 'https://github.com/login/oauth/authorize' : 'https://www.linkedin.com/oauth/v2/authorization'
+    const params = new URLSearchParams(provider === 'github'
+      ? { client_id: process.env.GITHUB_CLIENT_ID, redirect_uri: process.env.GITHUB_REDIRECT_URI || '', scope: GITHUB_OAUTH_SCOPES_TRUST, state }
+      : { response_type: 'code', client_id: process.env.LINKEDIN_CLIENT_ID, redirect_uri: process.env.LINKEDIN_REDIRECT_URI || '', scope: process.env.LINKEDIN_SCOPES || 'openid profile email', state })
+    return { ok: true, status: 'pending', authorizationUrl: `${base}?${params}`, next_action: `Complete ${provider} authorization to create a server-observed proof.` }
+  }
+  return { ok: true, status: 'pending', next_action: provider === 'domain' || provider === 'website' ? 'Create a domain or website challenge.' : 'Submit provider evidence for review.' }
 }
 
 export async function getOperations({ limit = 100 } = {}) {
