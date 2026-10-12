@@ -10,7 +10,7 @@
 //     reputation) which are owner-scoped by the bound collection name.
 // Only changed rows are written back. Enabled with DOMAIN_SOURCE=postgres; the
 // snapshot fallback stays in the service until the authority is deleted.
-import { withPlatformTransaction, getRecord, upsertRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds, listRecordsByFieldIn } from './platformCollectionRepository.js'
+import { withPlatformTransaction, getRecord, upsertRecord, deleteRecord, listRecordsForOwner, listRecordsLimited, listRecordsByIds, listRecordsByFieldIn } from './platformCollectionRepository.js'
 import { runDatabaseAuthority } from '../config/database.js'
 import { createId } from '../utils/api.js'
 
@@ -67,8 +67,15 @@ const OWNER_FIELDS = {
   recommendationEvents: ['userId'],
   networkEdges: ['userId'],
   entityRelationships: ['userId'],
+  // Generic public surfaces slice (bounded owner + public windows).
+  files: ['ownerId', 'userId', 'createdBy'],
+  settingsEvents: ['userId', 'ownerId'],
 }
 const WRITE_COLLECTIONS = Object.keys(OWNER_FIELDS)
+
+function namedCollections(entries = []) {
+  return entries.map(entry => (typeof entry === 'string' ? entry : entry?.name)).filter(Boolean)
+}
 
 function mergeById(target, additions) {
   for (const row of additions) {
@@ -85,9 +92,9 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, collections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
-  const writeCollections = new Set([...WRITE_COLLECTIONS, ...collections.map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
+  const writeCollections = new Set([...WRITE_COLLECTIONS, ...namedCollections(collections), ...namedCollections(publicCollections)])
   for (const name of writeCollections) db[name] = []
   db.profiles = []
   db.users = []
@@ -193,24 +200,52 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     const field = (typeof entry === 'object' && entry.field) || (OWNER_FIELDS[name] ? OWNER_FIELDS[name][0] : 'userId')
     mergeById(db[name], await listRecordsForOwner(client, name, userId, { ownerFields: [field] }))
   }
+
+  for (const entry of publicCollections) {
+    const name = typeof entry === 'string' ? entry : entry?.name
+    if (!name) continue
+    const ownerFields = (typeof entry === 'object' && entry.ownerFields) || OWNER_FIELDS[name] || ['userId']
+    const limit = (typeof entry === 'object' && entry.limit) || domainCandidateLimit()
+    // The caller's own rows (all visibilities) plus a bounded window of rows
+    // owned by others that are public — matching `isRecordVisible`.
+    mergeById(db[name], await listRecordsForOwner(client, name, userId, { ownerFields }))
+    mergeById(db[name], await listRecordsLimited(client, name, { limit, payloadField: 'visibility', payloadValue: 'public' }))
+    mergeById(db[name], await listRecordsLimited(client, name, { limit, payloadField: 'public', payloadValue: true }))
+  }
+  if (publicCollections.length) {
+    const profileIds = []
+    for (const entry of publicCollections) {
+      const name = typeof entry === 'string' ? entry : entry?.name
+      for (const row of db[name] || []) profileIds.push(row.ownerId, row.userId, row.createdBy)
+    }
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
+  }
   return db
 }
 
 async function persistChanges(client, db, originals, writeCollections) {
   for (const name of writeCollections) {
+    const seen = new Set()
     for (const row of db[name] || []) {
       if (!row) continue
       if (!row.id) row.id = createId('domain_row')
       const key = `${name}:${row.id}`
+      seen.add(key)
       const next = JSON.stringify(row)
       if (originals.get(key) === next) continue
       await upsertRecord(client, name, row, { operation: originals.has(key) ? 'update' : 'insert', idempotencyKey: `${key}:${next.length}:${Date.now()}` })
+    }
+    // Rows loaded for this collection but no longer present were removed by the
+    // mutation (splice/filter), so soft-delete them.
+    for (const key of originals.keys()) {
+      if (!key.startsWith(`${name}:`) || seen.has(key)) continue
+      await deleteRecord(client, name, key.slice(name.length + 1))
     }
   }
 }
 
 function writeCollectionsFor(options) {
-  return new Set([...WRITE_COLLECTIONS, ...(options.collections || []).map(entry => typeof entry === 'string' ? entry : entry.name).filter(Boolean)])
+  return new Set([...WRITE_COLLECTIONS, ...namedCollections(options.collections), ...namedCollections(options.publicCollections)])
 }
 
 export async function runDomainRead(options, read) {

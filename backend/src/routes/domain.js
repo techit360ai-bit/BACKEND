@@ -111,13 +111,13 @@ const router = Router()
 
 router.use(requireAuth)
 
-function bindCollection(collectionName, responseKey, itemKey, itemPrefix, collectionField = null) {
+function bindCollection(collectionName, responseKey, itemKey, itemPrefix, collectionScope = null) {
   return (req, _res, next) => {
     req.collectionName = collectionName
     req.responseKey = responseKey
     req.itemKey = itemKey
     req.itemPrefix = itemPrefix
-    req.collectionField = collectionField
+    req.collectionScope = collectionScope
     next()
   }
 }
@@ -125,7 +125,13 @@ function bindCollection(collectionName, responseKey, itemKey, itemPrefix, collec
 // Owner-scoped collections (`generic*` cut over to the row-level store in §5).
 // The caller owns every row, so the store loads only their rows by `ownerId`.
 function bindOwnedCollection(collectionName, responseKey, itemKey, itemPrefix) {
-  return bindCollection(collectionName, responseKey, itemKey, itemPrefix, 'ownerId')
+  return bindCollection(collectionName, responseKey, itemKey, itemPrefix, { field: 'ownerId' })
+}
+
+// Public surfaces: the store loads the caller's own rows plus a bounded recent
+// window of other owners' public rows (see `domainRepository.buildDomainDb`).
+function bindPublicCollection(collectionName, responseKey, itemKey, itemPrefix, ownerFields) {
+  return bindCollection(collectionName, responseKey, itemKey, itemPrefix, { public: true, ownerFields })
 }
 
 /**
@@ -295,18 +301,18 @@ router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice',
 router.get('/wallet/analytics', walletAnalyticsGet)
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
-router.get('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericListGet)
+router.get('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericListGet)
 router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
-router.post('/opportunities', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericCreatePost)
-router.patch('/opportunities/:itemId', bindCollection('opportunities', 'opportunities', 'opportunity', 'opp'), genericPatchItem)
+router.post('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericCreatePost)
+router.patch('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericPatchItem)
 router.post('/opportunities/:id/apply', opportunityApply)
 router.get('/applications', applicationsList)
-router.get('/files', bindCollection('files', 'files', 'file', 'file'), genericListGet)
-router.post('/files', bindCollection('files', 'files', 'file', 'file'), genericCreatePost)
-router.delete('/files/:itemId', bindCollection('files', 'files', 'file', 'file'), genericDeleteItem)
+router.get('/files', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericListGet)
+router.post('/files', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericCreatePost)
+router.delete('/files/:itemId', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericDeleteItem)
 router.get('/notifications/preferences', notificationPrefsGet)
 router.patch('/notifications/preferences', notificationPrefsPatch)
-router.get('/settings', bindCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings'), genericListGet)
-router.post('/settings', bindCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings'), genericCreatePost)
+router.get('/settings', bindPublicCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings', ['userId', 'ownerId']), genericListGet)
+router.post('/settings', bindPublicCollection('settingsEvents', 'settingsEvents', 'settingsEvent', 'settings', ['userId', 'ownerId']), genericCreatePost)
 
 export default router

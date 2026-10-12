@@ -29,7 +29,7 @@ import {
   createWorkspaceInvitation,
   founderCapTable,
   genericCreateAsync,
-  genericDelete,
+  genericDeleteAsync,
   genericListAsync,
   genericPatchAsync,
   getAnalysisAsync,
@@ -643,7 +643,7 @@ export async function walletPaymentIntent(req, res) {
 }
 
 export async function genericListGet(req, res) {
-  return res.json({ [req.responseKey]: await genericListAsync(req.user.id, req.collectionName, req.collectionField || null) })
+  return res.json({ [req.responseKey]: await genericListAsync(req.user.id, req.collectionName, req.collectionScope || null) })
 }
 
 export async function collaborationCallCreate(req, res) {
@@ -653,7 +653,7 @@ export async function collaborationCallCreate(req, res) {
 }
 
 export async function genericCreatePost(req, res) {
-  const entity = await genericCreateAsync(req.user.id, req.collectionName, req.body, req.itemPrefix, req.collectionField || null)
+  const entity = await genericCreateAsync(req.user.id, req.collectionName, req.body, req.itemPrefix, req.collectionScope || null)
   // A new opportunity changes the opportunities surface for matching users.
   // Targeted surface invalidation keeps people/general caches intact.
   if (req.collectionName === 'opportunities') void invalidateDiscoveryType('opportunities')
@@ -661,13 +661,13 @@ export async function genericCreatePost(req, res) {
 }
 
 export async function genericPatchItem(req, res) {
-  const row = await genericPatchAsync(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body, req.collectionField || null)
+  const row = await genericPatchAsync(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.body, req.collectionScope || null)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ [req.itemKey]: row })
 }
 
-export function genericDeleteItem(req, res) {
-  const row = genericDelete(req.user.id, req.collectionName, req.params.itemId || req.params.id)
+export async function genericDeleteItem(req, res) {
+  const row = await genericDeleteAsync(req.user.id, req.collectionName, req.params.itemId || req.params.id, req.collectionScope || null)
   if (!row) return notFound(res, 'Record not found')
   return res.json({ ok: true, [req.itemKey]: row })
 }

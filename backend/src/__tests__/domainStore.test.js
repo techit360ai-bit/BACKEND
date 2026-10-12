@@ -458,18 +458,18 @@ describe('domain row-level store — notification prefs + contributor scores (§
   })
 })
 
-describe('domain row-level store — generic owner-scoped collections (§5 sub-slice 7)', () => {
-  it('lists an owned collection through the collection scope', async () => {
+describe('domain row-level store — generic bound collections (§5 sub-slice 7)', () => {
+  it('lists an owned collection through the owner scope', async () => {
     usedBounded({ organizationMarketplace: [{ id: 'm1', ownerId: 'u1', title: 'Seat' }] })
-    const rows = await svc.genericListAsync('u1', 'organizationMarketplace', 'ownerId')
+    const rows = await svc.genericListAsync('u1', 'organizationMarketplace', { field: 'ownerId' })
     expect(rows).toHaveLength(1)
     expect(mocks.lastReadOptions.userId).toBe('u1')
     expect(mocks.lastReadOptions.collections).toEqual([{ name: 'organizationMarketplace', field: 'ownerId' }])
   })
 
-  it('creates an owned collection item through the scoped mutation', async () => {
+  it('creates an owned collection item through the owner-scoped mutation', async () => {
     usedBounded({ organizationMarketplace: [] })
-    const row = await svc.genericCreateAsync('u1', 'organizationMarketplace', { title: 'Seat' }, 'market', 'ownerId')
+    const row = await svc.genericCreateAsync('u1', 'organizationMarketplace', { title: 'Seat' }, 'market', { field: 'ownerId' })
     expect(row.ownerId).toBe('u1')
     expect(row.title).toBe('Seat')
     expect(mocks.lastWriteOptions.collections).toEqual([{ name: 'organizationMarketplace', field: 'ownerId' }])
@@ -477,13 +477,32 @@ describe('domain row-level store — generic owner-scoped collections (§5 sub-s
 
   it('patches an owned collection item by id, preserving its owner', async () => {
     usedBounded({ organizationSettings: [{ id: 's1', ownerId: 'u1', value: 'a', updatedAt: '2024-01-01T00:00:00Z' }] })
-    const row = await svc.genericPatchAsync('u1', 'organizationSettings', 's1', { value: 'b' }, 'ownerId')
+    const row = await svc.genericPatchAsync('u1', 'organizationSettings', 's1', { value: 'b' }, { field: 'ownerId' })
     expect(row.value).toBe('b')
     expect(row.ownerId).toBe('u1')
     expect(mocks.lastWriteOptions.collections).toEqual([{ name: 'organizationSettings', field: 'ownerId' }])
   })
 
-  it('keeps the public surfaces on the snapshot when no field is bound', async () => {
+  it('lists a public surface through the bounded owner + public window', async () => {
+    usedBounded({ opportunities: [{ id: 'o1', ownerId: 'other', visibility: 'public' }, { id: 'o2', ownerId: 'u1' }] })
+    const rows = await svc.genericListAsync('u1', 'opportunities', { public: true, ownerFields: ['ownerId', 'userId', 'createdBy'] })
+    expect(rows.map(row => row.id)).toEqual(['o1', 'o2'])
+    expect(mocks.lastReadOptions.publicCollections).toEqual([{ name: 'opportunities', ownerFields: ['ownerId', 'userId', 'createdBy'] }])
+  })
+
+  it('creates and deletes a public-surface row through the scoped mutation', async () => {
+    usedBounded({ files: [] })
+    const row = await svc.genericCreateAsync('u1', 'files', { name: 'a.pdf' }, 'file', { public: true, ownerFields: ['ownerId'] })
+    expect(row.ownerId).toBe('u1')
+    expect(mocks.lastWriteOptions.publicCollections).toEqual([{ name: 'files', ownerFields: ['ownerId'] }])
+
+    usedBounded({ files: [{ id: 'f1', ownerId: 'u1' }] })
+    const removed = await svc.genericDeleteAsync('u1', 'files', 'f1', { public: true, ownerFields: ['ownerId'] })
+    expect(removed.id).toBe('f1')
+    expect(mocks.lastWriteOptions.publicCollections).toEqual([{ name: 'files', ownerFields: ['ownerId'] }])
+  })
+
+  it('keeps a surface on the snapshot when no scope is bound', async () => {
     mocks.readDb.mockReturnValue({ opportunities: [{ id: 'o1', ownerId: 'other', visibility: 'public' }, { id: 'o2', ownerId: 'u1' }] })
     const rows = await svc.genericListAsync('u1', 'opportunities')
     expect(rows.map(row => row.id)).toEqual(['o1', 'o2'])
@@ -493,7 +512,7 @@ describe('domain row-level store — generic owner-scoped collections (§5 sub-s
   it('falls back to the snapshot when the row-level store is disabled', async () => {
     mocks.storeEnabled.mockReturnValue(false)
     mocks.readDb.mockReturnValue({ organizationMarketplace: [{ id: 'm1', ownerId: 'u1', updatedAt: '2024-01-01T00:00:00Z' }] })
-    const rows = await svc.genericListAsync('u1', 'organizationMarketplace', 'ownerId')
+    const rows = await svc.genericListAsync('u1', 'organizationMarketplace', { field: 'ownerId' })
     expect(rows).toHaveLength(1)
     expect(mocks.runDomainRead).not.toHaveBeenCalled()
   })

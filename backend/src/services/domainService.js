@@ -2695,26 +2695,35 @@ export async function getCollaboratorScoresAsync(userId) {
   return domainRead(contributionScope(userId), () => getCollaboratorScores(userId), () => getCollaboratorScores(userId))
 }
 
-// Row-level (§5) wrappers — sub-slice: generic owner-scoped collections.
-// `src/routes/domain.js` serves the org/settings/talent/marketplace/... surfaces
-// through the shared `generic*` handlers. Those bound collections are
-// owner-scoped, so `bindOwnedCollection` marks them with a `collectionField` and
-// the row-level store loads only the caller's rows (the `generic*` events append
-// a recommendationEvent, covered by the owner-scoped repository collections). A
-// null field keeps the public `opportunities`/`files`/`settingsEvents` surfaces
-// on the snapshot (they deliberately surface records owned by others) for a
-// follow-up slice.
-export async function genericListAsync(userId, name, field = null) {
-  if (!field) return genericList(userId, name)
-  return domainRead({ userId, collections: [{ name, field }] }, () => genericList(userId, name), () => genericList(userId, name))
+// Row-level (§5) wrappers — sub-slice: generic bound collections.
+// `src/routes/domain.js` serves the org/settings/talent/marketplace/... and the
+// public `opportunities`/`files`/`settingsEvents` surfaces through the shared
+// `generic*` handlers. `bindOwnedCollection` marks owner-scoped collections
+// (`scope.field`, loads only the caller's rows); `bindPublicCollection` marks the
+// public surfaces (`scope.public`, loads the caller's rows plus a bounded recent
+// window of other owners' public rows). A null scope keeps the snapshot path.
+function genericScopeOptions(userId, name, scope) {
+  if (scope.public) return { userId, publicCollections: [{ name, ownerFields: scope.ownerFields }] }
+  return { userId, collections: [{ name, field: scope.field || 'ownerId' }] }
 }
-export async function genericCreateAsync(userId, name, body, prefix, field = null) {
-  if (!field) return genericCreate(userId, name, body, prefix)
-  return domainWrite({ userId, collections: [{ name, field }] }, () => genericCreate(userId, name, body, prefix, field), () => genericCreate(userId, name, body, prefix, field))
+export async function genericListAsync(userId, name, scope = null) {
+  if (!scope) return genericList(userId, name)
+  return domainRead(genericScopeOptions(userId, name, scope), () => genericList(userId, name), () => genericList(userId, name))
 }
-export async function genericPatchAsync(userId, name, itemId, body, field = null) {
-  if (!field) return genericPatch(userId, name, itemId, body)
-  return domainWrite({ userId, collections: [{ name, field }] }, () => genericPatch(userId, name, itemId, body, field), () => genericPatch(userId, name, itemId, body, field))
+export async function genericCreateAsync(userId, name, body, prefix, scope = null) {
+  if (!scope) return genericCreate(userId, name, body, prefix)
+  const field = scope.field || 'ownerId'
+  return domainWrite(genericScopeOptions(userId, name, scope), () => genericCreate(userId, name, body, prefix, field), () => genericCreate(userId, name, body, prefix, field))
+}
+export async function genericPatchAsync(userId, name, itemId, body, scope = null) {
+  if (!scope) return genericPatch(userId, name, itemId, body)
+  const field = scope.field || 'ownerId'
+  return domainWrite(genericScopeOptions(userId, name, scope), () => genericPatch(userId, name, itemId, body, field), () => genericPatch(userId, name, itemId, body, field))
+}
+export async function genericDeleteAsync(userId, name, itemId, scope = null) {
+  if (!scope) return genericDelete(userId, name, itemId)
+  const field = scope.field || 'ownerId'
+  return domainWrite(genericScopeOptions(userId, name, scope), () => genericDelete(userId, name, itemId, field), () => genericDelete(userId, name, itemId, field))
 }
 export async function listContributionsAsync(userId) {
   return domainRead(contributionScope(userId), () => listContributions(userId), () => listContributions(userId))
