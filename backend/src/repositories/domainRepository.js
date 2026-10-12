@@ -49,6 +49,7 @@ const OWNER_FIELDS = {
   hackathonTeamReports: ['createdBy', 'ownerId', 'userId'],
   organizationAbuseReviews: ['organizationId', 'ownerId', 'userId'],
   workspaces: ['ownerId', 'userId', 'organizationId'],
+  workspaceMembers: ['userId', 'ownerId', 'workspaceOwnerId'],
   notifications: ['userId'],
   // Contracts + opportunity applications slice.
   contracts: ['founderId', 'collaboratorId', 'ownerId', 'userId'],
@@ -74,6 +75,7 @@ const OWNER_FIELDS = {
   equityGrants: ['collaboratorId', 'ownerId', 'userId'],
   collaboratorEarnings: ['collaboratorId', 'ownerId', 'userId'],
   payouts: ['collaboratorId', 'ownerId', 'userId'],
+  dilutionEvents: ['collaboratorId', 'ownerId', 'userId'],
   workspaceInvitations: ['collaboratorId', 'inviterId', 'userId', 'ownerId'],
   // Wallet analytics slice (completed usage events).
   usageEvents: ['userId', 'ownerId'],
@@ -99,7 +101,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, founderProjects = false, workspaceWrites = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...namedCollections(collections), ...namedCollections(publicCollections)])
   for (const name of writeCollections) db[name] = []
@@ -139,6 +141,7 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   }
 
   if (userId && hackathon) {
+    if (!Array.isArray(db.organizationMemberships)) db.organizationMemberships = []
     mergeById(db.organizationMemberships, await listRecordsForOwner(client, 'organizationMemberships', userId, { ownerFields: ['userId'] }))
     mergeById(db.hackathons, await listRecordsLimited(client, 'hackathons', { limit: domainCandidateLimit() }))
     const orgIds = db.organizationMemberships.filter(row => row.status === 'active').map(row => row.organizationId)
@@ -223,6 +226,41 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   // Wallet analytics only needs the caller's completed usage events.
   if (userId && wallet) {
     mergeById(db.usageEvents, await listRecordsForOwner(client, 'usageEvents', userId, { ownerFields: OWNER_FIELDS.usageEvents }))
+  }
+
+  // Founder project/workspace writes (§5 2b): the caller's own projects and
+  // workspaces, their published deal-flow snapshots, and the analyses for the
+  // addressed project ids — the bounded window the project/workspace write
+  // functions mutate.
+  if (userId && founderProjects) {
+    mergeById(db.projects, await listRecordsForOwner(client, 'projects', userId, { ownerFields: ['ownerId'] }))
+    mergeById(db.workspaces, await listRecordsForOwner(client, 'workspaces', userId, { ownerFields: ['ownerId'] }))
+    mergeById(db.dealFlowSnapshots, await listRecordsForOwner(client, 'dealFlowSnapshots', userId, { ownerFields: ['ownerId'] }))
+    mergeById(db.projectAnalyses, await listRecordsByFieldIn(client, 'projectAnalyses', 'projectId', projectIds))
+  }
+
+  // Workspace invitation/membership writes (§5 2b): the caller's workspaces,
+  // memberships and invitations (addressed to them, sent by them, or on their
+  // workspaces), the notifications that de-dupe invitation notices, and the
+  // entitlement rows the free-collaborator workspace check reads.
+  if (userId && workspaceWrites) {
+    mergeById(db.workspaces, await listRecordsForOwner(client, 'workspaces', userId, { ownerFields: ['ownerId', 'userId'] }))
+    if (workspaceId) mergeById(db.workspaces, [await getRecord(client, 'workspaces', workspaceId)])
+    mergeById(db.workspaceMembers, await listRecordsForOwner(client, 'workspaceMembers', userId, { ownerFields: ['userId'] }))
+    mergeById(db.workspaceInvitations, await listRecordsForOwner(client, 'workspaceInvitations', userId, { ownerFields: OWNER_FIELDS.workspaceInvitations }))
+    mergeById(db.notifications, await listRecordsForOwner(client, 'notifications', userId, { ownerFields: ['userId'] }))
+    if (subjectUserId) mergeById(db.notifications, await listRecordsForOwner(client, 'notifications', subjectUserId, { ownerFields: ['userId'] }))
+    db.accountEntitlements = await listRecordsForOwner(client, 'accountEntitlements', userId, { ownerFields: ['userId'] })
+    db.subscriptions = await listRecordsForOwner(client, 'subscriptions', userId, { ownerFields: ['userId'] })
+    db.creditLedger = await listRecordsForOwner(client, 'creditLedger', userId, { ownerFields: ['userId'] })
+    const invitationWorkspaceIds = db.workspaceInvitations.map(row => row.workspaceId)
+    mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', [...db.workspaces.map(row => row.id), ...invitationWorkspaceIds]))
+    await loadByIds(client, 'workspaces', invitationWorkspaceIds, db.workspaces)
+    mergeById(db.workspaceInvitations, await listRecordsByFieldIn(client, 'workspaceInvitations', 'workspaceId', db.workspaces.map(row => row.id)))
+    const profileIds = [userId, subjectUserId]
+    for (const row of db.workspaceMembers) profileIds.push(row.userId)
+    for (const row of db.workspaceInvitations) profileIds.push(row.collaboratorId, row.invitedBy)
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
   }
 
   for (const entry of collections) {

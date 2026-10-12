@@ -2699,6 +2699,57 @@ export async function patchWorkspaceCollectionItemAsync(userId, workspaceId, nam
   return domainWrite(workspaceCollectionScope(userId, workspaceId, name), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body), () => patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, body))
 }
 
+// Row-level (§5) wrappers — sub-slice: founder project + workspace writes.
+// The synchronous writers mutate under `updateAuthorityDb`; these wrappers run
+// the same logic against a bounded bundle (the caller's own projects/workspaces,
+// the addressed invitations/memberships, their notifications) and persist only
+// the changed rows.
+function projectWriteScope(userId, projectIds = []) {
+  return { userId, founderProjects: true, projectIds }
+}
+function workspaceWriteScope(userId, workspaceId = null, subjectUserId = null) {
+  return { userId, workspaceWrites: true, workspaceId, subjectUserId }
+}
+function promotingFromHackathon(body) {
+  return Boolean(body?.origin && typeof body.origin === 'object' && body.origin.kind === 'hackathon_promote')
+}
+
+export async function createProjectAsync(userId, body = {}) {
+  const options = promotingFromHackathon(body)
+    ? { userId, founderProjects: true, hackathon: true }
+    : projectWriteScope(userId)
+  return domainWrite(options, () => createProject(userId, body), () => createProject(userId, body))
+}
+export async function updateProjectAsync(userId, projectId, body = {}) {
+  return domainWrite(projectWriteScope(userId, [projectId]), () => updateProject(userId, projectId, body), () => updateProject(userId, projectId, body))
+}
+export async function provisionWorkspaceAsync(userId, body = {}) {
+  const projectIds = body?.projectId ? [body.projectId] : []
+  return domainWrite(projectWriteScope(userId, projectIds), () => provisionWorkspace(userId, body), () => provisionWorkspace(userId, body))
+}
+export async function publishProjectAsync(userId, body = {}) {
+  const projectIds = body?.projectId ? [body.projectId] : []
+  return domainWrite(projectWriteScope(userId, projectIds), () => publishProject(userId, body), () => publishProject(userId, body))
+}
+export async function createWorkspaceInvitationAsync(userId, workspaceId, body = {}) {
+  return domainWrite(workspaceWriteScope(userId, workspaceId, body?.collaboratorId || null), () => createWorkspaceInvitation(userId, workspaceId, body), () => createWorkspaceInvitation(userId, workspaceId, body))
+}
+export async function acceptWorkspaceInvitationAsync(userId, invitationId) {
+  return domainWrite(workspaceWriteScope(userId), () => acceptWorkspaceInvitation(userId, invitationId), () => acceptWorkspaceInvitation(userId, invitationId))
+}
+export async function declineWorkspaceInvitationAsync(userId, invitationId) {
+  return domainWrite(workspaceWriteScope(userId), () => declineWorkspaceInvitation(userId, invitationId), () => declineWorkspaceInvitation(userId, invitationId))
+}
+export async function removeWorkspaceMemberAsync(userId, workspaceId, memberId) {
+  return domainWrite(workspaceWriteScope(userId, workspaceId), () => removeWorkspaceMember(userId, workspaceId, memberId), () => removeWorkspaceMember(userId, workspaceId, memberId))
+}
+export async function recordDilutionAsync(userId, body = {}) {
+  return domainWrite({ userId, equity: true }, () => recordDilution(userId, body), () => recordDilution(userId, body))
+}
+export async function requestWithdrawalAsync(userId, body = {}) {
+  return domainWrite({ userId, equity: true }, () => requestWithdrawal(userId, body), () => requestWithdrawal(userId, body))
+}
+
 // Row-level (§5) wrappers — sub-slice: notification preferences + contributor scores.
 const notificationScope = userId => ({ userId, notificationPreferences: true })
 const contributionScope = userId => ({ userId, contributions: true })

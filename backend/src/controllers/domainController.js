@@ -24,9 +24,9 @@ import {
   createOrganizationProjectAsync,
   createPaymentIntent,
   createPaymentIntentAsync,
-  createProject,
+  createProjectAsync,
   createWorkspaceCollectionItemAsync,
-  createWorkspaceInvitation,
+  createWorkspaceInvitationAsync,
   founderCapTableAsync,
   genericCreateAsync,
   genericDeleteAsync,
@@ -69,32 +69,32 @@ import {
   listWorkspaceMembers,
   listWorkspaceMembersAsync,
   patchWorkspaceCollectionItemAsync,
-  acceptWorkspaceInvitation,
-  declineWorkspaceInvitation,
+  acceptWorkspaceInvitationAsync,
+  declineWorkspaceInvitationAsync,
   getWorkspaceInvitationAsync,
-  removeWorkspaceMember,
+  removeWorkspaceMemberAsync,
   listWorkspaces,
   listWorkspacesAsync,
   logHackathonCheckInAsync,
   organizationDashboardAsync,
   promoteIntakeAsync,
   provisionHackathonWorkspaceAsync,
-  provisionWorkspace,
+  provisionWorkspaceAsync,
   patchHackathonTeamAsync,
-  recordDilution,
+  recordDilutionAsync,
   registerHackathonAsync,
   acceptHackathonInviteAsync,
   reportHackathonTeamAsync,
-  requestWithdrawal,
+  requestWithdrawalAsync,
   signContractAsync,
   submitHackathonBriefAsync,
   submitHackathonFinalAsync,
   updateNotificationPreferencesAsync,
   applyToOpportunityAsync,
   listApplicationsAsync,
-  publishProject,
+  publishProjectAsync,
   updateOrganizationProjectAsync,
-  updateProject,
+  updateProjectAsync,
   walletList,
   walletAnalyticsAsync,
   walletListAsync,
@@ -135,13 +135,13 @@ export async function founderProjects(req, res) {
 export async function founderProjectCreate(req, res) {
   const title = requireTitle(req, res)
   if (!title) return
-  const result = await persistedWorkspace(req, createProject(req.user.id, { ...req.body, title }))
+  const result = await persistedWorkspace(req, await createProjectAsync(req.user.id, { ...req.body, title }))
   if (!result.ok) return res.status(404).json(result)
   return created(res, result)
 }
 
 export async function founderProjectPatch(req, res) {
-  const project = await persistedWorkspace(req, updateProject(req.user.id, req.params.projectId, req.body), req.params.projectId)
+  const project = await persistedWorkspace(req, await updateProjectAsync(req.user.id, req.params.projectId, req.body), req.params.projectId)
   if (!project) return notFound(res, 'Project not found')
   return res.json({ project })
 }
@@ -164,7 +164,7 @@ export async function workspaces(req, res) {
 }
 
 export async function workspaceProvision(req, res) {
-  const result = await persistedWorkspace(req, provisionWorkspace(req.user.id, req.body), null)
+  const result = await persistedWorkspace(req, await provisionWorkspaceAsync(req.user.id, req.body), null)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
@@ -188,7 +188,7 @@ export async function hackathonProjectEntryGet(req, res) {
 }
 
 export async function workspaceInvitationCreate(req, res) {
-  const result = await persistedWorkspace(req, createWorkspaceInvitation(req.user.id, req.params.workspaceId, req.body))
+  const result = await persistedWorkspace(req, await createWorkspaceInvitationAsync(req.user.id, req.params.workspaceId, req.body))
   if (!result.ok) {
     const status = ['workspace_not_found', 'collaborator_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json({ error: result.error })
@@ -203,7 +203,7 @@ export async function workspaceInvitationGet(req, res) {
 }
 
 export async function workspaceInvitationAccept(req, res) {
-  const result = await persistedWorkspace(req, acceptWorkspaceInvitation(req.user.id, req.params.invitationId))
+  const result = await persistedWorkspace(req, await acceptWorkspaceInvitationAsync(req.user.id, req.params.invitationId))
   if (!result.ok) {
     const status = ['invitation_not_found', 'workspace_not_found'].includes(result.error) ? 404 : 400
     return res.status(status).json({ error: result.error })
@@ -212,7 +212,7 @@ export async function workspaceInvitationAccept(req, res) {
 }
 
 export async function workspaceInvitationDecline(req, res) {
-  const result = await persistedWorkspace(req, declineWorkspaceInvitation(req.user.id, req.params.invitationId))
+  const result = await persistedWorkspace(req, await declineWorkspaceInvitationAsync(req.user.id, req.params.invitationId))
   if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
 }
@@ -224,7 +224,7 @@ export async function workspaceMembersGet(req, res) {
 }
 
 export async function workspaceMemberDelete(req, res) {
-  const result = await persistedWorkspace(req, removeWorkspaceMember(req.user.id, req.params.workspaceId, req.params.memberId))
+  const result = await persistedWorkspace(req, await removeWorkspaceMemberAsync(req.user.id, req.params.workspaceId, req.params.memberId))
   if (!result.ok) return res.status(404).json({ error: result.error })
   return res.json(result)
 }
@@ -336,16 +336,16 @@ export async function equity(req, res) {
   return res.json(await collaboratorEquityAsync(req.user.id))
 }
 
-export function equityDilution(req, res) {
-  return created(res, recordDilution(req.user.id, req.body))
+export async function equityDilution(req, res) {
+  return created(res, await recordDilutionAsync(req.user.id, req.body))
 }
 
 export async function earnings(req, res) {
   return res.json(await collaboratorEarningsAsync(req.user.id))
 }
 
-export function earningsWithdraw(req, res) {
-  const result = requestWithdrawal(req.user.id, req.body)
+export async function earningsWithdraw(req, res) {
+  const result = await requestWithdrawalAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
@@ -731,8 +731,8 @@ export async function applicationsList(req, res) {
   return res.json(await listApplicationsAsync(req.user.id))
 }
 
-export function incubationPublish(req, res) {
-  const result = publishProject(req.user.id, req.body)
+export async function incubationPublish(req, res) {
+  const result = await publishProjectAsync(req.user.id, req.body)
   if (!result.ok) return res.status(400).json(result)
   return created(res, result)
 }
