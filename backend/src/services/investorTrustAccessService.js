@@ -1,4 +1,5 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
 import { createId, nowIso } from '../utils/api.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
@@ -60,4 +61,38 @@ export function decideInvestorTrustAccess(founderId, requestId, input = {}) {
     notify(db, request.investorId, 'investor_trust_access_decided', request)
     return { ok: true, request: publicRequest(request) }
   })
+}
+// Row-level (§5) wrappers — sub-slice: investor trust access. Bounded to the
+// caller's own projects/requests (investor or founder) so the request/decision
+// path no longer loads the snapshot. Gated by INVESTOR_*_SOURCE=postgres.
+const trustScope = (userId, extra = {}) => ({ userId, trustAccess: true, ...extra })
+
+async function trustRead(options, read, fallback) {
+  if (!investorStoreEnabled()) return fallback()
+  try { return await runInvestorRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_read_failed', slice: 'trust_access', error: error.message }))
+    if (!investorFallbackEnabled('READ')) throw error
+    return fallback()
+  }
+}
+async function trustMutation(options, mutate, fallback) {
+  if (!investorStoreEnabled()) return fallback()
+  try { return await applyInvestorMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_write_failed', slice: 'trust_access', error: error.message }))
+    if (!investorFallbackEnabled('WRITE')) throw error
+    return fallback()
+  }
+}
+
+export async function requestInvestorTrustAccessAsync(investorId, projectId, input = {}) {
+  return trustMutation(trustScope(investorId, { startupId: projectId }), () => requestInvestorTrustAccess(investorId, projectId, input), () => requestInvestorTrustAccess(investorId, projectId, input))
+}
+export async function investorTrustAccessStatusAsync(investorId, projectId) {
+  return trustRead(trustScope(investorId), () => investorTrustAccessStatus(investorId, projectId), () => investorTrustAccessStatus(investorId, projectId))
+}
+export async function listFounderTrustAccessRequestsAsync(founderId, status = null) {
+  return trustRead(trustScope(founderId), () => listFounderTrustAccessRequests(founderId, status), () => listFounderTrustAccessRequests(founderId, status))
+}
+export async function decideInvestorTrustAccessAsync(founderId, requestId, input = {}) {
+  return trustMutation(trustScope(founderId, { requestId }), () => decideInvestorTrustAccess(founderId, requestId, input), () => decideInvestorTrustAccess(founderId, requestId, input))
 }

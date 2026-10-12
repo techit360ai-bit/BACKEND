@@ -6,7 +6,7 @@ import { createEvidenceUpload, finalizeEvidenceUpload } from '../services/eviden
 import { identitySecurityEnabled, identitySecurityFallbackEnabled, listIdentitySecurity, syncIdentitySecurity } from '../repositories/identitySecurityRepository.js'
 import { createDomainChallenge, registryCheck, registryConfigurations, reviewVerificationOperation, runRegistryCheck, verificationOperations, verifyDomainChallenge } from '../services/registryVerificationService.js'
 import { reviewTrustProof, trustOperations } from '../services/trustAuthority.js'
-import { decideInvestorTrustAccess, investorTrustAccessStatus, listFounderTrustAccessRequests, requestInvestorTrustAccess } from '../services/investorTrustAccessService.js'
+import { decideInvestorTrustAccessAsync, investorTrustAccessStatusAsync, listFounderTrustAccessRequestsAsync, requestInvestorTrustAccessAsync } from '../services/investorTrustAccessService.js'
 
 const body = req => req.body && typeof req.body === 'object' ? req.body : {}
 const result = (res, value, success = 200) => value?.ok === false ? res.status(Number.isInteger(value.status) ? value.status : value.error === 'profile_not_found' ? 404 : 400).json(value) : res.status(success).json(value)
@@ -49,7 +49,7 @@ export async function evidenceUploadFinalize(req, res) { return result(res, awai
 export async function verificationEvidenceAnalyze(req, res) { return result(res, await analyzeEvidenceAsync(req.user.id, req.user.token, req.params.requestId, body(req))) }
 export async function adminVerificationAnalytics(_req, res) { return res.json(await verificationAnalyticsAsync()) }
 export async function adminReverificationNotifications(_req, res) { return result(res, await generateReverificationNotificationsAsync()) }
-export function investorTrustAccessRequest(req, res) { return result(res, requestInvestorTrustAccess(req.user.id, req.params.projectId, body(req)), 201) }
-export function investorTrustAccessGet(req, res) { return result(res, investorTrustAccessStatus(req.user.id, req.params.projectId)) }
-export function founderTrustAccessList(req, res) { return result(res, listFounderTrustAccessRequests(req.user.id, req.query.status ? String(req.query.status) : null)) }
-export function founderTrustAccessDecision(req, res) { return result(res, decideInvestorTrustAccess(req.user.id, req.params.requestId, body(req))) }
+export async function investorTrustAccessRequest(req, res) { return result(res, await requestInvestorTrustAccessAsync(req.user.id, req.params.projectId, body(req)), 201) }
+export async function investorTrustAccessGet(req, res) { return result(res, await investorTrustAccessStatusAsync(req.user.id, req.params.projectId)) }
+export async function founderTrustAccessList(req, res) { return result(res, await listFounderTrustAccessRequestsAsync(req.user.id, req.query.status ? String(req.query.status) : null)) }
+export async function founderTrustAccessDecision(req, res) { return result(res, await decideInvestorTrustAccessAsync(req.user.id, req.params.requestId, body(req))) }

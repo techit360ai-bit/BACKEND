@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
+import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const asNumber = value => Number.isFinite(Number(value)) ? Number(value) : null
@@ -165,4 +166,50 @@ export function investorAdvisoryEvidence(investorId, startupId = null) {
   const db = readAuthorityDb(); const ids = authorizedProjectIds(db, investorId); const selected = startupId ? (ids.has(startupId) ? [startupId] : []) : [...ids]
   const startups = selected.map(id => buildStartup(db, investorId, id)).filter(Boolean)
   return { scope: startupId ? `startup:${startupId}` : 'portfolio', startups, instructions: 'Explain observed changes and suggest review actions. Do not authorize access, change scores, or make investment decisions.' }
+}
+// Row-level (§5) wrappers — sub-slice: investor intelligence. Each runs the
+// existing synchronous service logic against a bounded investor bundle (the
+// caller's authorized startups + their progress/mentorship/activity children)
+// loaded from the row-level store. `overview`/`startup`/`brief`/`reports` also
+// persist a snapshot, so they go through the mutation runner. Gated by
+// INVESTOR_*_SOURCE=postgres; on failure they fall back to the snapshot.
+const investorScope = (investorId, extra = {}) => ({ userId: investorId, intelligence: true, ...extra })
+
+async function investorRead(options, read, fallback) {
+  if (!investorStoreEnabled()) return fallback()
+  try { return await runInvestorRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_read_failed', slice: 'intelligence', error: error.message }))
+    if (!investorFallbackEnabled('READ')) throw error
+    return fallback()
+  }
+}
+async function investorMutation(options, mutate, fallback) {
+  if (!investorStoreEnabled()) return fallback()
+  try { return await applyInvestorMutation(options, mutate) } catch (error) {
+    console.error(JSON.stringify({ event: 'investor_write_failed', slice: 'intelligence', error: error.message }))
+    if (!investorFallbackEnabled('WRITE')) throw error
+    return fallback()
+  }
+}
+
+export async function investorIntelligenceOverviewAsync(investorId) {
+  return investorMutation(investorScope(investorId), () => investorIntelligenceOverview(investorId), () => investorIntelligenceOverview(investorId))
+}
+export async function investorStartupIntelligenceAsync(investorId, startupId) {
+  return investorMutation(investorScope(investorId, { startupId }), () => investorStartupIntelligence(investorId, startupId), () => investorStartupIntelligence(investorId, startupId))
+}
+export async function investorRiskSignalsAsync(investorId) {
+  return investorMutation(investorScope(investorId), () => investorRiskSignals(investorId), () => investorRiskSignals(investorId))
+}
+export async function investorDailyBriefAsync(investorId) {
+  return investorMutation(investorScope(investorId), () => investorDailyBrief(investorId), () => investorDailyBrief(investorId))
+}
+export async function investorAlertsAsync(investorId) {
+  return investorMutation(investorScope(investorId), () => investorAlerts(investorId), () => investorAlerts(investorId))
+}
+export async function investorReportsAsync(investorId) {
+  return investorMutation(investorScope(investorId), () => investorReports(investorId), () => investorReports(investorId))
+}
+export async function investorAdvisoryEvidenceAsync(investorId, startupId = null) {
+  return investorRead(investorScope(investorId, { startupId }), () => investorAdvisoryEvidence(investorId, startupId), () => investorAdvisoryEvidence(investorId, startupId))
 }
