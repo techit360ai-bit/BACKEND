@@ -1,7 +1,8 @@
 import { readDb as readAuthorityDb, updateDb as updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
-import { requireOrganizationPermission, organizationOverview, organizationPulse, organizationRisks } from './organizationIntelligenceService.js'
-import { investorIntelligenceOverview } from './investorIntelligenceService.js'
+import { requireOrganizationPermission, organizationOverview, organizationPulse, organizationRisks, requireOrganizationPermissionAsync, organizationOverviewAsync, organizationPulseAsync, organizationRisksAsync } from './organizationIntelligenceService.js'
+import { investorIntelligenceOverview, investorIntelligenceOverviewFrom } from './investorIntelligenceService.js'
+import { recommendationStoreEnabled, recommendationFallbackEnabled, runRecommendationRead, applyRecommendationMutation } from '../repositories/recommendationRepository.js'
 import { publicTrustFor as legacyPublicTrustFor } from './trustVerificationAuthority.js'
 import { publicTrustFor as dispatchPublicTrustFor } from './trustAuthority.js'
 import { evaluateEntitlement, evaluateEntitlementAsync } from './tvceService.js'
@@ -126,14 +127,18 @@ function collaboratorRows(db, excludeId) {
   return rows(db, 'profiles').filter(row => row.id !== excludeId && String(row.role || '').toLowerCase() === 'collaborator').map(row => candidateProfile(db, row))
 }
 
-export function collaboratorRecommendations(userId, input = {}) {
-  const db = readAuthorityDb(); const viewer = candidateProfile(db, profileFor(db, userId)); const need = input; const access = matchingAccess(userId, viewer.role)
+export function collaboratorRecommendations(userId, input = {}) { return collaboratorRecommendationsFrom(readAuthorityDb(), userId, input) }
+
+function collaboratorRecommendationsFrom(db, userId, input = {}, accessOverride = null) {
+  const viewer = candidateProfile(db, profileFor(db, userId)); const need = input; const access = accessOverride || matchingAccess(userId, viewer.role)
   const results = collaboratorRows(db, userId).map(candidate => ({ candidate, ...rankCollaborator(viewer, candidate, need) })).sort((a, b) => b.score - a.score).slice(0, Math.min(access.matchLimit, Number(input.limit || access.matchLimit)))
   return { ok: true, type: 'collaborator', access, recommendations: results.map((row, index) => ({ rank: index + 1, collaborator: { id: row.candidate.id, name: row.candidate.name, title: row.candidate.title, skills: row.candidate.skills, country: row.candidate.country }, score: row.score, reasons: row.reasons, matchedSkills: row.matchedSkills, evidence: { executionScore: num(row.candidate.executionScore ?? row.candidate.execution ?? row.candidate.eviScore), deliveryReliability: num(row.candidate.deliveryReliability ?? row.candidate.deliveryRate), responseVelocity: num(row.candidate.responseVelocity ?? row.candidate.responseScore), collaborationHistory: Number(row.candidate.successfulCollaborations || 0) }, deterministic: true })) }
 }
 
-export function founderCollaboratorRecommendations(userId, projectId, input = {}) {
-  const db = readAuthorityDb(); const project = rows(db, 'projects').find(row => String(row.id) === String(projectId) && String(row.ownerId || row.founderId || row.createdBy) === String(userId))
+export function founderCollaboratorRecommendations(userId, projectId, input = {}) { return founderCollaboratorRecommendationsFrom(readAuthorityDb(), userId, projectId, input) }
+
+function founderCollaboratorRecommendationsFrom(db, userId, projectId, input = {}, accessOverride = null) {
+  const project = rows(db, 'projects').find(row => String(row.id) === String(projectId) && String(row.ownerId || row.founderId || row.createdBy) === String(userId))
   if (!project) return { ok: false, status: 404, error: 'project_not_found' }
   const teamIds = new Set(rows(db, 'workspaceMembers').filter(row => row.workspaceId === project.workspaceId && row.status === 'active').map(row => row.userId))
   const milestones = rows(db, 'milestones').filter(row => String(row.projectId || row.startupId) === String(projectId)); const overdue = milestones.filter(row => row.dueDate && new Date(row.dueDate).getTime() < Date.now() && !['completed', 'done', 'complete'].includes(String(row.status).toLowerCase())).length
@@ -143,8 +148,9 @@ export function founderCollaboratorRecommendations(userId, projectId, input = {}
   const requiredSkills = words(input.requiredSkills || project.requiredSkills || project.missingSkills || project.skills)
   const executionGap = Math.max(0, 70 - Number(project.executionScore ?? project.executionVelocity ?? project.eviScore ?? 0))
   const need = { requestedRole: input.requestedRole || openRoles[0], requiredSkills, stagnationDays }
-  const base = collaboratorRecommendations(userId, { ...need, limit: 50 }).recommendations
-  return { ok: true, type: 'founder_collaborator', projectId: String(projectId), access: matchingAccess(userId, 'founder'), context: { stage: project.stage || null, stagnationDays, openRoles, missingSkills: requiredSkills, overdueMilestones: overdue, executionGap }, recommendations: base.map(item => ({ ...item, score: clamp(item.score + Math.min(15, stagnationDays / 3) + Math.min(10, overdue * 3) + Math.min(10, executionGap / 7),), reasons: [...item.reasons, ...(stagnationDays >= 14 ? [`Priority raised: ${stagnationDays} days without meaningful progress`] : []), ...(overdue ? [`${overdue} milestone risk${overdue === 1 ? '' : 's'}`] : []), ...(executionGap ? [`Execution gap ${Math.round(executionGap)} points`] : [])].slice(0, 6) })) }
+  const access = accessOverride || matchingAccess(userId, 'founder')
+  const base = collaboratorRecommendationsFrom(db, userId, { ...need, limit: 50 }, access).recommendations
+  return { ok: true, type: 'founder_collaborator', projectId: String(projectId), access, context: { stage: project.stage || null, stagnationDays, openRoles, missingSkills: requiredSkills, overdueMilestones: overdue, executionGap }, recommendations: base.map(item => ({ ...item, score: clamp(item.score + Math.min(15, stagnationDays / 3) + Math.min(10, overdue * 3) + Math.min(10, executionGap / 7),), reasons: [...item.reasons, ...(stagnationDays >= 14 ? [`Priority raised: ${stagnationDays} days without meaningful progress`] : []), ...(overdue ? [`${overdue} milestone risk${overdue === 1 ? '' : 's'}`] : []), ...(executionGap ? [`Execution gap ${Math.round(executionGap)} points`] : [])].slice(0, 6) })) }
 }
 
 function organizationNeeds(db, organizationId, input = {}) {
@@ -155,22 +161,28 @@ function organizationNeeds(db, organizationId, input = {}) {
   return { required, openRoles, gaps, stages: [...new Set(projects.map(row => row.stage).filter(Boolean))], memberCount: members.length }
 }
 
-export function organizationTalentRecommendations(userId, input = {}) {
-  const context = requireOrganizationPermission(userId, 'view', input.organizationId); if (!context.ok) return context
-  const db = readAuthorityDb(); const needs = organizationNeeds(db, context.organizationId, input); const rowsOut = rows(db, 'profiles').filter(row => row.id !== userId && ['collaborator', 'founder', 'investor'].includes(String(row.role || '').toLowerCase())).map(row => candidateProfile(db, row))
+export function organizationTalentRecommendations(userId, input = {}) { return organizationTalentRecommendationsFrom(readAuthorityDb(), userId, input) }
+
+function organizationTalentRecommendationsFrom(db, userId, input = {}, contextOverride = null, accessOverride = null) {
+  const context = contextOverride || requireOrganizationPermission(userId, 'view', input.organizationId); if (!context.ok) return context
+  const needs = organizationNeeds(db, context.organizationId, input); const rowsOut = rows(db, 'profiles').filter(row => row.id !== userId && ['collaborator', 'founder', 'investor'].includes(String(row.role || '').toLowerCase())).map(row => candidateProfile(db, row))
   const recommendations = rowsOut.map(candidate => { const skill = overlap(needs.required, candidate.skills) * 100; const role = needs.openRoles.some(item => words([candidate.title, candidate.role]).some(term => term === item)) ? 100 : 0; const industry = overlap(candidate.industries, rows(db, 'projects').filter(p => p.organizationId === context.organizationId).map(p => p.industry)) * 100; const signals = executionSignals(db, candidate.id); const score = clamp(skill * 0.4 + role * 0.15 + industry * 0.1 + (signals.execution ?? 50) * 0.15 + (signals.delivery ?? 50) * 0.1 + Math.min(100, signals.collaboration * 10) * 0.1); const reasons = []; if (skill) reasons.push(`Need coverage ${Math.round(skill)}%`); if (role) reasons.push('Open-role alignment'); if (industry) reasons.push('Organization industry alignment'); if (signals.execution !== null) reasons.push(`Execution ${Math.round(signals.execution)}`); return { candidate, score, reasons: reasons.slice(0, 5), signals } }).sort((a, b) => b.score - a.score).slice(0, Math.min(50, Number(input.limit || 20)))
-  return { ok: true, organizationId: context.organizationId, access: matchingAccess(userId, 'organization'), needs, recommendations: recommendations.map((row, index) => ({ rank: index + 1, person: { id: row.candidate.id, name: row.candidate.name, role: row.candidate.role, title: row.candidate.title, skills: row.candidate.skills, country: row.candidate.country }, score: row.score, reasons: row.reasons, execution: row.signals, deterministic: true })) }
+  return { ok: true, organizationId: context.organizationId, access: accessOverride || matchingAccess(userId, 'organization'), needs, recommendations: recommendations.map((row, index) => ({ rank: index + 1, person: { id: row.candidate.id, name: row.candidate.name, role: row.candidate.role, title: row.candidate.title, skills: row.candidate.skills, country: row.candidate.country }, score: row.score, reasons: row.reasons, execution: row.signals, deterministic: true })) }
 }
 
-export function mentorRecommendations(userId, input = {}) {
-  const db = readAuthorityDb(); const mentor = profileFor(db, userId); const expertise = words([mentor.skills, mentor.subSkills, mentor.techStack, mentor.industries, input.expertise]); const rooms = rows(db, 'mentorshipRooms').filter(row => row.mentorId === userId); const activeCapacity = rooms.reduce((sum, room) => sum + rows(db, 'mentorshipMentees').filter(m => m.roomId === room.id && m.status === 'active').length, 0); const capacity = rooms.reduce((sum, room) => sum + Number(room.capacity || 0), 0); const candidates = rows(db, 'projects').map(project => { const ownerId = project.ownerId || project.founderId || project.createdBy; const owner = profileFor(db, ownerId); const activity = latest([...rows(db, 'projectActivities'), ...rows(db, 'startupActivities')].filter(row => String(row.projectId || row.startupId) === String(project.id))); const stagnationDays = ageDays(activity?.createdAt || project.updatedAt || project.createdAt) || 0; const gapSkills = words(project.missingSkills || project.requiredSkills || project.openRoles); const stageMatch = input.stage ? String(project.stage || '').toLowerCase() === String(input.stage).toLowerCase() ? 100 : 0 : 50; const skillMatch = overlap(expertise, gapSkills) * 100; const prior = rows(db, 'mentorshipApplications').filter(row => row.applicantId === ownerId).length + rows(db, 'mentorshipMentees').filter(row => row.userId === ownerId && row.status === 'completed').length * 2; const need = Math.min(100, stagnationDays * 4) + Math.min(30, gapSkills.length * 6); const score = clamp(skillMatch * 0.32 + stageMatch * 0.12 + Math.min(100, need) * 0.26 + Math.min(100, prior * 10) * 0.1 + (capacity > activeCapacity ? 100 : 0) * 0.1 + (project.status === 'active' ? 10 : 0) * 0.1); return { project, owner, score, stagnationDays, gapSkills, skillMatch, prior } }).filter(row => row.owner.id && row.owner.id !== userId).sort((a, b) => b.score - a.score).slice(0, Math.min(50, Number(input.limit || 20)))
-  const access = matchingAccess(userId, 'mentor'); return { ok: true, mentorId: userId, access, capacity: { active: activeCapacity, limit: capacity || null, remaining: capacity ? Math.max(0, capacity - activeCapacity) : null }, recommendations: candidates.slice(0, access.matchLimit).map((row, index) => ({ rank: index + 1, startup: { id: row.project.id, name: row.project.title || row.project.name || row.project.id, stage: row.project.stage || null, ownerId: row.owner.id, ownerName: display(row.owner), skills: row.gapSkills }, score: row.score, reasons: [row.skillMatch ? `Expertise covers ${Math.round(row.skillMatch)}% of identified gaps` : 'Relevant startup need', row.stagnationDays >= 14 ? `${row.stagnationDays} days stagnation risk` : 'Recent progress signal', row.project.stage ? `Stage: ${row.project.stage}` : null, row.prior ? `${row.prior} prior mentorship outcome signal` : null].filter(Boolean).slice(0, 5), evidence: { stagnationDays: row.stagnationDays, skillGaps: row.gapSkills, priorOutcomes: row.prior }, deterministic: true })) }
+export function mentorRecommendations(userId, input = {}) { return mentorRecommendationsFrom(readAuthorityDb(), userId, input) }
+
+function mentorRecommendationsFrom(db, userId, input = {}, accessOverride = null) {
+  const mentor = profileFor(db, userId); const expertise = words([mentor.skills, mentor.subSkills, mentor.techStack, mentor.industries, input.expertise]); const rooms = rows(db, 'mentorshipRooms').filter(row => row.mentorId === userId); const activeCapacity = rooms.reduce((sum, room) => sum + rows(db, 'mentorshipMentees').filter(m => m.roomId === room.id && m.status === 'active').length, 0); const capacity = rooms.reduce((sum, room) => sum + Number(room.capacity || 0), 0); const candidates = rows(db, 'projects').map(project => { const ownerId = project.ownerId || project.founderId || project.createdBy; const owner = profileFor(db, ownerId); const activity = latest([...rows(db, 'projectActivities'), ...rows(db, 'startupActivities')].filter(row => String(row.projectId || row.startupId) === String(project.id))); const stagnationDays = ageDays(activity?.createdAt || project.updatedAt || project.createdAt) || 0; const gapSkills = words(project.missingSkills || project.requiredSkills || project.openRoles); const stageMatch = input.stage ? String(project.stage || '').toLowerCase() === String(input.stage).toLowerCase() ? 100 : 0 : 50; const skillMatch = overlap(expertise, gapSkills) * 100; const prior = rows(db, 'mentorshipApplications').filter(row => row.applicantId === ownerId).length + rows(db, 'mentorshipMentees').filter(row => row.userId === ownerId && row.status === 'completed').length * 2; const need = Math.min(100, stagnationDays * 4) + Math.min(30, gapSkills.length * 6); const score = clamp(skillMatch * 0.32 + stageMatch * 0.12 + Math.min(100, need) * 0.26 + Math.min(100, prior * 10) * 0.1 + (capacity > activeCapacity ? 100 : 0) * 0.1 + (project.status === 'active' ? 10 : 0) * 0.1); return { project, owner, score, stagnationDays, gapSkills, skillMatch, prior } }).filter(row => row.owner.id && row.owner.id !== userId).sort((a, b) => b.score - a.score).slice(0, Math.min(50, Number(input.limit || 20)))
+  const access = accessOverride || matchingAccess(userId, 'mentor'); return { ok: true, mentorId: userId, access, capacity: { active: activeCapacity, limit: capacity || null, remaining: capacity ? Math.max(0, capacity - activeCapacity) : null }, recommendations: candidates.slice(0, access.matchLimit).map((row, index) => ({ rank: index + 1, startup: { id: row.project.id, name: row.project.title || row.project.name || row.project.id, stage: row.project.stage || null, ownerId: row.owner.id, ownerName: display(row.owner), skills: row.gapSkills }, score: row.score, reasons: [row.skillMatch ? `Expertise covers ${Math.round(row.skillMatch)}% of identified gaps` : 'Relevant startup need', row.stagnationDays >= 14 ? `${row.stagnationDays} days stagnation risk` : 'Recent progress signal', row.project.stage ? `Stage: ${row.project.stage}` : null, row.prior ? `${row.prior} prior mentorship outcome signal` : null].filter(Boolean).slice(0, 5), evidence: { stagnationDays: row.stagnationDays, skillGaps: row.gapSkills, priorOutcomes: row.prior }, deterministic: true })) }
 }
 
-export function investorThesisRecommendations(userId, input = {}) {
-  const db = readAuthorityDb(); const investor = profileFor(db, userId); const focus = words(input.industries || input.sectors || investor.investmentFocus || investor.industries); const geography = words(input.geography || input.geographies || investor.preferredGeographies || investor.country); const stages = words(input.stages || input.stagePreference || investor.stagePreference); const minTicket = num(input.minTicket || investor.minCheckSize); const maxTicket = num(input.maxTicket || investor.maxCheckSize); const risk = clean(input.riskTolerance || investor.riskTolerance).toLowerCase(); const history = rows(db, 'investments').filter(row => [row.investorId, row.userId, row.ownerId].includes(userId)); const watched = rows(db, 'investorWatchlists').filter(row => row.investorId === userId).map(row => row.projectId)
+export function investorThesisRecommendations(userId, input = {}) { return investorThesisRecommendationsFrom(readAuthorityDb(), userId, input) }
+
+function investorThesisRecommendationsFrom(db, userId, input = {}, accessOverride = null) {
+  const investor = profileFor(db, userId); const focus = words(input.industries || input.sectors || investor.investmentFocus || investor.industries); const geography = words(input.geography || input.geographies || investor.preferredGeographies || investor.country); const stages = words(input.stages || input.stagePreference || investor.stagePreference); const minTicket = num(input.minTicket || investor.minCheckSize); const maxTicket = num(input.maxTicket || investor.maxCheckSize); const risk = clean(input.riskTolerance || investor.riskTolerance).toLowerCase(); const history = rows(db, 'investments').filter(row => [row.investorId, row.userId, row.ownerId].includes(userId)); const watched = rows(db, 'investorWatchlists').filter(row => row.investorId === userId).map(row => row.projectId)
   const snapshots = rows(db, 'dealFlowSnapshots').filter(row => row.visibility === 'public' || row.investorId === userId); const projects = rows(db, 'projects'); const recommendations = snapshots.map(snapshot => { const project = projects.find(row => row.id === (snapshot.projectId || snapshot.startupId)) || {}; const sector = words(project.industry || snapshot.industry || snapshot.sector); const region = words(project.country || project.region || snapshot.region); const stage = words(project.stage || snapshot.stage); const ticket = num(snapshot.checkSize || snapshot.ticketSize || project.checkSize); const sectorScore = overlap(focus, sector) * 100; const geoScore = overlap(geography, region) * 100; const stageScore = overlap(stages, stage) * 100; const ticketScore = minTicket === null && maxTicket === null ? 50 : ticket !== null && (minTicket === null || ticket >= minTicket) && (maxTicket === null || ticket <= maxTicket) ? 100 : 0; const riskScore = risk ? (risk === String(snapshot.riskLevel || project.riskLevel || '').toLowerCase() ? 100 : 50) : 50; const behaviorScore = watched.includes(project.id) ? 100 : history.some(row => row.projectId === project.id) ? 100 : 0; const execution = num(snapshot.executionVelocity || snapshot.eviI || project.executionVelocity || project.eviScore) ?? 50; const score = clamp(sectorScore * 0.24 + geoScore * 0.12 + stageScore * 0.14 + ticketScore * 0.12 + riskScore * 0.08 + behaviorScore * 0.1 + execution * 0.2); return { project, snapshot, score, sectorScore, geoScore, stageScore, ticketScore, behaviorScore, execution } }).filter(row => row.project.id || row.snapshot.projectId).sort((a, b) => b.score - a.score).slice(0, Math.min(100, Number(input.limit || 30)))
-  return { ok: true, investorId: userId, access: matchingAccess(userId, 'investor'), thesis: { industries: focus, geographies: geography, stages, minTicket, maxTicket, riskTolerance: risk || null }, recommendations: recommendations.map((row, index) => ({ rank: index + 1, startup: { id: row.project.id || row.snapshot.projectId, name: row.project.title || row.snapshot.startupName || row.snapshot.name || row.snapshot.projectId, sector: row.project.industry || row.snapshot.industry || row.snapshot.sector || null, geography: row.project.country || row.project.region || row.snapshot.region || null, stage: row.project.stage || row.snapshot.stage || null, execution: row.execution }, score: row.score, reasons: [row.sectorScore >= 50 ? 'Sector matches thesis' : null, row.geoScore >= 50 ? 'Geography matches thesis' : null, row.stageScore >= 50 ? 'Stage matches thesis' : null, row.ticketScore === 100 ? 'Ticket size fits' : null, row.behaviorScore ? 'Aligned with your historical interest' : null, `Execution signal ${Math.round(row.execution)}`].filter(Boolean).slice(0, 6), deterministic: true })) }
+  return { ok: true, investorId: userId, access: accessOverride || matchingAccess(userId, 'investor'), thesis: { industries: focus, geographies: geography, stages, minTicket, maxTicket, riskTolerance: risk || null }, recommendations: recommendations.map((row, index) => ({ rank: index + 1, startup: { id: row.project.id || row.snapshot.projectId, name: row.project.title || row.snapshot.startupName || row.snapshot.name || row.snapshot.projectId, sector: row.project.industry || row.snapshot.industry || row.snapshot.sector || null, geography: row.project.country || row.project.region || row.snapshot.region || null, stage: row.project.stage || row.snapshot.stage || null, execution: row.execution }, score: row.score, reasons: [row.sectorScore >= 50 ? 'Sector matches thesis' : null, row.geoScore >= 50 ? 'Geography matches thesis' : null, row.stageScore >= 50 ? 'Stage matches thesis' : null, row.ticketScore === 100 ? 'Ticket size fits' : null, row.behaviorScore ? 'Aligned with your historical interest' : null, `Execution signal ${Math.round(row.execution)}`].filter(Boolean).slice(0, 6), deterministic: true })) }
 }
 
 function founderDigest(db, userId) {
@@ -189,4 +201,97 @@ export function continuousIntelligence(userId, input = {}) {
   const snapshot = { id: createId('continuous_intelligence'), userId, role, activeContext: input.activeContext || null, date: new Date().toISOString().slice(0, 10), asOf: nowIso(), cadence: 'daily', ...digest, deterministic: true }
   updateAuthorityDb(state => { rows(state, 'continuousIntelligenceSnapshots').push(snapshot); if (state.continuousIntelligenceSnapshots.length > 10000) state.continuousIntelligenceSnapshots.splice(0, state.continuousIntelligenceSnapshots.length - 10000); return snapshot })
   return { ok: true, intelligence: snapshot }
+}
+
+// ---------------------------------------------------------------------------
+// Row-level (§5) async surfaces. Each runs the existing ranking logic against a
+// bounded recommendation bundle loaded from the row-level store, resolving the
+// caller's access via the row-level entitlement path. On failure they fall back
+// to the snapshot while it still exists. Gated by INTELLIGENCE_SOURCE=postgres.
+async function recommendationRead(options, read, operation, fallback) {
+  if (!recommendationStoreEnabled()) return fallback()
+  try { return await runRecommendationRead(options, read) } catch (error) {
+    console.error(JSON.stringify({ event: 'recommendation_read_failed', operation, error: error.message }))
+    if (!recommendationFallbackEnabled()) throw error
+    return fallback()
+  }
+}
+
+export async function collaboratorRecommendationsAsync(userId, input = {}) {
+  return recommendationRead({ userId }, async () => {
+    const db = readAuthorityDb()
+    const access = await matchingAccessAsync(userId, input.role || null)
+    return collaboratorRecommendationsFrom(db, userId, input, access)
+  }, 'collaborators', () => collaboratorRecommendations(userId, input))
+}
+
+export async function founderCollaboratorRecommendationsAsync(userId, projectId, input = {}) {
+  return recommendationRead({ userId, projectId: String(projectId) }, async () => {
+    const db = readAuthorityDb()
+    const access = await matchingAccessAsync(userId, 'founder')
+    return founderCollaboratorRecommendationsFrom(db, userId, projectId, input, access)
+  }, 'founder_collaborators', () => founderCollaboratorRecommendations(userId, projectId, input))
+}
+
+export async function organizationTalentRecommendationsAsync(userId, input = {}) {
+  if (!recommendationStoreEnabled()) return organizationTalentRecommendations(userId, input)
+  const context = await requireOrganizationPermissionAsync(userId, 'view', input.organizationId)
+  if (!context.ok) return context
+  try {
+    return await runRecommendationRead({ userId, organizationId: context.organizationId }, async () => {
+      const db = readAuthorityDb()
+      const access = await matchingAccessAsync(userId, 'organization')
+      return organizationTalentRecommendationsFrom(db, userId, input, context, access)
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'recommendation_read_failed', operation: 'organization_talent', error: error.message }))
+    if (!recommendationFallbackEnabled()) throw error
+    return organizationTalentRecommendations(userId, input)
+  }
+}
+
+export async function mentorRecommendationsAsync(userId, input = {}) {
+  return recommendationRead({ userId }, async () => {
+    const db = readAuthorityDb()
+    const access = await matchingAccessAsync(userId, 'mentor')
+    return mentorRecommendationsFrom(db, userId, input, access)
+  }, 'mentor', () => mentorRecommendations(userId, input))
+}
+
+export async function investorThesisRecommendationsAsync(userId, input = {}) {
+  return recommendationRead({ userId }, async () => {
+    const db = readAuthorityDb()
+    const access = await matchingAccessAsync(userId, 'investor')
+    return investorThesisRecommendationsFrom(db, userId, input, access)
+  }, 'investor_thesis', () => investorThesisRecommendations(userId, input))
+}
+
+function investorDigestFrom(result) {
+  return { stage: null, progress: result.startups.map(row => ({ startupId: row.startupId, execution: row.executionVelocity, readiness: row.readiness, risk: row.riskLevel })), risks: result.startups.filter(row => ['moderate', 'high'].includes(row.riskLevel)).map(row => ({ type: 'startup_risk', startupId: row.startupId, level: row.riskLevel, evidence: row.evidence })), opportunities: result.startups.filter(row => row.riskLevel === 'low').map(row => ({ type: 'startup', startupId: row.startupId })), recommendations: result.startups.slice(0, 5).map(row => ({ action: row.riskLevel === 'high' ? 'review authorized evidence' : 'monitor next milestone', startupId: row.startupId })) }
+}
+
+export async function continuousIntelligenceAsync(userId, input = {}) {
+  if (!recommendationStoreEnabled()) return continuousIntelligence(userId, input)
+  try {
+    return await applyRecommendationMutation({ userId }, async () => {
+      const db = readAuthorityDb(); const profile = profileFor(db, userId); const role = String(input.role || profile.activeRole || profile.role || 'explorer').toLowerCase().replace('organisation', 'organization'); let digest
+      if (role === 'founder') digest = founderDigest(db, userId)
+      else if (role === 'collaborator') digest = collaboratorDigest(db, userId)
+      else if (role === 'investor') digest = investorDigestFrom(investorIntelligenceOverviewFrom(db, userId))
+      else if (role === 'organization') {
+        const organizationId = input.organizationId || rows(db, 'organizationMemberships').find(row => row.userId === userId && row.status === 'active')?.organizationId
+        const overview = await organizationOverviewAsync(userId, organizationId)
+        const pulse = await organizationPulseAsync(userId, { organizationId, window: input.window || '7d' })
+        const risks = await organizationRisksAsync(userId, { organizationId })
+        digest = { stage: null, progress: overview.ok ? overview.health : null, risks: risks.risks || [], opportunities: overview.ok ? [{ type: 'talent', action: 'review organization talent matches' }] : [], recommendations: pulse.activity?.slice(0, 5).map(row => ({ action: row.message })) || [] }
+      } else digest = { stage: null, progress: null, risks: [], opportunities: [], recommendations: [{ action: 'complete profile to improve recommendations' }] }
+      const snapshot = { id: createId('continuous_intelligence'), userId, role, activeContext: input.activeContext || null, date: new Date().toISOString().slice(0, 10), asOf: nowIso(), cadence: 'daily', ...digest, deterministic: true }
+      updateAuthorityDb(state => { rows(state, 'continuousIntelligenceSnapshots').push(snapshot); return snapshot })
+      return { ok: true, intelligence: snapshot }
+    })
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'recommendation_write_failed', operation: 'continuous_intelligence', error: error.message }))
+    if (!recommendationFallbackEnabled()) throw error
+    return continuousIntelligence(userId, input)
+  }
 }

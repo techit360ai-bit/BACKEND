@@ -99,8 +99,13 @@ function persistSnapshot(investorId, scope, startups) {
   })
 }
 
-export function investorIntelligenceOverview(investorId) {
-  const db = readAuthorityDb(); const ids = authorizedProjectIds(db, investorId); const startups = [...ids].map(id => buildStartup(db, investorId, id)).filter(Boolean)
+export function investorIntelligenceOverview(investorId) { return investorIntelligenceOverviewFrom(readAuthorityDb(), investorId) }
+
+// Bounded-bundle entry point used by the row-level recommendation/intelligence
+// cutover: computes the same overview from an already-loaded scoped db instead
+// of reading the whole snapshot.
+export function investorIntelligenceOverviewFrom(db, investorId) {
+  const ids = authorizedProjectIds(db, investorId); const startups = [...ids].map(id => buildStartup(db, investorId, id)).filter(Boolean)
   const overview = { portfolio: { total: startups.length, healthy: startups.filter(row => row.riskLevel === 'low').length, onTrack: startups.filter(row => row.riskLevel === 'moderate').length, highRisk: startups.filter(row => row.riskLevel === 'high').length }, startups, changes: buildChanges(db, investorId, startups), generatedAt: nowIso(), deterministic: true }
   persistSnapshot(investorId, 'overview', startups)
   return overview
