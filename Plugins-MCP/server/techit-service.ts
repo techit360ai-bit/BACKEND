@@ -5,7 +5,7 @@
  * these functions onto its own Express app (see ./mount.ts).
  */
 
-import type { Actor, AgentDefinition, Role } from '@techit/core';
+import type { Actor, AgentDefinition, ContributionEvent, Role } from '@techit/core';
 import { createRuntime, type CallContext, type IncubationContext, type Result } from '@techit/plugin-sdk';
 import { InMemorySecretVault, type SecretVault } from '@techit/infra-secrets';
 import { CREDENTIAL_SCOPES_KEY } from '@techit/plugin-sdk';
@@ -277,6 +277,20 @@ export interface ExecutionIntelligence {
     artifactId?: string;
   }>;
   /**
+   * Lifetime/relative progress over the SAME scope-filtered events. `baseline`
+   * is the project's first week; `delta` is the window minus that baseline (how
+   * far the founder has come); `perDay` is the sparkline; `cumulative` are the
+   * all-time totals that only ever grow. Computed from persisted execution
+   * events — no separate scoring engine, no new store.
+   */
+  progress: {
+    lifetime: { events: number; weight: number; artifacts: number; activeActors: number; activeTools: number; projects: number };
+    baseline: { label: string; at: string | null; events: number; weight: number; artifacts: number; activeActors: number; activeTools: number; projects: number };
+    delta: { events: number; weight: number; artifacts: number; activeActors: number };
+    perDay: Array<{ date: string; events: number; weight: number }>;
+    cumulative: { firstEventAt: string | null; lastEventAt: string | null; spanDays: number; eventsPerActiveDay: number };
+  };
+  /**
    * Subjects to combine with the canonical Trust Engine (`publicTrustFor`).
    * This view never computes trust itself.
    */
@@ -438,9 +452,8 @@ async function build(): Promise<TechitService> {
       const events = scope.workspaceId
         ? await contributions.eventsForWorkspace(scope.workspaceId)
         : await contributions.allEvents();
-      const rows = events.filter((event) => {
-        const at = new Date(event.timestamp).getTime();
-        if (!Number.isFinite(at) || at < from) return false;
+      const at = (event: ContributionEvent) => new Date(event.timestamp).getTime();
+      const matchesScope = (event: ContributionEvent) => {
         if (scope.actorId && event.actorId !== scope.actorId) return false;
         const incubation = incubationOf(event);
         if (scope.projectId && (event.projectId ?? incubation.projectId) !== scope.projectId) return false;
@@ -449,7 +462,11 @@ async function build(): Promise<TechitService> {
         if (scope.cohortId && incubation.cohortId !== scope.cohortId) return false;
         if (scope.hackathonId && incubation.hackathonId !== scope.hackathonId) return false;
         return true;
-      });
+      };
+      // Lifetime rows are the full scope-scoped history the stores already load
+      // for this request; `rows` is the windowed slice used for signals/velocity.
+      const lifetimeRows = events.filter((event) => matchesScope(event) && Number.isFinite(at(event)));
+      const rows = lifetimeRows.filter((event) => at(event) >= from);
       const role = String(scope.role || 'workspace');
       const byKind: Record<string, number> = {};
       const byTool: Record<string, number> = {};
@@ -491,6 +508,73 @@ async function build(): Promise<TechitService> {
           };
         });
       const byActor = [...byActorMap.values()].sort((a, b) => b.weight - a.weight);
+      // Progress = how far the founder has come vs. their own start, plus the
+      // cumulative totals that only grow. Everything is derived from the same
+      // persisted events; nothing here is scored or invented.
+      const aggregate = (subset: ContributionEvent[]) => {
+        const actors = new Set<string>();
+        const subsetTools = new Set<string>();
+        const subsetProjects = new Set<string>();
+        let subsetWeight = 0;
+        let subsetArtifacts = 0;
+        for (const event of subset) {
+          subsetWeight += Number(event.weight || 0);
+          if (event.artifactId) subsetArtifacts += 1;
+          actors.add(event.actorId);
+          subsetTools.add(event.sourceTool);
+          const projectId = event.projectId ?? incubationOf(event).projectId;
+          if (typeof projectId === 'string' && projectId) subsetProjects.add(projectId);
+        }
+        return {
+          events: subset.length,
+          weight: subsetWeight,
+          artifacts: subsetArtifacts,
+          activeActors: actors.size,
+          activeTools: subsetTools.size,
+          projects: subsetProjects.size,
+        };
+      };
+      const lifetime = aggregate(lifetimeRows);
+      const timestamps = lifetimeRows.map(at);
+      const firstTs = timestamps.length ? Math.min(...timestamps) : null;
+      const lastTs = timestamps.length ? Math.max(...timestamps) : null;
+      const baselineCutoff = firstTs === null ? null : firstTs + 7 * 86400_000;
+      const baselineRows = baselineCutoff === null ? [] : lifetimeRows.filter((event) => at(event) <= baselineCutoff);
+      const baseline = {
+        label: 'first_week',
+        at: firstTs === null ? null : new Date(firstTs).toISOString(),
+        ...aggregate(baselineRows),
+      };
+      const windowAgg = aggregate(rows);
+      const delta = {
+        events: windowAgg.events - baseline.events,
+        weight: Math.round(windowAgg.weight - baseline.weight),
+        artifacts: windowAgg.artifacts - baseline.artifacts,
+        activeActors: windowAgg.activeActors - baseline.activeActors,
+      };
+      const dayBuckets = new Map<string, { date: string; events: number; weight: number }>();
+      for (const event of rows) {
+        const date = new Date(at(event)).toISOString().slice(0, 10);
+        const bucket = dayBuckets.get(date) ?? { date, events: 0, weight: 0 };
+        bucket.events += 1;
+        bucket.weight += Number(event.weight || 0);
+        dayBuckets.set(date, bucket);
+      }
+      const perDay = [...dayBuckets.values()].sort((a, b) => a.date.localeCompare(b.date));
+      const spanDays = firstTs === null || lastTs === null ? 0 : Math.max(1, Math.round((lastTs - firstTs) / 86400_000));
+      const activeDays = new Set(lifetimeRows.map((event) => new Date(at(event)).toISOString().slice(0, 10))).size;
+      const progress = {
+        lifetime,
+        baseline,
+        delta,
+        perDay,
+        cumulative: {
+          firstEventAt: firstTs === null ? null : new Date(firstTs).toISOString(),
+          lastEventAt: lastTs === null ? null : new Date(lastTs).toISOString(),
+          spanDays,
+          eventsPerActiveDay: activeDays ? Math.round((lifetime.events / activeDays) * 100) / 100 : 0,
+        },
+      };
       const searchable = Object.fromEntries(
         (['projectId', 'organizationId', 'programId', 'cohortId', 'hackathonId'] as const)
           .filter((key) => scope[key])
@@ -516,6 +600,7 @@ async function build(): Promise<TechitService> {
         },
         velocity: { eventsPerDay: rows.length / days, weightPerDay: weight / days },
         highlights,
+        progress,
         trustSubjects: [
           ...byActor.slice(0, 10).map((row) => ({ kind: 'actor' as const, id: row.actorId })),
           ...[...projects].slice(0, 10).map((id) => ({ kind: 'project' as const, id })),

@@ -87,6 +87,37 @@ describe('WS-H execution intelligence', () => {
     expect(hackathon.roleFocus).toContain('submissions');
   });
 
+  test('progress compares the window to a founder start and never invents data', async () => {
+    const mod = await import('../server/techit-service.js?cb=' + Date.now());
+    const svc = await mod.getTechitService();
+    await svc.invoke('github', 'list_repositories', {}, {
+      id: 'founder-1',
+      kind: 'human',
+      role: 'editor',
+      workspaceId: 'ws-h4',
+      incubation: INCUBATION,
+    });
+    await svc.invoke('github', 'list_issues', { repo: 'acme/app' }, {
+      id: 'founder-1',
+      kind: 'human',
+      role: 'editor',
+      workspaceId: 'ws-h4',
+      incubation: INCUBATION,
+    });
+
+    const view = await svc.executionIntelligence({ workspaceId: 'ws-h4', projectId: 'proj-1', role: 'founder' });
+    expect(view.progress.lifetime.events).toBeGreaterThanOrEqual(2);
+    expect(view.progress.lifetime.projects).toBe(1);
+    expect(view.progress.baseline.label).toBe('first_week');
+    expect(view.progress.baseline.events).toBeGreaterThanOrEqual(2);
+    // Two events today vs. a two-event first week => zero net change, not a fake gain.
+    expect(view.progress.delta.events).toBe(0);
+    expect(view.progress.perDay.length).toBeGreaterThanOrEqual(1);
+    expect(view.progress.cumulative.firstEventAt).toBeTruthy();
+    expect(view.progress.cumulative.spanDays).toBeGreaterThanOrEqual(1);
+    expect(view.progress.cumulative.eventsPerActiveDay).toBeGreaterThan(0);
+  });
+
   test('scope filters partition the same canonical stream', async () => {
     const mod = await import('../server/techit-service.js?cb=' + Date.now());
     const svc = await mod.getTechitService();
