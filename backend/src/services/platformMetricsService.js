@@ -81,23 +81,42 @@ export function computePlatformMetricsFromDb(db) {
 }
 
 /**
- * Aggregate for one caller. Founders only ever see the platform totals plus
- * their own row; organizations and admins additionally receive the per-founder
- * breakdown (row-level identity: this reads the same authority the org
- * dashboard already uses).
+ * Aggregate for one caller, scoped by role — a platform-wide view is
+ * admin-only:
+ *   - admin        → every project + every founder (the platform ledger)
+ *   - organization → only projects enrolled in THIS org's programs, plus the
+ *                    org's own projects; per-founder rows are limited to that
+ *                    cohort, so no other tenant's data leaks
+ *   - founder      → only the caller's own projects/milestones
  */
 export function platformMetricsFor(user) {
   const db = readAuthorityDb()
-  const computed = computePlatformMetricsFromDb(db)
+  const allProjects = rows(db, 'projects')
+  const allMilestones = rows(db, 'milestones')
+  const userId = user?.id
   const role = String(user?.role || '').toLowerCase()
-  const canSeeAll = ['admin', 'organization', 'organisation', 'organisation_admin'].includes(role)
-  const mine = computed.perFounder.find(entry => entry.founderId === String(user?.id)) || null
-  return {
-    ok: true,
-    scope: canSeeAll ? 'platform' : 'founder',
-    totals: computed.totals,
-    founder: mine,
-    perFounder: canSeeAll ? computed.perFounder : undefined,
-    generatedAt: computed.generatedAt,
+  const projectOf = milestone => String(milestone.projectId || milestone.startupId || '')
+
+  if (role === 'admin') {
+    const computed = computePlatformMetrics(allProjects, allMilestones)
+    return { ok: true, scope: 'platform', totals: computed.totals, perFounder: computed.perFounder, generatedAt: computed.generatedAt }
   }
+
+  if (['organization', 'organisation', 'organisation_admin', 'organization_admin'].includes(role)) {
+    const programs = rows(db, 'organizationPrograms').filter(row => row.ownerId === userId || row.organizationId === userId)
+    const programIds = new Set(programs.map(row => row.id))
+    const enrollments = rows(db, 'programEnrollments').filter(row =>
+      programIds.has(row.programId) || row.organizationId === userId || row.ownerId === userId)
+    const enrolledProjectIds = new Set(enrollments.map(row => String(row.projectId || '')).filter(Boolean))
+    const scopedProjects = allProjects.filter(row => row.organizationId === userId || enrolledProjectIds.has(String(row.id)))
+    const scopedIds = new Set(scopedProjects.map(row => String(row.id)))
+    const computed = computePlatformMetrics(scopedProjects, allMilestones.filter(row => scopedIds.has(projectOf(row))))
+    return { ok: true, scope: 'organization', totals: computed.totals, perFounder: computed.perFounder, generatedAt: computed.generatedAt }
+  }
+
+  const ownProjects = allProjects.filter(row => row.ownerId === userId || row.founderId === userId)
+  const ownIds = new Set(ownProjects.map(row => String(row.id)))
+  const computed = computePlatformMetrics(ownProjects, allMilestones.filter(row => ownIds.has(projectOf(row))))
+  const mine = computed.perFounder.find(entry => entry.founderId === String(userId)) || null
+  return { ok: true, scope: 'founder', totals: computed.totals, founder: mine, generatedAt: computed.generatedAt }
 }

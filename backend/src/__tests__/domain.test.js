@@ -143,7 +143,7 @@ describe('domain live-data endpoints', () => {
     expect(other.body.projects).toEqual([])
   })
 
-  it('serves platform execution metrics with the caller row and no cross-founder leak', async () => {
+  it('scopes platform metrics by role: admins see the platform, orgs see their programs, founders see themselves', async () => {
     const db = makeDb()
     db.projects = [
       { id: 'p1', ownerId: 'user-uuid-1', stage: 'mvp' },
@@ -154,19 +154,71 @@ describe('domain live-data endpoints', () => {
       { id: 'm1', projectId: 'p1', status: 'completed' },
       { id: 'm2', projectId: 'p2', status: 'in_progress' },
     ]
+    db.organizationPrograms = [{ id: 'prog1', ownerId: 'user-uuid-1', name: 'Alpha' }]
+    db.programEnrollments = [{ id: 'e1', programId: 'prog1', organizationId: 'user-uuid-1', founderId: 'user-uuid-2', projectId: 'p3', status: 'accepted' }]
     readAuthorityDb.mockReturnValue(db)
 
+    // Founder: only their own projects, never the platform figures.
     const founder = await request(app).get('/api/domain/platform/metrics').set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
     expect(founder.status).toBe(200)
-    expect(founder.body.totals).toMatchObject({ startups: 3, prototypes: 3, mvpCompleted: 2, productsLaunched: 1, milestones: 2, completedMilestones: 1 })
-    expect(founder.body.founder).toMatchObject({ founderId: 'user-uuid-1', startups: 2, mvpCompleted: 2, productsLaunched: 1, milestones: 2 })
+    expect(founder.body.scope).toBe('founder')
+    expect(founder.body.totals).toMatchObject({ startups: 2, mvpCompleted: 2, productsLaunched: 1, milestones: 2, completedMilestones: 1 })
+    expect(founder.body.founder).toMatchObject({ founderId: 'user-uuid-1', startups: 2 })
     expect(founder.body.perFounder).toBeUndefined()
 
+    // Organization: only the project enrolled in its program (p3), not its own or the platform.
     const org = await request(app).get('/api/domain/platform/metrics').set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
     expect(org.status).toBe(200)
-    expect(org.body.scope).toBe('platform')
-    expect(org.body.perFounder).toHaveLength(2)
-    expect(org.body.perFounder[0]).toMatchObject({ founderId: 'user-uuid-1', startups: 2 })
+    expect(org.body.scope).toBe('organization')
+    expect(org.body.totals).toMatchObject({ startups: 1, prototypes: 1, mvpCompleted: 0, productsLaunched: 0 })
+    expect(org.body.perFounder).toHaveLength(1)
+    expect(org.body.perFounder[0]).toMatchObject({ founderId: 'user-uuid-2', startups: 1 })
+
+    // Admin: the full platform ledger with every founder.
+    const admin = await request(app).get('/api/domain/platform/metrics').set('Authorization', `Bearer ${validToken('user-uuid-1', 'admin')}`)
+    expect(admin.status).toBe(200)
+    expect(admin.body.scope).toBe('platform')
+    expect(admin.body.totals).toMatchObject({ startups: 3, prototypes: 3, mvpCompleted: 2, productsLaunched: 1 })
+    expect(admin.body.perFounder).toHaveLength(2)
+  })
+
+  it('lets an organization invite a founder to a program and the founder accept to link the project', async () => {
+    const db = makeDb()
+    db.organizationPrograms = [{ id: 'prog1', ownerId: 'user-uuid-1', name: 'Alpha Cohort', cohort: '2026-A' }]
+    db.projects = [{ id: 'p-f1', ownerId: 'user-uuid-2', title: 'Founder Two Venture', stage: 'prototype' }]
+    readAuthorityDb.mockReturnValue(db)
+
+    const invite = await request(app)
+      .post('/api/domain/organization/programs/prog1/invitations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({ email: 'bob@example.com', projectId: 'p-f1' })
+    expect(invite.status).toBe(201)
+    expect(invite.body.enrollment).toMatchObject({ programId: 'prog1', founderId: 'user-uuid-2', projectId: 'p-f1', status: 'pending' })
+    const token = invite.body.enrollment.token
+    expect(typeof token).toBe('string')
+    expect(db.notifications.some(n => n.userId === 'user-uuid-2' && n.type === 'organization_invitation')).toBe(true)
+
+    const roster = await request(app)
+      .get('/api/domain/organization/programs/prog1/enrollments')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    expect(roster.status).toBe(200)
+    expect(roster.body.enrollments).toHaveLength(1)
+    expect(roster.body.enrollments[0].project).toMatchObject({ id: 'p-f1', title: 'Founder Two Venture', stage: 'prototype' })
+
+    const mine = await request(app)
+      .get('/api/domain/organization/enrollments')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+    expect(mine.status).toBe(200)
+    expect(mine.body.enrollments).toHaveLength(1)
+
+    const accept = await request(app)
+      .post('/api/domain/organization/enrollments/accept')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ token })
+    expect(accept.status).toBe(200)
+    expect(accept.body).toMatchObject({ ok: true, projectId: 'p-f1' })
+    expect(db.projects[0].programId).toBe('prog1')
+    expect(db.programEnrollments[0].status).toBe('accepted')
   })
 
   it('persists organization projects in an organization-owned scope', async () => {
