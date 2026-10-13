@@ -143,6 +143,32 @@ describe('domain live-data endpoints', () => {
     expect(other.body.projects).toEqual([])
   })
 
+  it('serves platform execution metrics with the caller row and no cross-founder leak', async () => {
+    const db = makeDb()
+    db.projects = [
+      { id: 'p1', ownerId: 'user-uuid-1', stage: 'mvp' },
+      { id: 'p2', ownerId: 'user-uuid-1', stage: 'launched' },
+      { id: 'p3', ownerId: 'user-uuid-2', stage: 'prototype' },
+    ]
+    db.milestones = [
+      { id: 'm1', projectId: 'p1', status: 'completed' },
+      { id: 'm2', projectId: 'p2', status: 'in_progress' },
+    ]
+    readAuthorityDb.mockReturnValue(db)
+
+    const founder = await request(app).get('/api/domain/platform/metrics').set('Authorization', `Bearer ${validToken('user-uuid-1')}`)
+    expect(founder.status).toBe(200)
+    expect(founder.body.totals).toMatchObject({ startups: 3, prototypes: 3, mvpCompleted: 2, productsLaunched: 1, milestones: 2, completedMilestones: 1 })
+    expect(founder.body.founder).toMatchObject({ founderId: 'user-uuid-1', startups: 2, mvpCompleted: 2, productsLaunched: 1, milestones: 2 })
+    expect(founder.body.perFounder).toBeUndefined()
+
+    const org = await request(app).get('/api/domain/platform/metrics').set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    expect(org.status).toBe(200)
+    expect(org.body.scope).toBe('platform')
+    expect(org.body.perFounder).toHaveLength(2)
+    expect(org.body.perFounder[0]).toMatchObject({ founderId: 'user-uuid-1', startups: 2 })
+  })
+
   it('persists organization projects in an organization-owned scope', async () => {
     const db = makeDb()
     readAuthorityDb.mockReturnValue(db)

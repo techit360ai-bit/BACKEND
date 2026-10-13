@@ -77,6 +77,7 @@ import {
   applicationsList,
   incubationPublish,
   executionIntelligence,
+  platformMetrics,
   opportunityApply,
   watchlist,
   watchlistAdd,
@@ -232,6 +233,8 @@ router.post('/incubation/intakes/:intakeId/promote', intakePromote)
 router.post('/incubation/publish', incubationPublish)
 // WS-H: one canonical execution-intelligence view for every consumer surface.
 router.get('/execution-intelligence', executionIntelligence)
+// Phase M: platform-wide execution metrics (startups/prototypes/MVPs/launches/milestones).
+router.get('/platform/metrics', platformMetrics)
 router.get('/incubation/analyses', analyses)
 router.post('/incubation/analyses', analysisCreate)
 router.get('/incubation/analyses/:analysisId', analysisGet)

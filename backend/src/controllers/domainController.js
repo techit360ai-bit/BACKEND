@@ -109,6 +109,7 @@ import { appendWorkspaceTaskEvent, getWorkspaceTask, runWorkspaceTask } from '..
 import { connectorCredentialStatus, removeConnectorCredential, setConnectorCredential } from '../services/connectorCredentialService.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 import { executionIntelligenceFor } from '../services/executionIntelligenceService.js'
+import { platformMetricsFor } from '../services/platformMetricsService.js'
 
 function created(res, body) {
   return res.status(201).json(body)
@@ -743,4 +744,12 @@ export async function incubationPublish(req, res) {
 export async function executionIntelligence(req, res) {
   const result = await executionIntelligenceFor(req.user, req.query || {})
   return res.status(result.ok ? 200 : 503).json(result)
+}
+
+// Phase M: one aggregate reading of the execution ledger (startups built,
+// prototypes, MVPs, launches, milestones). Founders receive the platform totals
+// plus their own row; organizations and admins also receive the per-founder
+// breakdown.
+export async function platformMetrics(req, res) {
+  return res.json(platformMetricsFor(req.user))
 }
