@@ -56,6 +56,10 @@ import {
   notificationPrefsGet,
   notificationPrefsPatch,
   orgDashboard,
+  programInvitationCreate,
+  programEnrollments,
+  myProgramEnrollments,
+  programInvitationAccept,
   orgCohortHealth,
   orgInterventions,
   orgImpact,
@@ -199,6 +203,12 @@ router.post('/organization/integrations', requireCapability('organization.profil
 router.patch('/organization/integrations/:id', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericPatchItem)
 router.get('/organization/programs', requireRole('organization', 'organisation'), bindOwnedCollection('organizationPrograms', 'programs', 'program', 'program'), genericListGet)
 router.post('/organization/programs', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationPrograms', 'programs', 'program', 'program'), genericCreatePost)
+// Phase O: invite a founder to a program and read the enrolled roster.
+router.post('/organization/programs/:programId/invitations', requireRole('organization', 'organisation'), programInvitationCreate)
+router.get('/organization/programs/:programId/enrollments', requireRole('organization', 'organisation'), programEnrollments)
+// Founder-facing: my program enrollments + accept an invite token.
+router.get('/organization/enrollments', myProgramEnrollments)
+router.post('/organization/enrollments/accept', programInvitationAccept)
 router.patch('/organization/programs/:id', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationPrograms', 'programs', 'program', 'program'), genericPatchItem)
 router.get('/organization/ai-operations', requireRole('organization', 'organisation'), bindOwnedCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericListGet)
 router.post('/organization/ai-operations', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationAiOperations', 'operations', 'operation', 'aiop'), genericCreatePost)

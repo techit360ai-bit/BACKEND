@@ -1900,6 +1900,151 @@ export function acceptHackathonInvite(userId, hackathonId, teamId, body) {
   })
 }
 
+// --- Organization programs: founder↔program enrollment ----------------------
+//
+// An organization creates a program (generic bound collection) and invites a
+// founder (by email or id) to enrol one of their projects. The invite carries a
+// token; on accept the founder's project is linked to the program/cohort so the
+// org dashboard can monitor it and the execution-intelligence scope resolves.
+
+function publicProgramEnrollment(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    programId: row.programId,
+    organizationId: row.organizationId,
+    projectId: row.projectId,
+    founderId: row.founderId,
+    cohortId: row.cohortId || null,
+    status: row.status,
+    token: row.status === 'pending' ? row.token : undefined,
+    createdAt: row.createdAt,
+    acceptedAt: row.acceptedAt || null,
+  }
+}
+
+function programRosterEntry(db, enrollment) {
+  const project = collection(db, 'projects').find(row => row.id === enrollment.projectId) || null
+  const profile = collection(db, 'profiles').find(row => row.id === enrollment.founderId) || null
+  const milestones = collection(db, 'milestones').filter(row => row.projectId === enrollment.projectId)
+  return {
+    ...publicProgramEnrollment(enrollment),
+    project: project
+      ? { id: project.id, title: project.title, stage: project.stage || 'idea', industry: project.industry || '', progress: Number(project.progress || 0) }
+      : null,
+    founder: profile
+      ? { id: profile.id, name: profileDisplayName(profile), email: profile.email || '' }
+      : { id: enrollment.founderId, name: 'Founder', email: '' },
+    milestones: {
+      total: milestones.length,
+      completed: milestones.filter(row => ['completed', 'complete', 'done', 'shipped'].includes(String(row.status || '').toLowerCase())).length,
+    },
+  }
+}
+
+export function createProgramInvitation(userId, programId, body = {}) {
+  return updateAuthorityDb(db => {
+    const program = collection(db, 'organizationPrograms').find(row => row.id === programId && row.ownerId === userId)
+    if (!program) return { ok: false, error: 'program_not_found' }
+
+    const email = String(body.email || '').trim().toLowerCase()
+    const requestedFounderId = String(body.founderId || '').trim()
+    const profile = requestedFounderId
+      ? collection(db, 'profiles').find(row => row.id === requestedFounderId)
+      : email
+        ? collection(db, 'profiles').find(row => String(row.email || '').toLowerCase() === email)
+        : null
+    if (!profile) return { ok: false, error: 'founder_not_found' }
+    const founderId = profile.id
+
+    const projectId = String(body.projectId || '').trim()
+    if (projectId) {
+      const project = collection(db, 'projects').find(row => row.id === projectId && row.ownerId === founderId)
+      if (!project) return { ok: false, error: 'project_not_found' }
+    }
+
+    const existing = collection(db, 'programEnrollments').find(row =>
+      row.programId === programId && row.founderId === founderId && ['pending', 'accepted'].includes(row.status))
+    if (existing) return { ok: true, enrollment: publicProgramEnrollment(existing) }
+
+    const cohortId = String(body.cohortId || program.cohort || '').trim() || null
+    const token = createId('proginvite')
+    const enrollment = insertOwned(db, 'programEnrollments', userId, {
+      programId,
+      organizationId: userId,
+      projectId: projectId || null,
+      founderId,
+      cohortId,
+      status: 'pending',
+      token,
+    }, 'progenroll')
+
+    collection(db, 'notifications').push({
+      id: createId('notif'),
+      userId: founderId,
+      actorId: userId,
+      type: 'organization_invitation',
+      read: false,
+      content: `invited you to join the program “${program.name || program.title || 'Program'}”`,
+      author: profileDisplayName(collection(db, 'profiles').find(row => row.id === userId), 'An organization'),
+      linkTo: `/programs/accept?token=${encodeURIComponent(token)}`,
+      invitationId: enrollment.id,
+      createdAt: nowIso(),
+    })
+    return { ok: true, enrollment: publicProgramEnrollment(enrollment) }
+  })
+}
+
+export function listProgramEnrollments(userId, programId) {
+  const db = readAuthorityDb()
+  const program = collection(db, 'organizationPrograms').find(row => row.id === programId && row.ownerId === userId)
+  if (!program) return { ok: false, error: 'program_not_found' }
+  const enrollments = collection(db, 'programEnrollments')
+    .filter(row => row.programId === programId)
+    .sort(byNewest)
+    .map(row => programRosterEntry(db, row))
+  return { ok: true, program: { id: program.id, name: program.name || program.title || 'Program' }, enrollments }
+}
+
+export function listFounderProgramEnrollments(userId) {
+  const db = readAuthorityDb()
+  const enrollments = collection(db, 'programEnrollments')
+    .filter(row => row.founderId === userId)
+    .sort(byNewest)
+    .map(row => {
+      const program = collection(db, 'organizationPrograms').find(p => p.id === row.programId)
+      return { ...programRosterEntry(db, row), programName: program?.name || program?.title || 'Program' }
+    })
+  return { ok: true, enrollments }
+}
+
+export function acceptProgramInvitation(userId, body = {}) {
+  return updateAuthorityDb(db => {
+    const token = String(body.token || '').trim()
+    if (!token) return { ok: false, error: 'invite_token_required' }
+    const enrollment = collection(db, 'programEnrollments').find(row => row.token === token && row.founderId === userId)
+    if (!enrollment) return { ok: false, error: 'invite_not_found' }
+    if (enrollment.status === 'accepted') return { ok: true, enrollment: publicProgramEnrollment(enrollment) }
+
+    // Resolve the project to link: the invited one, else the founder's primary
+    // or most recent project.
+    const owned = collection(db, 'projects').filter(row => row.ownerId === userId)
+    const project = collection(db, 'projects').find(row => row.id === enrollment.projectId && row.ownerId === userId)
+      || owned.find(row => row.isPrimary)
+      || owned.sort(byNewest)[0]
+    enrollment.status = 'accepted'
+    enrollment.acceptedAt = nowIso()
+    enrollment.updatedAt = enrollment.acceptedAt
+    if (project) {
+      enrollment.projectId = project.id
+      project.programId = enrollment.programId
+      if (enrollment.cohortId) project.cohortId = enrollment.cohortId
+      project.updatedAt = nowIso()
+    }
+    return { ok: true, enrollment: publicProgramEnrollment(enrollment), projectId: project?.id || null }
+  })
+}
+
 export function patchHackathonTeam(userId, hackathonId, teamId, body) {
   return updateAuthorityDb(db => {
     const team = collection(db, 'hackathonTeams').find(row =>
@@ -2588,6 +2733,22 @@ export async function organizationDemoDayAnalyticsAsync(userId) {
 }
 export async function organizationDashboardAsync(userId) {
   return domainRead(orgScope(userId), () => organizationDashboard(userId), () => organizationDashboard(userId))
+}
+
+// Row-level (§5) wrappers — sub-slice: organization programs + enrollment.
+const programScope = userId => ({ userId, programs: true })
+
+export async function createProgramInvitationAsync(userId, programId, body = {}) {
+  return domainWrite(programScope(userId), () => createProgramInvitation(userId, programId, body), () => createProgramInvitation(userId, programId, body))
+}
+export async function listProgramEnrollmentsAsync(userId, programId) {
+  return domainRead(programScope(userId), () => listProgramEnrollments(userId, programId), () => listProgramEnrollments(userId, programId))
+}
+export async function listFounderProgramEnrollmentsAsync(userId) {
+  return domainRead(programScope(userId), () => listFounderProgramEnrollments(userId), () => listFounderProgramEnrollments(userId))
+}
+export async function acceptProgramInvitationAsync(userId, body = {}) {
+  return domainWrite(programScope(userId), () => acceptProgramInvitation(userId, body), () => acceptProgramInvitation(userId, body))
 }
 
 // Row-level (§5) wrappers — sub-slice: hackathons.

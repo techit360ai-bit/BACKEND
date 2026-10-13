@@ -77,6 +77,9 @@ const OWNER_FIELDS = {
   payouts: ['collaboratorId', 'ownerId', 'userId'],
   dilutionEvents: ['collaboratorId', 'ownerId', 'userId'],
   workspaceInvitations: ['collaboratorId', 'inviterId', 'userId', 'ownerId'],
+  // Organization programs + founder enrollment slice.
+  organizationPrograms: ['ownerId', 'userId', 'organizationId'],
+  programEnrollments: ['organizationId', 'founderId', 'ownerId', 'userId'],
   // Wallet analytics slice (completed usage events).
   usageEvents: ['userId', 'ownerId'],
 }
@@ -101,7 +104,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, founderProjects = false, workspaceWrites = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, founderProjects = false, workspaceWrites = false, programs = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...namedCollections(collections), ...namedCollections(publicCollections)])
   for (const name of writeCollections) db[name] = []
@@ -169,6 +172,18 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     await loadByIds(client, 'profiles', profileIds, db.profiles)
     await loadByIds(client, 'projects', db.hackathonTeamWorkspaces.map(row => row.projectId), db.projects)
     await loadByIds(client, 'workspaces', db.hackathonTeamWorkspaces.map(row => row.workspaceId), db.workspaces)
+  }
+
+  // Organization programs + founder enrollment (§programs): the org reads its
+  // owned programs and the enrollments it created; a founder reads the
+  // enrollments addressed to them. Both share one scope key.
+  if (userId && programs) {
+    mergeById(db.organizationPrograms, await listRecordsForOwner(client, 'organizationPrograms', userId, { ownerFields: ['ownerId', 'userId', 'organizationId'] }))
+    mergeById(db.programEnrollments, await listRecordsForOwner(client, 'programEnrollments', userId, { ownerFields: ['organizationId', 'founderId', 'ownerId', 'userId'] }))
+    mergeById(db.projects, await listRecordsForOwner(client, 'projects', userId, { ownerFields: ['ownerId'] }))
+    mergeById(db.profiles, [await getRecord(client, 'profiles', userId)])
+    await loadByIds(client, 'projects', db.programEnrollments.map(row => row.projectId), db.projects)
+    await loadByIds(client, 'profiles', db.programEnrollments.map(row => row.founderId), db.profiles)
   }
 
   if (userId && contracts) {

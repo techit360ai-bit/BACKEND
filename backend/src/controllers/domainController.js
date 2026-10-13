@@ -77,6 +77,10 @@ import {
   listWorkspacesAsync,
   logHackathonCheckInAsync,
   organizationDashboardAsync,
+  createProgramInvitationAsync,
+  listProgramEnrollmentsAsync,
+  listFounderProgramEnrollmentsAsync,
+  acceptProgramInvitationAsync,
   promoteIntakeAsync,
   provisionHackathonWorkspaceAsync,
   provisionWorkspaceAsync,
@@ -361,6 +365,29 @@ export async function collaboratorScores(req, res) {
 
 export async function orgDashboard(req, res) {
   return res.json(await organizationDashboardAsync(req.user.id))
+}
+
+// Phase O: organization program invites + founder enrollment.
+export async function programInvitationCreate(req, res) {
+  const result = await createProgramInvitationAsync(req.user.id, req.params.programId, req.body || {})
+  if (!result.ok) return res.status(400).json(result)
+  return created(res, result)
+}
+
+export async function programEnrollments(req, res) {
+  const result = await listProgramEnrollmentsAsync(req.user.id, req.params.programId)
+  if (!result.ok) return res.status(404).json(result)
+  return res.json(result)
+}
+
+export async function myProgramEnrollments(req, res) {
+  return res.json(await listFounderProgramEnrollmentsAsync(req.user.id))
+}
+
+export async function programInvitationAccept(req, res) {
+  const result = await acceptProgramInvitationAsync(req.user.id, req.body || {})
+  if (!result.ok) return res.status(400).json(result)
+  return res.json(result)
 }
 
 export async function organizationProjects(req, res) {
