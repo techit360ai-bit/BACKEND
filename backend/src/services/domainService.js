@@ -3,6 +3,7 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { computeGsisNarrative, extractRecommendation } from './aiRouterClient.js'
 import { domainStoreEnabled, domainFallbackEnabled, runDomainRead, applyDomainMutation } from '../repositories/domainRepository.js'
 import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryService.js'
+import { noteManualStageInDb } from './lifecycleService.js'
 import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
@@ -370,7 +371,18 @@ export function createProject(userId, body) {
 }
 
 export function updateProject(userId, projectId, body) {
-  return updateAuthorityDb(db => patchOwned(db, 'projects', projectId, userId, body))
+  return updateAuthorityDb(db => {
+    const before = findOwned(db, 'projects', projectId, userId)
+    const previousStage = before ? String(before.stage || 'idea').toLowerCase() : null
+    const updated = patchOwned(db, 'projects', projectId, userId, body)
+    // An explicit founder stage change is a manual override: record it so the
+    // evidence-based reconciler keeps it instead of auto-downgrading.
+    if (updated && body && Object.prototype.hasOwnProperty.call(body, 'stage')) {
+      const nextStage = String(updated.stage || 'idea').toLowerCase()
+      if (previousStage !== null && nextStage !== previousStage) noteManualStageInDb(db, userId, updated, previousStage)
+    }
+    return updated
+  })
 }
 
 export function listOrganizationProjects(userId) {

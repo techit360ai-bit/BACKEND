@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { createId, nowIso } from '../utils/api.js'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
+import { reconcileStageBestEffort } from './lifecycleService.js'
 import {
   workspaceCapabilityEnabled,
   workspaceAccess,
@@ -91,7 +92,7 @@ export async function chooseBuildPath(userId, workspaceId, body = {}) {
     await insert('workspaceLifecycleEvents', { id: createId('workspace_event'), workspaceId, actorId: userId, previous, next: { buildPath, lifecycleView: buildPath }, metadata: { event: 'workspace.build_path.choose' }, createdAt: nowIso() })
     return { ok: true, buildProfile: next, costEstimate: estimate }
   }
-  return updateAuthorityDb(db => {
+  const result = updateAuthorityDb(db => {
     const access = workspaceFor(db, workspaceId, userId); if (!access) return { ok: false, status: 404, error: 'workspace_not_found' }
     const buildPath = body.buildPath === 'mvp' ? 'mvp' : body.buildPath === 'prototype' ? 'prototype' : null
     if (!buildPath) return { ok: false, status: 400, error: 'build_path_invalid' }
@@ -103,6 +104,8 @@ export async function chooseBuildPath(userId, workspaceId, body = {}) {
     collection(db, 'workspaceCostEstimates').push(estimate); appendLifecycle(db, workspaceId, userId, previous, { buildPath, lifecycleView: buildPath }, { event: 'workspace.build_path.choose' })
     return { ok: true, buildProfile: next, costEstimate: estimate }
   })
+  if (result.ok && result.buildProfile?.projectId) reconcileStageBestEffort(userId, result.buildProfile.projectId, { trigger: 'workspace.build_path.choose' })
+  return result
 }
 
 export async function createCostEstimate(userId, workspaceId, body = {}) {

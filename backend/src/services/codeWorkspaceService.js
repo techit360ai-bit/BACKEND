@@ -13,6 +13,7 @@ import {
   collaboratorIsPaid,
   firstCollaboratorWorkspace,
 } from '../repositories/workspaceCodeRepository.js'
+import { reconcileStageBestEffort } from './lifecycleService.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const sha = value => crypto.createHash('sha256').update(String(value)).digest('hex')
@@ -130,7 +131,7 @@ export async function saveProjectFile(userId, workspaceId, body = {}) {
     await appendEventRow({ workspaceId, projectId: file.projectId, actorId: userId, type: before ? 'file_updated' : 'file_created', fileId: file.id, path, before, after: { contentHash: file.contentHash, version: nextVersion } })
     return { ok: true, file: { ...publicFile(file), content } }
   }
-  return updateAuthorityDb(db => {
+  const saved = updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     let file = rows(db, 'projectFiles').find(row => row.workspaceId === workspaceId && row.path === path)
     if (file && body.expectedVersion !== undefined && Number(body.expectedVersion) !== Number(file.version)) return { ok: false, status: 409, error: 'file_version_conflict', current: publicFile(file) }
@@ -142,6 +143,8 @@ export async function saveProjectFile(userId, workspaceId, body = {}) {
     appendCodeEvent(db, { workspaceId, projectId: file.projectId, actorId: userId, type: before ? 'file_updated' : 'file_created', fileId: file.id, path, before, after: { contentHash: file.contentHash, version: nextVersion } })
     return { ok: true, file: { ...publicFile(file), content } }
   })
+  if (saved.ok && saved.file?.projectId) reconcileStageBestEffort(userId, saved.file.projectId, { trigger: saved.file.version > 1 ? 'file_updated' : 'file_created' })
+  return saved
 }
 
 export async function moveProjectFile(userId, workspaceId, pathValue, body = {}) {
@@ -315,7 +318,7 @@ export async function verifyCodeDeployment(userId, workspaceId, deploymentId, bo
     await appendEventRow({ workspaceId, projectId: deployment.projectId, actorId: userId, type: `deployment_${status}`, deploymentId, metadata: { verificationId: row.id, url: row.url } })
     return { ok: true, deployment: updated, verification: row }
   }
-  return updateAuthorityDb(db => {
+  const verified = updateAuthorityDb(db => {
     const auth = codeWorkspaceAccess(db, userId, workspaceId, true); if (!auth) return { ok: false, status: 403, error: 'workspace_write_denied' }
     const deployment = rows(db, 'codeDeploymentRecords').find(row => row.id === deploymentId && row.workspaceId === workspaceId); if (!deployment) return { ok: false, status: 404, error: 'deployment_not_found' }
     const row = { id: createId('deployment_verification'), deploymentId, workspaceId, projectId: deployment.projectId, actorId: userId, providerStatus: String(body.providerStatus || 'pending'), checks, url: String(body.url || '').slice(0, 1000), status, createdAt: nowIso() }
@@ -323,4 +326,6 @@ export async function verifyCodeDeployment(userId, workspaceId, deploymentId, bo
     appendCodeEvent(db, { workspaceId, projectId: deployment.projectId, actorId: userId, type: `deployment_${status}`, deploymentId, metadata: { verificationId: row.id, url: row.url } })
     return { ok: true, deployment, verification: row }
   })
+  if (status === 'verified' && verified.ok && verified.deployment?.projectId) reconcileStageBestEffort(userId, verified.deployment.projectId, { trigger: 'deployment_verified' })
+  return verified
 }
