@@ -1132,6 +1132,24 @@ describe('domain live-data endpoints', () => {
     })
   })
 
+  it('merges partial notification preferences within a scope (inline mute keeps siblings)', async () => {
+    const db = makeDb()
+    readAuthorityDb.mockReturnValue(db)
+    const token = validToken()
+
+    await request(app)
+      .patch('/api/domain/notifications/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'categories', preferences: { publicity: true, milestone: true, mentions: true } })
+    const muted = await request(app)
+      .patch('/api/domain/notifications/preferences')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ scope: 'categories', preferences: { publicity: false } })
+
+    expect(muted.status).toBe(200)
+    expect(muted.body.preferences.categories).toEqual({ publicity: false, milestone: true, mentions: true })
+  })
+
   it('creates a contract draft with correct shape and ownership', async () => {
     const db = makeDb()
     readAuthorityDb.mockReturnValue(db)

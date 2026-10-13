@@ -134,7 +134,16 @@ function appendLifecycleEvidence(db, userId, project, previousStage, nextStage, 
  */
 export function reconcileProjectStage(userId, projectId, options = {}) {
   if (!projectId) return { ok: false, status: 400, error: 'project_id_required' }
-  return updateAuthorityDb(db => reconcileProjectStageInDb(db, userId, projectId, options))
+  const result = updateAuthorityDb(db => reconcileProjectStageInDb(db, userId, projectId, options))
+  // Phase P: a subscriber reaching launch gets free publicity. Dynamic import
+  // keeps lifecycle independent of the subscription/moments stack and keeps the
+  // broadcast off the critical write path (best-effort, idempotent per project).
+  if (result?.ok && result.changed && ['launched', 'growth'].includes(String(result.stage))) {
+    import('./publicityService.js')
+      .then(module => module.publicizeLaunchBestEffort(userId, projectId))
+      .catch(() => {})
+  }
+  return result
 }
 
 /**

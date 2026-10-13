@@ -2452,7 +2452,9 @@ export function updateNotificationPreferences(userId, body) {
     const currentPreferences = idx === -1 ? {} : cleanObject(rows[idx].preferences)
     const scope = String(body.scope || '').trim()
     const preferences = scope
-      ? { ...currentPreferences, [scope]: cleanObject(body.preferences) }
+      // Merge within the scope so a partial update (e.g. the inline "turn off
+      // similar" action disabling one category) never wipes sibling categories.
+      ? { ...currentPreferences, [scope]: { ...(currentPreferences[scope] || {}), ...cleanObject(body.preferences || body) } }
       : cleanObject(body.preferences || body)
     const next = { userId, preferences, updatedAt: nowIso() }
     if (idx === -1) rows.push({ id: createId('prefs'), createdAt: nowIso(), ...next })
