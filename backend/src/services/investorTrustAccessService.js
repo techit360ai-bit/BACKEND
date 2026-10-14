@@ -1,13 +1,14 @@
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
 import { createId, nowIso } from '../utils/api.js'
+import { DEFAULT_CONSENT_SCOPES, defaultGrantedScopes, grantedScopesWithinRequest, normalizeConsentScopes } from './consentScopes.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const text = (value, max = 1000) => typeof value === 'string' ? value.replace(/[<>\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : ''
 const ownerId = project => project?.ownerId || project?.founderId || project?.creatorId || project?.userId || project?.createdBy || null
 
 function projectFor(db, projectId) { return rows(db, 'projects').find(row => String(row.id) === String(projectId)) }
-function publicRequest(row) { return { id: row.id, projectId: row.projectId, investorId: row.investorId, founderId: row.founderId, status: row.status, purpose: row.purpose, requestedScopes: row.requestedScopes, decisionNote: row.decisionNote || null, createdAt: row.createdAt, updatedAt: row.updatedAt, decidedAt: row.decidedAt || null } }
+function publicRequest(row) { return { id: row.id, projectId: row.projectId, investorId: row.investorId, founderId: row.founderId, status: row.status, purpose: row.purpose, requestedScopes: row.requestedScopes, grantedScopes: Array.isArray(row.grantedScopes) ? row.grantedScopes : [], decisionNote: row.decisionNote || null, createdAt: row.createdAt, updatedAt: row.updatedAt, decidedAt: row.decidedAt || null } }
 function event(db, request, actorId, action, metadata = {}) { rows(db, 'investorTrustAccessHistory').push({ id: createId('trust_access_event'), requestId: request.id, projectId: request.projectId, actorId, action, metadata, createdAt: nowIso() }) }
 function notify(db, userId, type, request) { if (!userId) return; rows(db, 'notifications').push({ id: createId('notification'), userId, type, title: type === 'investor_trust_access_requested' ? 'Investor requested Trust access' : `Trust access request ${request.status}`, message: type === 'investor_trust_access_requested' ? 'An investor requested additional startup Trust access.' : `Your startup Trust access request was ${request.status}.`, read: false, metadata: { requestId: request.id, projectId: request.projectId }, createdAt: nowIso() }) }
 
@@ -21,8 +22,9 @@ export function requestInvestorTrustAccess(investorId, projectId, input = {}) {
     const existing = rows(db, 'investorTrustAccessRequests').find(row => row.investorId === investorId && String(row.projectId) === String(projectId) && ['pending', 'approved'].includes(row.status))
     if (existing) return { ok: true, created: false, request: publicRequest(existing) }
     const now = nowIso()
-    const requestedScopes = Array.isArray(input.requestedScopes) ? [...new Set(input.requestedScopes.map(value => text(String(value), 80)).filter(Boolean))].slice(0, 12) : ['approved_evidence_metadata']
-    const request = { id: createId('trust_access'), projectId: String(projectId), investorId, founderId: String(founderId), status: 'pending', purpose: text(input.purpose, 1000), requestedScopes: requestedScopes.length ? requestedScopes : ['approved_evidence_metadata'], createdAt: now, updatedAt: now }
+    const requestedScopes = normalizeConsentScopes(input.requestedScopes)
+    const scopes = requestedScopes.length ? requestedScopes : [...DEFAULT_CONSENT_SCOPES]
+    const request = { id: createId('trust_access'), projectId: String(projectId), investorId, founderId: String(founderId), status: 'pending', purpose: text(input.purpose, 1000), requestedScopes: scopes, grantedScopes: [], createdAt: now, updatedAt: now }
     rows(db, 'investorTrustAccessRequests').push(request)
     event(db, request, investorId, 'requested', { requestedScopes: request.requestedScopes })
     notify(db, request.founderId, 'investor_trust_access_requested', request)
@@ -34,6 +36,23 @@ export function investorTrustAccessStatus(investorId, projectId) {
   const db = readAuthorityDb()
   const request = rows(db, 'investorTrustAccessRequests').filter(row => row.investorId === investorId && String(row.projectId) === String(projectId)).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0]
   return { ok: true, request: request ? publicRequest(request) : null, requestAccessAllowed: !request || ['rejected', 'cancelled', 'expired'].includes(request.status) }
+}
+
+/**
+ * Resolve the scopes an investor is currently granted for a project. Only an
+ * APPROVED request counts; everything else (pending/rejected/absent) is
+ * fail-closed to the empty set so no sensitive field leaks before consent.
+ */
+export function investorConsentFor(db, projectId, investorId) {
+  const request = rows(db, 'investorTrustAccessRequests')
+    .filter(row => row.investorId === investorId && String(row.projectId) === String(projectId) && row.status === 'approved')
+    .sort((a, b) => new Date(b.decidedAt || b.updatedAt || b.createdAt) - new Date(a.decidedAt || a.updatedAt || a.createdAt))[0]
+  const grantedScopes = request ? (Array.isArray(request.grantedScopes) ? request.grantedScopes : []) : []
+  return { granted: Boolean(request), status: request ? request.status : 'none', grantedScopes }
+}
+
+export function investorConsentScopes(projectId, investorId) {
+  return investorConsentFor(readAuthorityDb(), projectId, investorId).grantedScopes
 }
 
 export function listFounderTrustAccessRequests(founderId, status = null) {
@@ -53,11 +72,18 @@ export function decideInvestorTrustAccess(founderId, requestId, input = {}) {
     if (!project || String(ownerId(project)) !== String(founderId)) return { ok: false, status: 403, error: 'startup_owner_required' }
     if (request.status !== 'pending') return { ok: false, status: 409, error: 'access_request_already_decided' }
     request.status = decision
+    // Fail-closed: approval shares only what the founder explicitly names (and
+    // only scopes the investor actually asked for); rejection shares nothing.
+    request.grantedScopes = decision === 'approved'
+      ? (Array.isArray(input.grantedScopes)
+        ? grantedScopesWithinRequest(request.requestedScopes, input.grantedScopes)
+        : defaultGrantedScopes(request.requestedScopes))
+      : []
     request.decisionNote = text(input.note, 1000)
     request.decidedBy = founderId
     request.decidedAt = nowIso()
     request.updatedAt = request.decidedAt
-    event(db, request, founderId, decision, { note: request.decisionNote })
+    event(db, request, founderId, decision, { note: request.decisionNote, grantedScopes: request.grantedScopes })
     notify(db, request.investorId, 'investor_trust_access_decided', request)
     return { ok: true, request: publicRequest(request) }
   })
@@ -92,6 +118,9 @@ export async function investorTrustAccessStatusAsync(investorId, projectId) {
 }
 export async function listFounderTrustAccessRequestsAsync(founderId, status = null) {
   return trustRead(trustScope(founderId), () => listFounderTrustAccessRequests(founderId, status), () => listFounderTrustAccessRequests(founderId, status))
+}
+export async function investorConsentForAsync(projectId, investorId) {
+  return trustRead(trustScope(investorId, { startupId: projectId }), () => investorConsentFor(readAuthorityDb(), projectId, investorId), () => investorConsentFor(readAuthorityDb(), projectId, investorId))
 }
 export async function decideInvestorTrustAccessAsync(founderId, requestId, input = {}) {
   return trustMutation(trustScope(founderId, { requestId }), () => decideInvestorTrustAccess(founderId, requestId, input), () => decideInvestorTrustAccess(founderId, requestId, input))

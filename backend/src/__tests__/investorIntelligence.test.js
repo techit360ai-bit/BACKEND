@@ -61,6 +61,19 @@ describe('investor mentorship intelligence', () => {
     expect(response.body.milestonesCompleted).toBe(1)
   })
 
+  it('keeps execution metrics private until the founder grants the execution scope', async () => {
+    const withoutConsent = await request(app).get('/api/investor-intelligence/overview').set('Authorization', `Bearer ${token()}`)
+    expect(withoutConsent.status).toBe(200)
+    expect(withoutConsent.body.startups[0].executionVelocity).toBeNull()
+    expect(withoutConsent.body.startups[0].executionEvidence).toBeNull()
+
+    db.investorTrustAccessRequests.push({ id: 'req-1', investorId: 'investor-1', projectId: 'startup-1', founderId: 'founder-1', status: 'approved', requestedScopes: ['approved_evidence_metadata', 'execution_metrics'], grantedScopes: ['approved_evidence_metadata', 'execution_metrics'], decidedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), createdAt: new Date().toISOString() })
+
+    const withConsent = await request(app).get('/api/investor-intelligence/overview').set('Authorization', `Bearer ${token()}`)
+    expect(withConsent.status).toBe(200)
+    expect(withConsent.body.startups[0].executionVelocity).toBe(78)
+  })
+
   it('exposes scoped alerts and deterministic reports', async () => {
     const alerts = await request(app).get('/api/investor-intelligence/alerts').set('Authorization', `Bearer ${token()}`)
     const reports = await request(app).get('/api/investor-intelligence/reports').set('Authorization', `Bearer ${token()}`)

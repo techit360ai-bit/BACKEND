@@ -1,7 +1,12 @@
 import { findIdentityById } from '../repositories/identityRepository.js'
+import { readAuthorityDb } from '../config/database.js'
 import { publicTrustFor } from './trustAuthority.js'
+import { requireOrganizationPermissionAsync } from './organizationIntelligenceService.js'
+import { investorCanReadStartup } from './investorIntelligenceService.js'
+import { investorConsentForAsync } from './investorTrustAccessService.js'
 
 const SCOPE_KEYS = ['projectId', 'organizationId', 'programId', 'cohortId', 'hackathonId']
+const ORG_SCOPE_KEYS = ['organizationId', 'programId', 'cohortId']
 
 function normalizeRole(role) {
   const value = String(role || '').toLowerCase()
@@ -9,6 +14,64 @@ function normalizeRole(role) {
   if (value === 'organization') return 'organisation'
   if (value === 'organisation_admin') return 'organisation'
   return value || 'workspace'
+}
+
+function organizationMembership(db, userId, organizationId) {
+  return (Array.isArray(db.organizationMemberships) ? db.organizationMemberships : [])
+    .some(row => row.organizationId === organizationId && row.userId === userId && row.status === 'active')
+}
+
+function hackathonScopeAuthorized(db, userId, hackathonId) {
+  const hackathon = (Array.isArray(db.hackathons) ? db.hackathons : []).find(row => row.id === hackathonId)
+  if (!hackathon) return false
+  if (hackathon.ownerId === userId) return true
+  return Boolean(hackathon.organizationId && organizationMembership(db, userId, hackathon.organizationId))
+}
+
+/**
+ * Phase C access boundary. A scope key names a tenant or a hackathon, so a
+ * caller may only use the ones they belong to. An organization/program/cohort
+ * scope requires an active membership of that organization (pinning the
+ * organizationId so a program/cohort id can never point at another tenant); a
+ * hackathon scope requires ownership. Investors are stripped of all tenant
+ * scopes — they can NEVER read an organization cohort that is not theirs — and
+ * may only scope a startup they are authorized for, and only when the founder
+ * granted the execution consent scope.
+ */
+async function authorizeExecutionScope(user, scope) {
+  const isAdmin = String(user?.role || '').toLowerCase() === 'admin'
+  const wantsOrgScope = ORG_SCOPE_KEYS.some(key => typeof scope[key] === 'string' && scope[key].trim())
+
+  if (wantsOrgScope && !isAdmin) {
+    const requestedOrg = typeof scope.organizationId === 'string' && scope.organizationId.trim() ? scope.organizationId.trim() : null
+    const context = await requireOrganizationPermissionAsync(user.id, 'view', requestedOrg)
+    if (!context.ok) return { ok: false, status: 403, error: 'scope_forbidden', detail: 'organization_membership_required' }
+    scope.organizationId = context.organizationId
+  }
+
+  if (typeof scope.hackathonId === 'string' && scope.hackathonId.trim() && !isAdmin) {
+    if (!hackathonScopeAuthorized(readAuthorityDb(), user.id, scope.hackathonId)) {
+      return { ok: false, status: 403, error: 'scope_forbidden', detail: 'hackathon_ownership_required' }
+    }
+  }
+
+  if (normalizeRole(user.role) === 'investor') {
+    delete scope.organizationId
+    delete scope.programId
+    delete scope.cohortId
+    delete scope.hackathonId
+    if (scope.projectId) {
+      if (!investorCanReadStartup(readAuthorityDb(), user.id, scope.projectId)) {
+        return { ok: false, status: 403, error: 'scope_forbidden', detail: 'startup_not_authorized' }
+      }
+      const consent = await investorConsentForAsync(scope.projectId, user.id)
+      if (!consent.grantedScopes.includes('execution_metrics')) {
+        return { ok: false, status: 403, error: 'consent_required', detail: 'execution_metrics_not_granted' }
+      }
+    }
+  }
+
+  return { ok: true }
 }
 
 /**
@@ -25,9 +88,6 @@ function normalizeRole(role) {
  * snapshot, so the §5 request path never loads a platform snapshot here.
  */
 export async function executionIntelligenceFor(user, query = {}) {
-  if (process.env.MCP_ENABLED !== 'true') {
-    return { ok: false, error: 'execution_intelligence_unavailable', detail: 'MCP is not enabled' }
-  }
   const identity = await findIdentityById(user.id)
   const profile = identity?.profile || {}
   const context = identity?.activeContext || null
@@ -45,6 +105,13 @@ export async function executionIntelligenceFor(user, query = {}) {
   // A collaborator's default view is their own execution; a founder's is their project.
   if (role === 'collaborator' && !scope.actorId) scope.actorId = user.id
   if (role === 'founder' && !scope.projectId && typeof profile.projectId === 'string') scope.projectId = profile.projectId
+
+  // Access boundary first — never reach the projection with an unauthorized scope.
+  const permission = await authorizeExecutionScope(user, scope)
+  if (!permission.ok) return permission
+  if (process.env.MCP_ENABLED !== 'true') {
+    return { ok: false, error: 'execution_intelligence_unavailable', detail: 'MCP is not enabled' }
+  }
 
   try {
     const { getTechitService } = await import('../../../Plugins-MCP/server/techit-service.ts')

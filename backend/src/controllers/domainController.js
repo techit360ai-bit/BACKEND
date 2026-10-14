@@ -770,7 +770,9 @@ export async function incubationPublish(req, res) {
 // and hackathon console read this same projection.
 export async function executionIntelligence(req, res) {
   const result = await executionIntelligenceFor(req.user, req.query || {})
-  return res.status(result.ok ? 200 : 503).json(result)
+  // Scope/consent denials are 403; a genuinely unavailable engine is 503.
+  const status = result.ok ? 200 : (result.status || (result.error === 'execution_intelligence_unavailable' ? 503 : 403))
+  return res.status(status).json(result)
 }
 
 // Phase M: one aggregate reading of the execution ledger (startups built,

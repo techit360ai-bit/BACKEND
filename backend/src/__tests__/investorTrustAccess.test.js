@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
-import { decideInvestorTrustAccess, investorTrustAccessStatus, listFounderTrustAccessRequests, requestInvestorTrustAccess } from '../services/investorTrustAccessService.js'
+import { decideInvestorTrustAccess, investorConsentScopes, investorTrustAccessStatus, listFounderTrustAccessRequests, requestInvestorTrustAccess } from '../services/investorTrustAccessService.js'
 
 let db
 beforeEach(() => {
@@ -30,5 +30,40 @@ describe('investor Trust access requests', () => {
     expect(decision.request.status).toBe('approved')
     expect(listFounderTrustAccessRequests('founder-1').requests[0].status).toBe('approved')
     expect(db.investorTrustAccessHistory.map(row => row.action)).toEqual(['requested', 'approved'])
+  })
+})
+
+describe('investor consent scopes (Phase C, fail-closed)', () => {
+  it('shares only approved metadata when a founder approves without naming scopes', () => {
+    const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'] })
+    expect(created.request.requestedScopes).toEqual(['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'])
+    const decision = decideInvestorTrustAccess('founder-1', created.request.id, { decision: 'approved' })
+    // Sensitive execution/cohort scopes stay private unless explicitly granted.
+    expect(decision.request.grantedScopes).toEqual(['approved_evidence_metadata'])
+    expect(investorConsentScopes('project-1', 'investor-1')).toEqual(['approved_evidence_metadata'])
+  })
+
+  it('grants exactly the requested subset the founder names', () => {
+    const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['approved_evidence_metadata', 'execution_metrics'] })
+    const decision = decideInvestorTrustAccess('founder-1', created.request.id, { decision: 'approved', grantedScopes: ['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'] })
+    // cohort_benchmarks was never requested, so it cannot be granted.
+    expect(decision.request.grantedScopes).toEqual(['approved_evidence_metadata', 'execution_metrics'])
+  })
+
+  it('grants nothing when the founder rejects', () => {
+    const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['approved_evidence_metadata', 'execution_metrics'] })
+    const decision = decideInvestorTrustAccess('founder-1', created.request.id, { decision: 'rejected' })
+    expect(decision.request.grantedScopes).toEqual([])
+    expect(investorConsentScopes('project-1', 'investor-1')).toEqual([])
+  })
+
+  it('treats pending requests as no consent', () => {
+    requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['execution_metrics'] })
+    expect(investorConsentScopes('project-1', 'investor-1')).toEqual([])
+  })
+
+  it('drops unknown scopes from a request', () => {
+    const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['execution_metrics', 'bogus_scope', 'root'] })
+    expect(created.request.requestedScopes).toEqual(['execution_metrics'])
   })
 })

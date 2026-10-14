@@ -1,6 +1,7 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
+import { investorConsentFor } from './investorTrustAccessService.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const asNumber = value => Number.isFinite(Number(value)) ? Number(value) : null
@@ -17,7 +18,26 @@ function authorizedProjectIds(db, investorId) {
     for (const row of rows(db, name)) if ([row.investorId, row.userId, row.ownerId].includes(investorId)) ids.add(row.projectId || row.startupId || row.resourceId)
   }
   for (const name of ['dealRooms', 'dataRooms']) for (const row of rows(db, name)) if (row.investorId === investorId) ids.add(row.projectId || row.startupId)
+  // Phase C: an investor also has intelligence on the mentorship programs THEY
+  // run — the room's project and each active mentee's project. Ownership is the
+  // gate (mentorId === investorId); another organization's cohort is never added.
+  const mentoredRooms = rows(db, 'mentorshipRooms').filter(row => row.mentorId === investorId)
+  const mentoredRoomIds = new Set(mentoredRooms.map(row => row.id))
+  for (const room of mentoredRooms) if (room.projectId) ids.add(room.projectId)
+  const menteeIds = new Set(rows(db, 'mentorshipMentees')
+    .filter(row => mentoredRoomIds.has(row.roomId) && row.status !== 'removed')
+    .map(row => row.userId).filter(Boolean))
+  if (menteeIds.size) {
+    for (const project of rows(db, 'projects')) {
+      if (menteeIds.has(project.ownerId) || menteeIds.has(project.founderId)) ids.add(project.id)
+    }
+  }
   return new Set([...ids].filter(Boolean))
+}
+
+/** Ownership-scoped read gate: may THIS investor read THIS startup's intelligence? */
+export function investorCanReadStartup(db, investorId, projectId) {
+  return Boolean(projectId) && authorizedProjectIds(db, investorId).has(String(projectId))
 }
 
 function milestoneRows(db, projectId, project, snapshot) {
@@ -45,6 +65,10 @@ function projectActivity(db, projectId, project) {
 
 function buildStartup(db, investorId, projectId) {
   const project = rows(db, 'projects').find(row => row.id === projectId) || {}
+  // Phase C: execution velocity and code-commit evidence are founder data that
+  // stay private until the founder grants the `execution_metrics` consent scope.
+  const grantedScopes = new Set(investorConsentFor(db, projectId, investorId).grantedScopes)
+  const executionAllowed = grantedScopes.has('execution_metrics')
   const snapshot = latest(rows(db, 'dealFlowSnapshots').filter(row => (row.projectId || row.startupId) === projectId && row.investorId === investorId)) || latest(rows(db, 'dealFlowSnapshots').filter(row => (row.projectId || row.startupId) === projectId && row.visibility === 'public')) || {}
   const milestones = milestoneRows(db, projectId, project, snapshot)
   const completedMilestones = milestones.filter(row => ['completed', 'complete', 'done'].includes(String(row.status).toLowerCase())).length
@@ -54,7 +78,7 @@ function buildStartup(db, investorId, projectId) {
   const mentorshipCompletion = mentorship.tasks.length ? clamp((mentorship.completedTasks / mentorship.tasks.length) * 100) : null
   const activity = projectActivity(db, projectId, project)
   const daysInactive = activity.lastMeaningfulAt ? Math.max(0, Math.floor((Date.now() - isoTime(activity.lastMeaningfulAt)) / 86400000)) : null
-  const execution = asNumber(snapshot.executionVelocity ?? snapshot.eviI ?? snapshot.evi_i ?? project.executionVelocity ?? project.eviScore)
+  const execution = executionAllowed ? asNumber(snapshot.executionVelocity ?? snapshot.eviI ?? snapshot.evi_i ?? project.executionVelocity ?? project.eviScore) : null
   const readiness = asNumber(snapshot.readinessScore ?? snapshot.marketReadiness ?? project.marketReadinessScore)
   const engagement = mentorship.mentees.length ? clamp((mentorship.mentees.filter(row => row.status === 'active').length / mentorship.mentees.length) * 100) : asNumber(project.founderEngagement)
   const consistency = daysInactive === null ? null : clamp(100 - Math.min(100, daysInactive * 4))
@@ -67,7 +91,7 @@ function buildStartup(db, investorId, projectId) {
     mentorship.rooms.length ? `${mentorship.rooms.length} mentorship room(s)` : null,
     mentorship.tasks.length ? `${mentorship.completedTasks}/${mentorship.tasks.length} mentorship tasks completed` : null,
     activity.lastMeaningfulAt ? `last meaningful activity ${activity.lastMeaningfulAt}` : null,
-    activity.codeCommits.length ? `${activity.codeCommits.length} verified code commit(s) recorded` : null,
+    executionAllowed && activity.codeCommits.length ? `${activity.codeCommits.length} verified code commit(s) recorded` : null,
   ])
   return {
     startupId: projectId,
@@ -85,7 +109,7 @@ function buildStartup(db, investorId, projectId) {
     mentorship: { rooms: mentorship.rooms.length, activeMentees: mentorship.mentees.filter(row => row.status === 'active').length, tasks: mentorship.tasks.length, completedTasks: mentorship.completedTasks, completion: mentorshipCompletion },
     milestones: { total: milestones.length, completed: completedMilestones, overdue: overdueMilestones },
     lastMeaningfulAt: activity.lastMeaningfulAt,
-    executionEvidence: { verifiedCodeCommits: activity.codeCommits.length, latestCommitAt: activity.codeCommits[0]?.createdAt || null },
+    executionEvidence: executionAllowed ? { verifiedCodeCommits: activity.codeCommits.length, latestCommitAt: activity.codeCommits[0]?.createdAt || null } : null,
     evidence,
     deterministic: true,
   }
