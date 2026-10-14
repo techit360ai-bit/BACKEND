@@ -87,3 +87,28 @@ Problem: Moments + feed + notification prefs exist; no "completed → broadcast"
 ## Definition of done (per phase)
 Implementation works end-to-end; tests added and passing; no regressions; docs updated;
 production-readiness and scalability maintained or improved; no mock/fake path left on the surface touched.
+
+## Status log (implemented, sequential)
+
+- Phase R — done (ai-router `291f29e`).
+- Phase E — done (BACKEND `98f779b`, new-frontend `ed41aeb`).
+- Phase L — done (BACKEND `069f56a`, ai-router `886909d`, new-frontend `ba2e51c`).
+- Phase M — done (BACKEND `c860244`, new-frontend `4b3334a`).
+- Phase O — done (BACKEND `1748880`, new-frontend `5235e29`).
+- Phase P — done (BACKEND `1945b5b`, new-frontend `36d2f03`).
+- Phase C — done (BACKEND `67b15a0`, ai-router `6d4f9db`, new-frontend `c809dd9`).
+  Consent is fail-closed: approval grants only the non-sensitive requested scopes unless the
+  founder names sensitive scopes; execution/cohort fields stay private until granted. An
+  investor can never scope an organization/program/cohort that is not theirs; investors only
+  read startups they are authorized for (watchlist/deal room/relationship/mentorship room they
+  run) and only with the granted execution scope.
+- Phase X — done for the surfaces touched here (BACKEND `e92ba69`, new-frontend `5292936`):
+  the canonical execution-intelligence view no longer depends on the MCP connector flag, and
+  the FastTrack/incubation client surfaces real pipeline errors instead of a silent `null`.
+
+### Remaining deployment prerequisites (environment, not app code)
+- Run the row-level stores as authoritative: `DOMAIN_SOURCE=postgres` and the sibling
+  `*_READ_SOURCE`/`*_WRITE_SOURCE` flags (`.env.example` still ships `sqlite` dev defaults).
+  These are validated by the production config check and cannot be flipped in code.
+- `messaging-backend` already ships a pgx/Postgres store (`internal/store/postgres`); the
+  deployed instance must point it at the platform database.
