@@ -22,7 +22,7 @@ beforeEach(() => {
     userRoles: [], activeContexts: [],
     investorTrustAccessRequests: [], investorTrustAccessHistory: [], notifications: [],
     investorWatchlists: [], dealFlowSnapshots: [], mentorshipRooms: [], mentorshipMentees: [],
-    projects: [], organizations: [], organizationMemberships: [], hackathons: [],
+    projects: [], milestones: [], organizations: [], organizationMemberships: [], hackathons: [],
   }
   readAuthorityDb.mockReturnValue(db)
   updateAuthorityDb.mockImplementation(fn => fn(db))
@@ -107,5 +107,39 @@ describe('execution-intelligence availability (Phase X)', () => {
       if (previous === undefined) delete process.env.MCP_ENABLED
       else process.env.MCP_ENABLED = previous
     }
+  })
+})
+
+// Phase E: anonymous cohort comparison (same industry + stage), min-size guarded.
+describe('execution-intelligence cohort comparison (Phase E)', () => {
+  const project = (id, stage) => ({ id, ownerId: 'founder-2', industry: 'SaaS', stage })
+  beforeEach(() => {
+    db.users.push({ id: 'founder-2' })
+    db.profiles.push({ id: 'founder-2', role: 'founder', projectId: 'p1', isOnboarded: true })
+  })
+
+  it('withholds the cohort until it reaches the minimum size', async () => {
+    db.projects.push(project('p1', 'mvp'), project('p2', 'mvp'), project('p3', 'mvp'))
+    const response = await request(app).get(url).set('Authorization', `Bearer ${token('founder-2', 'founder')}`)
+    expect(response.status).toBe(200)
+    expect(response.body.cohort.available).toBe(false)
+    expect(response.body.cohort.reason).toBe('cohort_too_small')
+  })
+
+  it('returns an anonymous milestone percentile once the cohort is big enough', async () => {
+    db.projects.push(project('p1', 'mvp'), project('p2', 'mvp'), project('p3', 'mvp'), project('p4', 'mvp'), project('p5', 'mvp'))
+    const done = (id, n) => Array.from({ length: n }, (_, i) => ({ id: `${id}-m${i}`, projectId: id, status: 'completed' }))
+    // p1 has 2 completed milestones; p2 has 5; p3..p5 have 0 -> 4 of 5 at or below -> 80th percentile.
+    db.milestones.push(...done('p1', 2), ...done('p2', 5))
+    const response = await request(app).get(url).set('Authorization', `Bearer ${token('founder-2', 'founder')}`)
+    expect(response.status).toBe(200)
+    expect(response.body.cohort.available).toBe(true)
+    expect(response.body.cohort.anonymous).toBe(true)
+    expect(response.body.cohort.size).toBe(5)
+    expect(response.body.cohort.metric).toBe('completed_milestones')
+    expect(response.body.cohort.value).toBe(2)
+    expect(response.body.cohort.percentile).toBe(80)
+    // Anonymous: no peer ids leak into the cohort block.
+    expect(JSON.stringify(response.body.cohort)).not.toMatch(/p[2-5]\b/)
   })
 })

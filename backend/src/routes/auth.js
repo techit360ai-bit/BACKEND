@@ -34,6 +34,15 @@ const signinLimit = baseLimit({
   message: { error: 'Too many sign-in attempts. Please wait a minute and try again.' },
 })
 
+// Session refresh is a background, idempotent call the SPA retries on 401 and
+// across tabs. It must NOT share the credential-entry budget: a burst of
+// /refresh retries used to exhaust signinLimit and lock the user out of /signin.
+const refreshLimit = baseLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many session refresh attempts. Please retry shortly.' },
+})
+
 const otpLimit = baseLimit({
   windowMs: 10 * 60 * 1000,
   max: 3,
@@ -54,7 +63,7 @@ const verifyLimit = baseLimit({
 
 router.post('/signup',      signupLimit, signup)
 router.post('/signin',      signinLimit, signin)
-router.post('/refresh',     signinLimit, refresh)
+router.post('/refresh',     refreshLimit, refresh)
 router.get('/session',      requireAuth, session)
 router.post('/signout',     requireAuth, signout)
 router.get('/sessions',     requireAuth, activeSessions)

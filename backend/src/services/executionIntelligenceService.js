@@ -16,6 +16,50 @@ function normalizeRole(role) {
   return value || 'workspace'
 }
 
+const COHORT_MIN_SIZE = 5
+const COMPLETED_MILESTONE = new Set(['completed', 'complete', 'done', 'shipped'])
+const rowsOf = (db, name) => (Array.isArray(db[name]) ? db[name] : [])
+const industryOf = project => String(project?.industry || project?.sector || project?.vertical || project?.category || '').trim().toLowerCase()
+const stageOf = project => String(project?.stage || project?.status || 'idea').trim().toLowerCase()
+const completedMilestones = (db, projectId) => rowsOf(db, 'milestones')
+  .filter(row => String(row.projectId || row.startupId || '') === String(projectId) && COMPLETED_MILESTONE.has(String(row.status || '').toLowerCase()))
+  .length
+
+/**
+ * Anonymous cohort comparison (Phase E): how the caller's project compares to
+ * other projects in the SAME industry and lifecycle stage. Only aggregate
+ * numbers are returned (size, percentile, median) and only when the cohort is
+ * at least COHORT_MIN_SIZE, so no individual peer is ever identifiable. Derived
+ * from persisted project rows — nothing is scored or invented.
+ */
+function cohortFor(db, project) {
+  if (!project) return { available: false, reason: 'no_project' }
+  const industry = industryOf(project)
+  const stage = stageOf(project)
+  if (!industry) return { available: false, reason: 'no_industry', industry: null, stage }
+  const peers = rowsOf(db, 'projects').filter(peer => industryOf(peer) === industry && stageOf(peer) === stage)
+  if (peers.length < COHORT_MIN_SIZE) {
+    return { available: false, reason: 'cohort_too_small', industry, stage, size: peers.length, minimum: COHORT_MIN_SIZE }
+  }
+  // Same industry AND same stage; the metric is completed milestones, which
+  // varies within a stage, so the percentile is meaningful.
+  const values = peers.map(peer => completedMilestones(db, peer.id)).sort((a, b) => a - b)
+  const value = completedMilestones(db, project.id)
+  const atOrBelow = values.filter(candidate => candidate <= value).length
+  return {
+    available: true,
+    anonymous: true,
+    industry,
+    stage,
+    size: values.length,
+    minimum: COHORT_MIN_SIZE,
+    metric: 'completed_milestones',
+    value,
+    percentile: Math.round((atOrBelow / values.length) * 100),
+    median: values[Math.floor(values.length / 2)],
+  }
+}
+
 function organizationMembership(db, userId, organizationId) {
   return (Array.isArray(db.organizationMemberships) ? db.organizationMemberships : [])
     .some(row => row.organizationId === organizationId && row.userId === userId && row.status === 'active')
@@ -116,7 +160,12 @@ export async function executionIntelligenceFor(user, query = {}) {
     // Compose the canonical Trust Engine — this route owns no trust formula.
     const subjects = (view.trustSubjects || []).filter((subject) => subject.kind === 'actor')
     const trust = await Promise.all(subjects.map(async (subject) => ({ subjectId: subject.id, kind: 'actor', ...(await publicTrustFor(subject.id, null)) })))
-    return { ok: true, ...view, trust }
+    // Anonymous cohort comparison for the caller's project (when one is resolved).
+    const db = readAuthorityDb()
+    const projectId = scope.projectId || (Array.isArray(view.signals?.projects) ? view.signals.projects[0] : null)
+    const project = projectId ? rowsOf(db, 'projects').find(row => String(row.id) === String(projectId)) : null
+    const cohort = cohortFor(db, project)
+    return { ok: true, ...view, cohort, trust }
   } catch (error) {
     return { ok: false, error: 'execution_intelligence_unavailable', detail: String(error?.message || error) }
   }

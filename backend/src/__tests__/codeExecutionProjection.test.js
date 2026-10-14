@@ -37,6 +37,7 @@ describe('code execution projection', () => {
     expect(db.projectActivities).toHaveLength(1)
     expect(db.workspaceReports).toHaveLength(1)
     db.investorWatchlists = [{ investorId: 'investor-1', projectId: 'project-1' }]
+    db.investorTrustAccessRequests = [{ id: 'trust-1', projectId: 'project-1', investorId: 'investor-1', founderId: 'founder-1', status: 'approved', requestedScopes: ['approved_evidence_metadata', 'execution_metrics'], grantedScopes: ['approved_evidence_metadata', 'execution_metrics'], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
     const startup = investorIntelligenceOverview('investor-1').startups[0]
     expect(startup.executionEvidence).toEqual({ verifiedCodeCommits: 1, latestCommitAt: db.projectActivities[0].createdAt })
     expect(startup.evidence).toContain('1 verified code commit(s) recorded')
