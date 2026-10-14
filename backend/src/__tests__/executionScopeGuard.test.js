@@ -89,3 +89,23 @@ describe('execution-intelligence scope boundary', () => {
     expect(response.body.ok).toBe(true)
   })
 })
+
+// Phase X: the canonical execution-intelligence view reads local contribution
+// stores, so it must NOT be gated behind the MCP connector flag.
+describe('execution-intelligence availability (Phase X)', () => {
+  it('serves the org execution view even when MCP_ENABLED is false', async () => {
+    const previous = process.env.MCP_ENABLED
+    process.env.MCP_ENABLED = 'false'
+    try {
+      db.organizations.push({ id: 'org-1' })
+      db.activeContexts.push({ id: 'ctx-1', userId: 'org-1', status: 'active', organizationId: 'org-1' })
+      db.organizationMemberships.push({ id: 'm1', organizationId: 'org-1', userId: 'org-1', status: 'active', role: 'owner' })
+      const response = await request(app).get(`${url}?organizationId=org-1`).set('Authorization', `Bearer ${token('org-1', 'organization')}`)
+      expect(response.status).toBe(200)
+      expect(response.body.ok).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.MCP_ENABLED
+      else process.env.MCP_ENABLED = previous
+    }
+  })
+})

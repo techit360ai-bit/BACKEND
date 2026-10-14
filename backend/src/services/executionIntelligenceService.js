@@ -109,10 +109,6 @@ export async function executionIntelligenceFor(user, query = {}) {
   // Access boundary first — never reach the projection with an unauthorized scope.
   const permission = await authorizeExecutionScope(user, scope)
   if (!permission.ok) return permission
-  if (process.env.MCP_ENABLED !== 'true') {
-    return { ok: false, error: 'execution_intelligence_unavailable', detail: 'MCP is not enabled' }
-  }
-
   try {
     const { getTechitService } = await import('../../../Plugins-MCP/server/techit-service.ts')
     const svc = await getTechitService()
