@@ -24,6 +24,6 @@
     "install:all": "npm install"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5"
+    "concurrently": "^10.0.6"
   }
 }
