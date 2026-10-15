@@ -1,5 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import trustRouter from '../routes/trust.js'
 
@@ -13,6 +14,16 @@ function registeredPaths(router) {
       .map(layer => layer.route.path),
   )
 }
+
+// The frontend trust client lives in the sibling `new-frontend` repository, which
+// is NOT part of this repository's checkout (own CI, own lifecycle). Resolve it
+// from the conventional sibling path - or FRONTEND_TRUST_ROUTES_PATH when set -
+// and skip the cross-repo contract when it is absent instead of throwing ENOENT
+// and failing the whole backend suite in a single-repo CI checkout.
+const clientPath = process.env.FRONTEND_TRUST_ROUTES_PATH
+  ? path.resolve(process.env.FRONTEND_TRUST_ROUTES_PATH)
+  : fileURLToPath(new URL('../../../../new-frontend/frontend/src/lib/api/trustRoutes.ts', import.meta.url))
+const frontendClientPresent = existsSync(clientPath)
 
 describe('trust route coverage', () => {
   it('exposes every endpoint the frontend trust client calls', () => {
@@ -90,8 +101,9 @@ describe('trust route coverage', () => {
     }
   })
 
-  it('keeps the frontend client and backend in sync on the advanced endpoints', () => {
-    const clientPath = fileURLToPath(new URL('../../../../new-frontend/frontend/src/lib/api/trustRoutes.ts', import.meta.url))
+  // Only meaningful when the sibling frontend repo is present (local dev or a
+  // multi-repo checkout); it is skipped in this repo's CI.
+  it.skipIf(!frontendClientPresent)('keeps the frontend client and backend in sync on the advanced endpoints', () => {
     const source = readFileSync(clientPath, 'utf8')
     for (const fragment of ['/trust/adapters/', '/trust/refresh-plan', '/trust/continuous-verification/run', '/trust/milestone', '/trust/milestone/review', '/trust/team/invite', '/trust/team/verify', '/trust/share-profile/preview', '/trust/revenue/connect', '/trust/revenue/verify', '/trust/revenue/credentials', '/trust/analytics/connect', '/trust/analytics/verify', '/trust/analytics/credentials', '/trust/shipping/connect', '/trust/shipping/verify', '/trust/shipping/credentials', '/trust/team/connect', '/trust/team/credentials', '/trust/team/work-email/challenge', '/trust/team/work-email/verify', '/trust/team/registry/verify', '/trust/team/hris/verify', '/trust/team/credential/', '/trust/milestone/evidence', '/trust/milestone/evidence/', '/trust/identity/connect', '/trust/identity/credentials', '/trust/identity/verify', '/trust/identity/registry/verify', '/trust/identity/screening', '/trust/identity/']) {
       expect(source.includes(fragment), `frontend trust route registry no longer declares ${fragment}`).toBe(true)
