@@ -38,6 +38,10 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           envs: PLATFORM_DATABASE_URL,REDIS_URL,JWT_PUBLIC_KEY
+          # The t3.micro needs >10m to build the Go image; the appleboy default
+          # command_timeout is 10m and killed the build mid-compile. Allow a
+          # longer window so the on-box docker build can finish.
+          command_timeout: 30m
           script_stop: true
           script: |
             set -e
