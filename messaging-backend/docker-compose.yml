@@ -21,6 +21,10 @@ services:
       retries: 20
 
   server:
+    # Production runs the image CI built and pushed to GHCR (the t3.micro box
+    # only pulls it). Local `docker compose up --build` still builds here and
+    # tags it with the default below.
+    image: "${MESSAGING_IMAGE:-techit-messaging-server:dev}"
     build: .
     env_file:
       - .env

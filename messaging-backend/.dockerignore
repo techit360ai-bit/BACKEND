@@ -1,0 +1,8 @@
+# Keep the build context to source only: never bake a runtime .env (secrets) or
+# local binaries into the image, and keep CI uploads small.
+.git
+.env
+*.env
+bin/
+node_modules/
+*.log
