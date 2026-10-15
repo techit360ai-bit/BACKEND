@@ -264,6 +264,15 @@ jobs:
               echo "⚠️ GHCR login failed; continuing with an anonymous pull"
             fi
             MESSAGING_IMAGE="$MESSAGING_IMAGE" docker compose pull server
+            # A container from an earlier naming scheme (compose v1's
+            # `messaging-backend_server_1`) can still hold the host port, which
+            # makes the new container fail with "port is already allocated".
+            # Release :8080 before starting the replacement.
+            STALE="$(docker ps -q --filter publish=8080 || true)"
+            if [ -n "$STALE" ]; then
+              echo "⚠️ releasing :8080 from stale container(s): $STALE"
+              docker rm -f $STALE >/dev/null 2>&1 || true
+            fi
             MESSAGING_IMAGE="$MESSAGING_IMAGE" docker compose up -d --no-deps --no-build server
             docker compose ps
             # Each deploy ships a new :sha tag, so drop superseded messaging
