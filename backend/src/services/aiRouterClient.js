@@ -10,6 +10,8 @@
 // rule-based text. It never fabricates numeric data.
 
 import crypto from 'node:crypto'
+import jwt from 'jsonwebtoken'
+import { issueExecutionGrant } from './usageGrantService.js'
 
 const AI_ROUTER_URL = (process.env.AI_ROUTER_URL || 'http://localhost:8000').replace(/\/$/, '')
 const TIMEOUT_MS = Number(process.env.AI_ROUTER_TIMEOUT_MS || '6000') || 6000
@@ -19,6 +21,50 @@ let inFlight = 0
 const waiters = []
 let circuitOpenedUntil = 0
 let consecutiveFailures = 0
+
+// Attach a backend-minted execution grant to every outbound router call so that
+// flipping REQUIRE_AI_EXECUTION_GRANT=true on ai-router cannot 403 the platform.
+// Defaults ON when grant signing material is configured; override with
+// AI_ROUTER_ATTACH_EXECUTION_GRANT.
+function grantAttachEnabled() {
+  const flag = process.env.AI_ROUTER_ATTACH_EXECUTION_GRANT
+  if (flag !== undefined && flag !== '') return ['1', 'true', 'yes'].includes(String(flag).toLowerCase())
+  return Boolean(process.env.AI_EXECUTION_GRANT_SECRET || process.env.AI_EXECUTION_GRANT_PRIVATE_KEY || process.env.JWT_PRIVATE_KEY)
+}
+
+function tokenSubject(token) {
+  try {
+    const decoded = jwt.decode(token)
+    return decoded && typeof decoded === 'object' ? String(decoded.sub || decoded.user_id || '') : ''
+  } catch { return '' }
+}
+
+/**
+ * Mint a short-lived grant for one backend->router call. The grant binds the
+ * reservation to the caller's own subject. When the caller knows the exact
+ * router task type it is bound to it; otherwise the reservation still records the
+ * task and the router authorizes by subject + reservation + expiry.
+ *
+ * Non-fatal by design: on any failure the call proceeds without the header and
+ * degrades exactly as before (callers already return null on router errors).
+ */
+function executionGrantHeader(token, { taskType, workspaceId } = {}) {
+  if (!grantAttachEnabled() || !token) return null
+  const userId = tokenSubject(token)
+  if (!userId) return null
+  try {
+    const result = issueExecutionGrant({
+      userId,
+      requestId: `router_${crypto.randomUUID()}`,
+      taskType: taskType || 'router_enrichment',
+      workspaceId,
+      estimatedCredits: 1,
+      fundingSource: 'platform_subsidy',
+      bindTaskType: Boolean(taskType),
+    })
+    return result && result.ok ? { 'X-AI-Execution-Grant': result.grant.token } : null
+  } catch { return null }
+}
 
 async function acquireSlot() {
   if (inFlight < MAX_IN_FLIGHT) { inFlight += 1; return () => releaseSlot() }
@@ -34,8 +80,13 @@ function releaseSlot() {
   if (next) next()
 }
 
-async function requestJson(path, { method = 'POST', token, body, headers = {}, timeoutMs = TIMEOUT_MS } = {}) {
+async function requestJson(path, { method = 'POST', token, body, headers = {}, timeoutMs = TIMEOUT_MS, taskType, workspaceId } = {}) {
   if (Date.now() < circuitOpenedUntil) return null
+  const requestHeaders = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }
+  if (token && !requestHeaders['X-AI-Execution-Grant']) {
+    const grantHeaders = executionGrantHeader(token, { taskType, workspaceId })
+    if (grantHeaders) Object.assign(requestHeaders, grantHeaders)
+  }
   const release = await acquireSlot()
   try {
     let lastResponse = null
@@ -43,7 +94,7 @@ async function requestJson(path, { method = 'POST', token, body, headers = {}, t
       try {
         const response = await fetch(`${AI_ROUTER_URL}${path}`, {
           method,
-          headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+          headers: requestHeaders,
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           signal: AbortSignal.timeout(timeoutMs),
         })
@@ -103,7 +154,7 @@ export async function requestAdminRouterTelemetry() {
  */
 export async function computeGsisNarrative(token, componentScores) {
   if (!token) return null
-  try { return await requestJson('/api/v1/gsis/compute', { token, body: { component_scores: componentScores, ...componentScores } }) } catch { return null }
+  try { return await requestJson('/api/v1/gsis/compute', { token, body: { component_scores: componentScores, ...componentScores }, taskType: 'gsis_compute' }) } catch { return null }
 }
 
 // Workspace callers can attach an explicit provider funding policy. The router
@@ -120,7 +171,7 @@ export async function requestWorkspaceAI(token, input, routing = {}) {
       model_id: routing.modelId || undefined,
       operation: routing.operation || 'chat',
       privacy_policy_version: routing.privacyPolicyVersion || 'workspace-byok-v1',
-    } })
+    }, workspaceId: routing.workspaceId })
   } catch { return null }
 }
 
@@ -135,6 +186,8 @@ export async function requestWorkspaceConversation(token, body) {
     return await requestJson('/api/v1/workspace/conversation', {
       token,
       body,
+      taskType: 'workspace_conversation',
+      workspaceId: body && typeof body === 'object' ? (body.workspace_id || body.workspaceId) : undefined,
       timeoutMs: Number(process.env.AI_ROUTER_WORKSPACE_TIMEOUT_MS || '45000') || 45_000,
     })
   } catch { return null }
@@ -174,7 +227,7 @@ export async function requestInvestorAdvisory(token, evidence) {
 
 export async function requestInvestorEvi(token, projectId, startupData) {
   if (!token || !projectId) return null
-  try { return await requestJson(`/api/v1/investor/evi/${encodeURIComponent(projectId)}`, { token, body: startupData || {} }) } catch { return null }
+  try { return await requestJson(`/api/v1/investor/evi/${encodeURIComponent(projectId)}`, { token, body: startupData || {}, taskType: 'investor_evi' }) } catch { return null }
 }
 
 export async function requestOrganizationAdvisory(token, evidence) {
@@ -188,25 +241,25 @@ export async function requestOrganizationAdvisory(token, evidence) {
  */
 export async function analyzeVerificationEvidence(token, executionGrant, evidence) {
   if (!token || !executionGrant) return null
-  try { return await requestJson('/api/v1/incubation/evidence/research', { token, body: evidence || {}, headers: { 'X-AI-Execution-Grant': executionGrant } }) } catch { return null }
+  try { return await requestJson('/api/v1/incubation/evidence/research', { token, body: evidence || {}, headers: { 'X-AI-Execution-Grant': executionGrant }, taskType: 'evidence_research' }) } catch { return null }
 }
 
 export async function requestSupportIntelligence(token, input = {}) {
   if (!token) return null
-  try { return await requestJson('/api/v1/support/intelligence', { token, body: input }) } catch { return null }
+  try { return await requestJson('/api/v1/support/intelligence', { token, body: input, taskType: 'customer_support_intelligence' }) } catch { return null }
 }
 
 export async function requestAcademyEnrichment(token, input = {}) {
   if (!token) return null
-  try { return await requestJson('/api/v1/training/modules/enrich', { token, body: input }) } catch { return null }
+  try { return await requestJson('/api/v1/training/modules/enrich', { token, body: input, taskType: 'training_generation' }) } catch { return null }
 }
 
 export async function requestAcademyModuleGeneration(token, input = {}) {
   if (!token) return null
-  try { return await requestJson('/api/v1/training/modules/generate', { token, body: input }) } catch { return null }
+  try { return await requestJson('/api/v1/training/modules/generate', { token, body: input, taskType: 'training_generation' }) } catch { return null }
 }
 
 export async function requestAcademyExerciseReview(token, input = {}) {
   if (!token) return null
-  try { return await requestJson('/api/v1/training/exercises/review', { token, body: input }) } catch { return null }
+  try { return await requestJson('/api/v1/training/exercises/review', { token, body: input, taskType: 'training_generation' }) } catch { return null }
 }

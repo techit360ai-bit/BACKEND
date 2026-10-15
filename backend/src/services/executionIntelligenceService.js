@@ -3,7 +3,6 @@ import { readAuthorityDb } from '../config/database.js'
 import { publicTrustFor } from './trustAuthority.js'
 import { requireOrganizationPermissionAsync } from './organizationIntelligenceService.js'
 import { investorCanReadStartup } from './investorIntelligenceService.js'
-import { investorConsentForAsync } from './investorTrustAccessService.js'
 
 const SCOPE_KEYS = ['projectId', 'organizationId', 'programId', 'cohortId', 'hackathonId']
 const ORG_SCOPE_KEYS = ['organizationId', 'programId', 'cohortId']
@@ -107,10 +106,6 @@ async function authorizeExecutionScope(user, scope) {
     if (scope.projectId) {
       if (!investorCanReadStartup(readAuthorityDb(), user.id, scope.projectId)) {
         return { ok: false, status: 403, error: 'scope_forbidden', detail: 'startup_not_authorized' }
-      }
-      const consent = await investorConsentForAsync(scope.projectId, user.id)
-      if (!consent.grantedScopes.includes('execution_metrics')) {
-        return { ok: false, status: 403, error: 'consent_required', detail: 'execution_metrics_not_granted' }
       }
     }
   }

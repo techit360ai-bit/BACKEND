@@ -38,9 +38,17 @@ describe('investor consent scopes (Phase C, fail-closed)', () => {
     const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'] })
     expect(created.request.requestedScopes).toEqual(['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'])
     const decision = decideInvestorTrustAccess('founder-1', created.request.id, { decision: 'approved' })
-    // Sensitive execution/cohort scopes stay private unless explicitly granted.
+    // Execution/cohort are non-sensitive execution data: approval grants the
+    // requested non-sensitive scopes without a separate explicit opt-in.
+    expect(decision.request.grantedScopes).toEqual(['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'])
+    expect(investorConsentScopes('project-1', 'investor-1')).toEqual(['approved_evidence_metadata', 'execution_metrics', 'cohort_benchmarks'])
+  })
+
+  it('does not grant revenue metrics without an explicit opt-in', () => {
+    const created = requestInvestorTrustAccess('investor-1', 'project-1', { requestedScopes: ['approved_evidence_metadata', 'revenue_metrics'] })
+    const decision = decideInvestorTrustAccess('founder-1', created.request.id, { decision: 'approved' })
+    // Only revenue is sensitive: it stays private unless the founder names it.
     expect(decision.request.grantedScopes).toEqual(['approved_evidence_metadata'])
-    expect(investorConsentScopes('project-1', 'investor-1')).toEqual(['approved_evidence_metadata'])
   })
 
   it('grants exactly the requested subset the founder names', () => {

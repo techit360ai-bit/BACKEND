@@ -311,3 +311,50 @@ b87338b docs, 1db1a73 plan.
 new-frontend (docs/frontend-debug-access): e48d7f6 E/O/X, 5292936 X, c809dd9 C,
 36d2f03 P, 5235e29 O, 40ef646/4b3334a M, ba2e51c L, ed41aeb E, 34d70ef docs,
 c8767e4 plan.
+
+## 9. Resolution addendum (2026-10-15)
+
+The deployment-review items are now fixed in code.
+
+### Q2 — execution-grant path (fixed)
+
+- Algorithm alignment: `issueExecutionGrant` (BACKEND
+  `services/usageGrantService.js`) now resolves the algorithm exactly like the
+  router verifier — RS256 by default in production/staging, HS256 in dev, with
+  `AI_EXECUTION_GRANT_ALGORITHM` overriding both sides. RS256 signs with
+  `JWT_PRIVATE_KEY` (platform key pair). The router verifier
+  (`ai-router/execution_controls.py`) now selects its key by algorithm, so a
+  stray `AI_EXECUTION_GRANT_SECRET` can no longer break RS256 verification — RSA
+  algorithms verify with `JWT_PUBLIC_KEY`.
+- Grant attachment: every outbound call in `services/aiRouterClient.js` now
+  mints and attaches `X-AI-Execution-Grant` at the single request choke point
+  (`AI_ROUTER_ATTACH_EXECUTION_GRANT`, default on when grant signing material is
+  present). The grant binds the caller's own subject + a fresh reservation and is
+  task-type-bound where the exact router task is known. It is non-fatal: on
+  failure the call proceeds without the header and degrades as before.
+- Result: `REQUIRE_AI_EXECUTION_GRANT=true` no longer 403s the platform's
+  router calls as long as both sides share `AI_EXECUTION_GRANT_ALGORITHM`.
+
+### Q5 — consent scopes (fixed)
+
+- Only revenue requires consent. `consentScopes.js` and the frontend catalog now
+  mark `revenue_metrics` as the single SENSITIVE scope; `execution_metrics` and
+  `cohort_benchmarks` are non-sensitive and travel with the baseline approval.
+  `revenue_metrics` is added to the requestable catalog and the investor access
+  request. The platform investor-intelligence and execution-scope guards no
+  longer gate execution velocity/commits behind `execution_metrics`.
+- All Trust Center metrics are gated. `trust_investor_read_model.py` now returns
+  no source metrics at all until the investor holds the baseline
+  `approved_evidence_metadata` scope; revenue additionally requires
+  `revenue_metrics`. `main.py` passes the baseline flag through.
+- Tests: BACKEND 976/976, ai-router 286 passed / 1 skipped (+ new grant-verifier
+  and grant-signer tests), frontend API suites 33/33, `tsc -b` clean.
+
+### Messaging image (dispatched)
+
+`TECHIT Messaging — Deploy to EC2` had never actually run — every prior
+`workflow_run` attempt was **skipped** (the gate requires a green
+`TECHIT Backend Services` run on `main`), which is why the Sept-23 image was
+still live. It has been dispatched via `workflow_dispatch` from CI
+(run 38694125042), so the box rebuilds/pulls the current messaging image with
+`JWT_PUBLIC_KEY` set instead of building on the 909MB t3.micro by hand.

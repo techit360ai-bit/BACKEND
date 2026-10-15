@@ -1,7 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { investorStoreEnabled, investorFallbackEnabled, runInvestorRead, applyInvestorMutation } from '../repositories/investorIntelligenceRepository.js'
-import { investorConsentFor } from './investorTrustAccessService.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 const asNumber = value => Number.isFinite(Number(value)) ? Number(value) : null
@@ -65,10 +64,11 @@ function projectActivity(db, projectId, project) {
 
 function buildStartup(db, investorId, projectId) {
   const project = rows(db, 'projects').find(row => row.id === projectId) || {}
-  // Phase C: execution velocity and code-commit evidence are founder data that
-  // stay private until the founder grants the `execution_metrics` consent scope.
-  const grantedScopes = new Set(investorConsentFor(db, projectId, investorId).grantedScopes)
-  const executionAllowed = grantedScopes.has('execution_metrics')
+  // Phase C (revised): execution velocity and code-commit evidence are
+  // non-financial execution data — they are visible to an investor who is
+  // authorized for the startup. Only revenue metrics require an explicit
+  // `revenue_metrics` consent scope (enforced on the Trust read model).
+  const executionAllowed = true
   const snapshot = latest(rows(db, 'dealFlowSnapshots').filter(row => (row.projectId || row.startupId) === projectId && row.investorId === investorId)) || latest(rows(db, 'dealFlowSnapshots').filter(row => (row.projectId || row.startupId) === projectId && row.visibility === 'public')) || {}
   const milestones = milestoneRows(db, projectId, project, snapshot)
   const completedMilestones = milestones.filter(row => ['completed', 'complete', 'done'].includes(String(row.status).toLowerCase())).length

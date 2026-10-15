@@ -57,11 +57,13 @@ describe('execution-intelligence scope boundary', () => {
     expect(response.body.error).toBe('scope_forbidden')
   })
 
-  it('denies an investor a startup with no execution consent (fail-closed)', async () => {
+  it('lets an authorized investor read execution metrics without a separate execution consent', async () => {
     db.investorWatchlists.push({ id: 'w1', investorId: 'investor-1', projectId: 'startup-1' })
     const response = await request(app).get(`${url}?projectId=startup-1`).set('Authorization', `Bearer ${token('investor-1', 'investor')}`)
-    expect(response.status).toBe(403)
-    expect(response.body.error).toBe('consent_required')
+    // Only revenue metrics require consent now; execution metrics are gated by
+    // startup authorization alone.
+    expect(response.status).toBe(200)
+    expect(response.body.ok).toBe(true)
   })
 
   it('denies an investor a startup outside their authorized scope', async () => {
