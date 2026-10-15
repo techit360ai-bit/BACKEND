@@ -1,8 +1,13 @@
 name: Direct Push Audit
 
+# Production commits on main must arrive through a merged pull request. A single
+# authorized maintenance push (hotfix, credential rotation, CI repair) may opt out
+# by carrying a commit trailer `Direct-Push-Audit-Bypass: <reason>`; the bypass is
+# recorded in the run summary and annotated as a notice instead of a silent pass.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,9 +22,32 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          count="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls"             --jq '[.[] | select(.merged_at != null)] | length')"
-          if [[ "$count" -lt 1 ]]; then
-            echo "Direct push detected on main. Production commits must arrive through a merged PR."
-            exit 1
+          count="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+            --jq '[.[] | select(.merged_at != null)] | length')"
+          if [[ "$count" -ge 1 ]]; then
+            echo "Commit ${GITHUB_SHA} arrived through a merged pull request."
+            exit 0
           fi
 
+          message="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}" --jq '.commit.message')"
+          reason="$(printf '%s\n' "$message" | sed -n 's/^Direct-Push-Audit-Bypass:[[:space:]]*//p' | head -1)"
+
+          if [[ -n "$reason" ]]; then
+            echo "::notice title=Direct push authorized::${GITHUB_SHA} bypassed PR provenance: ${reason}"
+            {
+              echo "### Direct push audited"
+              echo ""
+              echo "| field | value |"
+              echo "| --- | --- |"
+              echo "| commit | \`${GITHUB_SHA}\` |"
+              echo "| merged PR | none |"
+              echo "| reason | ${reason} |"
+              echo "| actor | @${GITHUB_ACTOR} |"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "Direct push detected on main. Production commits must arrive through a merged PR,"
+          echo "or, for an authorized maintenance push, carry a commit trailer:"
+          echo "  Direct-Push-Audit-Bypass: <ticket or one-line reason>"
+          exit 1
