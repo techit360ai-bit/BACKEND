@@ -63,4 +63,31 @@ describe('execution grant algorithm alignment with ai-router', () => {
     const result = issueExecutionGrant({ userId: 'u1', requestId: 'r3', taskType: 'gsis_compute', estimatedCredits: 1 })
     expect(result).toMatchObject({ ok: false, error: 'execution_grant_private_key_not_configured' })
   })
+
+  it('emits billing-class, workflow, and data-handling claims additively', () => {
+    process.env.NODE_ENV = 'development'
+    process.env.AI_EXECUTION_GRANT_SECRET = 'dev-grant-secret'
+    const result = issueExecutionGrant({
+      userId: 'u1', requestId: 'r4', taskType: 'gsis_compute', estimatedCredits: 1,
+      allowedBillingClasses: ['free', 'bogus'], workflowId: 'wf-1',
+      maxWorkflowCostUsd: 2.5, requiredDataHandling: 'no_training',
+    })
+    expect(result.ok).toBe(true)
+    const decoded = jwt.decode(result.grant.token)
+    expect(decoded.allowed_billing_classes).toEqual(['free'])
+    expect(decoded.workflow_id).toBe('wf-1')
+    expect(decoded.max_workflow_cost_usd).toBe(2.5)
+    expect(decoded.required_data_handling).toBe('no_training')
+  })
+
+  it('omits the additive claims when the caller does not request them', () => {
+    process.env.NODE_ENV = 'development'
+    process.env.AI_EXECUTION_GRANT_SECRET = 'dev-grant-secret'
+    const result = issueExecutionGrant({ userId: 'u1', requestId: 'r5', taskType: 'gsis_compute', estimatedCredits: 1 })
+    const decoded = jwt.decode(result.grant.token)
+    expect(decoded.allowed_billing_classes).toBeUndefined()
+    expect(decoded.workflow_id).toBeUndefined()
+    expect(decoded.max_workflow_cost_usd).toBeUndefined()
+    expect(decoded.required_data_handling).toBeUndefined()
+  })
 })

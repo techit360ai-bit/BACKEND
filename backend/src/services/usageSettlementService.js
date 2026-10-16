@@ -6,6 +6,7 @@ import { reserveUsagePostgres, settleUsagePostgres, financePostgresEnabled } fro
 import { reserveOrganizationBudget, settleOrganizationBudget } from './organizationBudgetService.js'
 import { economicsForUsage } from './unitEconomicsService.js'
 import { billingJobsRowLevelEnabled, usageSettlementHealthRowLevel } from '../repositories/billingJobsRepository.js'
+import { recordWorkflowUsage, workflowBudgetFor, workflowBudgetSnapshot, resolveWorkflowCeiling } from './workflowBudgetService.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -74,6 +75,9 @@ function validateFacts(facts) {
     cacheHit: Boolean(facts.cache_hit ?? facts.cacheHit),
     grantId: text(facts.grant_id || facts.grantId) || null,
     reservationId: text(facts.reservation_id || facts.reservationId) || null,
+    workflowId: text(facts.workflow_id || facts.workflowId) || null,
+    costStatus: text(facts.cost_status || facts.costStatus) || '',
+    pricingVersion: text(facts.pricing_version || facts.pricingVersion) || null,
     metadata: facts.metadata && typeof facts.metadata === 'object' ? facts.metadata : {},
   }
 }
@@ -127,7 +131,11 @@ export function settleUsage(facts) {
     const existing = usageFor(db, normalized.requestId)
     if (existing) {
       if (existing.payloadHash !== payloadHash) return { ok: false, error: 'request_id_payload_conflict', requestId: normalized.requestId }
-      return { ok: true, idempotent: true, usageEvent: existing, reservation: reservationFor(db, normalized.reservationId || normalized.requestId) }
+      return {
+        ok: true, idempotent: true, usageEvent: existing,
+        reservation: reservationFor(db, normalized.reservationId || normalized.requestId),
+        workflowBudget: workflowBudgetSnapshot(workflowBudgetFor(db, normalized.workflowId || existing.workflowId)),
+      }
     }
     const now = nowIso()
     const reservation = reservationFor(db, normalized.reservationId || normalized.requestId)
@@ -163,9 +171,28 @@ export function settleUsage(facts) {
       allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd,
       grossMargin: economics.grossMargin, marginStatus: economics.marginStatus,
       fundingSource: reservation?.fundingSource || 'unknown',
+      workflowId: normalized.workflowId || null,
+      costStatus: normalized.costStatus || 'estimated',
+      pricingVersion: normalized.pricingVersion || null,
       metadata: normalized.metadata, createdAt: now, updatedAt: now,
     }
     db.usageEvents.push(usageEvent)
+    // Authoritative workflow reconciliation: accumulate every settled
+    // sub-request of the workflow and compare the total with the ceiling the
+    // grant carried. The router enforces this at admission; the backend is the
+    // record of truth for what was actually spent.
+    const workflowRow = recordWorkflowUsage(db, {
+      workflowId: normalized.workflowId,
+      requestId: normalized.requestId,
+      userId: normalized.userId,
+      workspaceId: normalized.workspaceId,
+      providerCostUsd: economics.providerCostUsd,
+      credits: economics.settledCredits,
+      costStatus: normalized.costStatus || 'estimated',
+      pricingVersion: normalized.pricingVersion,
+      maxCostUsd: resolveWorkflowCeiling(reservation, normalized),
+      status: normalized.status,
+    })
     if (reservation?.fundingSource === 'organization') {
       const organizationSettlement = settleOrganizationBudget({ requestId: normalized.requestId, status: normalized.status, actualCredits })
       if (!organizationSettlement.ok) return organizationSettlement
@@ -181,14 +208,28 @@ export function settleUsage(facts) {
       requestId: normalized.requestId, deltaCredits: -economics.settledCredits, credits: -economics.settledCredits,
       type: 'usage_settlement', createdAt: now,
     })
-    return { ok: true, idempotent: false, usageEvent, reservation }
+    return { ok: true, idempotent: false, usageEvent, reservation, workflowBudget: workflowBudgetSnapshot(workflowRow) }
   })
 }
 
 export function usageSettlementHealth() {
   const db = readAuthorityDb()
   const settled = db.usageEvents.filter(row => row.status === 'completed').sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
-  return { ok: true, usageEvents: db.usageEvents.length, pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length, lastSettledAt: settled[0]?.updatedAt || null }
+  const workflows = db.workflowBudgets || []
+  return {
+    ok: true,
+    usageEvents: db.usageEvents.length,
+    pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length,
+    workflows: workflows.length,
+    workflowsOverBudget: workflows.filter(row => row.status === 'exceeded').length,
+    workflowsPendingReconciliation: workflows.filter(row => row.costStatus === 'pending_reconciliation').length,
+    lastSettledAt: settled[0]?.updatedAt || null,
+  }
+}
+
+/** Authoritative workflow budget snapshot for admin/observability reads. */
+export function workflowBudget(workflowId) {
+  return workflowBudgetSnapshot(workflowBudgetFor(readAuthorityDb(), workflowId))
 }
 
 const financeWrites = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'

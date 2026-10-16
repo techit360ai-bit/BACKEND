@@ -1,5 +1,6 @@
 import { createId, nowIso } from '../utils/api.js'
 import { economicsForUsage } from '../services/unitEconomicsService.js'
+import { mergeWorkflowBudget, workflowBudgetSnapshot, resolveWorkflowCeiling } from '../services/workflowBudgetService.js'
 import { withPlatformTransaction, upsertRecord, deleteRecord, listRecords, listRecordsForOwner, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const enabled = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
@@ -47,7 +48,7 @@ async function listByUser(client, collection, userId, { forUpdate = false } = {}
 
 export async function loadFinanceSnapshotPostgres(userId) {
   return withPlatformTransaction(async client => {
-    const names = ['profiles', 'userRoles', 'verificationProfiles', 'trustProfiles', 'riskProfiles', 'organizationMemberships', 'walletAccounts', 'creditLedger', 'usageReservations', 'usageEvents', 'subscriptions', 'billingPlans', 'creditPackages', 'rateCards', 'geoPricingProfiles', 'profitabilityEvents', 'marginAlerts', 'workspaceTeamEntitlements', 'accountEntitlements', 'capabilityConsumptions', 'capabilityAnalytics', 'paywallEvents', 'workflowSnapshots', 'paymentIntents', 'billingWebhookEvents']
+    const names = ['profiles', 'userRoles', 'verificationProfiles', 'trustProfiles', 'riskProfiles', 'organizationMemberships', 'walletAccounts', 'creditLedger', 'usageReservations', 'usageEvents', 'subscriptions', 'billingPlans', 'creditPackages', 'rateCards', 'geoPricingProfiles', 'profitabilityEvents', 'marginAlerts', 'workspaceTeamEntitlements', 'accountEntitlements', 'capabilityConsumptions', 'capabilityAnalytics', 'paywallEvents', 'workflowSnapshots', 'workflowBudgets', 'paymentIntents', 'billingWebhookEvents']
     const snapshot = {}
     for (const name of names) snapshot[name] = ['billingPlans', 'creditPackages', 'rateCards', 'geoPricingProfiles', 'workspaceTeamEntitlements'].includes(name) ? (await client.query("SELECT * FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL ORDER BY updated_at DESC", [name])).rows.map(row => ({ ...(row.payload || {}), id: row.record_id, version: Number(row.version) })) : await listByUser(client, name, userId)
     const config = (await client.query("SELECT payload FROM platform_collection_records WHERE collection_name='tvceConfig' AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 1")).rows[0]?.payload
@@ -235,19 +236,29 @@ export async function settleUsagePostgres(facts) {
   return withPlatformTransaction(async client => {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`usage:${requestId}`])
     const existing = await findByPayload(client, 'usageEvents', 'requestId', requestId, { forUpdate: true })
-    if (existing) return { ok: true, idempotent: true, usageEvent: existing, reservation: await findByPayload(client, 'usageReservations', 'requestId', requestId, { forUpdate: true }) }
+    if (existing) return { ok: true, idempotent: true, usageEvent: existing, reservation: await findByPayload(client, 'usageReservations', 'requestId', requestId, { forUpdate: true }), workflowBudget: workflowBudgetSnapshot(existing.workflowId ? await findByPayload(client, 'workflowBudgets', 'workflowId', existing.workflowId) : null) }
     const reservation = await findByPayload(client, 'usageReservations', 'requestId', facts.reservation_id || facts.reservationId || requestId, { forUpdate: true })
     if (status === 'completed' && !reservation) return { ok: false, error: 'reservation_not_found', requestId }
     if (reservation && (reservation.userId !== userId || reservation.taskType !== taskType)) return { ok: false, error: 'reservation_execution_mismatch', requestId }
     const now = nowIso(); const economics = economicsForUsage({ ...facts, taskType, status }, reservation, null); const credits = economics.settledCredits
-    const usageEvent = { id: createId('usage'), requestId, payloadHash: facts.payloadHash || null, userId, workspaceId: facts.workspace_id || facts.workspaceId || null, taskType, provider: facts.provider || 'unknown', model: facts.model || 'unknown', status, promptTokens: economics.inputTokens, completionTokens: economics.outputTokens, totalTokens: number(facts.total_tokens ?? facts.totalTokens), providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: number(facts.latency_ms ?? facts.latencyMs), attemptCount: number(facts.attempt_count ?? facts.attemptCount, 1), cacheHit: Boolean(facts.cache_hit ?? facts.cacheHit), grantId: facts.grant_id || facts.grantId || null, reservationId: reservation?.reservationId || facts.reservation_id || facts.reservationId || null, credits, rateCardVersion: economics.rateCardVersion, totalCogs: economics.directServiceCogsUsd, customerPrice: economics.allocatedRevenueUsd, allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd, grossMargin: economics.grossMargin, marginStatus: economics.marginStatus, fundingSource: reservation?.fundingSource || 'unknown', metadata: facts.metadata || {}, createdAt: now, updatedAt: now }
+    const usageEvent = { id: createId('usage'), requestId, payloadHash: facts.payloadHash || null, userId, workspaceId: facts.workspace_id || facts.workspaceId || null, taskType, provider: facts.provider || 'unknown', model: facts.model || 'unknown', status, promptTokens: economics.inputTokens, completionTokens: economics.outputTokens, totalTokens: number(facts.total_tokens ?? facts.totalTokens), providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: number(facts.latency_ms ?? facts.latencyMs), attemptCount: number(facts.attempt_count ?? facts.attemptCount, 1), cacheHit: Boolean(facts.cache_hit ?? facts.cacheHit), grantId: facts.grant_id || facts.grantId || null, reservationId: reservation?.reservationId || facts.reservation_id || facts.reservationId || null, credits, rateCardVersion: economics.rateCardVersion, totalCogs: economics.directServiceCogsUsd, customerPrice: economics.allocatedRevenueUsd, allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd, grossMargin: economics.grossMargin, marginStatus: economics.marginStatus, fundingSource: reservation?.fundingSource || 'unknown', workflowId: facts.workflow_id || facts.workflowId || null, costStatus: String(facts.cost_status || facts.costStatus || 'estimated'), pricingVersion: facts.pricing_version || facts.pricingVersion || null, metadata: facts.metadata || {}, createdAt: now, updatedAt: now }
     await upsertRecord(client, 'usageEvents', usageEvent, { idempotencyKey: `usage-event:${requestId}`, operation: 'insert' })
     if (reservation) {
       const next = { ...reservation, settledCredits: credits, releasedCredits: Math.max(0, number(reservation.reservedCredits) - credits), status: status === 'completed' ? 'settled' : 'refunded', updatedAt: now }
       await upsertRecord(client, 'usageReservations', next, { idempotencyKey: `usage-reservation-settle:${requestId}`, operation: 'update', expectedVersion: reservation.version })
     }
     if (credits > 0) await upsertRecord(client, 'creditLedger', { id: createId('usage_debit'), userId, workspaceId: usageEvent.workspaceId, requestId, deltaCredits: -credits, credits: -credits, type: 'usage_settlement', createdAt: now, updatedAt: now }, { idempotencyKey: `usage-debit:${requestId}`, operation: 'insert' })
-    return { ok: true, idempotent: false, usageEvent, reservation }
+    let workflowRow = null
+    if (usageEvent.workflowId) {
+      const existingBudget = await findByPayload(client, 'workflowBudgets', 'workflowId', usageEvent.workflowId, { forUpdate: true })
+      workflowRow = mergeWorkflowBudget(existingBudget, {
+        workflowId: usageEvent.workflowId, requestId, userId, workspaceId: usageEvent.workspaceId,
+        providerCostUsd: economics.providerCostUsd, credits, costStatus: usageEvent.costStatus,
+        pricingVersion: usageEvent.pricingVersion, maxCostUsd: resolveWorkflowCeiling(reservation, facts), status,
+      })
+      await upsertRecord(client, 'workflowBudgets', workflowRow, { idempotencyKey: `workflow-budget:${usageEvent.workflowId}`, operation: existingBudget ? 'update' : 'insert', expectedVersion: existingBudget?.version })
+    }
+    return { ok: true, idempotent: false, usageEvent, reservation, workflowBudget: workflowBudgetSnapshot(workflowRow) }
   }, { userId })
 }
 
