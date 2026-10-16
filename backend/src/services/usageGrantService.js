@@ -32,10 +32,24 @@ export function issueExecutionGrant(body = {}) {
   if (!secret) {
     return { ok: false, error: algorithm === 'RS256' ? 'execution_grant_private_key_not_configured' : 'execution_grant_secret_not_configured' }
   }
+  // Normalize the additive entitlement claims once so the reservation metadata,
+  // the signed grant, and (later) settlement reconciliation all agree.
+  const allowedBillingClasses = billingClasses(
+    body.allowed_billing_classes ?? body.allowedBillingClasses ?? body.billing_class ?? body.billingClass,
+  )
+  const requiredDataHandling = stringOrUndefined(body.required_data_handling ?? body.requiredDataHandling)
+  const workflowId = stringOrUndefined(body.workflow_id ?? body.workflowId)
+  const maxWorkflowCostUsd = positiveNumber(body.max_workflow_cost_usd ?? body.maxWorkflowCostUsd)
   const reservation = reserveUsage({
     userId, workspaceId: body.workspace_id || body.workspaceId || null, requestId, taskType,
     estimatedCredits, grantId: requestId, fundingSource: body.funding_source || body.fundingSource || 'payg',
-    metadata: body.metadata || {},
+    metadata: {
+      ...(body.metadata || {}),
+      ...(workflowId ? { workflowId } : {}),
+      ...(maxWorkflowCostUsd ? { maxWorkflowCostUsd } : {}),
+      ...(allowedBillingClasses ? { allowedBillingClasses } : {}),
+      ...(requiredDataHandling ? { requiredDataHandling } : {}),
+    },
   })
   if (!reservation.ok) return reservation
   const expiresIn = Math.max(10, Math.min(900, Number(body.expires_in_seconds || 300)))
@@ -49,6 +63,12 @@ export function issueExecutionGrant(body = {}) {
     max_input_tokens: positiveInteger(body.max_input_tokens ?? body.maxInputTokens),
     max_output_tokens: positiveInteger(body.max_output_tokens ?? body.maxOutputTokens),
     max_provider_cost_usd: positiveNumber(body.max_provider_cost_usd ?? body.maxProviderCostUsd),
+    // Additive entitlement claims the router filters on. Absent claims leave
+    // routing unrestricted, so older callers keep working unchanged.
+    allowed_billing_classes: allowedBillingClasses,
+    required_data_handling: requiredDataHandling,
+    workflow_id: workflowId,
+    max_workflow_cost_usd: maxWorkflowCostUsd,
   }
   // The router validates `task_type` against the concrete task it is about to
   // run, so only bind it when the caller knows the exact router task type.
@@ -67,4 +87,21 @@ function positiveInteger(value) {
 function positiveNumber(value) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+const BILLING_CLASSES = new Set(['free', 'paid', 'metered'])
+
+function billingClasses(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : (value === undefined || value === null || value === '' ? [] : [value])
+  const classes = [...new Set(
+    raw.map((item) => String(item).trim().toLowerCase()).filter((item) => BILLING_CLASSES.has(item)),
+  )]
+  return classes.length ? classes : undefined
+}
+
+function stringOrUndefined(value) {
+  const text = String(value ?? '').trim()
+  return text || undefined
 }
