@@ -668,7 +668,24 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     if (!payment) return { ok: false, error: 'payment_not_found' }
     if (payment.status === 'successful') return { ok: true, idempotent: true, payment }
     if (input.verified !== true) return { ok: false, error: 'payment_verification_required' }
-    const now = nowIso(); payment.status = 'successful'; payment.verifiedAt = now; payment.providerReference = text(input.providerReference) || null
+    const now = nowIso()
+    const lateFulfillment = payment.status === 'expired'
+      || Boolean(payment.expiresAt && new Date(payment.expiresAt).getTime() <= new Date(now).getTime())
+    payment.status = 'successful'
+    payment.verifiedAt = now
+    payment.providerReference = text(input.providerReference) || payment.providerReference || null
+    payment.lateFulfillment = lateFulfillment || payment.lateFulfillment === true
+    payment.reconciliationRequired = lateFulfillment || payment.reconciliationRequired === true
+    payment.reconciliationReason = lateFulfillment ? 'provider_capture_after_intent_expiry' : payment.reconciliationReason || null
+    payment.updatedAt = now
+    if (lateFulfillment) {
+      collection(db, 'paymentRiskEvents').push({
+        id: createId('payment_risk'), userId, operation: 'payment_intent_late_capture', decision: 'allowed',
+        error: 'provider_capture_after_intent_expiry', riskState: 'REVIEW', requestedCredits: number(payment.credits),
+        requestedAmountUsd: String(payment.currency || 'USD').toUpperCase() === 'USD' ? number(payment.amount) / 100 : 0,
+        createdAt: now, updatedAt: now,
+      })
+    }
     const credits = Math.max(0, number(payment.credits))
     if (credits > 0) collection(db, 'creditLedger').push({ id: createId('credit_purchase'), userId, deltaCredits: credits, credits, type: 'credit_purchase', paymentIntentId: payment.id, idempotencyKey: payment.id, createdAt: now })
     const planId = text(input.planId || payment.planId)

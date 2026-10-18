@@ -50,6 +50,7 @@ import { platformAuthorityMetrics } from './controllers/platformMetricsControlle
 import { csrfProtection } from './middlewares/csrf.js'
 import { runBillingJobs } from './services/billingJobsService.js'
 import { flushTrustProjectionOutbox } from './services/trustProjectionService.js'
+import { providerAvailability } from './services/billingProviderConfig.js'
 
 const app = express()
 
@@ -191,6 +192,23 @@ app.get('/ready', (_req, res) => {
 
   const cors = assertCorsConfigured()
   checks.push({ name: 'cors.origins', ok: cors.ok, detail: cors.detail })
+
+  const providers = providerAvailability()
+  checks.push({
+    name: 'billing.providers',
+    ok: Object.values(providers).some(Boolean) || !isProdLike(),
+    detail: Object.entries(providers).map(([name, ready]) => `${name}=${ready ? 'ready' : 'missing'}`).join(' '),
+  })
+  checks.push({
+    name: 'billing.redirects',
+    ok: Boolean(process.env.BILLING_SUCCESS_URL && process.env.BILLING_CANCEL_URL) || !isProdLike(),
+    detail: `success=${process.env.BILLING_SUCCESS_URL ? 'set' : 'missing'} cancel=${process.env.BILLING_CANCEL_URL ? 'set' : 'missing'}`,
+  })
+  checks.push({
+    name: 'billing.gateway_auth',
+    ok: Boolean(process.env.PAYMENT_GATEWAY_SERVICE_SECRET) || !isProdLike(),
+    detail: process.env.PAYMENT_GATEWAY_SERVICE_SECRET ? 'set' : 'missing',
+  })
 
   // The deployed SPA origin is a warning, not a hard failure, until the AWS
   // env is finalized; it must still be visible on every probe.

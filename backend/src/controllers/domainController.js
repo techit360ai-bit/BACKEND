@@ -666,7 +666,7 @@ export async function walletListGet(req, res) {
 
 export async function walletPaymentIntent(req, res) {
   const result = await createPaymentIntentAsync(req.user.id, req.body)
-  if (result?.ok === false) return res.status(400).json(result)
+  if (result?.ok === false) return res.status(result.status || 400).json(result)
   return created(res, result)
 }
 

@@ -32,6 +32,14 @@ jobs:
           PLATFORM_DATABASE_URL: ${{ secrets.PLATFORM_DATABASE_URL }}
           REDIS_URL: ${{ secrets.REDIS_URL }}
           MCP_SECRET_KEY: ${{ secrets.MCP_SECRET_KEY }}
+          PAYMENT_GATEWAY_SERVICE_SECRET: ${{ secrets.PAYMENT_GATEWAY_SERVICE_SECRET }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          PAYSTACK_SECRET_KEY: ${{ secrets.PAYSTACK_SECRET_KEY }}
+          FLUTTERWAVE_SECRET_KEY: ${{ secrets.FLUTTERWAVE_SECRET_KEY }}
+          FLUTTERWAVE_SECRET_HASH: ${{ secrets.FLUTTERWAVE_SECRET_HASH }}
+          BILLING_SUCCESS_URL: ${{ vars.BILLING_SUCCESS_URL || 'https://beta.techitnetwork.com/wallet?checkout=success' }}
+          BILLING_CANCEL_URL: ${{ vars.BILLING_CANCEL_URL || 'https://beta.techitnetwork.com/wallet?checkout=cancelled' }}
           DB_DRIVER: ${{ vars.PLATFORM_DB_DRIVER || 'sqlite' }}
           # The box's real legacy SQLite store (the committed template path is
           # the generic /var/lib location, which does not exist here).
@@ -40,7 +48,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH
+          envs: JWT_PRIVATE_KEY,JWT_PUBLIC_KEY,PLATFORM_DATABASE_URL,REDIS_URL,MCP_SECRET_KEY,DB_DRIVER,SQLITE_DB_PATH,PAYMENT_GATEWAY_SERVICE_SECRET,STRIPE_SECRET_KEY,STRIPE_WEBHOOK_SECRET,PAYSTACK_SECRET_KEY,FLUTTERWAVE_SECRET_KEY,FLUTTERWAVE_SECRET_HASH,BILLING_SUCCESS_URL,BILLING_CANCEL_URL
           # `set -e` at the top of the script aborts on the first failure.
           # appleboy/ssh-action v1 no longer declares `script_stop` (it was
           # being ignored with an "unexpected input" warning), and the default
@@ -177,6 +185,11 @@ jobs:
               fs.chmodSync(p, 0o600);
               console.log("jwt RS256 material ensured");
             '
+
+            # Payment must fail before the service restarts, not after it is
+            # serving with checkout disabled. This checks the merged on-box env
+            # and never prints secret values.
+            node ops/ec2/payment-readiness.mjs backend/.env
 
             # --- ensure swap --------------------------------------------------
             # This box is memory-tight: `npm install --workspaces` for the
