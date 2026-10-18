@@ -4,6 +4,7 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { listActions as listActionsPostgres, listKpis as listKpisPostgres, listCollection as listOrganizationCollectionPostgres, syncOrganizationAggregate, syncOrganizationCollections, organizationReadEnabled, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
 import { organizationAccessEnabled, organizationAccessFallbackEnabled, loadOrganizationAccess } from '../repositories/organizationAccessRepository.js'
 import { organizationIntelligenceEnabled, organizationIntelligenceFallbackEnabled, runOrganizationIntelligenceRead, applyOrganizationIntelligenceMutation, runOrganizationIntelligenceMaintenanceStore } from '../repositories/organizationIntelligenceRepository.js'
+import { normalizeOrganizationResourcePayload } from './organizationResourcePolicy.js'
 
 const DAY = 86400000
 const INTERNAL_ROLES = new Set(['owner', 'admin', 'executive', 'program_director', 'program_manager', 'mentor_manager', 'reviewer', 'analyst', 'operations', 'communications', 'finance', 'partner', 'read_only', 'mentor'])
@@ -186,7 +187,11 @@ function createScopedRecord(userId, permission, collectionName, prefix, body, re
   if (!value) return { ok: false, error: `${requiredField}_required` }
   return updateAuthorityDb(db => {
     const { id: _ignoredId, organizationId: _ignoredOrganizationId, organization_id: _ignoredSnakeOrganizationId, createdBy: _ignoredCreatedBy, createdAt: _ignoredCreatedAt, updatedAt: _ignoredUpdatedAt, ...attributes } = body
-    const row = { id: createId(prefix), ...attributes, [requiredField]: value, organizationId: context.organizationId, createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }
+    let normalized = attributes
+    if (collectionName === 'organizationResources') {
+      normalized = normalizeOrganizationResourcePayload(collectionName, attributes)
+    }
+    const row = { id: createId(prefix), ...normalized, [requiredField]: value, organizationId: context.organizationId, createdBy: userId, createdAt: nowIso(), updatedAt: nowIso() }
     rows(db, collectionName).push(row)
     audit(db, context, userId, `${prefix}_created`, prefix, row.id, null, row)
     return { ok: true, record: row }
@@ -252,7 +257,39 @@ export function organizationCohortBenchmarks(userId, organizationId = null) {
   return { ok: true, organizationId: context.organizationId, benchmark, deterministic: true }
 }
 
-export function generateOrganizationReport(userId, body = {}) { const context = requireOrganizationPermission(userId, 'metrics', body.organizationId); if (!context.ok) return context; const overview = organizationOverview(userId, context.organizationId); const pulse = organizationPulse(userId, { organizationId: context.organizationId, window: body.window || '30d' }); const kpis = listOrganizationKpis(userId, context.organizationId); const risks = organizationRisks(userId, { organizationId: context.organizationId }); return updateAuthorityDb(db => { const report = { id: createId('org_report'), organizationId: context.organizationId, type: clean(body.type) || 'executive', window: body.window || '30d', filters: body.filters && typeof body.filters === 'object' ? body.filters : {}, sections: { overview, pulse, kpis: kpis.kpis, risks: risks.risks }, generatedBy: userId, generatedAt: nowIso(), sourceLabels: { overview: 'platform_calculated', pulse: 'platform_calculated', kpis: 'organization_defined', risks: 'platform_calculated' }, deterministic: true }; rows(db, 'organizationReports').push(report); audit(db, context, userId, 'report_generated', 'organization_report', report.id, null, { type: report.type, window: report.window }); return { ok: true, report } }) }
+export function generateOrganizationReport(userId, body = {}) {
+  const context = requireOrganizationPermission(userId, 'metrics', body.organizationId)
+  if (!context.ok) return context
+  const window = body.window || '30d'
+  const overview = organizationOverview(userId, context.organizationId)
+  const pulse = organizationPulse(userId, { organizationId: context.organizationId, window })
+  const kpis = listOrganizationKpis(userId, context.organizationId)
+  const risks = organizationRisks(userId, { organizationId: context.organizationId })
+  const days = ({ today: 1, yesterday: 2, '7d': 7, '30d': 30 }[window] || 30)
+  const since = Date.now() - days * DAY
+  return updateAuthorityDb(db => {
+    const evidence = scoped(db, 'organizationActivityEvents', context.organizationId)
+      .filter(row => inWindow(row.createdAt || row.updatedAt, since))
+      .filter(row => row.sourceType === 'academy' || row.sourceType === 'mcp' || ['partner_training_completed', 'software_contribution'].includes(row.type))
+      .sort((a, b) => timestamp(b.createdAt || b.updatedAt) - timestamp(a.createdAt || a.updatedAt))
+      .slice(0, 50)
+    const report = {
+      id: createId('org_report'),
+      organizationId: context.organizationId,
+      type: clean(body.type) || 'executive',
+      window,
+      filters: body.filters && typeof body.filters === 'object' ? body.filters : {},
+      sections: { overview, pulse, kpis: kpis.kpis, risks: risks.risks, evidence },
+      generatedBy: userId,
+      generatedAt: nowIso(),
+      sourceLabels: { overview: 'platform_calculated', pulse: 'platform_calculated', kpis: 'organization_defined', risks: 'platform_calculated', evidence: 'organization_activity_events' },
+      deterministic: true,
+    }
+    rows(db, 'organizationReports').push(report)
+    audit(db, context, userId, 'report_generated', 'organization_report', report.id, null, { type: report.type, window: report.window })
+    return { ok: true, report }
+  })
+}
 
 export function runOrganizationIntelligenceMaintenance() {
   return updateAuthorityDb(db => {

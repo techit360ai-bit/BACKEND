@@ -32,7 +32,8 @@ import tvceRoutes from './routes/tvce.js'
 import billingWebhookRoutes from './routes/billingWebhooks.js'
 import distributionRoutes from './routes/distribution.js'
 import { authorizeCodeDestination, projectCodeCommit } from './services/codeExecutionProjectionService.js'
-import { readAuthorityDb } from './config/database.js'
+import { readAuthorityDb, updateAuthorityDb } from './config/database.js'
+import { organizationResourceAccess } from './services/organizationResourcePolicy.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import {
@@ -241,6 +242,59 @@ const JWT_SECRET = process.env.JWT_SECRET
 // Plugins registered by Plugins-MCP (`CONNECTOR_NAMES`). Anything outside this
 // set is refused at the mount boundary rather than relying on a lookup failure.
 const MCP_KNOWN_PLUGINS = new Set(['github', 'gitlab', 'bitbucket', 'notion', 'figma', 'web3', 'ai'])
+
+function authorizeOrganizationIntegration(actor, plugin, params) {
+  const integrationId = String(params.integrationId || params.organizationIntegrationId || '').trim()
+  if (!integrationId) return { allowed: true, integration: null }
+  const db = readAuthorityDb()
+  const integration = (db.organizationIntegrations || []).find(row => row.id === integrationId)
+  if (!integration) return { allowed: false, error: 'organization_integration_not_found' }
+  if (integration.pluginName && integration.pluginName !== plugin) {
+    return { allowed: false, error: 'organization_integration_plugin_mismatch' }
+  }
+  if (integration.resourceKind && integration.resourceKind !== 'software') {
+    return { allowed: false, error: 'organization_integration_not_software' }
+  }
+  if (params.organizationId && integration.organizationId && params.organizationId !== integration.organizationId) {
+    return { allowed: false, error: 'organization_integration_scope_mismatch' }
+  }
+  const access = organizationResourceAccess(db, actor.id, integration)
+  if (!access.allowed) return { allowed: false, error: access.reason, access }
+  return { allowed: true, integration, access }
+}
+
+function recordOrganizationSoftwareEvidence({ actor, plugin, tool, params, integration }) {
+  if (!integration?.organizationId) return
+  try {
+    updateAuthorityDb(db => {
+      if (!Array.isArray(db.organizationActivityEvents)) db.organizationActivityEvents = []
+      db.organizationActivityEvents.push({
+        id: randomUUID(),
+        organizationId: integration.organizationId,
+        type: 'software_contribution',
+        sourceType: 'mcp',
+        sourceId: integration.id,
+        resourceId: integration.resourceId || integration.id,
+        integrationId: integration.id,
+        externalId: integration.externalId || null,
+        pluginName: plugin,
+        tool,
+        projectId: params.projectId || actor.incubation?.projectId || null,
+        programId: params.programId || integration.programId || actor.incubation?.programId || null,
+        cohortId: params.cohortId || integration.cohortId || actor.incubation?.cohortId || null,
+        userId: actor.id,
+        message: `Organization software action completed: ${plugin}.${tool}`,
+        evidence: [{ type: 'mcp_invocation', plugin, tool }],
+        createdAt: new Date().toISOString(),
+      })
+      return true
+    })
+  } catch (error) {
+    // Execution already succeeded; evidence projection must not turn it into a
+    // client-visible failure or duplicate a provider side effect.
+    console.error(JSON.stringify({ event: 'organization_mcp_evidence_failed', error: error.message }))
+  }
+}
 export function mcpRoleFromClaim(role) {
   if (['viewer', 'editor', 'admin', 'owner'].includes(role)) return role
   if (role === 'admin') return 'admin'
@@ -317,12 +371,20 @@ if (MCP_ENABLED) {
       if (Array.isArray(allowedTools) && !allowedTools.includes(`${plugin}.${tool}`)) {
         return { allowed: false, status: 403, error: `${plugin}.${tool} is not permitted for this actor` }
       }
+      const integrationDecision = authorizeOrganizationIntegration(resolved.actor, plugin, params)
+      if (!integrationDecision.allowed) {
+        return { allowed: false, status: 403, error: integrationDecision.error }
+      }
       if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
       if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
       return { allowed: true }
     },
     onSuccessfulInvocation({ resolved, plugin, tool, params, data }) {
       if (plugin === 'github' && tool === 'push_files') projectCodeCommit(resolved.actor.id, params, data)
+      const integration = authorizeOrganizationIntegration(resolved.actor, plugin, params)
+      if (integration.integration) {
+        recordOrganizationSoftwareEvidence({ actor: resolved.actor, plugin, tool, params, integration: integration.integration })
+      }
     },
   })
 }

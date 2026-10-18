@@ -87,6 +87,34 @@ describe('organization program row-level store (§5 cutover)', () => {
     expect(store.startupCandidates.some(row => row.hackathonId === 'h1' && row.teamId === 't1')).toBe(true)
   })
 
+  it('preserves lifecycle provenance when converting a shortlisted hackathon team', async () => {
+    store.hackathons.push({ id: 'h1', organizationId: 'org-1', ownerId: 'org-user' })
+    store.hackathonTeams.push({
+      id: 't1',
+      hackathonId: 'h1',
+      leaderId: 'member',
+      name: 'Evidence Team',
+      source: 'community_discovery',
+      sourceCommunity: 'campus-builders',
+      shortlistedAt: '2026-10-01T00:00:00.000Z',
+      programId: 'program-1',
+      cohortId: 'cohort-1',
+    })
+    store.hackathonScores.push({ id: 'score-1', teamId: 't1', createdAt: '2026-10-02T00:00:00.000Z', total: 91 })
+    const result = await convertHackathonTeamAsync('member', 'h1', 't1', { consent: true, projectId: 'project-1' })
+    expect(result.ok).toBe(true)
+    expect(result.candidate).toMatchObject({
+      source: 'community_discovery',
+      sourceCommunity: 'campus-builders',
+      shortlistedAt: '2026-10-01T00:00:00.000Z',
+      evaluationId: 'score-1',
+      programId: 'program-1',
+      cohortId: 'cohort-1',
+      projectId: 'project-1',
+    })
+    expect(store.hackathonTeams[0]).toMatchObject({ startupCandidateId: result.candidate.id, evaluationId: 'score-1' })
+  })
+
   it('reviews a sponsorship application resolved by id row-level', async () => {
     store.organizationMemberships[0].role = 'admin'
     store.sponsorshipApplications.push({ id: 'app-1', organizationId: 'org-1', status: 'submitted' })

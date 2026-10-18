@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { adminTvceAnalytics, capabilityCatalog, evaluateEntitlement, evaluatePaywall, fulfillPayment, freeTierUsage, nextBestAction, saveWorkflow, walletForecast } from '../services/tvceService.js'
 import { codeWorkspaceAccess } from '../services/codeWorkspaceService.js'
+import { listOrganizationEntitlements, saveOrganizationEntitlement } from '../services/organizationEntitlementService.js'
 
 vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthorityDb: vi.fn() }))
 
@@ -56,6 +57,32 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(analytics.metrics.totalRevenue).toBe(7900)
     expect(analytics.funnel.find(row => row.stage === 'PAYMENT_SUCCESS').count).toBe(1)
     expect(analytics.capabilityConversion[0].conversionRate).toBe(100)
+  })
+
+  it('separates reserved and settled canary spend with pricing provenance', () => {
+    const createdAt = new Date().toISOString()
+    db.usageEvents.push(
+      {
+        id: 'u-pending', userId: 'u1', provider: 'openrouter', model: 'vendor/canary', status: 'completed',
+        totalTokens: 1000, providerCostUsd: 1.5, totalVariableCostUsd: 1.5, credits: 5,
+        costStatus: 'pending_reconciliation', metadata: { pricing_source: 'conservative_default', leaseId: 'auto:openrouter:vendor/canary', approvalStatus: 'auto_canary' }, createdAt,
+      },
+      {
+        id: 'u-settled', userId: 'u1', provider: 'openrouter', model: 'vendor/canary', status: 'completed',
+        totalTokens: 2000, providerCostUsd: 2.5, totalVariableCostUsd: 2.5, credits: 8,
+        costStatus: 'estimated', metadata: { pricing_source: 'provider_feed', leaseId: 'auto:openrouter:vendor/canary', approvalStatus: 'auto_canary' }, createdAt,
+      },
+    )
+    const analytics = adminTvceAnalytics()
+    expect(analytics.metrics.aiTokenSpend).toMatchObject({
+      reservedCostUsd: 1.5,
+      settledCostUsd: 2.5,
+      pendingReconciliationCount: 1,
+      autoCanaryCalls: 2,
+    })
+    const row = analytics.providerModelBreakdown.find(item => item.provider === 'openrouter')
+    expect(row).toMatchObject({ leaseId: 'auto:openrouter:vendor/canary', approvalStatus: 'auto_canary', autoCanaryCalls: 2 })
+    expect(row.pricingSource).toBe('mixed')
   })
 
   it('provides explicit free founder quotas and blocks only after the quota is consumed', () => {
@@ -120,5 +147,38 @@ describe('TVCE entitlement and continuation contracts', () => {
     expect(withSubscription.expectedValue.trim().length).toBeGreaterThan(0)
     expect(withSubscription.expectedValue).toMatch(/subscription/i)
     expect(withSubscription.expectedValue).toContain('founder-pro')
+  })
+
+  it('lists and edits organization entitlements with configurable limits and stale-write protection', () => {
+    db.organizations = [{ id: 'org-1', name: 'Evidence Org' }]
+    const saved = saveOrganizationEntitlement('admin-1', {
+      organizationId: 'org-1',
+      plan: 'enterprise',
+      reason: 'contract addendum',
+      limits: { participants: 5000, cohorts: 25 },
+      capabilities: { ORGANIZATION_MONITORING: true },
+      sponsorAccess: true,
+      partnerResourceAccess: true,
+    })
+    expect(saved.ok).toBe(true)
+    expect(saved.entitlement.limits.participants).toBe(5000)
+    expect(saved.entitlement.limits.cohorts).toBe(25)
+    expect(saved.entitlement.capabilities.ORGANIZATION_MONITORING).toBe(true)
+    expect(saved.entitlement.version).toBe(2)
+    expect(db.organizationAuditEvents[0]).toMatchObject({ action: 'entitlement_updated', actorId: 'admin-1' })
+    expect(db.organizationAuditEvents[0].newState.limits.participants).toBe(5000)
+
+    const listed = listOrganizationEntitlements({ organizationId: 'org-1' }, db)
+    expect(listed.ok).toBe(true)
+    expect(listed.entitlements[0].limits.participants).toBe(5000)
+    expect(listed.limits).toContain('participants')
+
+    const stale = saveOrganizationEntitlement('admin-2', {
+      id: saved.entitlement.id,
+      organizationId: 'org-1',
+      limits: { participants: 100 },
+      expectedVersion: 1,
+    })
+    expect(stale).toMatchObject({ ok: false, status: 409, error: 'stale_entitlement_version' })
   })
 })

@@ -682,6 +682,7 @@ export async function collaborationCallCreate(req, res) {
 
 export async function genericCreatePost(req, res) {
   const entity = await genericCreateAsync(req.user.id, req.collectionName, req.body, req.itemPrefix, req.collectionScope || null)
+  if (entity?.ok === false) return res.status(entity.status || 400).json({ error: entity.error })
   // A new opportunity changes the opportunities surface for matching users.
   // Targeted surface invalidation keeps people/general caches intact.
   if (req.collectionName === 'opportunities') void invalidateDiscoveryType('opportunities')

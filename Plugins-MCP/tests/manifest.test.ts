@@ -19,6 +19,16 @@ describe('Strategy 1 — manifest validation', () => {
     expect(m.resources).toHaveLength(1);
   });
 
+  it('accepts organization training and software resource metadata', () => {
+    const extended = VALID.replace(
+      '  - type: thing',
+      '  - type: course\n    resourceKind: training\n    externalId: partner-course-1\n    audiencePolicy: public_free\n    completionMode: webhook\n    completionEvent: training.completed\n    expiresAt: 2027-01-01T00:00:00.000Z',
+    );
+    const m = parseManifest(extended);
+    expect(m.resources[0].resourceKind).toBe('training');
+    expect(m.resources[0].completionMode).toBe('webhook');
+  });
+
   it('rejects a manifest missing auth', () => {
     const bad = VALID.replace('auth: { kind: api_key }', '');
     expect(() => parseManifest(bad)).toThrow(ManifestError);

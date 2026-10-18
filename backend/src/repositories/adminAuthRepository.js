@@ -8,6 +8,7 @@ import { withPlatformTransaction, getRecord, listRecords, listRecordsByField, up
 
 const ADMIN_USERS = 'adminUsers'
 const TELEMETRY = 'adminTelemetrySnapshots'
+const AI_CONTROL_AUDIT = 'adminAiControlAuditEvents'
 
 export function adminAuthEnabled() {
   return process.env.ADMIN_AUTH_SOURCE === 'postgres' || process.env.DB_DRIVER === 'postgres'
@@ -58,4 +59,17 @@ export async function adminTelemetryCollections() {
 
 export async function appendAdminTelemetry(snapshot) {
   return withPlatformTransaction(client => upsertRecord(client, TELEMETRY, snapshot, { operation: 'insert' }))
+}
+
+export async function appendAiControlAudit(event) {
+  return withPlatformTransaction(client => upsertRecord(client, AI_CONTROL_AUDIT, event, { operation: 'insert' }))
+}
+
+export async function listAiControlAudit(limit = 100) {
+  return withPlatformTransaction(async client => {
+    const rows = await listRecords(client, AI_CONTROL_AUDIT)
+    return rows
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, limit)
+  })
 }

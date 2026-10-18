@@ -492,12 +492,57 @@ export function adminTvceAnalyticsFromDb(db, period = 'all', options = {}) {
     summary.totalTokens += number(row.totalTokens ?? (number(row.inputTokens ?? row.promptTokens) + number(row.outputTokens ?? row.completionTokens)))
     summary.creditsSettled += number(row.credits)
     return summary
-  }, { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, creditsSettled: 0 })
+  }, {
+    inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, creditsSettled: 0,
+    autoCanaryCalls: 0, reservedCostUsd: 0, settledCostUsd: 0,
+    pendingReconciliationCount: 0, pendingReconciliationAmountUsd: 0,
+  })
   const providerModel = new Map()
   for (const row of usageEvents) {
     const key = `${row.provider || 'unknown'}:${row.model || 'unknown'}`
-    const item = providerModel.get(key) || { provider: row.provider || 'unknown', model: row.model || 'unknown', calls: 0, inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, providerCostUsd: 0, totalVariableCostUsd: 0, credits: 0, revenueUsd: 0 }
-    item.calls += 1; item.inputTokens += number(row.inputTokens ?? row.promptTokens); item.outputTokens += number(row.outputTokens ?? row.completionTokens); item.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens); item.totalTokens += number(row.totalTokens); item.providerCostUsd += number(row.providerCostUsd); item.totalVariableCostUsd += number(row.totalVariableCostUsd ?? row.totalCogs); item.credits += number(row.credits); item.revenueUsd += number(row.allocatedRevenueUsd ?? row.customerPrice); providerModel.set(key, item)
+    const item = providerModel.get(key) || {
+      provider: row.provider || 'unknown', model: row.model || 'unknown', calls: 0, inputTokens: 0,
+      outputTokens: 0, cachedInputTokens: 0, totalTokens: 0, providerCostUsd: 0,
+      totalVariableCostUsd: 0, credits: 0, revenueUsd: 0, autoCanaryCalls: 0,
+      autoCanarySpendUsd: 0, reservedCostUsd: 0, settledCostUsd: 0,
+      pendingReconciliationCount: 0, pendingReconciliationAmountUsd: 0,
+      pricingSource: null, leaseId: null, approvalStatus: null,
+    }
+    const providerCost = number(row.providerCostUsd)
+    const pending = row.costStatus === 'pending_reconciliation'
+    const pricingSource = row.pricingSource || row.metadata?.pricingSource || row.metadata?.pricing_source || 'registry'
+    const leaseId = row.leaseId || row.metadata?.leaseId || row.metadata?.lease_id || null
+    const approvalStatus = row.approvalStatus || row.metadata?.approvalStatus || row.metadata?.approval_status || null
+    const autoCanary = Boolean(leaseId) && (approvalStatus === 'auto_canary' || String(row.metadata?.tags || '').includes('auto_canary'))
+    item.calls += 1
+    item.inputTokens += number(row.inputTokens ?? row.promptTokens)
+    item.outputTokens += number(row.outputTokens ?? row.completionTokens)
+    item.cachedInputTokens += number(row.cachedInputTokens ?? row.cachedTokens)
+    item.totalTokens += number(row.totalTokens)
+    item.providerCostUsd += providerCost
+    item.totalVariableCostUsd += number(row.totalVariableCostUsd ?? row.totalCogs)
+    item.credits += number(row.credits)
+    item.revenueUsd += number(row.allocatedRevenueUsd ?? row.customerPrice)
+    item.pricingSource = item.pricingSource && item.pricingSource !== pricingSource ? 'mixed' : pricingSource
+    item.leaseId = item.leaseId && item.leaseId !== leaseId ? 'mixed' : (leaseId || item.leaseId)
+    item.approvalStatus = item.approvalStatus && item.approvalStatus !== approvalStatus ? 'mixed' : (approvalStatus || item.approvalStatus)
+    if (autoCanary) {
+      item.autoCanaryCalls += 1
+      item.autoCanarySpendUsd += providerCost
+      tokenTotals.autoCanaryCalls += 1
+    }
+    if (pending) {
+      item.reservedCostUsd += providerCost
+      item.pendingReconciliationCount += 1
+      item.pendingReconciliationAmountUsd += providerCost
+      tokenTotals.reservedCostUsd += providerCost
+      tokenTotals.pendingReconciliationCount += 1
+      tokenTotals.pendingReconciliationAmountUsd += providerCost
+    } else {
+      item.settledCostUsd += providerCost
+      tokenTotals.settledCostUsd += providerCost
+    }
+    providerModel.set(key, item)
   }
   const walletCredits = collection(db, 'walletAccounts').reduce((sum, row) => sum + number(row.creditBalance), 0) + ledger.filter(row => number(row.deltaCredits ?? row.credits) > 0).reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
   const reservedCredits = collection(db, 'usageReservations').filter(row => row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)

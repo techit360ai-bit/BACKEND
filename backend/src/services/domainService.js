@@ -6,6 +6,7 @@ import { appendPlatformEventInDb, appendRelationshipInDb } from './discoveryServ
 import { noteManualStageInDb } from './lifecycleService.js'
 import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
+import { normalizeOrganizationResourcePayload, sanitizeOrganizationResource } from './organizationResourcePolicy.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
 import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, financeReadEnabled, financeReadFallbackEnabled } from '../repositories/financeRepository.js'
 import { syncFinanceProjection } from './financePostgresProjection.js'
@@ -20,6 +21,19 @@ function isRecordVisible(record, userId) {
 
 function organizationMember(db, userId, organizationId) {
   return collection(db, 'organizationMemberships').some(row => row.organizationId === organizationId && row.userId === userId && row.status === 'active')
+}
+
+function organizationRecordVisible(db, row, userId) {
+  return Boolean(row?.organizationId && organizationMember(db, userId, row.organizationId))
+}
+
+function organizationWriteContext(db, userId, requestedOrganizationId = null) {
+  const active = collection(db, 'activeContexts').find(row => row.userId === userId && row.status === 'active')
+  const candidate = requestedOrganizationId || active?.organizationId || null
+  if (candidate && organizationMember(db, userId, candidate)) return candidate
+  if (requestedOrganizationId) return null
+  // Preserve legacy owner-only records when no organization context exists.
+  return userId
 }
 
 function hackathonVisible(db, hackathon, userId) {
@@ -93,6 +107,10 @@ function insertOwned(db, name, userId, body, prefix, field = 'ownerId') {
   }, userId, field)
   collection(db, name).push(row)
   return row
+}
+
+function organizationResourcePayload(name, body) {
+  return normalizeOrganizationResourcePayload(name, cleanObject(body))
 }
 
 function patchOwned(db, name, id, userId, body, field = 'ownerId') {
@@ -1651,6 +1669,12 @@ export function registerHackathon(userId, hackathonId, body) {
       inviteToken: String(body.inviteToken || ''),
       openRoles: Array.isArray(body.openRoles) ? body.openRoles : [],
       rosterClosed: false,
+      source: String(body.source || 'hackathon_registration').slice(0, 100),
+      sourceCommunity: String(body.sourceCommunity || '').slice(0, 160) || null,
+      shortlistedAt: body.shortlistedAt || null,
+      evaluationId: body.evaluationId || null,
+      programId: body.programId || null,
+      cohortId: body.cohortId || null,
     }, 'team', 'leaderId')
     for (const member of Array.isArray(body.members) ? body.members : []) {
       collection(db, 'hackathonMembers').push({
@@ -1661,6 +1685,9 @@ export function registerHackathon(userId, hackathonId, body) {
         userId: member.userId || member.collaboratorId || null,
         name: member.name || '',
         role: member.role || '',
+        source: String(body.source || 'hackathon_registration').slice(0, 100),
+        sourceCommunity: String(body.sourceCommunity || '').slice(0, 160) || null,
+        evaluationId: body.evaluationId || null,
         createdAt: nowIso(),
       })
     }
@@ -1917,6 +1944,10 @@ function publicProgramEnrollment(row) {
     founderId: row.founderId,
     cohortId: row.cohortId || null,
     status: row.status,
+    source: row.source || null,
+    sourceCommunity: row.sourceCommunity || null,
+    shortlistedAt: row.shortlistedAt || null,
+    evaluationId: row.evaluationId || null,
     token: row.status === 'pending' ? row.token : undefined,
     createdAt: row.createdAt,
     acceptedAt: row.acceptedAt || null,
@@ -1977,6 +2008,10 @@ export function createProgramInvitation(userId, programId, body = {}) {
       cohortId,
       status: 'pending',
       token,
+      source: String(body.source || 'program_invitation').slice(0, 100),
+      sourceCommunity: String(body.sourceCommunity || '').slice(0, 160) || null,
+      shortlistedAt: body.shortlistedAt || nowIso(),
+      evaluationId: body.evaluationId || null,
     }, 'progenroll')
 
     collection(db, 'notifications').push({
@@ -2034,6 +2069,7 @@ export function acceptProgramInvitation(userId, body = {}) {
       || owned.sort(byNewest)[0]
     enrollment.status = 'accepted'
     enrollment.acceptedAt = nowIso()
+    enrollment.shortlistedAt = enrollment.shortlistedAt || enrollment.createdAt || enrollment.acceptedAt
     enrollment.updatedAt = enrollment.acceptedAt
     if (project) {
       enrollment.projectId = project.id
@@ -2312,7 +2348,11 @@ export async function createPaymentIntentAsync(userId, body) {
 
 export function genericList(userId, name) {
   const db = readAuthorityDb()
-  return collection(db, name).filter(row => isRecordVisible(row, userId)).sort(byNewest)
+  const organizationScoped = name === 'organizationIntegrations'
+  return collection(db, name)
+    .filter(row => isRecordVisible(row, userId) || (organizationScoped && organizationRecordVisible(db, row, userId)))
+    .map(row => organizationScoped ? sanitizeOrganizationResource(row) : row)
+    .sort(byNewest)
 }
 
 function collaborationText(value, maxLength) {
@@ -2405,7 +2445,13 @@ export function createCollaborationCall(userId, body) {
 
 export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
   return updateAuthorityDb(db => {
-    const row = insertOwned(db, name, userId, body, prefix, field)
+    const payload = organizationResourcePayload(name, body)
+    if (name === 'organizationIntegrations') {
+      const organizationId = organizationWriteContext(db, userId, payload.organizationId)
+      if (!organizationId) return { ok: false, status: 403, error: 'organization_access_denied' }
+      payload.organizationId = organizationId
+    }
+    const row = insertOwned(db, name, userId, payload, prefix, field)
     const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
     const event = appendPlatformEventInDb(db, {
       userId, actorId: userId, eventType: `${type}_created`, entityType: type, entityId: row.id,
@@ -2419,7 +2465,27 @@ export function genericCreate(userId, name, body, prefix, field = 'ownerId') {
 
 export function genericPatch(userId, name, itemId, body, field = 'ownerId') {
   return updateAuthorityDb(db => {
-    const row = patchOwned(db, name, itemId, userId, body, field)
+    const current = collection(db, name).find(item => item.id === itemId && (
+      item[field] === userId
+      || (name === 'organizationIntegrations' && organizationRecordVisible(db, item, userId))
+    ))
+    if (!current) return null
+    if (name === 'organizationIntegrations') {
+      const organizationId = organizationWriteContext(db, userId, current.organizationId || body.organizationId || null)
+      if (!organizationId) return null
+      body = { ...body, organizationId }
+    }
+    const payload = organizationResourcePayload(name, { ...current, ...body })
+    let row = null
+    if (name === 'organizationIntegrations') {
+      const records = collection(db, name)
+      const index = records.findIndex(item => item.id === itemId)
+      if (index === -1) return null
+      records[index] = { ...records[index], ...cleanObject(payload), id: records[index].id, updatedAt: nowIso() }
+      row = records[index]
+    } else {
+      row = patchOwned(db, name, itemId, userId, payload, field)
+    }
     if (!row) return null
     const type = name === 'opportunities' ? 'opportunity' : name === 'ventureIntakes' ? 'idea' : name === 'projects' ? 'project' : name
     appendPlatformEventInDb(db, {
@@ -2948,6 +3014,7 @@ export async function getCollaboratorScoresAsync(userId) {
 // window of other owners' public rows). A null scope keeps the snapshot path.
 function genericScopeOptions(userId, name, scope) {
   if (scope.public) return { userId, publicCollections: [{ name, ownerFields: scope.ownerFields }] }
+  if (scope.organizationScoped) return { userId, collections: [{ name, organizationScoped: true }] }
   return { userId, collections: [{ name, field: scope.field || 'ownerId' }] }
 }
 export async function genericListAsync(userId, name, scope = null) {

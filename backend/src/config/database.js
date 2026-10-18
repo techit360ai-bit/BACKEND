@@ -156,6 +156,7 @@ const INITIAL = {
   catchUpStates: [],
   adminUsers: [],
   adminTelemetrySnapshots: [],
+  adminAiControlAuditEvents: [],
   organizationMarketplace: [],
   organizationTalent: [],
   organizationSettings: [],

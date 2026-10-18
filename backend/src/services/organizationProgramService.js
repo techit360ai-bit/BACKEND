@@ -285,8 +285,31 @@ function convertHackathonTeamFromDb(db, userId, hackathonId, teamId, body) {
   if (!hackathon || !team) return { ok: false, error: 'hackathon_team_not_found' }
   const existing = collection(db, 'startupCandidates').find(row => row.hackathonId === hackathonId && row.teamId === teamId)
   if (existing) return { ok: true, idempotent: true, candidate: existing }
-  const candidate = { id: createId('startup_candidate'), organizationId: hackathon.organizationId || null, hackathonId, teamId, founderId: userId, name: text(body.name) || team.name || 'Hackathon startup candidate', status: 'candidate', consentAt: nowIso(), consentVersion: text(body.consentVersion) || 'v1', createdAt: nowIso(), updatedAt: nowIso() }
+  const latestScore = collection(db, 'hackathonScores').filter(row => row.teamId === teamId).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]
+  const candidate = {
+    id: createId('startup_candidate'),
+    organizationId: hackathon.organizationId || null,
+    hackathonId,
+    teamId,
+    founderId: userId,
+    name: text(body.name) || team.name || 'Hackathon startup candidate',
+    status: 'candidate',
+    consentAt: nowIso(),
+    consentVersion: text(body.consentVersion) || 'v1',
+    source: text(team.source) || 'hackathon',
+    sourceCommunity: text(team.sourceCommunity) || null,
+    shortlistedAt: team.shortlistedAt || null,
+    evaluationId: latestScore?.id || team.evaluationId || null,
+    programId: body.programId || team.programId || null,
+    cohortId: body.cohortId || team.cohortId || null,
+    projectId: body.projectId || null,
+    createdAt: nowIso(),
+    updatedAt: nowIso(),
+  }
   collection(db, 'startupCandidates').push(candidate)
+  team.startupCandidateId = candidate.id
+  team.evaluationId = candidate.evaluationId
+  team.updatedAt = nowIso()
   return { ok: true, candidate }
 }
 export function convertHackathonTeam(userId, hackathonId, teamId, body = {}) {

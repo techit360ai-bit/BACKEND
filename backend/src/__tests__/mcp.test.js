@@ -1,9 +1,23 @@
-import { describe, it, expect } from 'vitest'
+import { afterAll, describe, it, expect, vi } from 'vitest'
+import fs from 'node:fs'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
+
+const testDbPath = vi.hoisted(() => {
+  const path = `/tmp/techit-mcp-authority-${process.pid}-${Date.now()}.json`
+  process.env.DB_DRIVER = 'json'
+  process.env.JSON_DB_PATH = path
+  return path
+})
+
 import app, { mcpRoleFromClaim } from '../app.js'
+import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 
 const TEST_SECRET = 'test_jwt_secret_do_not_use_in_production'
+
+afterAll(() => {
+  fs.rmSync(testDbPath, { force: true })
+})
 
 function token({ sub = 'user-1', role = 'founder', workspaceId = `ws-${Date.now()}`, kind, toolsAllowed } = {}) {
   return jwt.sign({ sub, role, workspaceId, kind, toolsAllowed }, TEST_SECRET, { expiresIn: '1h' })
@@ -278,5 +292,62 @@ describe('/api/mcp tool authorization boundary', () => {
 
     expect(res.status).toBe(403)
     expect(res.body.error.code).toBe('permission_denied')
+  })
+
+  it('enforces organization software access policy and projects contribution evidence', async () => {
+    const suffix = Date.now()
+    const organizationId = `org-mcp-${suffix}`
+    const integrationId = `integration-mcp-${suffix}`
+    const member = `member-mcp-${suffix}`
+    const outsider = `outsider-mcp-${suffix}`
+    updateAuthorityDb(db => {
+      db.organizationIntegrations ||= []
+      db.organizationMemberships ||= []
+      db.organizationActivityEvents ||= []
+      db.organizationIntegrations.push({
+        id: integrationId,
+        organizationId,
+        pluginName: 'github',
+        resourceKind: 'software',
+        accessPolicy: 'organization',
+        integrationStatus: 'active',
+        externalId: 'partner-repo-tool',
+      })
+      db.organizationMemberships.push({
+        id: `membership-mcp-${suffix}`,
+        organizationId,
+        userId: member,
+        role: 'member',
+        status: 'active',
+      })
+      return true
+    })
+
+    const memberInvocation = await request(app)
+      .post('/api/mcp/invoke')
+      .set(auth(token({ sub: member, role: 'founder', workspaceId: `ws-org-mcp-${suffix}` })))
+      .send({ plugin: 'github', tool: 'list_repositories', params: { integrationId } })
+    expect(memberInvocation.status).toBe(200)
+    expect(memberInvocation.body.ok).toBe(true)
+
+    const outsiderInvocation = await request(app)
+      .post('/api/mcp/invoke')
+      .set(auth(token({ sub: outsider, role: 'founder', workspaceId: `ws-org-mcp-out-${suffix}` })))
+      .send({ plugin: 'github', tool: 'list_repositories', params: { integrationId } })
+    expect(outsiderInvocation.status).toBe(403)
+    expect(outsiderInvocation.body.error.code).toBe('permission_denied')
+    expect(outsiderInvocation.body.error.error).toBe('organization_membership_required')
+
+    const evidence = readAuthorityDb().organizationActivityEvents
+      .filter(row => row.integrationId === integrationId && row.type === 'software_contribution')
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]).toMatchObject({
+      organizationId,
+      sourceType: 'mcp',
+      pluginName: 'github',
+      tool: 'list_repositories',
+      userId: member,
+    })
+    expect(evidence[0]).not.toHaveProperty('data')
   })
 })
