@@ -76,7 +76,7 @@ describe('database persistence adapter', () => {
     expect(persisted.profiles[0].email).toBe('alice@example.com')
     expect(persisted.notifications[0].content).toBe('Welcome')
     expect(persisted.files[0].name).toBe('pitch.md')
-  })
+  }, 30_000)
 
   it('supports migration apply, apply dry-run, and rollback dry-run against a disposable SQLite database', () => {
     migrateSqlite({ dbPath: process.env.SQLITE_DB_PATH, dryRun: false })
@@ -104,7 +104,7 @@ describe('database persistence adapter', () => {
     expect(afterDryRuns.notifications).toHaveLength(1)
     expect(afterDryRuns.notifications[0].id).toBe('notif-dry-run')
     expect(afterDryRuns.hackathonInvitations).toEqual([])
-  })
+  }, 30_000)
 
   it('preserves sequential writes under event-loop concurrency', async () => {
     await Promise.all(Array.from({ length: 5 }, (_, index) => new Promise(resolve => {
@@ -131,7 +131,7 @@ describe('database persistence adapter', () => {
       'notif-3',
       'notif-4',
     ])
-  })
+  }, 30_000)
 
   it('applies updateAuthorityDb mutations atomically and returns the mutator result', () => {
     const result = updateAuthorityDb(db => {

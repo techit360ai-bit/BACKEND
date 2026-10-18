@@ -1,4 +1,4 @@
-import { academyProjectsAsync, getAcademyCurriculumAsync, triggerAcademyAdaptationAsync, startAcademyModuleAsync, heartbeatAcademyModuleAsync, saveAcademyReflectionAsync, scoreAcademyQuizAsync, saveAcademyExerciseAsync, applyAcademyExerciseReviewAsync, applyAcademyEnrichmentAsync, applyAcademyGeneratedLessonsAsync, completeAcademyModuleAsync, academyBadgesAsync } from '../services/academyService.js'
+import { academyProjectsAsync, getAcademyCurriculumAsync, triggerAcademyAdaptationAsync, startAcademyModuleAsync, heartbeatAcademyModuleAsync, saveAcademyReflectionAsync, scoreAcademyQuizAsync, saveAcademyExerciseAsync, applyAcademyExerciseReviewAsync, applyAcademyEnrichmentAsync, applyAcademyGeneratedLessonsAsync, completeAcademyModuleAsync, completeExternalAcademyResourceAsync, academyBadgesAsync } from '../services/academyService.js'
 import { requestAcademyEnrichment, requestAcademyExerciseReview, requestAcademyModuleGeneration } from '../services/aiRouterClient.js'
 import { intelligenceStateEnabled, intelligenceStateFallbackEnabled, syncIntelligenceState } from '../repositories/intelligenceStateRepository.js'
 
@@ -43,4 +43,5 @@ export async function exercise(req, res) {
   return send(res, await applyAcademyExerciseReviewAsync(req.user.id, req.params.curriculumId, req.params.moduleId, review))
 }
 export async function complete(req, res) { return send(res, await persisted(req, await completeAcademyModuleAsync(req.user.id, req.params.curriculumId, req.params.moduleId))) }
+export async function completeLearningPath(req, res) { return send(res, await persisted(req, await completeExternalAcademyResourceAsync(req.user.id, req.params.resourceId, req.body || {}))) }
 export async function badges(req, res) { return send(res, await academyBadgesAsync(req.user.id)) }

@@ -4,6 +4,7 @@ const db = {
   projects: [], contributions: [], workspaceTasks: [], mentorshipTasks: [], workspaceMembers: [], workspaces: [],
   projectAnalyses: [], ventureAnalyses: [], academyCurricula: [], academyModules: [], academyProgress: [],
   academyAssessments: [], academyEvents: [], academyBadges: [],
+  organizationMemberships: [], programEnrollments: [], organizationResources: [], organizationIntegrations: [], organizationActivityEvents: [],
 }
 
 vi.mock('../config/database.js', () => ({
@@ -21,6 +22,7 @@ const {
   applyAcademyExerciseReview,
   applyAcademyGeneratedLessons,
   completeAcademyModule,
+  completeExternalAcademyResource,
   triggerAcademyAdaptation,
 } = await import('../services/academyService.js')
 
@@ -92,6 +94,52 @@ describe('backend-owned TechIT Academy', () => {
     expect(reread.modules[0].content.overview).toBe('Project-specific draft')
     expect(reread.modules[0].content.caseStudies.length).toBeGreaterThanOrEqual(2)
     expect(reread.policy.aiAuthority).toBe(false)
+  })
+
+  it('exposes public partner learning paths and gates program paths by accepted enrollment', () => {
+    db.organizationResources.push(
+      { id: 'public-path', title: 'Public partner path', resourceKind: 'training', accessPolicy: 'public_free', status: 'active', organizationId: 'org-1' },
+      { id: 'program-path', title: 'Program path', resourceKind: 'training', accessPolicy: 'program', status: 'active', organizationId: 'org-1', programId: 'program-1' },
+    )
+    const publicPaths = academyProjects('learner-1', 'founder').learningPaths
+    expect(publicPaths.map(row => row.id)).toEqual(['public-path'])
+    expect(publicPaths[0].accessDecision).toMatchObject({ allowed: true, source: 'public_free', reason: 'public_free_access' })
+    expect(academyProjects('learner-1', 'explorer').learningPaths.map(row => row.id)).toEqual(['public-path'])
+
+    db.programEnrollments.push({ id: 'enrollment-1', founderId: 'learner-1', organizationId: 'org-1', programId: 'program-1', status: 'accepted' })
+    expect(academyProjects('learner-1', 'founder').learningPaths.map(row => row.id).sort()).toEqual(['program-path', 'public-path'])
+    expect(academyProjects('learner-2', 'founder').learningPaths.map(row => row.id)).toEqual(['public-path'])
+  })
+
+  it('returns a structured denial when a gated partner path is not authorized', () => {
+    db.organizationResources.push({ id: 'program-path', title: 'Program path', resourceKind: 'training', accessPolicy: 'program', status: 'active', organizationId: 'org-1', programId: 'program-1' })
+    const denied = completeExternalAcademyResource('learner-1', 'program-path', { evidence: 'not enrolled' })
+    expect(denied.ok).toBe(false)
+    expect(denied.status).toBe(403)
+    expect(denied.access).toMatchObject({
+      allowed: false,
+      source: 'program_enrollment',
+      reason: 'program_enrollment_required',
+      organizationId: 'org-1',
+      programId: 'program-1',
+    })
+  })
+
+  it('completes an external partner path idempotently with evidence', () => {
+    db.organizationResources.push({ id: 'public-path', title: 'Public partner path', resourceKind: 'training', accessPolicy: 'public_free', status: 'active', organizationId: 'org-1', externalId: 'partner-module-1' })
+    const first = completeExternalAcademyResource('learner-1', 'public-path', { evidence: 'completed the partner assessment' })
+    expect(first.ok).toBe(true)
+    expect(first.progress.status).toBe('complete')
+    expect(first.progress.sourceType).toBe('resource')
+    expect(first.event.type).toBe('external_module_completed')
+
+    const second = completeExternalAcademyResource('learner-1', 'public-path', { evidence: 'retry' })
+    expect(second.ok).toBe(true)
+    expect(second.idempotent).toBe(true)
+    expect(db.academyEvents.filter(row => row.resourceId === 'public-path')).toHaveLength(1)
+    const evidence = db.organizationActivityEvents.filter(row => row.type === 'partner_training_completed')
+    expect(evidence).toHaveLength(1)
+    expect(evidence[0]).toMatchObject({ organizationId: 'org-1', sourceType: 'academy', sourceId: 'public-path', userId: 'learner-1' })
   })
 
   it('exposes all 13 phases for mature projects with complete founder/collaborator tracks', () => {

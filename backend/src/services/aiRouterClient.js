@@ -122,28 +122,68 @@ async function requestJson(path, { method = 'POST', token, body, headers = {}, t
   }
 }
 
-export async function requestAdminRouterTelemetry() {
+function adminRouterServiceConfig() {
   const secret = process.env.ADMIN_AI_ROUTER_TELEMETRY_SECRET || ''
   const serviceId = process.env.ADMIN_AI_ROUTER_TELEMETRY_SERVICE_ID || 'platform-backend'
+  return { secret, serviceId }
+}
+
+async function requestAdminRouter(path, { method = 'GET', body } = {}) {
+  const { secret, serviceId } = adminRouterServiceConfig()
   if (!secret) return { ok: false, status: 503, error: 'admin_telemetry_service_not_configured' }
-  const path = '/internal/admin/telemetry'
+  const payload = body === undefined ? '' : JSON.stringify(body || {})
   const timestamp = String(Math.floor(Date.now() / 1000))
-  const canonical = `${timestamp}.GET.${path}.`
+  // FastAPI's request.url.path excludes the query string; sign the same value
+  // while still sending the query to the Router.
+  const canonicalPath = path.split('?')[0]
+  const canonical = `${timestamp}.${method}.${canonicalPath}.${payload}`
   const signature = crypto.createHmac('sha256', secret).update(canonical).digest('hex')
   try {
     const response = await fetch(`${AI_ROUTER_URL}${path}`, {
+      method,
       headers: {
         'X-TechIT-Service-Id': serviceId,
         'X-TechIT-Timestamp': timestamp,
         'X-TechIT-Signature': signature,
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
+      ...(body === undefined ? {} : { body: payload }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
-    if (!response.ok) return { ok: false, status: response.status, error: 'ai_router_admin_telemetry_rejected' }
-    return { ok: true, status: 200, telemetry: await response.json() }
+    if (!response.ok) {
+      let detail = null
+      try { detail = await response.json() } catch { detail = null }
+      return { ok: false, status: response.status, error: 'ai_router_admin_request_rejected', detail }
+    }
+    return { ok: true, status: response.status, data: await response.json() }
   } catch {
-    return { ok: false, status: 502, error: 'ai_router_admin_telemetry_unavailable' }
+    return { ok: false, status: 502, error: 'ai_router_admin_request_unavailable' }
   }
+}
+
+export async function requestAdminRouterTelemetry() {
+  const result = await requestAdminRouter('/internal/admin/telemetry')
+  if (!result.ok) return result
+  return { ...result, telemetry: result.data }
+}
+
+export async function requestAdminProviderStatus({ refreshCredentials = false } = {}) {
+  const query = refreshCredentials ? '?refresh_credentials=true' : ''
+  return requestAdminRouter(`/internal/admin/provider-status${query}`)
+}
+
+export async function requestAdminProviderRefresh(input = {}) {
+  return requestAdminRouter('/internal/admin/provider-refresh', { method: 'POST', body: input })
+}
+
+export async function updateAdminProviderPolicy(input = {}) {
+  return requestAdminRouter('/internal/admin/provider-policy', { method: 'PATCH', body: input })
+}
+
+export async function updateAdminModelLease(providerId, modelId, input = {}) {
+  if (!providerId || !modelId) return { ok: false, status: 400, error: 'provider_and_model_required' }
+  const path = `/internal/admin/model-leases/${encodeURIComponent(providerId)}/${encodeURIComponent(modelId)}`
+  return requestAdminRouter(path, { method: 'PATCH', body: input })
 }
 
 /**

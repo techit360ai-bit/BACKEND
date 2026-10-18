@@ -3,6 +3,7 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso } from '../utils/api.js'
 import { academyModulesForRole, ACADEMY_CATALOG_VERSION } from './academyCatalog.js'
 import { academyEnabled, academyFallbackEnabled, readAcademySources, applyAcademyMutation } from '../repositories/academyRepository.js'
+import { organizationResourceAccess } from './organizationResourcePolicy.js'
 
 const STAGE_ORDER = ['idea', 'validation', 'mvp', 'beta', 'launch', 'launched', 'growth', 'scaling']
 const DONE = new Set(['completed', 'complete', 'done', 'shipped', 'resolved'])
@@ -29,10 +30,50 @@ function authorizedProject(db, userId, role, projectId) {
   return null
 }
 
+function learningResourceView(db, userId, row, sourceType) {
+  const accessDecision = organizationResourceAccess(db, userId, row)
+  if (!accessDecision.allowed) return null
+  const resourceKind = String(row.resourceKind || row.kind || (sourceType === 'integration' ? 'software' : 'training')).toLowerCase()
+  if (resourceKind !== 'training') return null
+  return {
+    id: row.id,
+    title: row.title || row.name || row.pluginName || 'Partner learning path',
+    description: row.description || row.summary || null,
+    url: row.url || null,
+    organizationId: row.organizationId || null,
+    programId: row.programId || null,
+    cohortId: row.cohortId || null,
+    externalId: row.externalId || row.pluginName || row.id,
+    resourceId: row.resourceId || row.id,
+    sourceType,
+    resourceKind,
+    accessPolicy: row.accessPolicy || 'organization',
+    audiencePolicy: row.audiencePolicy || row.accessPolicy || 'organization',
+    accessDecision,
+    integrationId: row.integrationId || null,
+    completionMode: row.completionMode || 'native',
+    completionEvent: row.completionEvent || null,
+    expiresAt: row.expiresAt || null,
+    visibility: row.visibility || 'organization',
+    pluginName: row.pluginName || null,
+    pluginVersion: row.pluginVersion || null,
+    integrationStatus: row.integrationStatus || row.status || 'active',
+    lastVerifiedAt: row.lastVerifiedAt || null,
+    publishedAt: row.publishedAt || row.createdAt || null,
+  }
+}
+
+function academyLearningPathsFromDb(db, userId) {
+  return [
+    ...rows(db, 'organizationResources').map(row => learningResourceView(db, userId, row, 'resource')),
+    ...rows(db, 'organizationIntegrations').map(row => learningResourceView(db, userId, row, 'integration')),
+  ].filter(Boolean).sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')))
+}
+
 function academyProjectsFromDb(db, userId, rawRole) {
   const role = roleName(rawRole)
-  if (!['founder', 'collaborator'].includes(role)) return { ok: true, projects: [] }
-  return { ok: true, projects: rows(db, 'projects').filter(project => authorizedProject(db, userId, role, project.id)).map(project => ({ id: project.id, name: nameOf(project), stage: stageOf(project), industry: project.industry || null, updatedAt: project.updatedAt || project.createdAt || null })) }
+  const projects = !['founder', 'collaborator'].includes(role) ? [] : rows(db, 'projects').filter(project => authorizedProject(db, userId, role, project.id)).map(project => ({ id: project.id, name: nameOf(project), stage: stageOf(project), industry: project.industry || null, updatedAt: project.updatedAt || project.createdAt || null }))
+  return { ok: true, projects, learningPaths: academyLearningPathsFromDb(db, userId) }
 }
 
 export function academyProjects(userId, rawRole) { return academyProjectsFromDb(readAuthorityDb(), userId, rawRole) }
@@ -399,6 +440,103 @@ export async function academyBadgesAsync(userId) {
     console.error(JSON.stringify({ event: 'academy_read_failed', operation: 'badges', error: error.message }))
     if (!academyFallbackEnabled()) throw error
     return academyBadges(userId)
+  }
+}
+
+function completeExternalAcademyResourceFromDb(db, userId, resourceId, body = {}) {
+  const resource = [...rows(db, 'organizationResources'), ...rows(db, 'organizationIntegrations')].find(row => row.id === resourceId)
+  if (!resource) return { ok: false, status: 404, error: 'learning_path_not_found' }
+  const sourceType = rows(db, 'organizationIntegrations').includes(resource) ? 'integration' : 'resource'
+  const view = learningResourceView(db, userId, resource, sourceType)
+  if (!view) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'learning_path_access_denied',
+      access: organizationResourceAccess(db, userId, resource),
+    }
+  }
+  const contentVersion = String(resource.pluginVersion || resource.contentVersion || resource.updatedAt || resource.externalId || resource.id)
+  let progress = rows(db, 'academyProgress').find(row => row.userId === userId && row.resourceId === resource.id && row.sourceType === view.sourceType)
+  if (progress?.status === 'complete') return { ok: true, idempotent: true, progress, learningPath: view }
+  if (!progress) {
+    progress = {
+      id: createId('academy_progress'),
+      userId,
+      projectId: null,
+      curriculumId: null,
+      moduleId: `partner:${resource.id}`,
+      contentVersion,
+      sourceType: view.sourceType,
+      sourceId: resource.id,
+      resourceId: resource.id,
+      externalId: view.externalId,
+      organizationId: view.organizationId,
+      programId: view.programId,
+      cohortId: view.cohortId,
+      status: 'in_progress',
+      engagementSeconds: 0,
+      createdAt: nowIso(),
+    }
+    rows(db, 'academyProgress').push(progress)
+  }
+  progress.status = 'complete'
+  progress.completedAt = nowIso()
+  progress.updatedAt = progress.completedAt
+  progress.completionEvidenceHash = digest({
+    userId,
+    resourceId: resource.id,
+    externalId: view.externalId,
+    evidence: body.evidence || null,
+    completedAt: progress.completedAt,
+  })
+  const event = {
+    id: createId('academy_event'),
+    type: 'external_module_completed',
+    userId,
+    projectId: null,
+    curriculumId: null,
+    moduleId: progress.moduleId,
+    sourceType: view.sourceType,
+    externalId: view.externalId,
+    resourceId: resource.id,
+    organizationId: view.organizationId,
+    metadata: { evidenceHash: progress.completionEvidenceHash, programId: view.programId, cohortId: view.cohortId },
+    createdAt: nowIso(),
+  }
+  rows(db, 'academyEvents').push(event)
+  if (view.organizationId) {
+    rows(db, 'organizationActivityEvents').push({
+      id: createId('org_activity'),
+      organizationId: view.organizationId,
+      type: 'partner_training_completed',
+      sourceType: 'academy',
+      sourceId: resource.id,
+      resourceId: resource.id,
+      externalId: view.externalId,
+      programId: view.programId,
+      cohortId: view.cohortId,
+      userId,
+      message: `Partner training completed: ${view.title}`,
+      evidence: [{ type: 'academy_event', id: event.id, evidenceHash: progress.completionEvidenceHash }],
+      createdAt: event.createdAt,
+    })
+  }
+  return { ok: true, progress, event, learningPath: view }
+}
+
+export function completeExternalAcademyResource(userId, resourceId, body = {}) {
+  return updateAuthorityDb(db => completeExternalAcademyResourceFromDb(db, userId, resourceId, body))
+}
+
+export async function completeExternalAcademyResourceAsync(userId, resourceId, body = {}) {
+  if (!academyEnabled()) return completeExternalAcademyResource(userId, resourceId, body)
+  try {
+    return await applyAcademyMutation(userId, {}, db => completeExternalAcademyResourceFromDb(db, userId, resourceId, body))
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'academy_write_failed', operation: 'external_completion', error: error.message }))
+    if (!academyFallbackEnabled()) throw error
+    return completeExternalAcademyResource(userId, resourceId, body)
   }
 }
 

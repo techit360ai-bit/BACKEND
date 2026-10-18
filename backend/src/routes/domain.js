@@ -133,6 +133,12 @@ function bindOwnedCollection(collectionName, responseKey, itemKey, itemPrefix) {
   return bindCollection(collectionName, responseKey, itemKey, itemPrefix, { field: 'ownerId' })
 }
 
+// Organization-scoped collections accept caller-owned legacy rows plus rows
+// belonging to an organization in which the caller has an active membership.
+function bindOrganizationCollection(collectionName, responseKey, itemKey, itemPrefix) {
+  return bindCollection(collectionName, responseKey, itemKey, itemPrefix, { field: 'ownerId', organizationScoped: true })
+}
+
 // Public surfaces: the store loads the caller's own rows plus a bounded recent
 // window of other owners' public rows (see `domainRepository.buildDomainDb`).
 function bindPublicCollection(collectionName, responseKey, itemKey, itemPrefix, ownerFields) {
@@ -198,9 +204,9 @@ router.patch('/organization/talent/:id', requireCapability('organization.recruit
 router.get('/organization/settings', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericListGet)
 router.post('/organization/settings', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericCreatePost)
 router.patch('/organization/settings/:id', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationSettings', 'settings', 'setting', 'orgsetting'), genericPatchItem)
-router.get('/organization/integrations', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericListGet)
-router.post('/organization/integrations', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericCreatePost)
-router.patch('/organization/integrations/:id', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericPatchItem)
+router.get('/organization/integrations', requireCapability('organization.profile.manage'), bindOrganizationCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericListGet)
+router.post('/organization/integrations', requireCapability('organization.profile.manage'), bindOrganizationCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericCreatePost)
+router.patch('/organization/integrations/:id', requireCapability('organization.profile.manage'), bindOrganizationCollection('organizationIntegrations', 'integrations', 'integration', 'integration'), genericPatchItem)
 router.get('/organization/programs', requireRole('organization', 'organisation'), bindOwnedCollection('organizationPrograms', 'programs', 'program', 'program'), genericListGet)
 router.post('/organization/programs', requireCapability('organization.profile.manage'), bindOwnedCollection('organizationPrograms', 'programs', 'program', 'program'), genericCreatePost)
 // Phase O: invite a founder to a program and read the enrolled roster.

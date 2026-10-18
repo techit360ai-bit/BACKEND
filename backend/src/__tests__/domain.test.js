@@ -43,6 +43,11 @@ function makeDb(overrides = {}) {
     payouts: [],
     contributions: [],
     organizationDashboards: [],
+    organizations: [],
+    organizationMemberships: [],
+    activeContexts: [],
+    organizationIntegrations: [],
+    organizationActivityEvents: [],
     investorWatchlists: [],
     dealFlowSnapshots: [],
     capitalPools: [],
@@ -221,6 +226,44 @@ describe('domain live-data endpoints', () => {
     expect(db.programEnrollments[0].status).toBe('accepted')
   })
 
+  it('carries discovery and evaluation provenance through program enrollment', async () => {
+    const db = makeDb()
+    db.organizationPrograms = [{ id: 'prog1', ownerId: 'user-uuid-1', name: 'Provenance Cohort', cohort: '2026-B' }]
+    db.projects = [{ id: 'p-f1', ownerId: 'user-uuid-2', title: 'Founder Two Venture', stage: 'prototype' }]
+    readAuthorityDb.mockReturnValue(db)
+
+    const invite = await request(app)
+      .post('/api/domain/organization/programs/prog1/invitations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({
+        email: 'bob@example.com',
+        projectId: 'p-f1',
+        source: 'community_discovery',
+        sourceCommunity: 'campus-builders',
+        shortlistedAt: '2026-10-01T00:00:00.000Z',
+        evaluationId: 'eval-1',
+      })
+
+    expect(invite.status).toBe(201)
+    expect(invite.body.enrollment).toMatchObject({
+      source: 'community_discovery',
+      sourceCommunity: 'campus-builders',
+      shortlistedAt: '2026-10-01T00:00:00.000Z',
+      evaluationId: 'eval-1',
+    })
+    const accept = await request(app)
+      .post('/api/domain/organization/enrollments/accept')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2')}`)
+      .send({ token: invite.body.enrollment.token })
+    expect(accept.status).toBe(200)
+    expect(db.programEnrollments[0]).toMatchObject({
+      status: 'accepted',
+      sourceCommunity: 'campus-builders',
+      evaluationId: 'eval-1',
+      shortlistedAt: '2026-10-01T00:00:00.000Z',
+    })
+  })
+
   it('persists organization projects in an organization-owned scope', async () => {
     const db = makeDb()
     readAuthorityDb.mockReturnValue(db)
@@ -264,6 +307,64 @@ describe('domain live-data endpoints', () => {
     expect(own.body.projects).toHaveLength(1)
     expect(other.body.projects).toEqual([])
     expect(founder.status).toBe(403)
+  })
+
+  it('scopes integration records to active organization members while preserving legacy owner rows', async () => {
+    const db = makeDb({
+      profiles: [
+        { ...makeProfile('user-uuid-1', 'alice@example.com', 'organization'), isOnboarded: true },
+        { ...makeProfile('user-uuid-2', 'bob@example.com', 'organization'), isOnboarded: true },
+        { ...makeProfile('user-uuid-3', 'carol@example.com', 'organization'), isOnboarded: true },
+      ],
+      organizationMemberships: [{ id: 'membership-1', userId: 'user-uuid-2', organizationId: 'user-uuid-1', role: 'admin', status: 'active' }],
+      organizationIntegrations: [{ id: 'legacy-integration', ownerId: 'user-uuid-1', pluginName: 'legacy-tool', resourceKind: 'software' }],
+    })
+    readAuthorityDb.mockReturnValue(db)
+
+    const create = await request(app)
+      .post('/api/domain/organization/integrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+      .send({
+        pluginName: 'partner-learning',
+        pluginVersion: '1.2.0',
+        resourceKind: 'training',
+        audiencePolicy: 'organization',
+        completionMode: 'webhook',
+        completionEvent: 'training.completed',
+        apiKey: 'must-not-be-persisted',
+      })
+
+    expect(create.status).toBe(201)
+    expect(create.body.integration).toMatchObject({
+      organizationId: 'user-uuid-1',
+      resourceKind: 'training',
+      completionMode: 'webhook',
+      completionEvent: 'training.completed',
+    })
+    expect(create.body.integration.apiKey).toBeUndefined()
+    expect(db.organizationIntegrations.find(row => row.id === create.body.integration.id).apiKey).toBeUndefined()
+
+    const owner = await request(app)
+      .get('/api/domain/organization/integrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-1', 'organization')}`)
+    const member = await request(app)
+      .get('/api/domain/organization/integrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-2', 'organization')}`)
+    const outsider = await request(app)
+      .get('/api/domain/organization/integrations')
+      .set('Authorization', `Bearer ${validToken('user-uuid-3', 'organization')}`)
+
+    expect(owner.body.integrations.map(row => row.id).sort()).toEqual([create.body.integration.id, 'legacy-integration'].sort())
+    expect(member.body.integrations.map(row => row.id)).toEqual([create.body.integration.id])
+    expect(outsider.body.integrations).toEqual([])
+
+    const update = await request(app)
+      .patch(`/api/domain/organization/integrations/${create.body.integration.id}`)
+      .set('Authorization', `Bearer ${validToken('user-uuid-2', 'organization')}`)
+      .send({ integrationStatus: 'verified', lastVerifiedAt: '2026-10-18T00:00:00.000Z' })
+    expect(update.status).toBe(200)
+    expect(update.body.integration.integrationStatus).toBe('verified')
+    expect(update.body.integration.organizationId).toBe('user-uuid-1')
   })
 
   it('aggregates cohort health from real org projects with derived bands and alerts', async () => {

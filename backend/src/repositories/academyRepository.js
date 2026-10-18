@@ -13,6 +13,7 @@ import {
   upsertRecord,
   listRecordsForOwner,
   listRecordsByField,
+  listRecords,
 } from './platformCollectionRepository.js'
 
 // Academy collections this domain writes, with the owner-bearing field each uses.
@@ -68,6 +69,10 @@ async function buildAcademyDb(client, userId, projectId = null, curriculumId = n
   for (const [name, ownerFields] of Object.entries(PROJECT_CONTEXT)) {
     db[name] = await listRecordsForOwner(client, name, userId, { ownerFields })
   }
+  db.organizationMemberships = await listRecordsByField(client, 'organizationMemberships', 'userId', userId)
+  db.programEnrollments = await listRecordsByField(client, 'programEnrollments', 'founderId', userId)
+  db.organizationResources = await listRecords(client, 'organizationResources')
+  db.organizationIntegrations = await listRecords(client, 'organizationIntegrations')
   // Collaborator workspaces are memberships the user does not own; resolve them
   // so project access checks can follow workspaceMembers -> workspaces -> project.
   for (const member of db.workspaceMembers) {

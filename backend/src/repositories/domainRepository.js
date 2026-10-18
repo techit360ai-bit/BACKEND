@@ -112,6 +112,7 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   db.users = []
   db.workspaceMembers = []
   db.projects = []
+  db.organizationMemberships = []
 
   if (userId && endorsements) {
     mergeById(db.endorsements, await listRecordsForOwner(client, 'endorsements', userId, { ownerFields: OWNER_FIELDS.endorsements }))
@@ -281,6 +282,20 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   for (const entry of collections) {
     const name = typeof entry === 'string' ? entry : entry.name
     if (!name) continue
+    if (typeof entry === 'object' && entry.organizationScoped) {
+      mergeById(db.organizationMemberships, await listRecordsForOwner(client, 'organizationMemberships', userId, { ownerFields: ['userId'] }))
+      // The legacy organization owner id is itself a valid organization scope
+      // even when no membership row was created during onboarding.
+      const organizationIds = [...new Set([userId, ...db.organizationMemberships
+        .filter(row => row.status === 'active' && row.organizationId)
+        .map(row => row.organizationId)])].filter(Boolean)
+      if (organizationIds.length) {
+        mergeById(db[name], await listRecordsByFieldIn(client, name, 'organizationId', organizationIds))
+      }
+      const ownedLegacy = await listRecordsForOwner(client, name, userId, { ownerFields: ['ownerId'] })
+      mergeById(db[name], ownedLegacy.filter(row => !row.organizationId))
+      continue
+    }
     if (workspaceId) {
       mergeById(db[name], await listRecordsByFieldIn(client, name, 'workspaceId', [workspaceId]))
       continue

@@ -3,6 +3,11 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { organizationBillingEnabled, applyOrganizationEntitlementStore } from '../repositories/organizationBillingRepository.js'
 
 const ACTIVE_STATUSES = new Set(['active', 'trialing', 'grace_period'])
+const ACCESS_POLICIES = new Set(['organization', 'program', 'cohort', 'public_free', 'invite'])
+const CONFIGURABLE_LIMITS = new Set([
+  'programs', 'cohorts', 'hackathons', 'startups', 'participants', 'projects',
+  'organizers', 'judges', 'mentors', 'reports', 'storageBytes',
+])
 
 export const ORGANIZATION_CAPABILITIES = Object.freeze({
   ORGANIZATION_PROFILE: { access: 'free' },
@@ -42,6 +47,29 @@ const collection = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; 
 const text = value => typeof value === 'string' ? value.trim() : ''
 const numeric = value => Number.isFinite(Number(value)) ? Number(value) : 0
 const active = row => ACTIVE_STATUSES.has(String(row?.status || '').toLowerCase()) && (!row.expiresAt || new Date(row.expiresAt).getTime() > Date.now())
+
+function normalizeLimits(input = {}, current = {}) {
+  const limits = { ...COMMUNITY_HOST_LIMITS, ...(current || {}) }
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!CONFIGURABLE_LIMITS.has(key)) continue
+    if (value === null || value === '') {
+      limits[key] = null
+      continue
+    }
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < 0) continue
+    limits[key] = Math.floor(parsed)
+  }
+  return limits
+}
+
+function normalizeCapabilities(input, current = {}) {
+  const capabilities = { ...(current || {}) }
+  for (const [key, value] of Object.entries(input || {})) {
+    if (key in ORGANIZATION_CAPABILITIES) capabilities[key] = Boolean(value)
+  }
+  return capabilities
+}
 
 function organizationExists(db, organizationId) {
   return collection(db, 'organizations').some(row => row.id === organizationId) ||
@@ -114,6 +142,32 @@ export function evaluateOrganizationEntitlement(organizationId, capability, { db
   return { allowed: true, code: 'allowed', capability, organizationId, entitlement, capacity }
 }
 
+export function listOrganizationEntitlements({ organizationId = null } = {}, db = readAuthorityDb()) {
+  if (organizationId && !organizationExists(db, organizationId)) {
+    return { ok: false, status: 404, error: 'organization_not_found' }
+  }
+  const ids = organizationId
+    ? [organizationId]
+    : [...new Set([
+      ...collection(db, 'organizations').map(row => row.id),
+      ...collection(db, 'organizationMemberships').map(row => row.organizationId),
+      ...collection(db, 'organizationEntitlements').map(row => row.organizationId),
+      ...collection(db, 'organizationDashboards').map(row => row.ownerId),
+    ].filter(Boolean))]
+  const organizations = ids.map(id => {
+    const row = collection(db, 'organizations').find(item => item.id === id)
+    return { id, name: row?.name || row?.title || id }
+  })
+  const entitlements = ids.map(id => organizationEntitlement(id, db)).filter(Boolean)
+  return {
+    ok: true,
+    organizations,
+    entitlements,
+    capabilities: Object.keys(ORGANIZATION_CAPABILITIES),
+    limits: [...CONFIGURABLE_LIMITS],
+  }
+}
+
 export function saveOrganizationEntitlement(adminId, input = {}) {
   const organizationId = text(input.organizationId)
   if (!organizationId) return { ok: false, error: 'organization_id_required' }
@@ -121,21 +175,43 @@ export function saveOrganizationEntitlement(adminId, input = {}) {
   return updateAuthorityDb(db => {
     const entitlements = collection(db, 'organizationEntitlements')
     const row = entitlements.find(item => item.id === input.id && item.organizationId === organizationId) || { id: input.id || createId('org_entitlement'), organizationId, createdAt: nowIso() }
+    const before = row.id && entitlements.includes(row) ? { ...row } : null
+    const currentVersion = Number(row.version || 1)
+    if (input.expectedVersion !== undefined && input.expectedVersion !== null && Number(input.expectedVersion) !== currentVersion) {
+      return { ok: false, status: 409, error: 'stale_entitlement_version', entitlement: organizationEntitlement(organizationId, db) }
+    }
+    const accessPolicy = text(input.accessPolicy)
+    if (accessPolicy && !ACCESS_POLICIES.has(accessPolicy)) return { ok: false, status: 400, error: 'invalid_access_policy' }
     Object.assign(row, {
       plan: text(input.plan) || row.plan || 'program_pass',
       source: text(input.source) || row.source || 'admin_grant',
       status: text(input.status) || row.status || 'active',
       startsAt: input.startsAt || row.startsAt || nowIso(),
       expiresAt: input.expiresAt ?? row.expiresAt ?? null,
-      capabilities: { ...(row.capabilities || {}), ...(input.capabilities || {}) },
-      limits: { ...COMMUNITY_HOST_LIMITS, ...(row.limits || {}), ...(input.limits || {}) },
+      capabilities: normalizeCapabilities(input.capabilities, row.capabilities),
+      limits: normalizeLimits(input.limits, row.limits),
+      accessPolicy: accessPolicy || row.accessPolicy || 'organization',
+      sponsorAccess: input.sponsorAccess === undefined ? Boolean(row.sponsorAccess) : Boolean(input.sponsorAccess),
+      partnerResourceAccess: input.partnerResourceAccess === undefined ? Boolean(row.partnerResourceAccess) : Boolean(input.partnerResourceAccess),
       paymentIntentId: input.paymentIntentId || row.paymentIntentId || null,
       providerReference: input.providerReference || row.providerReference || null,
       createdBy: input.createdBy || row.createdBy || adminId,
+      version: currentVersion + 1,
       updatedAt: nowIso(),
     })
     if (!entitlements.includes(row)) entitlements.push(row)
-    collection(db, 'organizationAuditEvents').push({ id: createId('org_audit'), organizationId, actorId: adminId, action: 'entitlement_updated', resourceType: 'organization_entitlement', resourceId: row.id, metadata: { plan: row.plan, source: row.source }, createdAt: nowIso() })
+    collection(db, 'organizationAuditEvents').push({
+      id: createId('org_audit'),
+      organizationId,
+      actorId: adminId,
+      action: 'entitlement_updated',
+      resourceType: 'organization_entitlement',
+      resourceId: row.id,
+      previousState: before,
+      newState: { ...row },
+      metadata: { plan: row.plan, source: row.source, reason: String(input.reason || '').slice(0, 500) },
+      createdAt: nowIso(),
+    })
     return { ok: true, entitlement: organizationEntitlement(organizationId, db) }
   })
 }

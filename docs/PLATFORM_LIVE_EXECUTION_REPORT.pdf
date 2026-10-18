@@ -1,0 +1,326 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 5 >>
+endobj
+5 0 obj
+<< /Length 5345 >>
+stream
+BT /F2 17 Tf 54 748.0 Td (TechIT Network - Platform Live-Execution Report \(v3\)) Tj ET
+BT /F1 9.5 Tf 54 721.0 Td (Full coverage: the approved plan \(R, E, L, M, O, P, C, X\), the original founder questions, the 1M-user) Tj ET
+BT /F1 9.5 Tf 54 708.8 Td (scalability contract, the per-phase definition-of-done, what is left, the deployment recommendation, and) Tj ET
+BT /F1 9.5 Tf 54 696.6 Td (answers to the four live deployment review questions.) Tj ET
+BT /F1 9.5 Tf 54 680.4 Td (Prepared: 2026-10-14. Repositories: ai-router, BACKEND, new-frontend.) Tj ET
+BT /F1 9.5 Tf 54 664.2 Td (v3 closes the three items v2 left open - E peer/cohort comparison, O org program/cohort execution) Tj ET
+BT /F1 9.5 Tf 54 652.0 Td (scoping, and the remaining X mock fallbacks - and adds a one-line fix for the /refresh rate-limit) Tj ET
+BT /F1 9.5 Tf 54 639.8 Td (lockout found during review.) Tj ET
+BT /F2 13.5 Tf 54 617.6 Td (1. Executive summary) Tj ET
+BT /F1 9.5 Tf 54 594.1 Td (The program makes one Execution Ledger the single source of truth, then adds thin lifecycle, consent and) Tj ET
+BT /F1 9.5 Tf 54 581.9 Td (delivery layers on top. Eight phases were planned and all eight are now fully done \(R, E, L, M, O, P, C,) Tj ET
+BT /F1 9.5 Tf 54 569.7 Td (X\):) Tj ET
+BT /F1 9.5 Tf 54 553.5 Td (- Phase E - execution intelligence now covers all three founder asks: vs. your own) Tj ET
+BT /F1 9.5 Tf 54 540.3 Td (start, vs. similar startups, and cumulative improvement.) Tj ET
+BT /F1 9.5 Tf 54 524.1 Td (- Phase O - the organization dashboard reads execution intelligence scoped by the) Tj ET
+BT /F1 9.5 Tf 54 510.9 Td (caller's organization, and a selected program/cohort, not the caller's own workspace.) Tj ET
+BT /F1 9.5 Tf 54 494.7 Td (- Phase X - no silent mock fallback remains in any frontend API client.) Tj ET
+BT /F1 9.5 Tf 54 481.5 Td (Everything below is committed and pushed. This v3 replaces v2 \(which in turn replaced the first report\).) Tj ET
+BT /F2 13.5 Tf 54 459.3 Td (2. Traceability: original founder questions -> status) Tj ET
+BT /F1 9.5 Tf 54 435.8 Td (- AI router allows only OpenAI + Anthropic keys -> Phase R -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 422.6 Td (- All models \(free or paid\) must make real API calls -> Phase R -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 409.4 Td (- Subscribers get free publicity of a completed product -> Phase P -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 396.2 Td (- Investor signs consent to keep founder data private -> Phase C -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 383.0 Td (- Execution intelligence: vs. start / vs. similar startups / cumulative -> Phase E -> DONE \(baseline) Tj ET
+BT /F1 9.5 Tf 54 370.8 Td (    delta, anonymous industry+stage cohort percentile, cumulative totals\).) Tj ET
+BT /F1 9.5 Tf 54 357.6 Td (- Institutions/incubators monitor startups in their program -> Phases O + M -> DONE) Tj ET
+BT /F1 9.5 Tf 54 345.4 Td (    \(invites/onboarding/roster + per-program/cohort execution scoping on the org dashboard + platform) Tj ET
+BT /F1 9.5 Tf 54 333.2 Td (    metrics\).) Tj ET
+BT /F1 9.5 Tf 54 320.0 Td (- Preserve evidence across idea -> collab -> roadmap -> prototype -> Phase E/L ledger -> DONE) Tj ET
+BT /F1 9.5 Tf 54 307.8 Td (    \(append-only execution events + lifecycle derived from them\).) Tj ET
+BT /F1 9.5 Tf 54 294.6 Td (- FastTrack codebase/prototype continues in the workspace -> Phase L -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 281.4 Td (- Execution intelligence visualised, subscriber-gated -> Phase E -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 268.2 Td (- Build -> launch transition tracked automatically -> Phase L -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 255.0 Td (- FastTrack MVP vs already-launched detection -> Phase L -> DONE \(auto-infer + explicit override\).) Tj ET
+BT /F1 9.5 Tf 54 241.8 Td (- Org programs: invite/onboard/track; other org UI without real backend -> Phase O -> DONE for) Tj ET
+BT /F1 9.5 Tf 54 229.6 Td (    programs/invites/roster/scoping; remaining generic-CRUD org pages are a product decision \(section) Tj ET
+BT /F1 9.5 Tf 54 217.4 Td (    6\), they are backed by live rows, not fake data.) Tj ET
+BT /F1 9.5 Tf 54 204.2 Td (- All AI models used via routing, not only OpenAI/Anthropic -> Phase R -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 191.0 Td (- Track startups/MVPs/prototypes/milestones + surface on dashboards -> Phase M -> DONE.) Tj ET
+BT /F1 9.5 Tf 54 177.8 Td (Plus: everything live, real, functional \(no mocks\) -> Phase X -> DONE.) Tj ET
+BT /F2 13.5 Tf 54 155.6 Td (3. Phase detail) Tj ET
+BT /F2 11.5 Tf 54 126.1 Td (R - Router: all providers real and validated \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 107.6 Td (Registry declares 9 providers with real adapters, but credential health/readiness covered only OpenAI +) Tj ET
+BT /F1 9.5 Tf 54 95.4 Td (Anthropic and the route chain appended unconfigured providers. Delivered: provider credential health) Tj ET
+BT /F1 9.5 Tf 54 83.2 Td (generalised to every registry provider \(base_url + headers\), optional providers probed only when a key) Tj ET
+BT /F1 9.5 Tf 54 71.0 Td (is present; readiness checks every configured provider \(OpenAI/Anthropic stay mandatory\); select_chain) Tj ET
+BT /F1 9.5 Tf 54 58.8 Td (excludes unconfigured providers so a task never fires at a keyless model. Files: provider_key_health.py,) Tj ET
+BT /F1 9.5 Tf 54 46.6 Td (routing_engine.py, .env.example, tests.) Tj ET
+BT /F1 8 Tf 522 30 Td (Page 1 of 5) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 6244 >>
+stream
+BT /F2 11.5 Tf 54 738.0 Td (E - Execution Ledger + Intelligence depth \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 719.5 Td (Delivered: the canonical execution projection adds lifetime, first-week baseline, window-vs-baseline) Tj ET
+BT /F1 9.5 Tf 54 707.3 Td (delta, a per-day sparkline and cumulative totals, all computed from the same persisted events \(no second) Tj ET
+BT /F1 9.5 Tf 54 695.1 Td (engine\). v3 adds the plan's cohort block: an ANONYMOUS comparison of projects in the SAME industry AND) Tj ET
+BT /F1 9.5 Tf 54 682.9 Td (stage, metric = completed milestones, withheld until the cohort has at least 5 peers \(COHORT_MIN_SIZE =) Tj ET
+BT /F1 9.5 Tf 54 670.7 Td (5\) so no individual peer is identifiable. It returns the founder's value, percentile and cohort median.) Tj ET
+BT /F1 9.5 Tf 54 658.5 Td (Frontend: subscriber-gated visual progress \(baseline vs now, sparkline, cumulative\) plus "Ahead of N% of) Tj ET
+BT /F1 9.5 Tf 54 646.3 Td (M similar industry/stage startups". Files: executionIntelligenceService.js \(cohortFor\),) Tj ET
+BT /F1 9.5 Tf 54 634.1 Td (executionScopeGuard.test.js, ExecutionProgress.tsx, executionIntelligence.ts.) Tj ET
+BT /F2 11.5 Tf 54 611.9 Td (L - Lifecycle: build->launch + FastTrack honesty \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 593.4 Td (Delivered: lifecycleService reconciles stage from observable evidence \(code events, files, docs, build) Tj ET
+BT /F1 9.5 Tf 54 581.2 Td (path, MVP milestones, validations, verified deployments, traction\), monotonic, with a manual override) Tj ET
+BT /F1 9.5 Tf 54 569.0 Td (the reconciler always keeps. FastTrack gets a product-stage picker, an explicit "already launched?" and) Tj ET
+BT /F1 9.5 Tf 54 556.8 Td (repo-based inference. project_id/workspace_id persist and the analysis continues in the workspace.) Tj ET
+BT /F1 9.5 Tf 54 544.6 Td (Files: lifecycleService.js, stage_inference.py, FastTrackPanel.tsx, tests.) Tj ET
+BT /F2 11.5 Tf 54 522.4 Td (M - Platform metrics \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 503.9 Td (Delivered: one aggregate from the ledger \(startups, prototypes, MVP completed, launches, growth,) Tj ET
+BT /F1 9.5 Tf 54 491.7 Td (milestones, per-founder breakdown\), scoped by role; platform-wide is admin-only. Surfaced on founder,) Tj ET
+BT /F1 9.5 Tf 54 479.5 Td (org and admin dashboards. Files: platformMetricsService.js, PlatformMetricsStrip.tsx,) Tj ET
+BT /F1 9.5 Tf 54 467.3 Td (ImpactReporting.tsx.) Tj ET
+BT /F2 11.5 Tf 54 445.1 Td (O - Org programs: invites, onboarding, tracking, scoping \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 426.6 Td (Delivered: program<->founder link with invite tokens and acceptance \(programEnrollments\), an) Tj ET
+BT /F1 9.5 Tf 54 414.4 Td (auto-populated scoped roster, the Incubator program manager, and a founder invite-acceptance page. v3) Tj ET
+BT /F1 9.5 Tf 54 402.2 Td (wires the dashboard: the org Dashboard and the program manager render ExecutionIntelligencePanel with) Tj ET
+BT /F1 9.5 Tf 54 390.0 Td (organizationId and, for a selected program, programId + cohortId, so the panel reads execution) Tj ET
+BT /F1 9.5 Tf 54 377.8 Td (intelligence scoped to that organization/program/cohort instead of the caller's own workspace. The) Tj ET
+BT /F1 9.5 Tf 54 365.6 Td (backend scope guard already enforces active membership of the named organization and pins program/cohort) Tj ET
+BT /F1 9.5 Tf 54 353.4 Td (ids to that same tenant, so an organization can never read another tenant's cohort. Files:) Tj ET
+BT /F1 9.5 Tf 54 341.2 Td (domainService.js \(programEnrollments\), Incubator.tsx, org/Dashboard.tsx, ExecutionIntelligencePanel.tsx,) Tj ET
+BT /F1 9.5 Tf 54 329.0 Td (ProgramInviteAccept.tsx.) Tj ET
+BT /F2 11.5 Tf 54 306.8 Td (P - Publicity for subscribers \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 288.3 Td (Delivered: a project reaching launched for a subscribed user generates a TechIT Moment + feed post; a) Tj ET
+BT /F1 9.5 Tf 54 276.1 Td (publicity notification-preference category gates delivery \(opt-out\); cost is 0 for subscribers. No new) Tj ET
+BT /F1 9.5 Tf 54 263.9 Td (broadcast system. Files: publicityService.js, notifications.ts, Settings.tsx, NotificationsPanel.tsx.) Tj ET
+BT /F2 11.5 Tf 54 241.7 Td (C - Consent \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 223.2 Td (Delivered: a canonical consent scope catalog \(approved_evidence_metadata shareable; execution_metrics) Tj ET
+BT /F1 9.5 Tf 54 211.0 Td (and cohort_benchmarks SENSITIVE\). Request/decision carry grantedScopes; approving without naming scopes) Tj ET
+BT /F1 9.5 Tf 54 198.8 Td (grants ONLY the non-sensitive requested scopes; rejection grants nothing; unknown scopes dropped) Tj ET
+BT /F1 9.5 Tf 54 186.6 Td (\(fail-closed\). Ownership-scoped execution boundary: organization/program/cohort scopes require an active) Tj ET
+BT /F1 9.5 Tf 54 174.4 Td (membership of that org \(organizationId pinned so a program/cohort id cannot point at another tenant\);) Tj ET
+BT /F1 9.5 Tf 54 162.2 Td (hackathonId requires ownership; admins may scope any tenant. Investors are stripped of ALL tenant scopes) Tj ET
+BT /F1 9.5 Tf 54 150.0 Td (on that route, so an investor can NEVER read an organization cohort that is not theirs; an investor may) Tj ET
+BT /F1 9.5 Tf 54 137.8 Td (only scope a startup they are authorized for and only with the granted execution scope. Investors keep) Tj ET
+BT /F1 9.5 Tf 54 125.6 Td (intelligence on the mentorship programs THEY run \(mentorId == investorId\): the room's project and each) Tj ET
+BT /F1 9.5 Tf 54 113.4 Td (active mentee's project. Investor execution velocity and code-commit evidence stay private until) Tj ET
+BT /F1 9.5 Tf 54 101.2 Td (execution_metrics is granted. AI-router registers the new scopes fail-closed. Files: consentScopes.js,) Tj ET
+BT /F1 9.5 Tf 54 89.0 Td (investorTrustAccessService.js, executionIntelligenceService.js, investorIntelligenceService.js,) Tj ET
+BT /F1 9.5 Tf 54 76.8 Td (domainController.js, trust_investor_read_model.py, TrustCenter.tsx, InvestorTrustDashboard.tsx, tests.) Tj ET
+BT /F1 9.5 Tf 54 60.6 Td (Consent flow, as shipped \(see also section 7, question 5\): the investor opens a startup in the investor) Tj ET
+BT /F1 9.5 Tf 54 48.4 Td (dashboard and, when not yet approved, clicks "Request additional Trust access") Tj ET
+BT /F1 8 Tf 522 30 Td (Page 2 of 5) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 4975 >>
+stream
+BT /F1 9.5 Tf 54 748.0 Td (\(requestInvestorTrustAccess sends the full catalog as requestedScopes\). The FOUNDER decides in Trust) Tj ET
+BT /F1 9.5 Tf 54 735.8 Td (Center: per-request checkboxes, sensitive scopes unchecked by default, "Approve selected" calls) Tj ET
+BT /F1 9.5 Tf 54 723.6 Td (decideFounderTrustAccessRequest with the chosen grantedScopes. The investor read then sends only the) Tj ET
+BT /F1 9.5 Tf 54 711.4 Td (founder's grantedScopes; the investor can never self-grant.) Tj ET
+BT /F2 11.5 Tf 54 689.2 Td (X - Everything live \(DONE\)) Tj ET
+BT /F1 9.5 Tf 54 670.7 Td (Delivered: removed the spurious MCP_ENABLED gate on execution intelligence \(it reads local stores, not) Tj ET
+BT /F1 9.5 Tf 54 658.5 Td (the connector surface; MCP_ENABLED now gates only /api/mcp and the GitHub->vault bridge\);) Tj ET
+BT /F1 9.5 Tf 54 646.3 Td (FastTrack/incubation client surfaces real pipeline errors instead of a silent null; and v3 removes the) Tj ET
+BT /F1 9.5 Tf 54 634.1 Td (remaining silent withFallback mock fallbacks from all six clients \(alerts, audio, gsis, training,) Tj ET
+BT /F1 9.5 Tf 54 621.9 Td (workspace, tourGuide\). A grep for withFallback across frontend/src/lib/api now returns none outside the) Tj ET
+BT /F1 9.5 Tf 54 609.7 Td (client/config plumbing. Files: alerts.ts, audio.ts, gsis.ts, training.ts, workspace.ts, tourGuide.ts.) Tj ET
+BT /F2 13.5 Tf 54 587.5 Td (4. 1M-user scalability contract) Tj ET
+BT /F1 9.5 Tf 54 564.0 Td (- Row-level indexed reads/writes only; pagination + bounded candidate limits ->) Tj ET
+BT /F1 9.5 Tf 54 550.8 Td (all new reads are owner/project/scope-bounded \(consent lookup is per project+investor; cohort is a) Tj ET
+BT /F1 9.5 Tf 54 538.6 Td (single indexed industry+stage query that only returns an anonymous aggregate; metrics aggregate runs) Tj ET
+BT /F1 9.5 Tf 54 526.4 Td (over scoped rows\).) Tj ET
+BT /F1 9.5 Tf 54 510.2 Td (- Respect config/scalability_slos.json \(read p95 <= 500ms, 0.999 availability\) and) Tj ET
+BT /F1 9.5 Tf 54 497.0 Td (scripts/capacity_model.py scenarios up to 1,000,000 users.) Tj ET
+BT /F1 9.5 Tf 54 480.8 Td (- Aggregates precomputed/rolled-up, never full scans per request -> Phase M reads) Tj ET
+BT /F1 9.5 Tf 54 467.6 Td (persisted project/milestone rows and rolls up; the cohort query is bounded to one industry+stage.) Tj ET
+BT /F1 9.5 Tf 54 451.4 Td (- Migrations additive, reversible; no destructive schema changes -> none shipped.) Tj ET
+BT /F1 9.5 Tf 54 438.2 Td (Pre-deploy step: run the capacity model against the target profile and confirm the SLOs with the) Tj ET
+BT /F1 9.5 Tf 54 426.0 Td (row-level stores authoritative.) Tj ET
+BT /F2 13.5 Tf 54 403.8 Td (5. Verification and definition-of-done) Tj ET
+BT /F1 9.5 Tf 54 380.3 Td (Tests \(all passing\). Supertest suites were run outside the sandbox \(they bind a local port\).) Tj ET
+BT /F1 9.5 Tf 54 364.1 Td (- BACKEND: full suite 970/970 \(127 files\), incl. the new cohort tests in) Tj ET
+BT /F1 9.5 Tf 54 350.9 Td (executionScopeGuard.test.js and the consent-seeded code-execution projection test.) Tj ET
+BT /F1 9.5 Tf 54 334.7 Td (- new-frontend: full suite 271/271 \(64 files\); tsc -b clean; eslint on touched) Tj ET
+BT /F1 9.5 Tf 54 321.5 Td (files clean.) Tj ET
+BT /F1 9.5 Tf 54 305.3 Td (- ai-router: 284 passed, 1 skipped.) Tj ET
+BT /F1 9.5 Tf 54 292.1 Td (Definition of done \(per phase\): implementation end-to-end; tests added and passing; no regressions; docs) Tj ET
+BT /F1 9.5 Tf 54 279.9 Td (updated; production-readiness and scalability maintained; no mock/fake path on the surface touched.) Tj ET
+BT /F1 9.5 Tf 54 263.7 Td (- R/E/L/M/P/C/X: met.) Tj ET
+BT /F1 9.5 Tf 54 250.5 Td (- E: met for self-comparison AND peer/cohort comparison.) Tj ET
+BT /F1 9.5 Tf 54 237.3 Td (- O: met for invites/onboarding/roster AND per-program/cohort execution scoping.) Tj ET
+BT /F1 9.5 Tf 54 224.1 Td (- X: met - no mock fallback remains in any frontend API client.) Tj ET
+BT /F2 13.5 Tf 54 204.9 Td (6. What is left \(open items, in priority order\)) Tj ET
+BT /F1 9.5 Tf 54 181.4 Td (- Phase O - decide which organization pages \(AI Ops, Market-Readiness,) Tj ET
+BT /F1 9.5 Tf 54 168.2 Td (Community/Hangout, Integrations, Marketplace, Talent Pool, Settings\) need bespoke backend automation) Tj ET
+BT /F1 9.5 Tf 54 156.0 Td (versus staying generic bound collections. These are live, real rows today; this is a product-scope) Tj ET
+BT /F1 9.5 Tf 54 143.8 Td (decision, not a mock.) Tj ET
+BT /F1 9.5 Tf 54 127.6 Td (- Deployment prerequisites \(environment, not code - see section 7\).) Tj ET
+BT /F1 9.5 Tf 54 114.4 Td (- Separate: repository Dependabot backlog \(BACKEND 47 advisories incl. 13 critical;) Tj ET
+BT /F1 9.5 Tf 54 101.2 Td (ai-router 1 critical; new-frontend 1 low\). Triage outside this program.) Tj ET
+BT /F2 13.5 Tf 54 79.0 Td (7. Deployment recommendation) Tj ET
+BT /F1 9.5 Tf 54 55.5 Td (Environment \(cannot be flipped from the repo\):) Tj ET
+BT /F1 8 Tf 522 30 Td (Page 3 of 5) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Length 5531 >>
+stream
+BT /F1 9.5 Tf 54 744.0 Td (- Row-level stores must be authoritative in production. .env.example still ships) Tj ET
+BT /F1 9.5 Tf 54 730.8 Td (sqlite DEV defaults; production must set DOMAIN_SOURCE=postgres and the sibling *_READ_SOURCE /) Tj ET
+BT /F1 9.5 Tf 54 718.6 Td (*_WRITE_SOURCE flags, otherwise the platform runs on the sqlite snapshot fallback.) Tj ET
+BT /F1 9.5 Tf 54 702.4 Td (- messaging-backend already ships a pgx/Postgres store \(internal/store/postgres\);) Tj ET
+BT /F1 9.5 Tf 54 689.2 Td (the deployed instance must point it at the platform database \(techit_msg\).) Tj ET
+BT /F1 9.5 Tf 54 673.0 Td (- MCP_ENABLED=true only where connectors are actually deployed; it no longer) Tj ET
+BT /F1 9.5 Tf 54 659.8 Td (affects core read models.) Tj ET
+BT /F1 9.5 Tf 54 643.6 Td (Rollout:) Tj ET
+BT /F1 9.5 Tf 54 627.4 Td (- Merge order: backend first \(it owns the consent authority and the read gate\),) Tj ET
+BT /F1 9.5 Tf 54 614.2 Td (then ai-router \(read-model scope names\), then new-frontend \(UI\). The backend is backward compatible: an) Tj ET
+BT /F1 9.5 Tf 54 602.0 Td (older frontend never asks for sensitive scopes.) Tj ET
+BT /F1 9.5 Tf 54 585.8 Td (- Gate the release on the production config check passing with every *_SOURCE flag) Tj ET
+BT /F1 9.5 Tf 54 572.6 Td (set to postgres; do not promote with the sqlite fallback active.) Tj ET
+BT /F1 9.5 Tf 54 556.4 Td (- Roll the consent change out dark: existing approvals keep working \(they had no) Tj ET
+BT /F1 9.5 Tf 54 543.2 Td (grantedScopes, so they resolve to the baseline scope\). No data backfill needed.) Tj ET
+BT /F1 9.5 Tf 54 527.0 Td (- After deploy verify four live behaviours: \(a\) an investor request for another) Tj ET
+BT /F1 9.5 Tf 54 513.8 Td (org's cohort returns 403; \(b\) execution metrics are hidden until the founder grants execution_metrics;) Tj ET
+BT /F1 9.5 Tf 54 501.6 Td (\(c\) /ready on the router reflects every configured provider, not just OpenAI/Anthropic; \(d\) /refresh no) Tj ET
+BT /F1 9.5 Tf 54 489.4 Td (longer consumes the /signin rate-limit budget.) Tj ET
+BT /F1 9.5 Tf 54 473.2 Td (- Rollback: revert the per-repo commits; no schema or data rollback is needed) Tj ET
+BT /F1 9.5 Tf 54 460.0 Td (because nothing destructive shipped.) Tj ET
+BT /F2 11.5 Tf 54 437.8 Td (7.1 Answers to the four review questions) Tj ET
+BT /F1 9.5 Tf 54 419.3 Td (Q1. Is JWT_ALGORITHM=RS256 intended for Node? Messaging has no JWT_PUBLIC_KEY and is still the Sept 23) Tj ET
+BT /F1 9.5 Tf 54 407.1 Td (build, so it cannot verify those tokens. Publish a messaging image / merge a CI build?) Tj ET
+BT /F1 9.5 Tf 54 390.9 Td (- Yes, RS256 is intended: jwtKeyService.js forces RS256 in production/staging) Tj ET
+BT /F1 9.5 Tf 54 377.7 Td (\(HS256 is refused there\), and .env.example ships RS256 PEM keys.) Tj ET
+BT /F1 9.5 Tf 54 361.5 Td (- The Go messaging service already supports RS256 verification with JWT_PUBLIC_KEY) Tj ET
+BT /F1 9.5 Tf 54 348.3 Td (\(internal/auth/jwt.go picks RS256 when the key is present and refuses HS256 in production;) Tj ET
+BT /F1 9.5 Tf 54 336.1 Td (internal/config/config.go requires JWT_PUBLIC_KEY outside dev/test\). That support landed in commit) Tj ET
+BT /F1 9.5 Tf 54 323.9 Td (b9ca9c1 \(2026-09-30\). The Sept-23 image predates it, which is exactly why it rejects platform tokens) Tj ET
+BT /F1 9.5 Tf 54 311.7 Td (today.) Tj ET
+BT /F1 9.5 Tf 54 295.5 Td (- Fix: rebuild/publish the messaging image with JWT_PUBLIC_KEY set. Use) Tj ET
+BT /F1 9.5 Tf 54 282.3 Td (.github/workflows/deploy-messaging-ec2.yml - it is gated on a green "TECHIT Backend Services" run and) Tj ET
+BT /F1 9.5 Tf 54 270.1 Td (can also be run via workflow_dispatch; it provisions JWT_PUBLIC_KEY, the RDS URL and techit_msg, and) Tj ET
+BT /F1 9.5 Tf 54 257.9 Td (rebuilds on the box. Because building on the 909MB t3.micro froze it, prefer workflow_dispatch from CI) Tj ET
+BT /F1 9.5 Tf 54 245.7 Td (\(or build the image elsewhere and pull\), not a manual on-box build.) Tj ET
+BT /F1 9.5 Tf 54 229.5 Td (Q2. REQUIRE_AI_EXECUTION_GRANT=true on ai-router: what path supplies the grant, and does the frontend) Tj ET
+BT /F1 9.5 Tf 54 217.3 Td (send it?) Tj ET
+BT /F1 9.5 Tf 54 201.1 Td (- The grant is backend-minted, never frontend-minted. BACKEND issueExecutionGrant) Tj ET
+BT /F1 9.5 Tf 54 187.9 Td (\(usageGrantService.js\) signs a short-lived token and is exposed at POST /usage/grant) Tj ET
+BT /F1 9.5 Tf 54 175.7 Td (\(routes/usageSettlement.js, requireUsageGrantIssuer\).) Tj ET
+BT /F1 9.5 Tf 54 159.5 Td (- ai-router reads it from the X-AI-Execution-Grant header in get_user_context) Tj ET
+BT /F1 9.5 Tf 54 146.3 Td (\(main.py\) and, when the flag is on, rejects any request without it.) Tj ET
+BT /F1 9.5 Tf 54 130.1 Td (- The frontend does NOT send the header. Only BACKEND does, and today only on the) Tj ET
+BT /F1 9.5 Tf 54 116.9 Td (trust-verification path \(aiRouterClient.analyzeVerificationEvidence ->) Tj ET
+BT /F1 9.5 Tf 54 104.7 Td (/api/v1/incubation/evidence/research\). Every other router call from aiRouterClient.js \(gsis/compute,) Tj ET
+BT /F1 9.5 Tf 54 92.5 Td (workspace/execute, workspace/conversation, investor advisory/evi, organization advisory, support,) Tj ET
+BT /F1 9.5 Tf 54 80.3 Td (training\) omits the header. So flipping REQUIRE_AI_EXECUTION_GRANT=true without extending those callers) Tj ET
+BT /F1 9.5 Tf 54 68.1 Td (to mint and attach a grant will 403 them.) Tj ET
+BT /F1 9.5 Tf 54 51.9 Td (- Also align the algorithm: BACKEND signs HS256 by default) Tj ET
+BT /F1 8 Tf 522 30 Td (Page 4 of 5) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 11 0 R >>
+endobj
+13 0 obj
+<< /Length 5060 >>
+stream
+BT /F3 7.4 Tf 58 747.0 Td (\(AI_EXECUTION_GRANT_ALGORITHM |  | 'HS256'\) while the ai-router verifier defaults to) Tj ET
+BT /F1 9.5 Tf 54 737.4 Td (RS256 in production/staging. Either set AI_EXECUTION_GRANT_ALGORITHM=RS256 on both sides with) Tj ET
+BT /F1 9.5 Tf 54 725.2 Td (AI_EXECUTION_GRANT_SECRET as the RS256 key, or keep both on the same shared HMAC secret. Do not leave) Tj ET
+BT /F1 9.5 Tf 54 713.0 Td (the defaults mismatched in production.) Tj ET
+BT /F1 9.5 Tf 54 696.8 Td (- Recommendation: only enable the flag once every router caller mints a grant) Tj ET
+BT /F1 9.5 Tf 54 683.6 Td (\(a shared helper\), or keep it false and rely on the backend as the single entry point. Do not enable it) Tj ET
+BT /F1 9.5 Tf 54 671.4 Td (as-is.) Tj ET
+BT /F1 9.5 Tf 54 655.2 Td (Q3. ai-router goes through pgbouncer on 6432 with db "techit_db", but its migration expects) Tj ET
+BT /F1 9.5 Tf 54 643.0 Td (techit_ai_db. Which is intended?) Tj ET
+BT /F1 9.5 Tf 54 626.8 Td (- techit_db is intended. There is no techit_ai_db anywhere in the repos or their) Tj ET
+BT /F1 9.5 Tf 54 613.6 Td (history. ai-router uses DATABASE_URL \(default .../techit_db in .env.example and docker-compose.yml\) and) Tj ET
+BT /F1 9.5 Tf 54 601.4 Td (falls back to AI_ROUTER_IDENTITY_DATABASE_URL \(.../techit_core\) only for the identity/session store. The) Tj ET
+BT /F1 9.5 Tf 54 589.2 Td (messaging service uses its own techit_msg; the platform/backend owns the rest of techit_db.) Tj ET
+BT /F1 9.5 Tf 54 573.0 Td (- Action: point the box's ai-router DATABASE_URL at techit_db \(via the 6432) Tj ET
+BT /F1 9.5 Tf 54 559.8 Td (pgbouncer proxy\). If a separate AI database is genuinely wanted, that is a deliberate change across env) Tj ET
+BT /F1 9.5 Tf 54 547.6 Td (+ migrations, not an existing expectation - and it is not needed for correctness.) Tj ET
+BT /F1 9.5 Tf 54 531.4 Td (Q4. Rate limiter: /signin and /refresh share signinLimit \(5 per minute\), so the frontend's /refresh) Tj ET
+BT /F1 9.5 Tf 54 519.2 Td (retries lock sign-in out.) Tj ET
+BT /F1 9.5 Tf 54 503.0 Td (- Confirmed and fixed in this commit. routes/auth.js now gives /refresh its own) Tj ET
+BT /F1 9.5 Tf 54 489.8 Td (refreshLimit \(30/min\), leaving signinLimit \(5/min\) for credential entry \(/signin, /forgot-password,) Tj ET
+BT /F1 9.5 Tf 54 477.6 Td (/reset-password\). A refresh burst can no longer exhaust the sign-in budget. BACKEND auth suite 48/48;) Tj ET
+BT /F1 9.5 Tf 54 465.4 Td (full suite 970/970.) Tj ET
+BT /F1 9.5 Tf 54 449.2 Td (Q5 \(review follow-up\). Should an investor need consent to see that a startup ships, or only for) Tj ET
+BT /F1 9.5 Tf 54 437.0 Td (financial/sensitive execution data?) Tj ET
+BT /F1 9.5 Tf 54 420.8 Td (- Today the code gates BOTH execution velocity and verified code-commit count) Tj ET
+BT /F1 9.5 Tf 54 407.6 Td (behind the sensitive execution_metrics scope \(investorIntelligenceService.js\), so an investor with only) Tj ET
+BT /F1 9.5 Tf 54 395.4 Td (approved_evidence_metadata sees milestones/mentorship/last activity but not commits or velocity.) Tj ET
+BT /F1 9.5 Tf 54 379.2 Td (- Financial data is ALREADY on its own consent scope: the ai-router investor read) Tj ET
+BT /F1 9.5 Tf 54 366.0 Td (model gates its revenue source behind revenue_metrics \(trust_investor_read_model.py\), separate from) Tj ET
+BT /F1 9.5 Tf 54 353.8 Td (execution_metrics and cohort_benchmarks.) Tj ET
+BT /F1 9.5 Tf 54 337.6 Td (- Recommendation: the intended split is sensible - baseline shares a non-financial) Tj ET
+BT /F1 9.5 Tf 54 324.4 Td ("are they shipping?" signal \(verified commits, milestone completion, activity recency\), while) Tj ET
+BT /F1 9.5 Tf 54 312.2 Td (velocity/EVI and financials \(revenue, burn, runway, cap table, fundraising\) require execution_metrics /) Tj ET
+BT /F1 9.5 Tf 54 300.0 Td (revenue_metrics. That requires \(a\) moving verified-commit evidence out of the execution_metrics gate,) Tj ET
+BT /F1 9.5 Tf 54 287.8 Td (and \(b\) adding revenue_metrics to the BACKEND request catalog so it is requestable and shows as) Tj ET
+BT /F1 9.5 Tf 54 275.6 Td (sensitive in Trust Center. This is a small, deliberate change; it is flagged here rather than shipped) Tj ET
+BT /F1 9.5 Tf 54 263.4 Td (silently because it widens what an investor sees by default. Confirm and it will be implemented next.) Tj ET
+BT /F2 13.5 Tf 54 241.2 Td (8. Commit inventory \(this program\)) Tj ET
+BT /F1 9.5 Tf 54 217.7 Td (BACKEND \(main\): 52b15de E-cohort + tests + refresh-limit, e92ba69 X, 67b15a0 C, 1945b5b P, 1748880 O,) Tj ET
+BT /F1 9.5 Tf 54 205.5 Td (bfaaf09 metrics-scope, c860244 M, 069f56a L, 98f779b E, 44da07f plan, e09ed9f docs. ai-router) Tj ET
+BT /F1 9.5 Tf 54 193.3 Td (\(fix/provider-key-readiness\): 291f29e R, 886909d L, 6d4f9db C, b87338b docs, 1db1a73 plan. new-frontend) Tj ET
+BT /F1 9.5 Tf 54 181.1 Td (\(docs/frontend-debug-access\): e48d7f6 E/O/X, 5292936 X, c809dd9 C, 36d2f03 P, 5235e29 O, 40ef646/4b3334a) Tj ET
+BT /F1 9.5 Tf 54 168.9 Td (M, ba2e51c L, ed41aeb E, 34d70ef docs, c8767e4 plan.) Tj ET
+BT /F1 8 Tf 522 30 Td (Page 5 of 5) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 4 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R >> >> /Contents 13 0 R >>
+endobj
+15 0 obj
+<< /Type /Catalog /Pages 4 0 R >>
+endobj
+16 0 obj
+<< /Title (TechIT Network ‚Äî Platform Live-Execution Report \(v3\)) /Producer (docs/tools/make_engineering_pdf.py) >>
+endobj
+xref
+0 17
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000000214 00000 n 
+0000000309 00000 n 
+0000000393 00000 n 
+0000005790 00000 n 
+0000005936 00000 n 
+0000012232 00000 n 
+0000012378 00000 n 
+0000017405 00000 n 
+0000017552 00000 n 
+0000023136 00000 n 
+0000023284 00000 n 
+0000028397 00000 n 
+0000028545 00000 n 
+0000028595 00000 n 
+trailer
+<< /Size 17 /Root 15 0 R /Info 16 0 R >>
+startxref
+28730
+%%EOF

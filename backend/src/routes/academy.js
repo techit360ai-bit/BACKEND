@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { projects, curriculum, adapt, start, heartbeat, reflection, quiz, exercise, complete, badges } from '../controllers/academyController.js'
+import { projects, curriculum, adapt, start, heartbeat, reflection, quiz, exercise, complete, completeLearningPath, badges } from '../controllers/academyController.js'
 
 const router = Router(); router.use(requireAuth)
 router.get('/projects', projects)
@@ -13,4 +13,5 @@ router.post('/curricula/:curriculumId/modules/:moduleId/reflection', reflection)
 router.post('/curricula/:curriculumId/modules/:moduleId/quiz', quiz)
 router.post('/curricula/:curriculumId/modules/:moduleId/exercise', exercise)
 router.post('/curricula/:curriculumId/modules/:moduleId/complete', complete)
+router.post('/learning-paths/:resourceId/complete', completeLearningPath)
 export default router

@@ -33,6 +33,15 @@ export const ResourceSpec = z.object({
   artifactType: z
     .enum(['code', 'design', 'document', 'workflow', 'dataset', 'contract', 'meeting'])
     .optional(),
+  /** Organization-published resource taxonomy. Additive: existing manifests stay valid. */
+  resourceKind: z.enum(['training', 'software', 'dataset', 'workspace']).optional(),
+  resourceId: z.string().min(1).optional(),
+  externalId: z.string().min(1).optional(),
+  integrationId: z.string().min(1).optional(),
+  audiencePolicy: z.enum(['organization', 'program', 'cohort', 'public_free', 'invite']).optional(),
+  completionMode: z.enum(['native', 'connector', 'webhook']).optional(),
+  completionEvent: z.string().min(1).optional(),
+  expiresAt: z.string().datetime().optional(),
 });
 
 export const EventSpec = z.object({
