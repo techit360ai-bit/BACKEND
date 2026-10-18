@@ -1106,6 +1106,23 @@ describe('domain live-data endpoints', () => {
     expect(summary.body.pendingPayments).toBe(1)
   })
 
+  it('returns the purchase-policy status instead of flattening risk decisions to 400', async () => {
+    const db = makeDb({
+      creditPackages: [{ id: 'pack_1', amount: 1900, currency: 'USD', credits: 100, active: true }],
+      riskProfiles: [{ id: 'risk_1', userId: 'user-uuid-1', state: 'HIGH' }],
+    })
+    readAuthorityDb.mockReturnValue(db)
+
+    const intent = await request(app)
+      .post('/api/domain/wallet/payment-intents')
+      .set('Authorization', `Bearer ${validToken()}`)
+      .send({ packageId: 'pack_1' })
+
+    expect(intent.status).toBe(403)
+    expect(intent.body.error).toBe('purchase_risk_review_required')
+    expect(db.paymentIntents).toHaveLength(0)
+  })
+
   it('counts a settled usage debit once in the wallet balance', async () => {
     const db = makeDb({
       walletAccounts: [{ id: 'wallet_1', userId: 'user-uuid-1', creditBalance: 25 }],

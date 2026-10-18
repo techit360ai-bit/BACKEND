@@ -131,6 +131,13 @@ setKey('USER_DIRECTORY_FALLBACK_SQLITE', fallback)
 
 // Merge into the existing target, preserving unmanaged keys and deduplicating.
 const existing = fs.existsSync(targetPath) ? fs.readFileSync(targetPath, 'utf8') : ''
+const existingValues = new Map()
+for (const rawLine of existing.split('\n')) {
+  const match = /^\s*([A-Za-z0-9_]+)\s*=(.*)$/.exec(rawLine)
+  if (match) {
+    existingValues.set(match[1], match[2].replace(/^"|"$/g, ''))
+  }
+}
 // Values with real or escaped newlines (e.g. a PEM public key) must be written
 // as a single quoted line so `docker compose --env-file` and Node's
 // `--env-file` both decode them back into the multi-line value.
@@ -142,7 +149,13 @@ const rendered = (existing ? existing.split('\n') : []).map((line) => {
   const match = /^\s*([A-Za-z0-9_]+)\s*=/.exec(line)
   if (!match || !merged.has(match[1])) return line
   seen.add(match[1])
-  return renderLine(match[1], merged.get(match[1]))
+  let value = merged.get(match[1])
+  // A blank template entry means "operator-managed secret". Preserve the
+  // existing non-empty value unless CI explicitly supplied an override.
+  if (value === '' && !process.env[match[1]] && existingValues.get(match[1])) {
+    value = existingValues.get(match[1])
+  }
+  return renderLine(match[1], value)
 })
 const appended = order.filter((key) => !seen.has(key)).map((key) => renderLine(key, merged.get(key)))
 let out = rendered.join('\n')

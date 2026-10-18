@@ -1,12 +1,14 @@
 import { createId, nowIso } from '../utils/api.js'
 import { economicsForUsage } from '../services/unitEconomicsService.js'
 import { mergeWorkflowBudget, workflowBudgetSnapshot, resolveWorkflowCeiling } from '../services/workflowBudgetService.js'
+import { evaluatePurchasePolicy, intentExpiry, purchasePolicyConfig, purchaseUsage, resolvePurchaseIdentity } from '../services/purchasePolicyService.js'
 import { withPlatformTransaction, upsertRecord, deleteRecord, listRecords, listRecordsForOwner, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const enabled = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
 const readEnabled = () => process.env.FINANCE_READ_SOURCE === 'postgres'
 const readFallback = () => process.env.FINANCE_READ_FALLBACK_SQLITE !== 'false'
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback
+const text = value => typeof value === 'string' ? value.trim() : ''
 
 function getFinancePool() {
   const connectionString = process.env.FINANCE_DATABASE_URL || process.env.DATABASE_URL
@@ -117,6 +119,324 @@ async function findById(client, collection, recordId, { forUpdate = false } = {}
   return row ? { ...(row.payload || {}), id: row.record_id, version: Number(row.version), createdAt: row.created_at, updatedAt: row.updated_at } : null
 }
 
+async function purchaseIdentitySignals(client, userId, now, config) {
+  const projectedRiskProfiles = await listByUser(client, 'riskProfiles', userId)
+  const projectedVerificationProfiles = await listByUser(client, 'verificationProfiles', userId)
+  const authorityRisk = await client.query(
+    'SELECT state FROM trust_risk_profiles WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1',
+    [userId],
+  )
+  const authorityVerification = await client.query(
+    'SELECT status, assurance, expires_at, payload, updated_at FROM trust_verification_profiles WHERE user_id=$1 ORDER BY updated_at DESC',
+    [userId],
+  )
+  const authorityIdentity = await client.query(
+    "SELECT kind,status,checked_at,created_at FROM trust_identity_verifications WHERE user_id=$1 AND kind='kyc' ORDER BY created_at DESC LIMIT 1",
+    [userId],
+  )
+  const authorityScreening = await client.query(
+    'SELECT status,match_count,screened_at FROM trust_screening_results WHERE user_id=$1 ORDER BY screened_at DESC LIMIT 1',
+    [userId],
+  )
+  const authorityRiskProfiles = authorityRisk.rows.map(row => ({ state: row.state }))
+  const authorityVerificationProfiles = authorityVerification.rows.map(row => ({
+    ...(row.payload || {}),
+    status: row.status || row.payload?.status,
+    assurance: row.assurance || row.payload?.assurance,
+    expiresAt: row.expires_at || row.payload?.expiresAt,
+    updatedAt: row.updated_at,
+  }))
+  const identityVerifications = authorityIdentity.rows.map(row => ({
+    kind: row.kind,
+    status: row.status,
+    checkedAt: row.checked_at,
+    createdAt: row.created_at,
+  }))
+  const screeningResults = authorityScreening.rows.map(row => ({
+    status: row.status,
+    matchCount: Number(row.match_count || 0),
+    screenedAt: row.screened_at,
+  }))
+  return resolvePurchaseIdentity({
+    riskProfiles: [...projectedRiskProfiles, ...authorityRiskProfiles],
+    verificationProfiles: [...projectedVerificationProfiles, ...authorityVerificationProfiles],
+    identityVerifications,
+    screeningResults,
+    now,
+    config,
+  })
+}
+
+async function expireStalePaymentIntents(client, userId, now, ttlMinutes) {
+  const intents = await listByUser(client, 'paymentIntents', userId, { forUpdate: true })
+  const expired = []
+  for (const intent of intents) {
+    if (String(intent.status || '').toLowerCase() !== 'pending') continue
+    const expiresAt = intent.expiresAt || intentExpiry(intent.createdAt, ttlMinutes)
+    if (new Date(expiresAt).getTime() > now.getTime()) continue
+    const next = {
+      ...intent,
+      status: 'expired',
+      checkoutStatus: intent.checkoutUrl ? 'expired' : intent.checkoutStatus || 'expired',
+      expiresAt,
+      expiredAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }
+    await upsertRecord(client, 'paymentIntents', next, {
+      idempotencyKey: `payment:${intent.id}:expired`,
+      operation: 'update',
+      expectedVersion: intent.version,
+    })
+    expired.push(next)
+  }
+  return { intents: intents.map(intent => expired.find(row => row.id === intent.id) || intent), expired }
+}
+
+async function resolveCatalogPlan(client, planId) {
+  if (!planId) return null
+  return await findById(client, 'billingPlans', planId) || await findByPayload(client, 'billingPlans', 'slug', planId)
+}
+
+async function recordPaymentRiskEvent(client, userId, operation, detail, now) {
+  const event = {
+    id: createId('payment_risk'),
+    userId,
+    operation,
+    decision: detail.ok === false ? 'rejected' : 'allowed',
+    error: detail.error || null,
+    riskState: detail.riskState || null,
+    requestedCredits: detail.requestedCredits ?? null,
+    requestedAmountUsd: detail.requestedAmountUsd ?? null,
+    usage: detail.usage || null,
+    limits: detail.limits || null,
+    kycRequired: Boolean(detail.kycRequired),
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  }
+  await upsertRecord(client, 'paymentRiskEvents', event, {
+    idempotencyKey: `payment-risk:${event.id}`,
+    operation: 'insert',
+  })
+  return event
+}
+
+export async function createPaymentIntentPostgres(userId, body = {}) {
+  if (!userId) return { ok: false, status: 400, error: 'platform_user_id_required' }
+  return withPlatformTransaction(async client => {
+    const config = purchasePolicyConfig()
+    const now = new Date()
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase:${userId}`])
+    const { intents } = await expireStalePaymentIntents(client, userId, now, config.intentTtlMinutes)
+    const idemKey = text(body.idemKey || body.idempotencyKey || body.idempotency_key)
+    const existing = idemKey
+      ? intents.find(intent => intent.idemKey === idemKey || intent.idempotencyKey === idemKey)
+      : null
+    if (existing) return { paymentIntent: existing, idempotent: true }
+
+    const packageId = text(body.packageId || body.package_id)
+    const pack = packageId ? await findById(client, 'creditPackages', packageId) : null
+    if (packageId && (!pack || pack.active === false)) return { ok: false, status: 404, error: 'credit_package_not_found' }
+    const planId = text(body.planId || body.plan_id)
+    const plan = await resolveCatalogPlan(client, planId)
+    if (planId && (!plan || plan.active === false)) return { ok: false, status: 404, error: 'billing_plan_not_found' }
+    if (!packageId && !planId && process.env.NODE_ENV === 'production') {
+      return { ok: false, status: 400, error: 'package_id_or_plan_id_required' }
+    }
+    const sponsorApplicationId = text(body.sponsorApplicationId || body.sponsor_application_id)
+    const sponsorApplication = sponsorApplicationId
+      ? await findById(client, 'sponsorshipApplications', sponsorApplicationId)
+      : null
+    const sponsorPackage = sponsorApplication?.packageId
+      ? await findById(client, 'organizationSponsorshipPackages', sponsorApplication.packageId)
+      : null
+    if (sponsorApplicationId && (
+      sponsorApplication?.status !== 'approved'
+      || !sponsorPackage
+      || sponsorPackage.status !== 'active'
+      || sponsorPackage.organizationId !== sponsorApplication.organizationId
+    )) {
+      return { ok: false, status: 409, error: 'approved_sponsorship_application_required' }
+    }
+
+    const amount = sponsorPackage
+      ? number(sponsorPackage.amount)
+      : pack ? number(pack.amount ?? pack.price) : plan ? number(plan.amount ?? plan.price) : number(body.amount)
+    const currency = String(sponsorPackage?.currency || pack?.currency || plan?.currency || body.currency || 'USD').toUpperCase()
+    const credits = sponsorPackage
+      ? number(sponsorPackage.creditGrant ?? sponsorPackage.credits)
+      : pack ? number(pack.credits) + number(pack.bonusCredits)
+        : plan ? number(plan.includedCredits ?? plan.credits) : number(body.credits)
+    if (amount <= 0) return { ok: false, status: 400, error: 'payment_amount_required' }
+
+    const identity = await purchaseIdentitySignals(client, userId, now, config)
+    const policy = evaluatePurchasePolicy({
+      credits,
+      amount,
+      currency,
+      intents,
+      riskState: identity.riskState,
+      kycVerified: identity.kycVerified,
+      now,
+      config,
+    })
+    if (!policy.ok) {
+      await recordPaymentRiskEvent(client, userId, 'payment_intent_create', policy, now)
+      return policy
+    }
+
+    const createdAt = now.toISOString()
+    const paymentIntent = {
+      id: createId('pay'),
+      userId,
+      packageId: pack?.id || packageId || null,
+      planId: plan?.id || planId || null,
+      organizationId: sponsorApplication?.organizationId || text(body.organizationId || body.organization_id) || null,
+      purchaseType: sponsorApplication ? 'sponsor_grant' : text(body.purchaseType || body.purchase_type) || null,
+      programId: text(body.programId || body.program_id) || null,
+      hackathonId: text(body.hackathonId || body.hackathon_id) || null,
+      budgetId: text(body.budgetId || body.budget_id) || null,
+      sponsorApplicationId: sponsorApplicationId || null,
+      organizationCapabilities: plan?.organizationCapabilities || plan?.capabilities || null,
+      organizationLimits: plan?.organizationLimits || plan?.limits || null,
+      organizationExpiresAt: plan?.durationDays
+        ? new Date(now.getTime() + Number(plan.durationDays) * 86400000).toISOString()
+        : null,
+      amount,
+      currency,
+      credits,
+      status: 'pending',
+      checkoutStatus: 'not_started',
+      provider: text(body.provider) || null,
+      idemKey: idemKey || `auto:${createId('idem')}`,
+      idempotencyKey: idemKey || null,
+      expiresAt: intentExpiry(createdAt, config.intentTtlMinutes),
+      policy: {
+        evaluatedAt: createdAt,
+        riskState: policy.riskState,
+        kycRequired: policy.kycRequired,
+        limits: policy.limits,
+        usageAtCreation: policy.usage,
+      },
+      createdAt,
+      updatedAt: createdAt,
+    }
+    await upsertRecord(client, 'paymentIntents', paymentIntent, {
+      idempotencyKey: `payment-intent:${userId}:${paymentIntent.idemKey}`,
+      operation: 'insert',
+    })
+    await recordPaymentRiskEvent(client, userId, 'payment_intent_create', {
+      ...policy,
+      ok: true,
+      requestedCredits: credits,
+      requestedAmountUsd: policy.requestedAmountUsd,
+    }, now)
+    return { paymentIntent }
+  }, { userId })
+}
+
+export async function markPaymentIntentCheckoutPostgres(userId, paymentId, checkout = {}) {
+  return withPlatformTransaction(async client => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase:${userId}`])
+    const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
+    if (!payment || payment.userId !== userId) return { ok: false, status: 404, error: 'payment_not_found' }
+    if (payment.checkoutUrl) return { ok: true, idempotent: true, paymentIntent: payment }
+    if (payment.status === 'successful') return { ok: false, status: 409, error: 'payment_intent_already_completed', paymentIntent: payment }
+    if (payment.status === 'expired' || (payment.expiresAt && new Date(payment.expiresAt).getTime() <= Date.now())) {
+      const now = nowIso()
+      const expired = { ...payment, status: 'expired', checkoutStatus: 'expired', expiredAt: now, updatedAt: now }
+      await upsertRecord(client, 'paymentIntents', expired, { idempotencyKey: `payment:${paymentId}:expired`, operation: 'update', expectedVersion: payment.version })
+      return { ok: false, status: 409, error: 'payment_intent_expired', paymentIntent: expired }
+    }
+    const now = nowIso()
+    const updated = {
+      ...payment,
+      provider: checkout.provider || payment.provider,
+      checkoutUrl: checkout.checkoutUrl,
+      providerSessionId: checkout.providerSessionId || null,
+      providerReference: checkout.providerReference || null,
+      checkoutStatus: 'created',
+      checkoutCreatedAt: now,
+      lastCheckoutError: null,
+      updatedAt: now,
+    }
+    await upsertRecord(client, 'paymentIntents', updated, {
+      idempotencyKey: `payment:${paymentId}:checkout-created:${checkout.providerSessionId || checkout.providerReference || paymentId}`,
+      operation: 'update',
+      expectedVersion: payment.version,
+    })
+    return { ok: true, paymentIntent: updated }
+  }, { userId })
+}
+
+export async function beginPaymentIntentCheckoutPostgres(userId, paymentId) {
+  return withPlatformTransaction(async client => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase:${userId}`])
+    const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
+    if (!payment || payment.userId !== userId) return { ok: false, status: 404, error: 'payment_not_found' }
+    if (payment.checkoutUrl) return { ok: true, idempotent: true, paymentIntent: payment }
+    if (payment.status === 'successful') return { ok: false, status: 409, error: 'payment_intent_already_completed', paymentIntent: payment }
+    if (payment.status === 'expired' || (payment.expiresAt && new Date(payment.expiresAt).getTime() <= Date.now())) {
+      const now = nowIso()
+      const expired = { ...payment, status: 'expired', checkoutStatus: 'expired', expiredAt: now, updatedAt: now }
+      await upsertRecord(client, 'paymentIntents', expired, { idempotencyKey: `payment:${paymentId}:expired`, operation: 'update', expectedVersion: payment.version })
+      return { ok: false, status: 409, error: 'payment_intent_expired', paymentIntent: expired }
+    }
+    const lockMs = Math.max(30, Number(process.env.PAYMENT_CHECKOUT_LOCK_SECONDS || 120)) * 1000
+    const lockedAt = payment.checkoutLockedAt ? new Date(payment.checkoutLockedAt).getTime() : 0
+    if (payment.checkoutStatus === 'creating' && lockedAt && Date.now() - lockedAt < lockMs) {
+      return { ok: false, status: 409, error: 'checkout_in_progress', paymentIntent: payment, retryAfterSeconds: Math.ceil((lockMs - (Date.now() - lockedAt)) / 1000) }
+    }
+    const now = nowIso()
+    const updated = {
+      ...payment,
+      checkoutStatus: 'creating',
+      checkoutLockedAt: now,
+      checkoutAttempts: number(payment.checkoutAttempts) + 1,
+      updatedAt: now,
+    }
+    await upsertRecord(client, 'paymentIntents', updated, {
+      idempotencyKey: `payment:${paymentId}:checkout-begin:${updated.checkoutAttempts}`,
+      operation: 'update',
+      expectedVersion: payment.version,
+    })
+    return { ok: true, paymentIntent: updated }
+  }, { userId })
+}
+
+export async function markPaymentIntentCheckoutFailurePostgres(userId, paymentId, failure = {}) {
+  return withPlatformTransaction(async client => {
+    const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
+    if (!payment || payment.userId !== userId) return { ok: false, status: 404, error: 'payment_not_found' }
+    if (payment.checkoutUrl || payment.status === 'successful') return { ok: true, paymentIntent: payment }
+    const now = nowIso()
+    const updated = {
+      ...payment,
+      checkoutStatus: 'failed',
+      lastCheckoutError: String(failure.error || 'provider_checkout_failed').slice(0, 200),
+      lastCheckoutFailedAt: now,
+      updatedAt: now,
+    }
+    await upsertRecord(client, 'paymentIntents', updated, {
+      idempotencyKey: `payment:${paymentId}:checkout-failed:${number(payment.checkoutAttempts)}`,
+      operation: 'update',
+      expectedVersion: payment.version,
+    })
+    return { ok: true, paymentIntent: updated }
+  }, { userId })
+}
+
+export async function expirePaymentIntentsPostgres(userId) {
+  const config = purchasePolicyConfig()
+  return withPlatformTransaction(async client => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase:${userId}`])
+    return expireStalePaymentIntents(client, userId, new Date(), config.intentTtlMinutes)
+  }, { userId })
+}
+
+export function paymentPolicyUsage(intents = []) {
+  return purchaseUsage(intents)
+}
+
 export async function fulfillPaymentPostgres(userId, paymentId, input = {}) {
   return withPlatformTransaction(async client => {
     const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
@@ -124,8 +444,28 @@ export async function fulfillPaymentPostgres(userId, paymentId, input = {}) {
     if (payment.status === 'successful') return { ok: true, idempotent: true, payment }
     if (input.verified !== true) return { ok: false, error: 'payment_verification_required' }
     const now = nowIso()
-    const updatedPayment = { ...payment, status: 'successful', verifiedAt: now, providerReference: input.providerReference || null, updatedAt: now }
+    const lateFulfillment = payment.status === 'expired'
+      || Boolean(payment.expiresAt && new Date(payment.expiresAt).getTime() <= new Date(now).getTime())
+    const updatedPayment = {
+      ...payment,
+      status: 'successful',
+      verifiedAt: now,
+      providerReference: input.providerReference || payment.providerReference || null,
+      lateFulfillment: lateFulfillment || payment.lateFulfillment === true,
+      reconciliationRequired: lateFulfillment || payment.reconciliationRequired === true,
+      reconciliationReason: lateFulfillment ? 'provider_capture_after_intent_expiry' : payment.reconciliationReason || null,
+      updatedAt: now,
+    }
     await upsertRecord(client, 'paymentIntents', updatedPayment, { idempotencyKey: `payment:${paymentId}:success`, operation: 'update', expectedVersion: payment.version })
+    if (lateFulfillment) {
+      await recordPaymentRiskEvent(client, userId, 'payment_intent_late_capture', {
+        ok: true,
+        error: 'provider_capture_after_intent_expiry',
+        riskState: 'REVIEW',
+        requestedCredits: number(payment.credits),
+        requestedAmountUsd: String(payment.currency || 'USD').toUpperCase() === 'USD' ? number(payment.amount) / 100 : 0,
+      }, new Date(now))
+    }
     const credits = Math.max(0, number(payment.credits))
     if (credits > 0) await upsertRecord(client, 'creditLedger', { id: createId('credit_purchase'), userId, deltaCredits: credits, credits, type: 'credit_purchase', paymentIntentId: payment.id, idempotencyKey: payment.id, createdAt: now, updatedAt: now }, { idempotencyKey: `credit-purchase:${payment.id}`, operation: 'insert' })
     const planId = input.planId || payment.planId || null
@@ -161,6 +501,7 @@ export async function paymentUserPostgres(paymentId) {
 
 export async function recordBillingEventPostgres(event) {
   return withPlatformTransaction(async client => {
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`billing:${event.provider}:${event.eventId}`])
     const existing = await findByPayload(client, 'billingWebhookEvents', 'eventId', String(event.eventId))
     if (existing) return existing
     const row = { id: event.id || createId('billing_event'), ...event, eventId: String(event.eventId), createdAt: event.createdAt || nowIso() }

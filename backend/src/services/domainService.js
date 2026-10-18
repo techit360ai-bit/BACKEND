@@ -7,9 +7,9 @@ import { noteManualStageInDb } from './lifecycleService.js'
 import { organizationOverview, requireOrganizationPermission } from './organizationIntelligenceService.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { normalizeOrganizationResourcePayload, sanitizeOrganizationResource } from './organizationResourcePolicy.js'
+import { evaluatePurchasePolicy, intentExpiry, purchasePolicyConfig, purchaseUsage, resolvePurchaseIdentity } from './purchasePolicyService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
-import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, financeReadEnabled, financeReadFallbackEnabled } from '../repositories/financeRepository.js'
-import { syncFinanceProjection } from './financePostgresProjection.js'
+import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, createPaymentIntentPostgres, financeReadEnabled, financeReadFallbackEnabled, financePostgresEnabled } from '../repositories/financeRepository.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -2298,10 +2298,50 @@ export function walletList(userId, name) {
 
 export async function walletListAsync(userId, name) { if (!financeReadEnabled()) return walletList(userId, name); try { return await walletCollectionPostgres(userId, name) } catch (error) { if (!financeReadFallbackEnabled()) throw error; return walletList(userId, name) } }
 
+function expireStalePaymentIntentsInDb(db, userId, now, ttlMinutes) {
+  const intents = collection(db, 'paymentIntents').filter(row => row.userId === userId)
+  for (const intent of intents) {
+    if (String(intent.status || '').toLowerCase() !== 'pending') continue
+    const expiresAt = intent.expiresAt || intentExpiry(intent.createdAt, ttlMinutes)
+    if (new Date(expiresAt).getTime() > now.getTime()) continue
+    Object.assign(intent, {
+      status: 'expired',
+      checkoutStatus: intent.checkoutUrl ? 'expired' : intent.checkoutStatus || 'expired',
+      expiresAt,
+      expiredAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    })
+  }
+  return intents
+}
+
+function recordPaymentRiskEventInDb(db, userId, detail, now) {
+  const event = {
+    id: createId('payment_risk'),
+    userId,
+    operation: 'payment_intent_create',
+    decision: detail.ok === false ? 'rejected' : 'allowed',
+    error: detail.error || null,
+    riskState: detail.riskState || null,
+    requestedCredits: detail.requestedCredits ?? null,
+    requestedAmountUsd: detail.requestedAmountUsd ?? null,
+    usage: detail.usage || null,
+    limits: detail.limits || null,
+    kycRequired: Boolean(detail.kycRequired),
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  }
+  collection(db, 'paymentRiskEvents').push(event)
+  return event
+}
+
 export function createPaymentIntent(userId, body) {
   return updateAuthorityDb(db => {
+    const config = purchasePolicyConfig()
+    const now = new Date()
+    const intents = expireStalePaymentIntentsInDb(db, userId, now, config.intentTtlMinutes)
     const idemKey = typeof body.idemKey === 'string' && body.idemKey.trim() ? body.idemKey.trim() : null
-    const existing = idemKey && collection(db, 'paymentIntents').find(row => row.userId === userId && row.idemKey === idemKey)
+    const existing = idemKey && intents.find(row => row.idemKey === idemKey || row.idempotencyKey === idemKey)
     if (existing) return { paymentIntent: existing, idempotent: true }
     const packageId = typeof body.packageId === 'string' ? body.packageId.trim() : ''
     const pack = packageId ? collection(db, 'creditPackages').find(row => row.id === packageId && row.active !== false) : null
@@ -2316,6 +2356,22 @@ export function createPaymentIntent(userId, body) {
     if (!packageId && !planId && process.env.NODE_ENV === 'production') return { ok: false, error: 'package_id_or_plan_id_required' }
     const amount = sponsorPackage ? Number(sponsorPackage.amount || 0) : pack ? Number(pack.amount ?? pack.price ?? 0) : plan ? Number(plan.amount ?? plan.price ?? 0) : Number(body.amount || 0)
     const credits = sponsorPackage ? Number(sponsorPackage.creditGrant || sponsorPackage.credits || 0) : pack ? Number(pack.credits || 0) + Number(pack.bonusCredits || 0) : plan ? Number(plan.includedCredits ?? plan.credits ?? 0) : Number(body.credits || 0)
+    const currency = String(sponsorPackage?.currency || pack?.currency || plan?.currency || body.currency || 'USD').toUpperCase()
+    if (amount <= 0) return { ok: false, status: 400, error: 'payment_amount_required' }
+    const identity = resolvePurchaseIdentity({
+      riskProfiles: collection(db, 'riskProfiles').filter(row => row.userId === userId),
+      verificationProfiles: collection(db, 'verificationProfiles').filter(row => row.userId === userId),
+      identityVerifications: db.trustIdentityVerifications || db.identityVerifications || [],
+      screeningResults: db.trustScreeningResults || db.screeningResults || [],
+      now,
+      config,
+    })
+    const policy = evaluatePurchasePolicy({ credits, amount, currency, intents, riskState: identity.riskState, kycVerified: identity.kycVerified, now, config })
+    if (!policy.ok) {
+      recordPaymentRiskEventInDb(db, userId, policy, now)
+      return policy
+    }
+    const createdAt = now.toISOString()
     const paymentIntent = insertOwned(db, 'paymentIntents', userId, {
       packageId: pack?.id || packageId || null,
       planId: plan?.id || planId || null,
@@ -2329,21 +2385,37 @@ export function createPaymentIntent(userId, body) {
       organizationLimits: plan?.organizationLimits || plan?.limits || null,
       organizationExpiresAt: plan?.durationDays ? new Date(Date.now() + Number(plan.durationDays) * 86400000).toISOString() : null,
       amount,
-      currency: sponsorPackage?.currency || pack?.currency || plan?.currency || body.currency || 'USD',
+      currency,
       credits,
       status: 'pending',
+      checkoutStatus: 'not_started',
       provider: body.provider || null,
-      idemKey,
-      createdAt: nowIso(),
+      idemKey: idemKey || `auto:${createId('idem')}`,
+      idempotencyKey: idemKey,
+      expiresAt: intentExpiry(createdAt, config.intentTtlMinutes),
+      policy: {
+        evaluatedAt: createdAt,
+        riskState: policy.riskState,
+        kycRequired: policy.kycRequired,
+        limits: policy.limits,
+        usageAtCreation: policy.usage,
+      },
+      createdAt,
+      updatedAt: createdAt,
     }, 'pay', 'userId')
+    recordPaymentRiskEventInDb(db, userId, { ...policy, ok: true, requestedCredits: credits, requestedAmountUsd: policy.requestedAmountUsd }, now)
     return { paymentIntent }
   })
 }
 
 export async function createPaymentIntentAsync(userId, body) {
-  const result = createPaymentIntent(userId, body)
-  if (!process.env.FINANCE_WRITE_SOURCE || process.env.FINANCE_WRITE_SOURCE !== 'postgres' || result?.ok === false) return result
-  try { await syncFinanceProjection(); return result } catch (error) { console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'create_payment_intent', error: error.message })); if (process.env.FINANCE_WRITE_FALLBACK_SQLITE !== 'false') return result; return { ok: false, error: 'finance_write_temporarily_unavailable' } }
+  if (!financePostgresEnabled()) return createPaymentIntent(userId, body)
+  try {
+    return await createPaymentIntentPostgres(userId, body)
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'finance_postgres_write_failed', operation: 'create_payment_intent', error: error.message }))
+    return { ok: false, status: 503, error: 'finance_write_temporarily_unavailable' }
+  }
 }
 
 export function genericList(userId, name) {

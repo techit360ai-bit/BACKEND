@@ -35,7 +35,17 @@ export async function syncTrustProjection() {
 
 export async function initializeTrustPostgresProjection() {
   if (!hasPlatformDatabaseUrl()) return { enabled: false }
-  const sql = await fs.readFile(new URL('../../migrations/postgres/002_trust_capability_authorization.sql', import.meta.url), 'utf8'); const proofSql = await fs.readFile(new URL('../../migrations/postgres/018_trust_proof_authority.sql', import.meta.url), 'utf8'); await getPlatformPool().query(sql); await getPlatformPool().query(proofSql); await syncTrustProjection()
+  const files = [
+    '002_trust_capability_authorization.sql',
+    '018_trust_proof_authority.sql',
+    '019_trust_authority_normalized.sql',
+    '020_trust_identity_screening.sql',
+  ]
+  for (const file of files) {
+    const sql = await fs.readFile(new URL(`../../migrations/postgres/${file}`, import.meta.url), 'utf8')
+    await getPlatformPool().query(sql)
+  }
+  await syncTrustProjection()
   timer = setInterval(() => { syncTrustProjection().catch(error => console.error(JSON.stringify({ event: 'trust_projection_failed', error: error.message }))) }, Math.max(5000, Number(process.env.TRUST_PROJECTION_INTERVAL_MS || 30000))); timer.unref?.()
   return { enabled: true }
 }
