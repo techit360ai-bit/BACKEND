@@ -233,6 +233,26 @@ export async function getProof(id, { client } = {}) {
   return result.rows[0] ? mapProof(result.rows[0]) : null
 }
 
+// Metadata-only milestone proof window used by the admin review dashboard. It
+// never selects evidence binaries or provider payloads; only normalized proof
+// fields needed to prioritize the queue.
+export async function listMilestoneProofsForAdmin({ limit = 500 } = {}) {
+  if (!trustRepositoryEnabled()) return { available: false, proofs: [] }
+  const bounded = Math.max(1, Math.min(2000, Number(limit) || 500))
+  try {
+    const result = await run(null,
+      `SELECT * FROM trust_verification_proofs
+       WHERE source='milestone'
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [bounded],
+    )
+    return { available: true, proofs: result.rows.map(mapProof) }
+  } catch {
+    return { available: false, proofs: [] }
+  }
+}
+
 export async function insertProof(proof, { client } = {}) {
   await run(client, `INSERT INTO trust_verification_proofs
     (id,user_id,project_id,source,method,provider_subject_id,status,confidence,points,metadata,evidence_hash,expires_at,verified_at,reviewed_by,reviewed_at,attestation_level,correlation_group,half_life_days,metric_window,policy_version,last_synced_at,created_at,updated_at)

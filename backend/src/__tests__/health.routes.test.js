@@ -23,7 +23,7 @@ describe('service probes', () => {
     expect(typeof res.body.uptimeSeconds).toBe('number')
   })
 
-  it('GET /ready exposes named checks plus the expected-origin warning', async () => {
+  it('GET /ready exposes named checks plus both expected-origin warnings', async () => {
     const res = await request(app).get('/ready')
     expect([200, 503]).toContain(res.status)
     expect(res.body.status).toBe(res.status === 200 ? 'ready' : 'not_ready')
@@ -31,8 +31,9 @@ describe('service probes', () => {
     expect(names).toEqual(expect.arrayContaining(['database.config', 'database.pool', 'jwt.keys', 'cors.origins']))
     const poolCheck = res.body.checks.find(check => check.name === 'database.pool')
     expect(poolCheck.ok).toBe(true)
-    expect(res.body.warnings[0].name).toBe('cors.expected_origin')
+    expect(res.body.warnings[0].name).toBe('cors.expected_origins')
     expect(res.body.warnings[0].detail).toContain('beta.techitnetwork.com')
+    expect(res.body.warnings[0].detail).toContain('admin.techitnetwork.com')
   })
 
   it('accepts the deployed origin in production', async () => {
@@ -42,12 +43,22 @@ describe('service probes', () => {
     process.env.PLATFORM_DATABASE_URL = 'postgres://user:pass@db.example.com:5432/techit'
     process.env.JWT_ALGORITHM = 'HS256'
     process.env.JWT_SECRET = 'a-production-secret-that-is-long-enough'
-    process.env.CORS_ORIGINS = 'https://beta.techitnetwork.com'
+    process.env.CORS_ORIGINS = 'https://beta.techitnetwork.com,https://admin.techitnetwork.com'
 
     const res = await request(app).get('/ready')
     const corsCheck = res.body.checks.find(check => check.name === 'cors.origins')
     expect(corsCheck.ok).toBe(true)
     expect(res.body.warnings[0].ok).toBe(true)
+  })
+
+  it('allows both deployed browser origins and rejects an unknown origin', async () => {
+    process.env.CORS_ORIGINS = 'https://beta.techitnetwork.com,https://admin.techitnetwork.com'
+    for (const origin of ['https://beta.techitnetwork.com', 'https://admin.techitnetwork.com']) {
+      const res = await request(app).get('/health').set('Origin', origin)
+      expect(res.headers['access-control-allow-origin']).toBe(origin)
+    }
+    const blocked = await request(app).get('/health').set('Origin', 'https://attacker.example')
+    expect(blocked.headers['access-control-allow-origin']).toBeUndefined()
   })
 
   it('fails closed when production has no explicit origin allow-list', async () => {

@@ -23,6 +23,15 @@ import {
 import { requireAdminAuth } from '../middlewares/auth.js'
 import { requireAdmin, requireSuperAdmin } from '../utils/roleGuards.js'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
+import {
+  adminAiSystemHealth,
+  adminGeographyAlerts,
+  adminMissionControl,
+  adminReferralCollaboration,
+  adminRevenueRetention,
+  adminTrustMilestoneReviews,
+  adminUserAnalytics,
+} from '../controllers/adminAnalyticsController.js'
 import { adminAnalytics as tvceAdminAnalytics, adminConfig as tvceAdminConfig, adminConfigUpdate as tvceAdminConfigUpdate, adminOrganizationEntitlement as tvceAdminOrganizationEntitlement, adminOrganizationEntitlements as tvceAdminOrganizationEntitlements, adminOrganizationBudget as tvceAdminOrganizationBudget, adminOrganizationHackathonReview as tvceAdminOrganizationHackathonReview, adminOrganizationAbuseReviews as tvceAdminOrganizationAbuseReviews, adminOrganizationAbuseReview as tvceAdminOrganizationAbuseReview, billingJobsRun as tvceBillingJobsRun, billingJobsStatus as tvceBillingJobsStatus } from '../controllers/tvceController.js'
 
 const router = Router()
@@ -40,6 +49,13 @@ const adminLoginLimit = rateLimit({
 
 router.post('/login', adminLoginLimit, adminLogin)
 router.get('/me', requireAdminAuth, requireAdmin, adminMe)
+router.get('/analytics/mission-control', requireAdminAuth, requireAdmin, adminMissionControl)
+router.get('/analytics/users', requireAdminAuth, requireAdmin, adminUserAnalytics)
+router.get('/analytics/referral-collaboration', requireAdminAuth, requireAdmin, adminReferralCollaboration)
+router.get('/analytics/revenue-retention', requireAdminAuth, requireSuperAdmin, adminRevenueRetention)
+router.get('/analytics/ai-system-health', requireAdminAuth, requireSuperAdmin, adminAiSystemHealth)
+router.get('/analytics/geography-alerts', requireAdminAuth, requireSuperAdmin, adminGeographyAlerts)
+router.get('/analytics/trust/milestone-reviews', requireAdminAuth, requireAdmin, adminTrustMilestoneReviews)
 router.get('/users', requireAdminAuth, requireSuperAdmin, adminList)
 router.post('/users', requireAdminAuth, requireSuperAdmin, adminCreate)
 router.patch('/users/:id', requireAdminAuth, requireSuperAdmin, adminUpdate)

@@ -41,8 +41,9 @@ import {
   assertCorsConfigured,
   databaseConfigStatus,
   expectedOriginAllowed,
-  EXPECTED_PRODUCTION_ORIGIN,
+  expectedOriginsStatus,
   isProdLike,
+  corsOrigins,
 } from './config/runtimeConfig.js'
 import { requireInternalMetricsAuth } from './middlewares/internalMetricsAuth.js'
 import { platformAuthorityMetrics } from './controllers/platformMetricsController.js'
@@ -101,17 +102,31 @@ app.use((req, res, next) => {
 })
 
 // CORS allow-list — comma-separated origins via env, defaults to local Vite
-// dev ports. Production MUST set CORS_ORIGINS to the deployed frontend(s);
-// without this env var, a real-domain frontend gets blocked at the browser.
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173')
-  .split(',')
-  .map(s => s.trim())
-  .filter(Boolean)
+// dev ports. Production MUST set CORS_ORIGINS to every deployed frontend.
+// The callback reads the runtime value so tests and rolling configuration
+// changes use the same exact parser as readiness.
+const DEVELOPMENT_CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:4173']
+
+function runtimeCorsOrigins() {
+  const configured = corsOrigins()
+  return configured.length ? configured : DEVELOPMENT_CORS_ORIGINS
+}
 
 app.use(cors({
-  origin: CORS_ORIGINS,
+  origin(origin, callback) {
+    // Non-browser callers do not send Origin and are not subject to CORS.
+    if (!origin) return callback(null, true)
+    return callback(null, runtimeCorsOrigins().includes(origin))
+  },
   credentials: true,
 }))
+// A denied browser preflight must not fall through to an application route.
+// The CORS middleware has already decided whether to emit Allow-Origin; this
+// terminates both allowed and denied OPTIONS requests without business logic.
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  return next()
+})
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('X-Frame-Options', 'DENY')
@@ -180,9 +195,11 @@ app.get('/ready', (_req, res) => {
   // The deployed SPA origin is a warning, not a hard failure, until the AWS
   // env is finalized; it must still be visible on every probe.
   const warnings = [{
-    name: 'cors.expected_origin',
+    name: 'cors.expected_origins',
     ok: !isProdLike() || expectedOriginAllowed(),
-    detail: `${EXPECTED_PRODUCTION_ORIGIN} ${expectedOriginAllowed() ? 'present' : 'missing from CORS_ORIGINS'}`,
+    detail: expectedOriginsStatus()
+      .map(item => `${item.origin} ${item.allowed ? 'present' : 'missing from CORS_ORIGINS'}`)
+      .join('; '),
   }]
 
   const ok = checks.every(check => check.ok)

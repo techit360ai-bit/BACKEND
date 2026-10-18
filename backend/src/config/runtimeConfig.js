@@ -20,9 +20,16 @@ export function currentEnvironment() {
 // Kept for callers that just want the boot-time value.
 export const ENVIRONMENT = currentEnvironment()
 
-// The deployed SPA origin. Kept here so readiness can report whether the
-// runtime allow-list actually includes it (the AWS value is applied separately).
-export const EXPECTED_PRODUCTION_ORIGIN = 'https://beta.techitnetwork.com'
+// Deployed browser origins. Readiness reports each one independently so a
+// missing admin origin cannot hide behind the public application allow-list.
+export const EXPECTED_PRODUCTION_ORIGINS = [
+  'https://beta.techitnetwork.com',
+  'https://admin.techitnetwork.com',
+]
+
+// Backwards-compatible singular export for callers that only need the primary
+// public application origin.
+export const EXPECTED_PRODUCTION_ORIGIN = EXPECTED_PRODUCTION_ORIGINS[0]
 
 export function isProdLike(env = currentEnvironment()) {
   return PROD_ENVS.has(String(env).toLowerCase())
@@ -62,8 +69,13 @@ export function assertCorsConfigured(env = currentEnvironment()) {
   return { ok: true, detail: origins.join(',') }
 }
 
+export function expectedOriginsStatus() {
+  const configured = new Set(corsOrigins())
+  return EXPECTED_PRODUCTION_ORIGINS.map(origin => ({ origin, allowed: configured.has(origin) }))
+}
+
 export function expectedOriginAllowed() {
-  return corsOrigins().includes(EXPECTED_PRODUCTION_ORIGIN)
+  return expectedOriginsStatus().every(item => item.allowed)
 }
 
 /**
