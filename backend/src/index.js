@@ -1,5 +1,6 @@
 import app from './app.js'
 import { validateDatabaseConfig } from './config/database.js'
+import { evaluatePaymentReadiness } from './config/paymentReadiness.js'
 import { initializeDiscoveryInfrastructure } from './services/discoveryInfrastructure.js'
 import { generateReverificationNotificationsAsync } from './services/trustVerificationService.js'
 import { runRevenueRefresh } from './services/trustRevenueService.js'
@@ -38,7 +39,6 @@ function validateSecurityConfig() {
     'ADMIN_AI_ROUTER_TELEMETRY_SECRET',
     'AI_USAGE_GRANT_SERVICE_SECRET',
     'AI_EXECUTION_GRANT_SECRET',
-    'PAYMENT_GATEWAY_SERVICE_SECRET',
     'VERIFICATION_AUDIT_HMAC_KEY',
     'MFA_ENCRYPTION_KEY',
     'MFA_ASSERTION_SECRET',
@@ -63,7 +63,6 @@ function validateSecurityConfig() {
     'ADMIN_AI_ROUTER_TELEMETRY_SECRET',
     'AI_USAGE_GRANT_SERVICE_SECRET',
     'AI_EXECUTION_GRANT_SECRET',
-    'PAYMENT_GATEWAY_SERVICE_SECRET',
     'VERIFICATION_AUDIT_HMAC_KEY',
     'MFA_ENCRYPTION_KEY',
     'MFA_ASSERTION_SECRET',
@@ -72,21 +71,27 @@ function validateSecurityConfig() {
     if ((process.env[name] || '').length < 32) throw new Error(`${name} must be at least 32 characters`)
   }
   if (!process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET || process.env.BACKEND_SUPPORT_MAINTENANCE_SECRET.length < 32) throw new Error('BACKEND_SUPPORT_MAINTENANCE_SECRET must be at least 32 characters')
-  for (const name of ['BILLING_SUCCESS_URL', 'BILLING_CANCEL_URL']) {
-    if (!process.env[name]) throw new Error(`${name} is required in production`)
+}
+
+function validatePaymentConfig() {
+  if (process.env.NODE_ENV !== 'production') return
+  const readiness = evaluatePaymentReadiness(process.env)
+  if (readiness.ok) return
+  const required = process.env.PAYMENT_CONFIGURATION_REQUIRED === 'true'
+  const event = {
+    event: required ? 'payment_configuration_required_but_incomplete' : 'payment_configuration_incomplete',
+    failures: readiness.failures,
+    providers: readiness.providers,
+    gatewaySecret: readiness.gatewaySecret,
+    redirects: readiness.redirects,
   }
-  const providers = {
-    stripe: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
-    paystack: Boolean(process.env.PAYSTACK_SECRET_KEY),
-    flutterwave: Boolean(process.env.FLUTTERWAVE_SECRET_KEY && process.env.FLUTTERWAVE_SECRET_HASH),
-  }
-  if (!Object.values(providers).some(Boolean)) {
-    throw new Error('At least one complete payment provider configuration is required in production (stripe, paystack, or flutterwave)')
-  }
+  if (required) throw new Error(`Payment configuration is required but incomplete: ${readiness.failures.join('; ')}`)
+  console.warn(JSON.stringify(event))
 }
 
 validateDatabaseConfig()
 validateSecurityConfig()
+validatePaymentConfig()
 if (process.env.DISCOVERY_DATABASE_URL) await initializeDiscoveryInfrastructure()
 if (process.env.TRUST_DATABASE_URL || process.env.DATABASE_URL) await initializeTrustPostgresProjection()
 if (process.env.IDENTITY_DATABASE_URL || process.env.DATABASE_URL) await initializeIdentityPostgresProjection()
