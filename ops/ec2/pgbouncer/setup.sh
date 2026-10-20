@@ -6,7 +6,8 @@
 #
 # Idempotent: safe to run on every deploy. Defaults the RDS URL to
 # $HOME/.techit/platform-database-url (the DevOps-owned on-box credential).
-# Only 127.0.0.1:6432 is exposed; the credential file is owner-only 0600.
+# Loopback plus the Docker bridge gateways are exposed; the public interface is
+# never bound. The credential file is owner-only 0600.
 # =============================================================================
 set -euo pipefail
 
@@ -61,6 +62,7 @@ trap 'rm -f "$TMP_INI" "$TMP_USERLIST"' EXIT
 # every non-loopback IPv4 gateway (172.17.0.1, 172.18.0.1, ...) so both share
 # this one pool; the instance's public interface is never used.
 DOCKER_GATEWAYS="$(for n in $(docker network ls -q 2>/dev/null || true); do docker network inspect "$n" --format '{{range .IPAM.Config}}{{.Gateway}}{{"\n"}}{{end}}' 2>/dev/null; done | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | grep -vE '^127\.' | sort -u | paste -sd, - || true)"
+LISTEN_ADDRS="127.0.0.1${DOCKER_GATEWAYS:+,$DOCKER_GATEWAYS}"
 RDS_URL="$RDS_URL" TEMPLATE="$TEMPLATE" OUT_INI="$TMP_INI" OUT_LIST="$TMP_USERLIST" DOCKER_GATEWAYS="$DOCKER_GATEWAYS" node -e '
   const fs = require("fs");
   const u = new URL(process.env.RDS_URL);
@@ -106,17 +108,36 @@ else
 fi
 
 sudo systemctl enable pgbouncer >/dev/null 2>&1 || true
-if [ "$CHANGED" = "0" ] && systemctl is-active --quiet pgbouncer; then
+listener_ready() {
+  GW="$1" node -e 'const n=require("net");const s=n.connect(6432,process.env.GW);s.on("connect",()=>{s.end();process.exit(0)});s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(1),2000)'
+}
+
+all_listeners_ready() {
+  systemctl is-active --quiet pgbouncer || return 1
+  local addr
+  for addr in $(printf '%s' "$LISTEN_ADDRS" | tr ',' ' '); do
+    if ! listener_ready "$addr"; then
+      echo "pgbouncer: configured listener missing on $addr:6432" >&2
+      return 1
+    fi
+  done
+}
+
+if [ "$CHANGED" = "0" ] && all_listeners_ready; then
   echo "pgbouncer: config unchanged and service already active; not restarting"
 else
+  if [ "$CHANGED" = "0" ]; then
+    echo "pgbouncer: config unchanged but listeners are stale; restarting"
+  fi
   sudo systemctl restart pgbouncer
 fi
 
-# Readiness: a bare TCP accept on the loopback port is enough to know PgBouncer
-# is listening (no psql needed on a box that only talks to RDS).
+# Readiness: require a TCP accept on every rendered address. Checking only
+# loopback previously let a stale process keep host clients working while every
+# container got ECONNREFUSED on its bridge gateway.
 for _ in $(seq 1 20); do
-  if node -e 'const n=require("net");const s=n.connect(6432,"127.0.0.1");s.on("connect",()=>{s.end();process.exit(0)});s.on("error",()=>process.exit(1));setTimeout(()=>process.exit(1),2000)'; then
-    echo "pgbouncer ready on 127.0.0.1:6432 (pool_mode=transaction, default_pool_size=30)"
+  if all_listeners_ready; then
+    echo "pgbouncer ready on port 6432 ($LISTEN_ADDRS; pool_mode=transaction, default_pool_size=15)"
     exit 0
   fi
   sleep 1
