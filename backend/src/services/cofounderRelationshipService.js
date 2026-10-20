@@ -493,7 +493,7 @@ export async function getInvitationAsync(userId, relationshipId) {
   if (disabled) return disabled
   return runCofounderRead(userId, { relationshipId }, () => {
     const db = readAuthorityDb()
-    const access = requireRelationship(db, relationshipId, userId, { statuses: ACTIONABLE_STATUSES })
+    const access = requireRelationship(db, relationshipId, userId, { statuses: [...ACTIONABLE_STATUSES, ...TERMINAL_STATUSES] })
     if (access.ok === false) return access
     return { ok: true, invitation: publicRelationship(access.relationship, userId, db) }
   })
@@ -782,7 +782,7 @@ export async function getRelationshipAsync(userId, relationshipId) {
   if (disabled) return disabled
   return runCofounderRead(userId, { relationshipId }, () => {
     const db = readAuthorityDb()
-    const access = requireRelationship(db, relationshipId, userId, { statuses: [...ACTIONABLE_STATUSES, COFOUNDER_STATUSES.ENDED] })
+    const access = requireRelationship(db, relationshipId, userId, { statuses: [...ACTIONABLE_STATUSES, ...TERMINAL_STATUSES] })
     if (access.ok === false) return access
     return { ok: true, relationship: publicRelationship(access.relationship, userId, db) }
   })
@@ -1247,6 +1247,7 @@ function healthFromDb(db, relationship) {
   let weighted = 0
   let weight = 0
   let confidenceTotal = 0
+  const policyWeight = Object.values(HEALTH_WEIGHTS).reduce((sum, value) => sum + value, 0)
   for (const [key, entry] of Object.entries(metrics)) {
     if (entry.value == null) continue
     weighted += entry.value * HEALTH_WEIGHTS[key]
@@ -1254,7 +1255,7 @@ function healthFromDb(db, relationship) {
     confidenceTotal += entry.confidence * HEALTH_WEIGHTS[key]
   }
   const overall = weight ? weighted / weight : null
-  const confidence = weight ? confidenceTotal / weight : 0
+  const confidence = confidenceTotal / policyWeight
   const band = overall == null || confidence < 0.35 ? 'insufficient_evidence' : overall >= 80 ? 'healthy' : overall >= 60 ? 'watch' : 'attention'
   return {
     overall: overall == null ? null : Math.round(overall),

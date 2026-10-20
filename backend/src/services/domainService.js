@@ -1137,7 +1137,7 @@ export async function listWorkspaceMembersAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
-    if (workspace.cofounderRelationshipId && workspace.status !== 'active') return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE')) return null
     const members = await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { members: [{ id: `workspace_owner_${workspace.ownerId}`, workspaceId, userId: workspace.ownerId, name: workspace.ownerId, accessLevel: 'owner', role: 'Workspace owner', status: 'active' }, ...members.map(member => ({ ...member, name: member.name || member.userId, avatarUrl: member.avatarUrl || '' }))] }
@@ -1211,7 +1211,7 @@ export async function workspaceContextAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
-    if (workspace.cofounderRelationshipId && workspace.status !== 'active') return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE')) return null
     const members = workspace.ownerId === userId ? [] : await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { workspaceId, projectId: workspace.projectId || null, venture: null, blueprintAvailable: false, isOwner: workspace.ownerId === userId, accessLevel: workspace.ownerId === userId ? 'owner' : 'viewer' }

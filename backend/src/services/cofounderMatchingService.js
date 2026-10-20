@@ -186,7 +186,7 @@ function evaluateCandidate({ db, founder, project, requirement, candidate }) {
     : null
 
   const dimensions = {
-    capabilityFit: scoreDimension(capability, COFOUNDER_FIT_POLICY.weights.capabilityFit, { requiredSkills, candidateSkills }, 'The requirement has no skills or the candidate profile has no usable skills.'),
+    capabilityFit: scoreDimension(capability, COFOUNDER_FIT_POLICY.weights.capabilityFit, { requiredSkills: requestedSkills, candidateSkills }, 'The requirement has no skills or the candidate profile has no usable skills.'),
     skillComplementarity: scoreDimension(complementarity, COFOUNDER_FIT_POLICY.weights.skillComplementarity, { founderSkills, candidateSkills }, 'Both founder and candidate skill sets are required to measure complementarity.'),
     ventureStageFit: scoreDimension(stageFit, COFOUNDER_FIT_POLICY.weights.ventureStageFit, { requiredStage: requirement.ventureStage || null, candidateStages }, 'Candidate venture-stage experience is not available.'),
     commitmentCompatibility: scoreDimension(commitmentFit, COFOUNDER_FIT_POLICY.weights.commitmentCompatibility, { requiredHours, candidateHours, requiredType: requirement.commitment?.type || null, candidateType: compatibility.commitment || null }, 'Commitment requirements or candidate availability are missing.'),
