@@ -72,6 +72,7 @@ function makeDb() {
     verifiedSkills: [],
     trustVerificationProofs: [],
     executionScores: [],
+    feedPosts: [],
   }
 }
 
@@ -270,20 +271,52 @@ describe('co-founder lifecycle and authorization', () => {
     await relationshipService.advanceRelationshipAsync('founder', relationshipId, { status: 'COFOUNDER_PROPOSAL' })
     await relationshipService.acceptProposalAsync('candidate-a', relationshipId, { idempotencyKey: 'activate' })
 
-    await relationshipService.pauseRelationshipAsync('founder', relationshipId)
+    const beforePause = authority.db.cofounderRelationships.find((row) => row.id === relationshipId)
+    expect(await relationshipService.pauseRelationshipAsync('founder', relationshipId, { version: beforePause.version - 1 }))
+      .toMatchObject({ ok: false, status: 409 })
+    await relationshipService.pauseRelationshipAsync('founder', relationshipId, { version: beforePause.version })
     const pausedWorkspace = await relationshipService.getRelationshipWorkspaceAsync('candidate-a', relationshipId)
     expect(pausedWorkspace).toMatchObject({ ok: false, status: 409 })
-    await relationshipService.resumeRelationshipAsync('founder', relationshipId)
-    const ended = await relationshipService.endRelationshipAsync('founder', relationshipId, { reason: 'venture_wound_down' })
+    const paused = authority.db.cofounderRelationships.find((row) => row.id === relationshipId)
+    expect(await relationshipService.resumeRelationshipAsync('founder', relationshipId, { version: paused.version - 1 }))
+      .toMatchObject({ ok: false, status: 409 })
+    await relationshipService.resumeRelationshipAsync('founder', relationshipId, { version: paused.version })
+    const resumed = authority.db.cofounderRelationships.find((row) => row.id === relationshipId)
+    expect(await relationshipService.endRelationshipAsync('founder', relationshipId, {
+      reason: 'venture_wound_down',
+      version: resumed.version - 1,
+    })).toMatchObject({ ok: false, status: 409 })
+    const ended = await relationshipService.endRelationshipAsync('founder', relationshipId, {
+      reason: 'venture_wound_down',
+      version: resumed.version,
+    })
     expect(ended).toMatchObject({ ok: true, evidencePreserved: true })
     expect(ended.relationship.status).toBe('ENDED')
     expect(await relationshipService.getRelationshipAsync('candidate-a', relationshipId)).toMatchObject({ ok: true, relationship: { status: 'ENDED' } })
     expect(await relationshipService.getRelationshipWorkspaceAsync('candidate-a', relationshipId)).toMatchObject({ ok: false, status: 409 })
   })
-})
 
-describe('relationship workspace privacy and deterministic evidence', () => {
-  async function activeRelationship() {
+  it('preserves declined and withdrawn invitation history for both parties', async () => {
+    const declinedInvite = await relationshipService.createInvitationAsync('founder', {
+      projectId: 'venture-1',
+      candidateId: 'candidate-a',
+    })
+    await relationshipService.declineInvitationAsync('candidate-a', declinedInvite.relationship.id, { reason: 'not_now' })
+    expect((await relationshipService.getInvitationAsync('founder', declinedInvite.relationship.id)).invitation)
+      .toMatchObject({ status: 'DECLINED', endReason: 'not_now' })
+    expect((await relationshipService.getRelationshipAsync('candidate-a', declinedInvite.relationship.id)).relationship)
+      .toMatchObject({ status: 'DECLINED' })
+
+    const withdrawnInvite = await relationshipService.createInvitationAsync('founder', {
+      projectId: 'venture-1',
+      candidateId: 'candidate-b',
+    })
+    await relationshipService.withdrawInvitationAsync('founder', withdrawnInvite.relationship.id, { reason: 'role_closed' })
+    expect((await relationshipService.getInvitationAsync('candidate-b', withdrawnInvite.relationship.id)).invitation)
+      .toMatchObject({ status: 'WITHDRAWN', endReason: 'role_closed' })
+  })
+
+  it('activates once under concurrent proposal acceptance and then remains idempotent', async () => {
     const invitation = await relationshipService.createInvitationAsync('founder', {
       projectId: 'venture-1',
       candidateId: 'candidate-a',
@@ -293,7 +326,31 @@ describe('relationship workspace privacy and deterministic evidence', () => {
     await relationshipService.advanceRelationshipAsync('candidate-a', relationshipId, { status: 'MUTUAL_INTEREST' })
     await relationshipService.advanceRelationshipAsync('candidate-a', relationshipId, { status: 'DUE_DILIGENCE' })
     await relationshipService.advanceRelationshipAsync('founder', relationshipId, { status: 'COFOUNDER_PROPOSAL' })
-    await relationshipService.acceptProposalAsync('candidate-a', relationshipId, { idempotencyKey: `activate-${relationshipId}` })
+
+    const [first, second] = await Promise.all([
+      relationshipService.acceptProposalAsync('candidate-a', relationshipId, { idempotencyKey: 'concurrent-activation' }),
+      relationshipService.acceptProposalAsync('candidate-a', relationshipId, { idempotencyKey: 'concurrent-activation' }),
+    ])
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(true)
+    expect(authority.db.workspaces).toHaveLength(1)
+    expect(authority.db.cofounderResponsibilities).toHaveLength(1)
+    expect(authority.db.cofounderRelationships.find((row) => row.id === relationshipId).status).toBe('ACTIVE')
+  })
+})
+
+describe('relationship workspace privacy and deterministic evidence', () => {
+  async function activeRelationship(candidateId = 'candidate-a') {
+    const invitation = await relationshipService.createInvitationAsync('founder', {
+      projectId: 'venture-1',
+      candidateId,
+    })
+    const relationshipId = invitation.relationship.id
+    await relationshipService.acceptDiscussionAsync(candidateId, relationshipId)
+    await relationshipService.advanceRelationshipAsync(candidateId, relationshipId, { status: 'MUTUAL_INTEREST' })
+    await relationshipService.advanceRelationshipAsync(candidateId, relationshipId, { status: 'DUE_DILIGENCE' })
+    await relationshipService.advanceRelationshipAsync('founder', relationshipId, { status: 'COFOUNDER_PROPOSAL' })
+    await relationshipService.acceptProposalAsync(candidateId, relationshipId, { idempotencyKey: `activate-${relationshipId}` })
     return authority.db.cofounderRelationships.find((row) => row.id === relationshipId)
   }
 
@@ -334,6 +391,64 @@ describe('relationship workspace privacy and deterministic evidence', () => {
     expect(candidateEvidence.claimed.skills).toContain('typescript')
     expect(candidateEvidence.verified.trustScore).toBe(84)
     expect(candidateEvidence.observed.execution.executionScore).toBe(76)
+  })
+
+  it('blocks cross-relationship resource IDs and keeps personal objectives private', async () => {
+    const relationship = await activeRelationship('candidate-a')
+    const secondRelationship = await activeRelationship('candidate-b')
+    const shared = await relationshipService.createObjectiveAsync('founder', relationship.id, { title: 'Shared roadmap' })
+    const personal = await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Founder private notes',
+      ownerId: 'founder',
+      visibilityLayer: 'PERSONAL',
+    })
+    expect(shared.ok).toBe(true)
+    expect(personal.ok).toBe(true)
+
+    const candidateObjectives = await relationshipService.listObjectivesAsync('candidate-a', relationship.id)
+    expect(candidateObjectives.objectives.map((row) => row.id)).toContain(shared.objective.id)
+    expect(candidateObjectives.objectives.map((row) => row.id)).not.toContain(personal.objective.id)
+
+    expect(await relationshipService.listObjectivesAsync('outsider', relationship.id)).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.patchObjectiveAsync('outsider', shared.objective.id, { title: 'Hijack' })).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.patchObjectiveAsync('candidate-b', shared.objective.id, { title: 'Hijack' })).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.getRelationshipWorkspaceAsync('candidate-b', relationship.id)).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.getRelationshipWorkspaceAsync('candidate-a', secondRelationship.id)).toMatchObject({ ok: false, status: 404 })
+
+    const decision = await relationshipService.createDecisionAsync('founder', relationship.id, { title: 'Choose launch date' })
+    expect(await relationshipService.respondToDecisionAsync('outsider', decision.decision.id, { response: 'approve' }))
+      .toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.respondToDecisionAsync('candidate-b', decision.decision.id, { response: 'approve' }))
+      .toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.listActivityAsync('outsider', relationship.id)).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.getRelationshipEvidenceAsync('outsider', relationship.id)).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.getRelationshipEvidenceAsync('candidate-b', relationship.id)).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.publishInvestorTeamSummaryAsync('outsider', 'venture-1', { payload: { team: [{ name: 'X', title: 'Y' }] } }))
+      .toMatchObject({ ok: false, status: 404 })
+
+    const published = await relationshipService.publishInvestorTeamSummaryAsync('founder', 'venture-1', {
+      payload: {
+        team: [{ name: 'Founder Member', title: 'Founder', role: 'founder' }],
+        strengths: ['execution'],
+        verifiedEvidence: { completedMilestones: 2, verifiedContributors: 2, executionConsistency: 80 },
+      },
+    })
+    expect(published).toMatchObject({ ok: true, summary: { projectId: 'venture-1' } })
+    expect(authority.db.cofounderTeamSummaries).toHaveLength(1)
+    expect(authority.db.feedPosts).toEqual([])
+  })
+
+  it('aggregates multiple active co-founders independently', async () => {
+    const first = await activeRelationship('candidate-a')
+    const second = await activeRelationship('candidate-b')
+    const founderMode = await relationshipService.getRelationshipModeAsync('founder', 'venture-1')
+    expect(founderMode.active).toBe(true)
+    expect(founderMode.relationships.map((row) => row.id).sort()).toEqual([first.id, second.id].sort())
+    expect(founderMode.team).toHaveLength(2)
+
+    const candidateMode = await relationshipService.getRelationshipModeAsync('candidate-a', 'venture-1')
+    expect(candidateMode.relationships).toHaveLength(1)
+    expect(candidateMode.relationships[0]).toMatchObject({ id: first.id, role: 'cofounder' })
   })
 })
 

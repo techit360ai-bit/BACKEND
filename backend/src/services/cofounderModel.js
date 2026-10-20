@@ -221,7 +221,7 @@ export function publicRelationship(relationship, userId, db = readAuthorityDb())
   const layerAllowed = role && (
     relationship.status === COFOUNDER_STATUSES.ACTIVE
     || relationship.status === COFOUNDER_STATUSES.PAUSED
-    || relationship.status === COFOUNDER_STATUSES.ENDED
+    || TERMINAL_STATUSES.includes(relationship.status)
     || PRE_ACTIVE_STATUSES.includes(relationship.status)
   )
   if (!layerAllowed) return null

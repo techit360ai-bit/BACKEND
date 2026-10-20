@@ -505,6 +505,7 @@ function invitedCandidateAction(userId, relationshipId, action, body = {}) {
     const access = requireRelationship(db, relationshipId, userId, { statuses: PRE_ACTIVE_STATUSES, candidateOnly: true })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const now = nowIso()
     if (action === 'accept-discussion') {
       if (relationship.status === COFOUNDER_STATUSES.DISCUSSION) return { ok: true, relationship: publicRelationship(relationship, userId, db), idempotent: true }
@@ -531,10 +532,10 @@ function invitedCandidateAction(userId, relationshipId, action, body = {}) {
   })
 }
 
-export async function acceptDiscussionAsync(userId, relationshipId) {
+export async function acceptDiscussionAsync(userId, relationshipId, body = {}) {
   const disabled = feature(userId)
   if (disabled) return disabled
-  return invitedCandidateAction(userId, relationshipId, 'accept-discussion')
+  return invitedCandidateAction(userId, relationshipId, 'accept-discussion', body)
 }
 
 export async function declineInvitationAsync(userId, relationshipId, body = {}) {
@@ -551,6 +552,7 @@ export async function requestChangesAsync(userId, relationshipId, body = {}) {
     const access = requireRelationship(db, relationshipId, userId, { statuses: PRE_ACTIVE_STATUSES, candidateOnly: true })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const requestedChanges = text(body.requestedChanges || body.changes, 2000)
     if (!requestedChanges) return fail('changed_terms_required')
     const now = nowIso()
@@ -576,6 +578,7 @@ export async function withdrawInvitationAsync(userId, relationshipId, body = {})
     const access = requireRelationship(db, relationshipId, userId, { statuses: PRE_ACTIVE_STATUSES, founderOnly: true })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const now = nowIso()
     relationship.status = COFOUNDER_STATUSES.WITHDRAWN
     relationship.withdrawnAt = now
@@ -601,6 +604,7 @@ export async function advanceRelationshipAsync(userId, relationshipId, body = {}
     const access = requireRelationship(db, relationshipId, userId, { statuses: PRE_ACTIVE_STATUSES })
     if (access.ok === false) return access
     const { relationship, role } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const target = String(body.status || body.to || '').toUpperCase()
     if (!(ADVANCE_TRANSITIONS[relationship.status] || []).includes(target)) return fail('invalid_cofounder_transition', 409, { currentStatus: relationship.status, target })
     if (target === COFOUNDER_STATUSES.MUTUAL_INTEREST && role !== 'cofounder') return fail('cofounder_candidate_required', 403)
@@ -732,6 +736,7 @@ export async function acceptProposalAsync(userId, relationshipId, body = {}) {
       return { ok: true, relationship: publicRelationship(relationship, userId, db), idempotent: true }
     }
     if (relationship.status !== COFOUNDER_STATUSES.COFOUNDER_PROPOSAL) return fail('invalid_cofounder_transition', 409, { currentStatus: relationship.status })
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const idempotencyKey = text(body.idempotencyKey || '', 160) || null
     if (relationship.activationIdempotencyKey && idempotencyKey && relationship.activationIdempotencyKey === idempotencyKey) {
       return { ok: true, relationship: publicRelationship(relationship, userId, db), idempotent: true }
@@ -825,7 +830,7 @@ export async function getRelationshipWorkspaceAsync(userId, relationshipId) {
   })
 }
 
-export async function pauseRelationshipAsync(userId, relationshipId) {
+export async function pauseRelationshipAsync(userId, relationshipId, body = {}) {
   const disabled = feature(userId)
   if (disabled) return disabled
   return applyCofounderMutation(userId, { relationshipId }, () => {
@@ -833,6 +838,7 @@ export async function pauseRelationshipAsync(userId, relationshipId) {
     const access = requireRelationship(db, relationshipId, userId, { statuses: ACTIVE_STATUSES, permission: 'MANAGE_COFOUNDER_RELATIONSHIP' })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     relationship.status = COFOUNDER_STATUSES.PAUSED
     relationship.pausedAt = nowIso()
     touch(relationship)
@@ -845,7 +851,7 @@ export async function pauseRelationshipAsync(userId, relationshipId) {
   })
 }
 
-export async function resumeRelationshipAsync(userId, relationshipId) {
+export async function resumeRelationshipAsync(userId, relationshipId, body = {}) {
   const disabled = feature(userId)
   if (disabled) return disabled
   return applyCofounderMutation(userId, { relationshipId }, () => {
@@ -853,6 +859,7 @@ export async function resumeRelationshipAsync(userId, relationshipId) {
     const access = requireRelationship(db, relationshipId, userId, { statuses: [COFOUNDER_STATUSES.PAUSED], permission: 'MANAGE_COFOUNDER_RELATIONSHIP' })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     relationship.status = COFOUNDER_STATUSES.ACTIVE
     relationship.resumedAt = nowIso()
     relationship.pausedAt = null
@@ -871,6 +878,7 @@ export async function endRelationshipAsync(userId, relationshipId, body = {}) {
     const access = requireRelationship(db, relationshipId, userId, { statuses: [COFOUNDER_STATUSES.ACTIVE, COFOUNDER_STATUSES.PAUSED], permission: 'MANAGE_COFOUNDER_RELATIONSHIP' })
     if (access.ok === false) return access
     const { relationship } = access
+    if (!versionMatches(relationship, body)) return fail('version_conflict', 409, { currentVersion: relationship.version })
     const now = nowIso()
     relationship.status = COFOUNDER_STATUSES.ENDED
     relationship.endedAt = now

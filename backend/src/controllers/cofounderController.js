@@ -68,7 +68,7 @@ export async function invitationGet(req, res) {
 }
 
 export async function invitationAcceptDiscussion(req, res) {
-  return send(res, await acceptDiscussionAsync(req.user.id, req.params.relationshipId))
+  return send(res, await acceptDiscussionAsync(req.user.id, req.params.relationshipId, requestBody(req)))
 }
 
 export async function invitationRequestChanges(req, res) {
@@ -108,11 +108,11 @@ export async function relationshipWorkspace(req, res) {
 }
 
 export async function relationshipPause(req, res) {
-  return send(res, await pauseRelationshipAsync(req.user.id, req.params.relationshipId))
+  return send(res, await pauseRelationshipAsync(req.user.id, req.params.relationshipId, requestBody(req)))
 }
 
 export async function relationshipResume(req, res) {
-  return send(res, await resumeRelationshipAsync(req.user.id, req.params.relationshipId))
+  return send(res, await resumeRelationshipAsync(req.user.id, req.params.relationshipId, requestBody(req)))
 }
 
 export async function relationshipEnd(req, res) {
