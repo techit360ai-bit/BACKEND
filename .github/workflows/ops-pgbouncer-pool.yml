@@ -41,9 +41,18 @@ jobs:
               echo "--- service ---"
               systemctl is-active pgbouncer || true
               echo "--- listen ---"
-              ss -ltn 2>/dev/null | grep 6432 || echo "nothing listening on 6432"
+              sudo ss -ltn 2>/dev/null | grep 6432 || echo "nothing listening on 6432"
+              echo "--- docker gateways ---"
+              docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{"\n"}}{{end}}' 2>/dev/null || true
+              for n in $(docker network ls -q 2>/dev/null || true); do
+                docker network inspect "$n" --format '{{.Name}} {{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true
+              done
               echo "--- effective config (comments stripped) ---"
-              grep -vE '^\s*(;|$)' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
+              sudo grep -vE '^\s*(;|$)' /etc/pgbouncer/pgbouncer.ini 2>/dev/null || true
+              echo "--- service unit ---"
+              systemctl cat pgbouncer 2>/dev/null || true
+              echo "--- recent service log ---"
+              sudo journalctl -u pgbouncer -n 20 --no-pager 2>/dev/null || true
               echo "--- RDS capacity, seen through the proxy ---"
               cd "$HOME/BACKEND"
               node ops/ec2/pgbouncer-pool-report.mjs
@@ -56,4 +65,4 @@ jobs:
             sudo bash ops/ec2/pgbouncer/setup.sh --credential-file "$HOME/.techit/platform-database-url"
             echo "--- service ---"
             systemctl is-active pgbouncer || true
-            ss -ltn 2>/dev/null | grep 6432 || true
+            sudo ss -ltn 2>/dev/null | grep 6432 || true
