@@ -67,7 +67,14 @@ export async function initializeDiscoveryInfrastructure() {
 }
 
 export function recommendationCacheKey(userId, options = {}) {
-  return `techit:discovery:recommendations:${userId}:${options.surface || 'discovery'}:${options.type || 'all'}:${options.limit || 'default'}`
+  const base = `techit:discovery:recommendations:${userId}:${options.surface || 'discovery'}:${options.type || 'all'}:${options.limit || 'default'}`
+  if (!options.relationshipType) return base
+  const relationshipType = String(options.relationshipType).toLowerCase()
+  const ventureId = String(options.ventureId || options.projectId || 'none')
+  const requirementId = String(options.requirementId || 'latest')
+  const requirementVersion = String(options.requirementVersion || 'latest')
+  const policyVersion = String(options.policyVersion || 'cofounder-fit-v1')
+  return `${base}:${relationshipType}:${ventureId}:${requirementId}:${requirementVersion}:${policyVersion}`
 }
 
 /** Cache TTL for a recommendation request, by surface type. */

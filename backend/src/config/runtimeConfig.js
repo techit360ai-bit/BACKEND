@@ -35,6 +35,21 @@ export function isProdLike(env = currentEnvironment()) {
   return PROD_ENVS.has(String(env).toLowerCase())
 }
 
+function envBool(value, fallback = false) {
+  if (value == null) return fallback
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase())
+}
+
+export function cofounderModeEnabled(userId = null) {
+  if (!envBool(process.env.COFOUNDER_MODE_ENABLED, false)) return false
+  const allowlist = String(process.env.COFOUNDER_MODE_ALLOWLIST || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+  if (!allowlist.length) return true
+  return Boolean(userId && allowlist.includes(String(userId)))
+}
+
 export function buildInfo() {
   return {
     service: SERVICE_NAME,

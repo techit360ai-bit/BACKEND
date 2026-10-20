@@ -77,6 +77,16 @@ const OWNER_FIELDS = {
   payouts: ['collaboratorId', 'ownerId', 'userId'],
   dilutionEvents: ['collaboratorId', 'ownerId', 'userId'],
   workspaceInvitations: ['collaboratorId', 'inviterId', 'userId', 'ownerId'],
+  // Co-founder relationship slice. Relationship rows are owned by either party
+  // for reads; writes still pass through the relationship authorization guard.
+  cofounderRequirements: ['founderId', 'ownerId'],
+  cofounderRelationships: ['founderId', 'cofounderId', 'ownerId'],
+  cofounderResponsibilities: ['ownerId', 'founderId', 'cofounderId'],
+  cofounderObjectives: ['ownerId', 'coOwnerId', 'founderId', 'cofounderId'],
+  cofounderDecisions: ['proposedBy', 'ownerId'],
+  cofounderActivity: ['actorId', 'ownerId'],
+  cofounderAlignmentSnapshots: ['ownerId'],
+  cofounderTeamSummaries: ['approvedBy', 'ownerId', 'userId'],
   // Organization programs + founder enrollment slice.
   organizationPrograms: ['ownerId', 'userId', 'organizationId'],
   programEnrollments: ['organizationId', 'founderId', 'ownerId', 'userId'],
@@ -104,7 +114,7 @@ async function loadByIds(client, collectionName, ids, target) {
   if (unique.length) mergeById(target, await listRecordsByIds(client, collectionName, unique))
 }
 
-async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, founderProjects = false, workspaceWrites = false, programs = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [] } = {}) {
+async function buildDomainDb(client, { userId = null, endorsements = false, investor = false, organization = false, hackathon = false, hackathonId = null, teamId = null, contracts = false, opportunityId = null, collaboratorId = null, venture = false, workspaceId = null, notificationPreferences = false, contributions = false, equity = false, wallet = false, founderProjects = false, workspaceWrites = false, programs = false, collections = [], publicCollections = [], subjectUserId = null, projectIds = [], cofounder = false, cofounderRelationshipId = null, cofounderProjectId = null, cofounderDiscovery = false } = {}) {
   const db = {}
   const writeCollections = new Set([...WRITE_COLLECTIONS, ...namedCollections(collections), ...namedCollections(publicCollections)])
   for (const name of writeCollections) db[name] = []
@@ -207,6 +217,10 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
   if (workspaceId) {
     mergeById(db.workspaces, [await getRecord(client, 'workspaces', workspaceId)])
     mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', [workspaceId]))
+    const workspace = db.workspaces.find(row => String(row.id) === String(workspaceId))
+    if (workspace?.cofounderRelationshipId) {
+      mergeById(db.cofounderRelationships, [await getRecord(client, 'cofounderRelationships', workspace.cofounderRelationshipId)])
+    }
   }
 
   if (userId && notificationPreferences) {
@@ -277,6 +291,67 @@ async function buildDomainDb(client, { userId = null, endorsements = false, inve
     for (const row of db.workspaceMembers) profileIds.push(row.userId)
     for (const row of db.workspaceInvitations) profileIds.push(row.collaboratorId, row.invitedBy)
     await loadByIds(client, 'profiles', profileIds, db.profiles)
+  }
+
+  // Co-founder slice: load the caller's relationships, requirements and all
+  // relationship-scoped records plus the linked venture workspace. When a
+  // specific relationship is addressed, only that relationship's private
+  // records are loaded; authorization still happens in the service/guard.
+  if (userId && cofounder) {
+    let relationships = await listRecordsForOwner(client, 'cofounderRelationships', userId, { ownerFields: OWNER_FIELDS.cofounderRelationships })
+    if (cofounderRelationshipId) {
+      const exact = await getRecord(client, 'cofounderRelationships', cofounderRelationshipId)
+      relationships = exact ? [exact] : []
+    }
+    mergeById(db.cofounderRelationships, relationships)
+    mergeById(db.cofounderRequirements, await listRecordsForOwner(client, 'cofounderRequirements', userId, { ownerFields: OWNER_FIELDS.cofounderRequirements }))
+    if (cofounderProjectId) mergeById(db.cofounderRequirements, await listRecordsByFieldIn(client, 'cofounderRequirements', 'projectId', [cofounderProjectId]))
+
+    const relationshipIds = db.cofounderRelationships.map(row => row.id)
+    for (const name of ['cofounderResponsibilities', 'cofounderObjectives', 'cofounderDecisions', 'cofounderActivity', 'cofounderAlignmentSnapshots']) {
+      if (relationshipIds.length) mergeById(db[name], await listRecordsByFieldIn(client, name, 'relationshipId', relationshipIds))
+    }
+
+    const projectIdsForRelationships = db.cofounderRelationships.map(row => row.projectId).filter(Boolean)
+    const addressedProjects = [...new Set([...projectIdsForRelationships, cofounderProjectId].filter(Boolean))]
+    if (addressedProjects.length) {
+      await loadByIds(client, 'projects', addressedProjects, db.projects)
+      mergeById(db.cofounderTeamSummaries, await listRecordsByFieldIn(client, 'cofounderTeamSummaries', 'projectId', addressedProjects))
+    }
+    const workspaceIds = db.cofounderRelationships.map(row => row.workspaceId).filter(Boolean)
+    if (workspaceIds.length) {
+      await loadByIds(client, 'workspaces', workspaceIds, db.workspaces)
+      mergeById(db.workspaceMembers, await listRecordsByFieldIn(client, 'workspaceMembers', 'workspaceId', workspaceIds))
+      mergeById(db.workspaceTasks, await listRecordsByFieldIn(client, 'workspaceTasks', 'workspaceId', workspaceIds))
+    }
+    if (addressedProjects.length) {
+      mergeById(db.milestones, await listRecordsByFieldIn(client, 'milestones', 'projectId', addressedProjects))
+      db.projectActivities ||= []
+      db.startupActivities ||= []
+      mergeById(db.projectActivities, await listRecordsByFieldIn(client, 'projectActivities', 'projectId', addressedProjects))
+      mergeById(db.startupActivities, await listRecordsByFieldIn(client, 'startupActivities', 'projectId', addressedProjects))
+    }
+
+    // Discovery is a bounded candidate read, not relationship private data.
+    // Only the relationship-scoped endpoints set this flag.
+    if (cofounderDiscovery) {
+      db.executionScores ||= []
+      db.trustProfiles ||= []
+      db.trustVerificationProofs ||= []
+      db.verifiedSkills ||= []
+      mergeById(db.profiles, await listRecordsLimited(client, 'profiles', { limit: domainCandidateLimit() }))
+      mergeById(db.executionScores, await listRecordsLimited(client, 'executionScores', { limit: domainCandidateLimit() }))
+      mergeById(db.trustProfiles, await listRecordsLimited(client, 'trustProfiles', { limit: domainCandidateLimit() }))
+      mergeById(db.trustVerificationProofs, await listRecordsLimited(client, 'trustVerificationProofs', { limit: domainCandidateLimit() }))
+      mergeById(db.verifiedSkills, await listRecordsLimited(client, 'verifiedSkills', { limit: domainCandidateLimit() }))
+    }
+
+    const profileIds = [userId]
+    for (const row of db.cofounderRelationships) profileIds.push(row.founderId, row.cofounderId)
+    for (const row of db.workspaceMembers) profileIds.push(row.userId)
+    for (const row of db.workspaceTasks) profileIds.push(row.ownerId, row.assigneeId, row.assignedTo)
+    await loadByIds(client, 'profiles', profileIds, db.profiles)
+    mergeById(db.notifications, await listRecordsForOwner(client, 'notifications', userId, { ownerFields: ['userId'] }))
   }
 
   for (const entry of collections) {

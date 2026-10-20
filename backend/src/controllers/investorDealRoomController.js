@@ -1,4 +1,5 @@
 import { createDealQuestionAsync, createDealRoomAsync, createIcReviewAsync, createInternalNoteAsync, createTermSheetAsync, getDealRoomAsync, listDealRoomsAsync, signDealNdaAsync, transitionDealAsync, updateDiligenceItemAsync, addDealQuestionMessageAsync } from '../services/investorDealRoomService.js'
+import { getApprovedInvestorTeamSummaryAsync } from '../services/cofounderRelationshipService.js'
 
 function result(res, value, success = 200) { if (value?.ok === false) return res.status(value.error === 'deal_room_not_found' ? 404 : 400).json(value); return res.status(success).json(value) }
 export async function deals(req, res) { return res.json(await listDealRoomsAsync(req.user.id)) }
@@ -12,3 +13,10 @@ export async function questionMessage(req, res) { return result(res, await addDe
 export async function noteCreate(req, res) { return result(res, await createInternalNoteAsync(req.user.id, req.params.dealId, req.body), 201) }
 export async function icCreate(req, res) { return result(res, await createIcReviewAsync(req.user.id, req.params.dealId, req.body), 201) }
 export async function termSheetCreate(req, res) { return result(res, await createTermSheetAsync(req.user.id, req.params.dealId, req.body), 201) }
+export async function teamSummary(req, res) {
+  const deal = await getDealRoomAsync(req.user.id, req.params.dealId)
+  if (deal?.ok === false) return result(res, deal)
+  const projectId = deal?.deal?.projectId || deal?.projectId
+  if (!projectId) return res.status(404).json({ ok: false, error: 'investor_team_summary_not_found' })
+  return result(res, await getApprovedInvestorTeamSummaryAsync(req.user.id, projectId))
+}

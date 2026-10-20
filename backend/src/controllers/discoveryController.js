@@ -32,6 +32,14 @@ export async function listRecommendations(req, res) {
     surface: req.query.surface,
     type: req.query.type,
     limit: req.query.limit,
+    relationshipType: req.query.relationshipType,
+    ventureId: req.query.ventureId || req.query.projectId,
+    projectId: req.query.projectId || req.query.ventureId,
+    requirementId: req.query.requirementId,
+    requirementVersion: req.query.requirementVersion,
+    candidateId: req.query.candidateId,
+    candidateIds: req.query.candidateIds,
+    policyVersion: req.query.policyVersion,
   }
   const cacheKey = recommendationCacheKey(req.user.id, options)
   const cached = await getCachedDiscovery(cacheKey).catch(() => null)

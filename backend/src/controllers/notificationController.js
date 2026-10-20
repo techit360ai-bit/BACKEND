@@ -4,7 +4,7 @@ import { recordActivityInDb, noteUserActivityAsync } from '../services/discovery
 import { listProfilesByIds } from '../repositories/identityRepository.js'
 import { listNotifications as listNotificationsPostgres, createNotification as createNotificationPostgres, markNotificationRead as markNotificationReadPostgres, markAllNotificationsRead as markAllNotificationsReadPostgres, deleteNotification as deleteNotificationPostgres, contentReadEnabled, contentReadFallbackEnabled, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 
-const TYPES = new Set(['fire', 'comment', 'collab', 'gsis', 'milestone', 'mention', 'answer'])
+const TYPES = new Set(['fire', 'comment', 'collab', 'cofounder', 'gsis', 'milestone', 'mention', 'answer'])
 
 function toNotification(n, findProfile = () => undefined) {
   const actorProfile = findProfile(n.actorId)
