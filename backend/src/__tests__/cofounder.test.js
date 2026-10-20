@@ -17,6 +17,7 @@ vi.mock('../services/executionIntelligenceService.js', () => ({ executionIntelli
 const relationshipService = await import('../services/cofounderRelationshipService.js')
 const matchingService = await import('../services/cofounderMatchingService.js')
 const domainService = await import('../services/domainService.js')
+const cofounderModel = await import('../services/cofounderModel.js')
 const { recommendationCacheKey } = await import('../services/discoveryInfrastructure.js')
 
 const FEATURE_FLAG = process.env.COFOUNDER_MODE_ENABLED
@@ -333,5 +334,48 @@ describe('relationship workspace privacy and deterministic evidence', () => {
     expect(candidateEvidence.claimed.skills).toContain('typescript')
     expect(candidateEvidence.verified.trustScore).toBe(84)
     expect(candidateEvidence.observed.execution.executionScore).toBe(76)
+  })
+})
+
+describe('co-founder profile extension', () => {
+  it('keeps structured preferences bounded and rejects unsupported or sensitive fields', () => {
+    const preferences = cofounderModel.normalizeCofounderPreferences({
+      commitment: 'full_time',
+      visionAnswers: 'Build durable infrastructure.',
+      workingStyle: 'deep work',
+      riskTolerance: 'high',
+      communicationPreference: 'weekly written sync',
+      contributionExpectations: 'Own delivery.',
+      inferredPersonality: 'must be ignored',
+      summary: 'not a matching preference',
+    })
+    expect(preferences).toEqual({
+      commitment: 'full_time',
+      visionAnswers: 'Build durable infrastructure.',
+      workingStyle: 'deep work',
+      riskTolerance: 'high',
+      communicationPreference: 'weekly written sync',
+      contributionExpectations: 'Own delivery.',
+    })
+    expect(cofounderModel.normalizeCofounderPreferences({ commitment: 'unknown' })).toEqual({ commitment: null })
+    expect(cofounderModel.normalizeCofounderPreferences(['full_time'])).toBeNull()
+  })
+
+  it('normalizes current and previous co-founder experience without exposing free-form data', () => {
+    expect(cofounderModel.normalizeCofounderExperience({
+      currentlyCofounder: true,
+      currentVentureCount: 2.8,
+      previousCofounderCount: 120,
+      previousVentures: ['Northstar', 'Second venture'],
+      summary: 'Built and shipped two products.',
+      inferredTrait: 'ignored',
+    })).toEqual({
+      currentlyCofounder: true,
+      currentVentureCount: 2,
+      previousCofounderCount: 50,
+      previousVentures: ['Northstar', 'Second venture'],
+      summary: 'Built and shipped two products.',
+    })
+    expect(cofounderModel.normalizeCofounderExperience('serial')).toBeNull()
   })
 })

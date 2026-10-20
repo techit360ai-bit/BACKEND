@@ -72,6 +72,28 @@ export const COFOUNDER_PERMISSIONS = Object.freeze([
   'MANAGE_COFOUNDER_RELATIONSHIP',
 ])
 
+const COFOUNDER_PREFERENCE_FIELDS = Object.freeze([
+  'commitment',
+  'visionAnswers',
+  'workingStyle',
+  'riskTolerance',
+  'communicationPreference',
+  'timeCommitment',
+  'decisionStyle',
+  'longTermAmbition',
+  'timezoneCompatibility',
+  'contributionExpectations',
+  'equityDiscussionPreference',
+])
+
+const COFOUNDER_EXPERIENCE_FIELDS = Object.freeze([
+  'currentlyCofounder',
+  'currentVentureCount',
+  'previousCofounderCount',
+  'previousVentures',
+  'summary',
+])
+
 export function rows(db, name) {
   if (!Array.isArray(db[name])) db[name] = []
   return db[name]
@@ -96,6 +118,35 @@ export function normalizeVisibility(value, fallback = VISIBILITY_LAYERS.SHARED) 
 export function normalizeStatus(value) {
   const normalized = String(value || '').toUpperCase()
   return Object.values(COFOUNDER_STATUSES).includes(normalized) ? normalized : null
+}
+
+export function normalizeCofounderPreferences(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const preferences = {}
+  for (const key of COFOUNDER_PREFERENCE_FIELDS) {
+    if (value[key] === undefined) continue
+    if (key === 'commitment') {
+      const commitment = text(value[key], 40)
+      preferences[key] = COFOUNDER_COMMITMENT_TYPES.includes(commitment) ? commitment : null
+      continue
+    }
+    preferences[key] = text(value[key], key === 'visionAnswers' || key === 'contributionExpectations' ? 2000 : 240)
+  }
+  return Object.keys(preferences).length ? preferences : null
+}
+
+export function normalizeCofounderExperience(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const experience = {}
+  if (value.currentlyCofounder !== undefined) experience.currentlyCofounder = Boolean(value.currentlyCofounder)
+  for (const key of ['currentVentureCount', 'previousCofounderCount']) {
+    if (value[key] === undefined) continue
+    const number = Number(value[key])
+    experience[key] = Number.isFinite(number) ? Math.max(0, Math.min(key === 'currentVentureCount' ? 20 : 50, Math.floor(number))) : 0
+  }
+  if (value.previousVentures !== undefined) experience.previousVentures = textList(value.previousVentures, 20, 120)
+  if (value.summary !== undefined) experience.summary = text(value.summary, 2000)
+  return Object.keys(experience).length ? experience : null
 }
 
 export function relationshipParty(relationship, userId) {

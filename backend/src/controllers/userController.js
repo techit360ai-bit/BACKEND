@@ -7,6 +7,7 @@ import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '.
 import { publicTrustFor } from '../services/trustAuthority.js'
 import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 import { userDirectoryEnabled, userDirectoryFallbackEnabled, loadMemberDirectorySources, loadConnectionRequestSources, loadConnectionSources, loadProfileByRef, applyConnectionMutation } from '../repositories/userDirectoryRepository.js'
+import { normalizeCofounderExperience, normalizeCofounderPreferences } from '../services/cofounderModel.js'
 
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
@@ -20,6 +21,7 @@ const UPDATABLE = new Set([
   'nextMilestone', 'whyBuilding', 'winningIn3Years', 'unfairAdvantage', 'ownershipPhilosophy',
   'yearsExperience', 'discipline', 'subSkills', 'techStack', 'earliestStart',
   'commitmentStyle', 'equityPreference', 'minCashFloor', 'vestingComfort',
+  'cofounderPreferences', 'cofounderExperience',
 ])
 
 export async function getMe(req, res) {
@@ -37,7 +39,10 @@ export async function getMe(req, res) {
 export async function updateMe(req, res) {
   const updates = {}
   for (const [key, value] of Object.entries(req.body)) {
-    if (UPDATABLE.has(key)) updates[key] = value
+    if (!UPDATABLE.has(key)) continue
+    if (key === 'cofounderPreferences') updates[key] = normalizeCofounderPreferences(value)
+    else if (key === 'cofounderExperience') updates[key] = normalizeCofounderExperience(value)
+    else updates[key] = value
   }
 
   if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
