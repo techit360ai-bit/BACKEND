@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import { requireAuth } from '../middlewares/auth.js'
 import { requireCapability } from '../services/capabilityAuthorization.js'
-import { checklistPatch, dealCreate, dealGet, deals, icCreate, ndaSign, noteCreate, questionCreate, questionMessage, statusChange, termSheetCreate } from '../controllers/investorDealRoomController.js'
+import { checklistPatch, dealCreate, dealGet, deals, icCreate, ndaSign, noteCreate, questionCreate, questionMessage, statusChange, teamSummary, termSheetCreate } from '../controllers/investorDealRoomController.js'
 import { auditVerify, closingGet, closingItemSave, comparableList, documentCreate, documentDownload, documentFinalize, documentRevoke, documents, folderCreate, folders, icUpdate, packCreate, participantCreate, participantRevoke, participants, questionnaireGet, questionnaireSave, questionnaireTemplateSave, referenceCreate, references, requestCreate, revenueGet, revenueRecord, revenueRefresh, technicalDdGet, termAction, termSheets } from '../controllers/investorDealRoomCompletionController.js'
 
 const router = Router(); router.use(requireAuth)
@@ -22,6 +22,7 @@ router.use(rateLimit({
 router.get('/', requireCapability('investor.dealroom.view'), deals)
 router.post('/', requireCapability('investor.dealroom.create'), dealCreate)
 router.get('/:dealId', requireCapability('investor.dealroom.view'), dealGet)
+router.get('/:dealId/team-summary', requireCapability('investor.dealroom.view'), teamSummary)
 router.post('/:dealId/nda/sign', ndaSign)
 router.post('/:dealId/status', requireCapability('investor.dealroom.manage'), statusChange)
 router.patch('/:dealId/checklist/:itemId', requireCapability('investor.dealroom.manage'), checklistPatch)

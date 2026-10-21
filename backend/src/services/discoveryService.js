@@ -2,6 +2,11 @@ import { createHash } from 'crypto'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { createId, nowIso, userName } from '../utils/api.js'
 import { discoveryStoreEnabled, discoveryFallbackEnabled, runDiscoveryRead, applyDiscoveryMutation } from '../repositories/discoveryRepository.js'
+import {
+  cofounderRecommendationsAsync,
+  cofounderRecommendationsInDb,
+  isCofounderRelationshipType,
+} from './cofounderMatchingService.js'
 
 const DAY_MS = 86_400_000
 const HOUR_MS = 3_600_000
@@ -730,6 +735,14 @@ function generateRecommendationsInDb(db, userId, options = {}) {
 }
 
 export function getRecommendations(userId, options = {}) {
+  if (isCofounderRelationshipType(options.relationshipType)) {
+    return cofounderRecommendationsInDb(
+      readAuthorityDb(),
+      userId,
+      options.projectId || options.ventureId,
+      options,
+    )
+  }
   return updateAuthorityDb(db => generateRecommendationsInDb(db, userId, options))
 }
 
@@ -1254,6 +1267,13 @@ async function discoveryWrite(options, mutate, fallback) {
 const viewerScope = (userId, extra = {}) => ({ userId, candidates: true, ...extra })
 
 export async function getRecommendationsAsync(userId, options = {}) {
+  if (isCofounderRelationshipType(options.relationshipType)) {
+    return cofounderRecommendationsAsync(
+      userId,
+      options.projectId || options.ventureId,
+      options,
+    )
+  }
   return discoveryWrite(viewerScope(userId), () => getRecommendations(userId, options), () => getRecommendations(userId, options))
 }
 export async function searchDiscoveryAsync(userId, query, options = {}) {

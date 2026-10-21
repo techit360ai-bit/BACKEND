@@ -10,6 +10,7 @@ import { normalizeOrganizationResourcePayload, sanitizeOrganizationResource } fr
 import { evaluatePurchasePolicy, intentExpiry, purchasePolicyConfig, purchaseUsage, resolvePurchaseIdentity } from './purchasePolicyService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
 import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, createPaymentIntentPostgres, financeReadEnabled, financeReadFallbackEnabled, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { canViewLayer, normalizeVisibility, VISIBILITY_LAYERS } from './cofounderModel.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
 
@@ -840,7 +841,9 @@ export function listWorkspaces(userId) {
   const freeCollaboratorWorkspaceId = !paid ? collaboratorMemberships[0]?.workspaceId || null : null
   const membershipByWorkspace = new Map(memberships.map(row => [row.workspaceId, row]))
   const workspaces = collection(db, 'workspaces')
-    .filter(row => row.ownerId === userId || (membershipByWorkspace.has(row.id) && (paid || !collaboratorMemberships.length || row.id === freeCollaboratorWorkspaceId)))
+    .filter(row => row.cofounderRelationshipId
+      ? cofounderWorkspaceAllowed(db, row, userId)
+      : row.ownerId === userId || (membershipByWorkspace.has(row.id) && (paid || !collaboratorMemberships.length || row.id === freeCollaboratorWorkspaceId)))
     .sort(byNewest)
     .map(workspace => ({
       ...workspace,
@@ -856,7 +859,14 @@ export async function listWorkspacesAsync(userId) {
     const rows = await listWorkspacesPostgres(userId)
     const collaboratorRows = rows.filter(row => row.workspace.ownerId !== userId && String(row.membership?.role || '').toLowerCase() === 'collaborator')
     const freeCollaboratorWorkspaceId = collaboratorRows.sort((a, b) => new Date(a.membership?.joinedAt || a.membership?.createdAt || 0) - new Date(b.membership?.joinedAt || b.membership?.createdAt || 0))[0]?.workspace.id || null
-    const workspaces = rows.filter(row => row.workspace.ownerId === userId || !collaboratorRows.length || row.workspace.id === freeCollaboratorWorkspaceId).map(row => ({ ...row.workspace, isOwner: row.workspace.ownerId === userId, accessLevel: row.workspace.ownerId === userId ? 'owner' : row.membership?.accessLevel || 'viewer' }))
+    const workspaces = rows
+      .filter(row => !row.workspace.cofounderRelationshipId || row.workspace.status === 'active')
+      .filter(row => !row.workspace.cofounderRelationshipId || cofounderWorkspaceParty(row.workspace, userId))
+      .filter(row => row.workspace.cofounderRelationshipId
+        || row.workspace.ownerId === userId
+        || !collaboratorRows.length
+        || row.workspace.id === freeCollaboratorWorkspaceId)
+      .map(row => ({ ...row.workspace, isOwner: row.workspace.ownerId === userId, accessLevel: row.workspace.ownerId === userId ? 'owner' : row.membership?.accessLevel || 'viewer' }))
     return { workspaces, accessPolicy: { collaboratorFreeWorkspaceLimit: 1, paidAccount: false, freeCollaboratorWorkspaceId, hiddenWorkspaceCount: Math.max(0, rows.length - workspaces.length) } }
   } catch (error) {
     if (!workspaceReadFallbackEnabled()) throw error
@@ -873,9 +883,42 @@ function freeCollaboratorWorkspaceAllowed(db, userId, workspaceId) {
   return !memberships.length || memberships[0].workspaceId === workspaceId
 }
 
+function cofounderWorkspaceRelationship(db, workspace) {
+  if (!workspace?.cofounderRelationshipId) return null
+  return collection(db, 'cofounderRelationships').find(row => String(row.id) === String(workspace.cofounderRelationshipId)) || null
+}
+
+function cofounderWorkspaceAllowed(db, workspace, userId) {
+  const relationship = cofounderWorkspaceRelationship(db, workspace)
+  return Boolean(relationship
+    && relationship.status === 'ACTIVE'
+    && [relationship.founderId, relationship.cofounderId].map(String).includes(String(userId)))
+}
+
+function cofounderWorkspaceParty(workspace, userId) {
+  return Boolean(workspace?.cofounderRelationshipId
+    && [workspace.cofounderFounderId, workspace.cofounderCofounderId].map(String).includes(String(userId)))
+}
+
 function workspaceAccess(db, workspaceId, userId) {
   const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId)
   if (!workspace) return null
+  if (workspace.cofounderRelationshipId) {
+    const relationship = cofounderWorkspaceRelationship(db, workspace)
+    if (!cofounderWorkspaceAllowed(db, workspace, userId)) return null
+    const membership = collection(db, 'workspaceMembers').find(row =>
+      row.workspaceId === workspaceId && row.userId === userId && row.status === 'active'
+    )
+    const isOwner = String(workspace.ownerId) === String(userId)
+    if (!isOwner && !membership) return null
+    return {
+      workspace,
+      membership,
+      isOwner,
+      accessLevel: isOwner ? 'owner' : membership?.accessLevel || 'viewer',
+      cofounderRelationship: relationship,
+    }
+  }
   if (workspace.ownerId === userId) return { workspace, isOwner: true, accessLevel: 'owner' }
   const membership = collection(db, 'workspaceMembers').find(row =>
     row.workspaceId === workspaceId && row.userId === userId && row.status === 'active'
@@ -887,6 +930,22 @@ function workspaceAccess(db, workspaceId, userId) {
 function workspaceCanWrite(access, collectionName) {
   if (access?.isOwner) return true
   return access?.accessLevel === 'contributor' && ['workspaceTasks', 'workspaceReports'].includes(collectionName)
+}
+
+function cofounderTaskFields(body, relationship, userId, existing = null) {
+  const parties = new Set([String(relationship.founderId), String(relationship.cofounderId)])
+  const ownerId = String(body.ownerId || existing?.ownerId || userId)
+  if (!parties.has(ownerId)) return null
+  const visibilityLayer = body.visibilityLayer !== undefined
+    ? normalizeVisibility(body.visibilityLayer)
+    : normalizeVisibility(existing?.visibilityLayer)
+  if (visibilityLayer === VISIBILITY_LAYERS.PERSONAL && ownerId !== String(userId)) return null
+  const requestedAllowed = body.allowedUserIds !== undefined ? body.allowedUserIds : existing?.allowedUserIds
+  const allowedUserIds = visibilityLayer === VISIBILITY_LAYERS.RESTRICTED
+    ? [...new Set((Array.isArray(requestedAllowed) ? requestedAllowed : []).map(String).filter(id => parties.has(id)))]
+    : []
+  if (visibilityLayer === VISIBILITY_LAYERS.RESTRICTED && !allowedUserIds.length) allowedUserIds.push(String(userId))
+  return { ownerId, visibilityLayer, allowedUserIds }
 }
 
 function publicWorkspaceInvitation(db, invitation) {
@@ -917,6 +976,7 @@ export function createWorkspaceInvitation(userId, workspaceId, body) {
   return updateAuthorityDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (workspace.cofounderRelationshipId) return { ok: false, error: 'cofounder_workspace_managed_by_relationship' }
     const collaboratorId = collaborationText(body.collaboratorId, 100)
     if (!collaboratorId || collaboratorId === userId) return { ok: false, error: 'collaborator_invalid' }
     const collaborator = collection(db, 'profiles').find(row => row.id === collaboratorId && profileHasRole(row, 'collaborator'))
@@ -1018,6 +1078,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
     }
     const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (workspace.cofounderRelationshipId) return { ok: false, error: 'cofounder_workspace_managed_by_relationship' }
     if (!freeCollaboratorWorkspaceAllowed(db, userId, workspace.id)) return { ok: false, error: 'free_collaborator_workspace_limit', limit: 1 }
     const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
       workspaceId: workspace.id,
@@ -1100,6 +1161,7 @@ export async function listWorkspaceMembersAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE' || !cofounderWorkspaceParty(workspace, userId))) return null
     const members = await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { members: [{ id: `workspace_owner_${workspace.ownerId}`, workspaceId, userId: workspace.ownerId, name: workspace.ownerId, accessLevel: 'owner', role: 'Workspace owner', status: 'active' }, ...members.map(member => ({ ...member, name: member.name || member.userId, avatarUrl: member.avatarUrl || '' }))] }
@@ -1113,6 +1175,7 @@ export function removeWorkspaceMember(userId, workspaceId, memberId) {
   return updateAuthorityDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (workspace.cofounderRelationshipId) return { ok: false, error: 'cofounder_membership_managed_by_relationship' }
     const member = collection(db, 'workspaceMembers').find(row =>
       row.id === memberId && row.workspaceId === workspaceId && row.status === 'active'
     )
@@ -1172,6 +1235,7 @@ export async function workspaceContextAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE' || !cofounderWorkspaceParty(workspace, userId))) return null
     const members = workspace.ownerId === userId ? [] : await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { workspaceId, projectId: workspace.projectId || null, venture: null, blueprintAvailable: false, isOwner: workspace.ownerId === userId, accessLevel: workspace.ownerId === userId ? 'owner' : 'viewer' }
@@ -1186,14 +1250,25 @@ export function listWorkspaceCollection(userId, workspaceId, name) {
   const access = workspaceAccess(db, workspaceId, userId)
   if (!access) return null
   if (!access.isOwner && ['workspaceAgents', 'workspaceConnectors'].includes(name)) return []
-  return collection(db, name).filter(row => row.workspaceId === workspaceId).sort(byNewest)
+  return collection(db, name)
+    .filter(row => row.workspaceId === workspaceId)
+    .filter(row => name !== 'workspaceTasks' || !access.cofounderRelationship || canViewLayer(row, access.cofounderRelationship, userId))
+    .sort(byNewest)
 }
 
 export function createWorkspaceCollectionItem(userId, workspaceId, name, body, prefix) {
   return updateAuthorityDb(db => {
     const access = workspaceAccess(db, workspaceId, userId)
     if (!access || !workspaceCanWrite(access, name)) return null
-    return insertOwned(db, name, userId, { ...body, workspaceId, createdBy: userId }, prefix)
+    const { cofounderRelationshipId, workspaceId: ignoredWorkspaceId, createdBy, createdAt, updatedAt, ...clientBody } = body
+    const payload = { ...clientBody, workspaceId, createdBy: userId }
+    if (name === 'workspaceTasks' && access.cofounderRelationship) {
+      const fields = cofounderTaskFields(body, access.cofounderRelationship, userId)
+      if (!fields) return null
+      payload.cofounderRelationshipId = access.cofounderRelationship.id
+      Object.assign(payload, fields)
+    }
+    return insertOwned(db, name, userId, payload, prefix)
   })
 }
 
@@ -1204,6 +1279,24 @@ export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, 
     const rows = collection(db, name)
     const idx = rows.findIndex(row => row.id === itemId && row.workspaceId === workspaceId)
     if (idx === -1) return null
+    if (name === 'workspaceTasks' && access.cofounderRelationship) {
+      if (!canViewLayer(rows[idx], access.cofounderRelationship, userId)) return null
+      const fields = cofounderTaskFields(body, access.cofounderRelationship, userId, rows[idx])
+      if (!fields) return null
+      const { id, workspaceId: ignoredWorkspaceId, cofounderRelationshipId, createdBy, createdAt, updatedAt, ownerId, visibilityLayer, allowedUserIds, ...clientBody } = body
+      rows[idx] = {
+        ...rows[idx],
+        ...cleanObject(clientBody),
+        ...fields,
+        id: rows[idx].id,
+        workspaceId,
+        cofounderRelationshipId: access.cofounderRelationship.id,
+        createdBy: rows[idx].createdBy,
+        createdAt: rows[idx].createdAt,
+        updatedAt: nowIso(),
+      }
+      return rows[idx]
+    }
     rows[idx] = {
       ...rows[idx],
       ...cleanObject(body),

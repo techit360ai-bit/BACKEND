@@ -66,6 +66,7 @@ export const OWN_PROFILE_FIELDS = Object.freeze([
   'whyBuilding', 'winningIn3Years', 'unfairAdvantage', 'ownershipPhilosophy',
   'yearsExperience', 'discipline', 'subSkills', 'techStack', 'earliestStart', 'commitmentStyle',
   'equityPreference', 'minCashFloor', 'vestingComfort', 'certifications', 'createdAt', 'updatedAt',
+  'cofounderPreferences', 'cofounderExperience',
 ])
 
 export function projectOwnProfile(profile) {

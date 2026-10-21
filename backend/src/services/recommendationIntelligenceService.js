@@ -7,6 +7,11 @@ import { publicTrustFor as legacyPublicTrustFor } from './trustVerificationAutho
 import { publicTrustFor as dispatchPublicTrustFor } from './trustAuthority.js'
 import { evaluateEntitlement, evaluateEntitlementAsync } from './tvceService.js'
 import { authorizationEnabled, loadAuthorizationSources } from '../repositories/authorizationRepository.js'
+import {
+  cofounderRecommendationsAsync,
+  cofounderRecommendationsInDb,
+  isCofounderRelationshipType,
+} from './cofounderMatchingService.js'
 
 const DAY = 86_400_000
 const rows = (db, name) => Array.isArray(db[name]) ? db[name] : (db[name] = [])
@@ -135,9 +140,17 @@ function collaboratorRecommendationsFrom(db, userId, input = {}, accessOverride 
   return { ok: true, type: 'collaborator', access, recommendations: results.map((row, index) => ({ rank: index + 1, collaborator: { id: row.candidate.id, name: row.candidate.name, title: row.candidate.title, skills: row.candidate.skills, country: row.candidate.country }, score: row.score, reasons: row.reasons, matchedSkills: row.matchedSkills, evidence: { executionScore: num(row.candidate.executionScore ?? row.candidate.execution ?? row.candidate.eviScore), deliveryReliability: num(row.candidate.deliveryReliability ?? row.candidate.deliveryRate), responseVelocity: num(row.candidate.responseVelocity ?? row.candidate.responseScore), collaborationHistory: Number(row.candidate.successfulCollaborations || 0) }, deterministic: true })) }
 }
 
-export function founderCollaboratorRecommendations(userId, projectId, input = {}) { return founderCollaboratorRecommendationsFrom(readAuthorityDb(), userId, projectId, input) }
+export function founderCollaboratorRecommendations(userId, projectId, input = {}) {
+  if (isCofounderRelationshipType(input.relationshipType)) {
+    return cofounderRecommendationsInDb(readAuthorityDb(), userId, projectId, input, matchingAccess(userId, 'founder'))
+  }
+  return founderCollaboratorRecommendationsFrom(readAuthorityDb(), userId, projectId, input)
+}
 
 function founderCollaboratorRecommendationsFrom(db, userId, projectId, input = {}, accessOverride = null) {
+  if (isCofounderRelationshipType(input.relationshipType)) {
+    return cofounderRecommendationsInDb(db, userId, projectId, input, accessOverride || matchingAccess(userId, 'founder'))
+  }
   const project = rows(db, 'projects').find(row => String(row.id) === String(projectId) && String(row.ownerId || row.founderId || row.createdBy) === String(userId))
   if (!project) return { ok: false, status: 404, error: 'project_not_found' }
   const teamIds = new Set(rows(db, 'workspaceMembers').filter(row => row.workspaceId === project.workspaceId && row.status === 'active').map(row => row.userId))
@@ -226,6 +239,10 @@ export async function collaboratorRecommendationsAsync(userId, input = {}) {
 }
 
 export async function founderCollaboratorRecommendationsAsync(userId, projectId, input = {}) {
+  if (isCofounderRelationshipType(input.relationshipType)) {
+    const access = await matchingAccessAsync(userId, 'founder')
+    return cofounderRecommendationsAsync(userId, projectId, input, access)
+  }
   return recommendationRead({ userId, projectId: String(projectId) }, async () => {
     const db = readAuthorityDb()
     const access = await matchingAccessAsync(userId, 'founder')

@@ -22,13 +22,28 @@ export async function listProjects(userId) {
 }
 
 export async function findWorkspace(workspaceId) {
-  const result = await getPool().query('SELECT * FROM core_workspaces WHERE id=$1', [workspaceId])
-  return result.rows[0] ? payload(result.rows[0]) : null
+  const result = await getPool().query(`SELECT w.*,cr.payload AS cofounder_payload FROM core_workspaces w LEFT JOIN platform_collection_records cr ON cr.collection_name='cofounderRelationships' AND cr.id=w.payload->>'cofounderRelationshipId' AND cr.deleted_at IS NULL WHERE w.id=$1`, [workspaceId])
+  if (!result.rows[0]) return null
+  const workspace = payload(result.rows[0])
+  if (result.rows[0].cofounder_payload) {
+    workspace.cofounderStatus = result.rows[0].cofounder_payload.status || null
+    workspace.cofounderFounderId = result.rows[0].cofounder_payload.founderId || null
+    workspace.cofounderCofounderId = result.rows[0].cofounder_payload.cofounderId || null
+  }
+  return workspace
 }
 
 export async function listWorkspaces(userId) {
-  const result = await getPool().query(`SELECT w.*,m.id AS membership_id,m.user_id AS membership_user_id,m.role AS membership_role,m.status AS membership_status,m.payload AS membership_payload FROM core_workspaces w LEFT JOIN core_workspace_members m ON m.workspace_id=w.id AND m.user_id=$1 AND m.status='active' WHERE w.owner_id=$1 OR m.user_id=$1 ORDER BY w.updated_at DESC`, [userId])
-  return result.rows.map(row => ({ workspace: payload(row), membership: row.membership_id ? { ...(row.membership_payload || {}), id: row.membership_id, workspaceId: row.id, userId: row.membership_user_id, role: row.membership_role, status: row.membership_status } : null }))
+  const result = await getPool().query(`SELECT w.*,m.id AS membership_id,m.user_id AS membership_user_id,m.role AS membership_role,m.status AS membership_status,m.payload AS membership_payload,cr.payload AS cofounder_payload FROM core_workspaces w LEFT JOIN core_workspace_members m ON m.workspace_id=w.id AND m.user_id=$1 AND m.status='active' LEFT JOIN platform_collection_records cr ON cr.collection_name='cofounderRelationships' AND cr.id=w.payload->>'cofounderRelationshipId' AND cr.deleted_at IS NULL WHERE (w.owner_id=$1 OR m.user_id=$1) AND (w.payload->>'cofounderRelationshipId' IS NULL OR (cr.payload->>'status'='ACTIVE' AND $1 IN (cr.payload->>'founderId',cr.payload->>'cofounderId'))) ORDER BY w.updated_at DESC`, [userId])
+  return result.rows.map(row => {
+    const workspace = payload(row)
+    if (row.cofounder_payload) {
+      workspace.cofounderStatus = row.cofounder_payload.status || null
+      workspace.cofounderFounderId = row.cofounder_payload.founderId || null
+      workspace.cofounderCofounderId = row.cofounder_payload.cofounderId || null
+    }
+    return { workspace, membership: row.membership_id ? { ...(row.membership_payload || {}), id: row.membership_id, workspaceId: row.id, userId: row.membership_user_id, role: row.membership_role, status: row.membership_status } : null }
+  })
 }
 
 export async function listMembers(workspaceId) {
