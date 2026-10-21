@@ -26,6 +26,7 @@ import {
   patchResponsibilityAsync,
   pauseRelationshipAsync,
   publishInvestorTeamSummaryAsync,
+  recordCandidateEventAsync,
   requestChangesAsync,
   respondToDecisionAsync,
   resumeRelationshipAsync,
@@ -53,6 +54,10 @@ export async function requirementsGet(req, res) {
 
 export async function requirementsPut(req, res) {
   return send(res, await upsertRequirementsAsync(req.user.id, req.params.ventureId, requestBody(req)))
+}
+
+export async function candidateEvent(req, res) {
+  return send(res, await recordCandidateEventAsync(req.user.id, requestBody(req)), 201)
 }
 
 export async function invitationCreate(req, res) {

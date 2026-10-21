@@ -7,6 +7,7 @@ import {
 } from '../middlewares/cofounderAccess.js'
 import {
   activity,
+  candidateEvent,
   capabilities,
   decisionCreate,
   decisionRespond,
@@ -55,6 +56,7 @@ router.get('/ventures/:ventureId/requirements', requirementsGet)
 router.put('/ventures/:ventureId/requirements', requirementsPut)
 router.get('/ventures/:ventureId/mode', relationshipMode)
 router.put('/ventures/:ventureId/investor-team-summary', investorTeamSummaryPublish)
+router.post('/events', candidateEvent)
 
 router.post('/invitations', invitationCreate)
 router.get('/invitations', invitations)

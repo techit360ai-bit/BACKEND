@@ -5,14 +5,28 @@ const evidenceMocks = vi.hoisted(() => ({
   getPublicTrust: vi.fn(),
   executionIntelligenceFor: vi.fn(),
 }))
+const workspaceReadMocks = vi.hoisted(() => ({
+  findWorkspace: vi.fn(),
+  listMembers: vi.fn(),
+  listWorkspaces: vi.fn(),
+}))
 
 vi.mock('../config/database.js', () => ({
   readAuthorityDb: vi.fn(() => authority.db),
   updateAuthorityDb: vi.fn((mutate) => mutate(authority.db)),
+  runBoundedDatabase: (_snapshot, callback) => callback(),
   writeAuthorityDb: vi.fn(),
 }))
 vi.mock('../services/trustAuthorityAsync.js', () => ({ getPublicTrust: evidenceMocks.getPublicTrust }))
 vi.mock('../services/executionIntelligenceService.js', () => ({ executionIntelligenceFor: evidenceMocks.executionIntelligenceFor }))
+vi.mock('../repositories/workspaceProjectRepository.js', () => ({
+  listProjects: vi.fn(async () => []),
+  listWorkspaces: workspaceReadMocks.listWorkspaces,
+  findWorkspace: workspaceReadMocks.findWorkspace,
+  listMembers: workspaceReadMocks.listMembers,
+  workspaceReadEnabled: () => process.env.WORKSPACE_READ_SOURCE === 'postgres',
+  workspaceReadFallbackEnabled: () => false,
+}))
 
 const relationshipService = await import('../services/cofounderRelationshipService.js')
 const matchingService = await import('../services/cofounderMatchingService.js')
@@ -66,6 +80,7 @@ function makeDb() {
     workspaces: [],
     workspaceMembers: [],
     workspaceTasks: [],
+    workspaceInvitations: [],
     notifications: [],
     milestones: [],
     trustProfiles: [],
@@ -73,6 +88,11 @@ function makeDb() {
     trustVerificationProofs: [],
     executionScores: [],
     feedPosts: [],
+    recommendationEvents: [],
+    recommendationProfiles: [],
+    networkEdges: [],
+    entityRelationships: [],
+    userActivityStates: [],
   }
 }
 
@@ -198,6 +218,41 @@ describe('deterministic co-founder matching', () => {
     })
     expect(cofounder).not.toBe(collaborator)
     expect(cofounder).toContain('co_founder:venture-1:requirement-1:3:cofounder-fit-v1')
+  })
+
+  it('records founder-scoped candidate analytics without private payloads', async () => {
+    const recorded = await relationshipService.recordCandidateEventAsync('founder', {
+      eventType: 'cofounder_candidate_viewed',
+      projectId: 'venture-1',
+      candidateIds: ['candidate-a', 'candidate-a', 'candidate-b'],
+      requirementVersion: 3,
+      privateNotes: 'must not persist',
+    })
+    expect(recorded).toMatchObject({ ok: true, recorded: true, candidateIds: ['candidate-a', 'candidate-b'] })
+    const event = authority.db.recommendationEvents.find((row) => row.eventType === 'cofounder_candidate_viewed')
+    expect(event).toMatchObject({
+      surface: 'cofounder',
+      entityType: 'cofounder_candidate',
+      entityId: 'candidate-a',
+      metadata: { projectId: 'venture-1', candidateId: 'candidate-a', candidateIds: ['candidate-a', 'candidate-b'], requirementVersion: 3 },
+    })
+    expect(event.metadata).not.toHaveProperty('privateNotes')
+
+    expect(await relationshipService.recordCandidateEventAsync('candidate-a', {
+      eventType: 'cofounder_candidate_compared',
+      projectId: 'venture-1',
+      candidateIds: ['candidate-b'],
+    })).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.recordCandidateEventAsync('founder', {
+      eventType: 'cofounder_candidate_compared',
+      projectId: 'venture-1',
+      candidateIds: ['ghost'],
+    })).toMatchObject({ ok: false, status: 404 })
+    expect(await relationshipService.recordCandidateEventAsync('founder', {
+      eventType: 'cofounder_arbitrary_event',
+      projectId: 'venture-1',
+      candidateIds: ['candidate-a'],
+    })).toMatchObject({ ok: false, status: 400 })
   })
 })
 
@@ -372,6 +427,240 @@ describe('relationship workspace privacy and deterministic evidence', () => {
     expect(candidateTasks).toContain('candidate-personal')
     expect(candidateTasks).not.toContain('founder-personal')
     expect(domainService.listWorkspaceCollection('outsider', workspaceId, 'workspaceTasks')).toBeNull()
+  })
+
+  it('keeps relationship workspace membership and task metadata server-controlled', async () => {
+    const relationship = await activeRelationship()
+    const workspaceId = relationship.workspaceId
+
+    const invite = domainService.createWorkspaceInvitation('founder', workspaceId, {
+      collaboratorId: 'outsider',
+      requestedRole: 'Engineer',
+      scope: 'Join the co-founder workspace',
+      equityProposal: 5,
+    })
+    expect(invite).toMatchObject({ ok: false, error: 'cofounder_workspace_managed_by_relationship' })
+    expect(authority.db.workspaceInvitations).toHaveLength(0)
+
+    authority.db.workspaceInvitations.push({
+      id: 'legacy-invite',
+      workspaceId,
+      collaboratorId: 'outsider',
+      invitedBy: 'founder',
+      status: 'pending',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+      requestedRole: 'Engineer',
+      accessLevel: 'contributor',
+    })
+    expect(domainService.acceptWorkspaceInvitation('outsider', 'legacy-invite'))
+      .toMatchObject({ ok: false, error: 'cofounder_workspace_managed_by_relationship' })
+    expect(authority.db.workspaceMembers.some((row) => row.userId === 'outsider')).toBe(false)
+
+    const restricted = domainService.createWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', {
+      title: 'Restricted task',
+      visibilityLayer: 'RESTRICTED',
+      allowedUserIds: ['founder', 'outsider'],
+    }, 'task')
+    expect(restricted.allowedUserIds).toEqual(['founder'])
+    expect(domainService.listWorkspaceCollection('outsider', workspaceId, 'workspaceTasks')).toBeNull()
+
+    const patched = domainService.patchWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', restricted.id, {
+      ownerId: 'candidate-a',
+      cofounderRelationshipId: 'spoofed-relationship',
+      workspaceId: 'spoofed-workspace',
+      createdAt: '2000-01-01T00:00:00.000Z',
+    })
+    expect(patched).toMatchObject({
+      ownerId: 'candidate-a',
+      cofounderRelationshipId: relationship.id,
+      workspaceId,
+    })
+    expect(patched.createdAt).not.toBe('2000-01-01T00:00:00.000Z')
+
+    const personal = domainService.createWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', {
+      title: 'Founder private task',
+      visibilityLayer: 'PERSONAL',
+    }, 'task')
+    expect(domainService.patchWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', personal.id, {
+      ownerId: 'candidate-a',
+    })).toBeNull()
+  })
+
+  it('removes task access while paused and after the relationship ends', async () => {
+    const relationship = await activeRelationship()
+    const workspaceId = relationship.workspaceId
+    const task = domainService.createWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', {
+      title: 'Shared delivery task',
+    }, 'task')
+    expect(task).toBeTruthy()
+
+    const active = authority.db.cofounderRelationships.find((row) => row.id === relationship.id)
+    await relationshipService.pauseRelationshipAsync('founder', relationship.id, { version: active.version })
+    expect(domainService.listWorkspaceCollection('candidate-a', workspaceId, 'workspaceTasks')).toBeNull()
+
+    const paused = authority.db.cofounderRelationships.find((row) => row.id === relationship.id)
+    await relationshipService.resumeRelationshipAsync('founder', relationship.id, { version: paused.version })
+    const resumed = authority.db.cofounderRelationships.find((row) => row.id === relationship.id)
+    expect(domainService.listWorkspaceCollection('candidate-a', workspaceId, 'workspaceTasks')).toHaveLength(1)
+    await relationshipService.endRelationshipAsync('founder', relationship.id, {
+      reason: 'venture_wound_down',
+      version: resumed.version,
+    })
+    expect(domainService.listWorkspaceCollection('candidate-a', workspaceId, 'workspaceTasks')).toBeNull()
+    expect(authority.db.workspaceTasks.find((row) => row.id === task.id)).toBeTruthy()
+  })
+
+  it('denies legacy non-party members on postgres workspace reads', async () => {
+    const relationship = await activeRelationship()
+    const workspace = {
+      id: relationship.workspaceId,
+      ownerId: 'founder',
+      projectId: 'venture-1',
+      status: 'active',
+      cofounderRelationshipId: relationship.id,
+      cofounderStatus: 'ACTIVE',
+      cofounderFounderId: 'founder',
+      cofounderCofounderId: 'candidate-a',
+    }
+    workspaceReadMocks.findWorkspace.mockResolvedValue(workspace)
+    workspaceReadMocks.listMembers.mockResolvedValue([
+      { id: 'member-a', workspaceId: workspace.id, userId: 'candidate-a', role: 'cofounder', status: 'active', accessLevel: 'contributor' },
+      { id: 'member-outsider', workspaceId: workspace.id, userId: 'outsider', role: 'collaborator', status: 'active', accessLevel: 'contributor' },
+    ])
+    workspaceReadMocks.listWorkspaces.mockResolvedValue([
+      { workspace, membership: { workspaceId: workspace.id, userId: 'outsider', role: 'collaborator', status: 'active' } },
+    ])
+    process.env.WORKSPACE_READ_SOURCE = 'postgres'
+    try {
+      expect(await domainService.workspaceContextAsync('outsider', workspace.id)).toBeNull()
+      expect(await domainService.listWorkspaceMembersAsync('outsider', workspace.id)).toBeNull()
+      expect((await domainService.listWorkspacesAsync('outsider')).workspaces).toEqual([])
+      expect(await domainService.workspaceContextAsync('candidate-a', workspace.id)).toMatchObject({ workspaceId: workspace.id })
+      expect((await domainService.listWorkspaceMembersAsync('candidate-a', workspace.id)).members).toHaveLength(3)
+    } finally {
+      delete process.env.WORKSPACE_READ_SOURCE
+    }
+  })
+
+  it('excludes private execution from shared health and the other party evidence', async () => {
+    const relationship = await activeRelationship()
+    const workspaceId = relationship.workspaceId
+    await relationshipService.createObjectiveAsync('founder', relationship.id, { title: 'Shared roadmap' })
+    await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Founder private objective',
+      ownerId: 'founder',
+      visibilityLayer: 'PERSONAL',
+    })
+    domainService.createWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', {
+      title: 'Founder private delivery',
+      ownerId: 'founder',
+      status: 'done',
+      visibilityLayer: 'PERSONAL',
+    }, 'task')
+    domainService.createWorkspaceCollectionItem('founder', workspaceId, 'workspaceTasks', {
+      title: 'Shared candidate delivery',
+      ownerId: 'candidate-a',
+      status: 'done',
+      visibilityLayer: 'SHARED',
+    }, 'task')
+
+    const health = await relationshipService.getRelationshipHealthAsync('candidate-a', relationship.id)
+    expect(health.health.metrics.goalAlignment.evidence).toMatchObject({ objectives: 1 })
+    expect(health.health.metrics.executionAlignment.evidence).toMatchObject({ completed: 1, total: 2 })
+
+    const evidence = await relationshipService.getRelationshipEvidenceAsync('candidate-a', relationship.id)
+    const founder = evidence.parties.find((row) => row.userId === 'founder')
+    const candidate = evidence.parties.find((row) => row.userId === 'candidate-a')
+    expect(founder.observed).toMatchObject({ assignedTasks: 0, ownedObjectives: 1 })
+    expect(candidate.observed).toMatchObject({ assignedTasks: 1, completedTasks: 1 })
+  })
+
+  it('rejects objective links that cross workspaces or widen private task visibility', async () => {
+    const relationship = await activeRelationship()
+    const otherRelationship = await activeRelationship('candidate-b')
+    const privateTask = domainService.createWorkspaceCollectionItem('founder', relationship.workspaceId, 'workspaceTasks', {
+      title: 'Founder private delivery',
+      visibilityLayer: 'PERSONAL',
+      status: 'done',
+    }, 'task')
+    const sharedTask = domainService.createWorkspaceCollectionItem('founder', relationship.workspaceId, 'workspaceTasks', {
+      title: 'Shared delivery',
+      visibilityLayer: 'SHARED',
+      status: 'done',
+    }, 'task')
+    const foreignTask = domainService.createWorkspaceCollectionItem('founder', otherRelationship.workspaceId, 'workspaceTasks', {
+      title: 'Other relationship delivery',
+      visibilityLayer: 'SHARED',
+      status: 'done',
+    }, 'task')
+
+    expect(await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Private task cannot back a shared objective',
+      visibilityLayer: 'SHARED',
+      linkedTaskIds: [privateTask.id],
+    })).toMatchObject({ ok: false, status: 403, error: 'shared_objective_requires_shared_task' })
+    expect(await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Foreign task cannot be linked',
+      visibilityLayer: 'SHARED',
+      linkedTaskIds: [foreignTask.id],
+    })).toMatchObject({ ok: false, status: 404, error: 'linked_task_not_found' })
+
+    const shared = await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Shared roadmap',
+      visibilityLayer: 'SHARED',
+      linkedTaskIds: [sharedTask.id],
+    })
+    expect(shared.objective.linkedTaskIds).toEqual([sharedTask.id])
+    expect(await relationshipService.patchObjectiveAsync('founder', shared.objective.id, {
+      version: shared.objective.version,
+      linkedTaskIds: [privateTask.id],
+    })).toMatchObject({ ok: false, status: 403, error: 'shared_objective_requires_shared_task' })
+    expect(authority.db.cofounderObjectives.find((row) => row.id === shared.objective.id).linkedTaskIds)
+      .toEqual([sharedTask.id])
+    expect(await relationshipService.patchObjectiveAsync('founder', shared.objective.id, {
+      version: shared.objective.version,
+      linkedTaskIds: [foreignTask.id],
+    })).toMatchObject({ ok: false, status: 404, error: 'linked_task_not_found' })
+
+    const personal = await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Founder private objective',
+      ownerId: 'founder',
+      visibilityLayer: 'PERSONAL',
+      linkedTaskIds: [privateTask.id],
+    })
+    expect(personal.objective.linkedTaskIds).toEqual([privateTask.id])
+    expect(await relationshipService.patchObjectiveAsync('founder', personal.objective.id, {
+      version: personal.objective.version,
+      visibilityLayer: 'SHARED',
+    })).toMatchObject({ ok: false, status: 403, error: 'shared_objective_requires_shared_task' })
+  })
+
+  it('filters legacy private links from shared objective output and progress', async () => {
+    const relationship = await activeRelationship()
+    const sharedTask = domainService.createWorkspaceCollectionItem('founder', relationship.workspaceId, 'workspaceTasks', {
+      title: 'Shared delivery',
+      visibilityLayer: 'SHARED',
+      status: 'done',
+    }, 'task')
+    const privateTask = domainService.createWorkspaceCollectionItem('founder', relationship.workspaceId, 'workspaceTasks', {
+      title: 'Founder private delivery',
+      visibilityLayer: 'PERSONAL',
+      status: 'active',
+    }, 'task')
+    const created = await relationshipService.createObjectiveAsync('founder', relationship.id, {
+      title: 'Shared roadmap',
+      linkedTaskIds: [sharedTask.id],
+    })
+    authority.db.cofounderObjectives.find((row) => row.id === created.objective.id).linkedTaskIds.push(privateTask.id)
+
+    for (const viewer of ['founder', 'candidate-a']) {
+      const objectives = await relationshipService.listObjectivesAsync(viewer, relationship.id)
+      expect(objectives.objectives.find((row) => row.id === created.objective.id)).toMatchObject({
+        linkedTaskIds: [sharedTask.id],
+        progress: 100,
+        progressEvidenceCount: 1,
+      })
+    }
   })
 
   it('returns insufficient evidence without fabricating health and keeps trust/execution layers separate', async () => {

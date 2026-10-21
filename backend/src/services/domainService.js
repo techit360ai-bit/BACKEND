@@ -861,6 +861,7 @@ export async function listWorkspacesAsync(userId) {
     const freeCollaboratorWorkspaceId = collaboratorRows.sort((a, b) => new Date(a.membership?.joinedAt || a.membership?.createdAt || 0) - new Date(b.membership?.joinedAt || b.membership?.createdAt || 0))[0]?.workspace.id || null
     const workspaces = rows
       .filter(row => !row.workspace.cofounderRelationshipId || row.workspace.status === 'active')
+      .filter(row => !row.workspace.cofounderRelationshipId || cofounderWorkspaceParty(row.workspace, userId))
       .filter(row => row.workspace.cofounderRelationshipId
         || row.workspace.ownerId === userId
         || !collaboratorRows.length
@@ -892,6 +893,11 @@ function cofounderWorkspaceAllowed(db, workspace, userId) {
   return Boolean(relationship
     && relationship.status === 'ACTIVE'
     && [relationship.founderId, relationship.cofounderId].map(String).includes(String(userId)))
+}
+
+function cofounderWorkspaceParty(workspace, userId) {
+  return Boolean(workspace?.cofounderRelationshipId
+    && [workspace.cofounderFounderId, workspace.cofounderCofounderId].map(String).includes(String(userId)))
 }
 
 function workspaceAccess(db, workspaceId, userId) {
@@ -926,6 +932,22 @@ function workspaceCanWrite(access, collectionName) {
   return access?.accessLevel === 'contributor' && ['workspaceTasks', 'workspaceReports'].includes(collectionName)
 }
 
+function cofounderTaskFields(body, relationship, userId, existing = null) {
+  const parties = new Set([String(relationship.founderId), String(relationship.cofounderId)])
+  const ownerId = String(body.ownerId || existing?.ownerId || userId)
+  if (!parties.has(ownerId)) return null
+  const visibilityLayer = body.visibilityLayer !== undefined
+    ? normalizeVisibility(body.visibilityLayer)
+    : normalizeVisibility(existing?.visibilityLayer)
+  if (visibilityLayer === VISIBILITY_LAYERS.PERSONAL && ownerId !== String(userId)) return null
+  const requestedAllowed = body.allowedUserIds !== undefined ? body.allowedUserIds : existing?.allowedUserIds
+  const allowedUserIds = visibilityLayer === VISIBILITY_LAYERS.RESTRICTED
+    ? [...new Set((Array.isArray(requestedAllowed) ? requestedAllowed : []).map(String).filter(id => parties.has(id)))]
+    : []
+  if (visibilityLayer === VISIBILITY_LAYERS.RESTRICTED && !allowedUserIds.length) allowedUserIds.push(String(userId))
+  return { ownerId, visibilityLayer, allowedUserIds }
+}
+
 function publicWorkspaceInvitation(db, invitation) {
   const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
   const inviter = collection(db, 'profiles').find(row => row.id === invitation.invitedBy)
@@ -954,6 +976,7 @@ export function createWorkspaceInvitation(userId, workspaceId, body) {
   return updateAuthorityDb(db => {
     const workspace = collection(db, 'workspaces').find(row => row.id === workspaceId && row.ownerId === userId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (workspace.cofounderRelationshipId) return { ok: false, error: 'cofounder_workspace_managed_by_relationship' }
     const collaboratorId = collaborationText(body.collaboratorId, 100)
     if (!collaboratorId || collaboratorId === userId) return { ok: false, error: 'collaborator_invalid' }
     const collaborator = collection(db, 'profiles').find(row => row.id === collaboratorId && profileHasRole(row, 'collaborator'))
@@ -1055,6 +1078,7 @@ export function acceptWorkspaceInvitation(userId, invitationId) {
     }
     const workspace = collection(db, 'workspaces').find(row => row.id === invitation.workspaceId)
     if (!workspace) return { ok: false, error: 'workspace_not_found' }
+    if (workspace.cofounderRelationshipId) return { ok: false, error: 'cofounder_workspace_managed_by_relationship' }
     if (!freeCollaboratorWorkspaceAllowed(db, userId, workspace.id)) return { ok: false, error: 'free_collaborator_workspace_limit', limit: 1 }
     const membership = existing || insertOwned(db, 'workspaceMembers', workspace.ownerId, {
       workspaceId: workspace.id,
@@ -1137,7 +1161,7 @@ export async function listWorkspaceMembersAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
-    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE')) return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE' || !cofounderWorkspaceParty(workspace, userId))) return null
     const members = await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { members: [{ id: `workspace_owner_${workspace.ownerId}`, workspaceId, userId: workspace.ownerId, name: workspace.ownerId, accessLevel: 'owner', role: 'Workspace owner', status: 'active' }, ...members.map(member => ({ ...member, name: member.name || member.userId, avatarUrl: member.avatarUrl || '' }))] }
@@ -1211,7 +1235,7 @@ export async function workspaceContextAsync(userId, workspaceId) {
   try {
     const workspace = await findWorkspacePostgres(workspaceId)
     if (!workspace) return null
-    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE')) return null
+    if (workspace.cofounderRelationshipId && (workspace.status !== 'active' || workspace.cofounderStatus !== 'ACTIVE' || !cofounderWorkspaceParty(workspace, userId))) return null
     const members = workspace.ownerId === userId ? [] : await listMembersPostgres(workspaceId)
     if (workspace.ownerId !== userId && !members.some(row => row.userId === userId && row.status === 'active')) return null
     return { workspaceId, projectId: workspace.projectId || null, venture: null, blueprintAvailable: false, isOwner: workspace.ownerId === userId, accessLevel: workspace.ownerId === userId ? 'owner' : 'viewer' }
@@ -1236,16 +1260,13 @@ export function createWorkspaceCollectionItem(userId, workspaceId, name, body, p
   return updateAuthorityDb(db => {
     const access = workspaceAccess(db, workspaceId, userId)
     if (!access || !workspaceCanWrite(access, name)) return null
-    const payload = { ...body, workspaceId, createdBy: userId }
+    const { cofounderRelationshipId, workspaceId: ignoredWorkspaceId, createdBy, createdAt, updatedAt, ...clientBody } = body
+    const payload = { ...clientBody, workspaceId, createdBy: userId }
     if (name === 'workspaceTasks' && access.cofounderRelationship) {
-      const visibilityLayer = normalizeVisibility(body.visibilityLayer)
-      const ownerId = String(body.ownerId || userId)
-      if (visibilityLayer === VISIBILITY_LAYERS.PERSONAL && ownerId !== String(userId)) return null
+      const fields = cofounderTaskFields(body, access.cofounderRelationship, userId)
+      if (!fields) return null
       payload.cofounderRelationshipId = access.cofounderRelationship.id
-      payload.visibilityLayer = visibilityLayer
-      payload.allowedUserIds = visibilityLayer === VISIBILITY_LAYERS.RESTRICTED
-        ? [String(access.cofounderRelationship.founderId), String(access.cofounderRelationship.cofounderId)]
-        : []
+      Object.assign(payload, fields)
     }
     return insertOwned(db, name, userId, payload, prefix)
   })
@@ -1260,9 +1281,21 @@ export function patchWorkspaceCollectionItem(userId, workspaceId, name, itemId, 
     if (idx === -1) return null
     if (name === 'workspaceTasks' && access.cofounderRelationship) {
       if (!canViewLayer(rows[idx], access.cofounderRelationship, userId)) return null
-      const visibilityLayer = body.visibilityLayer !== undefined ? normalizeVisibility(body.visibilityLayer) : normalizeVisibility(rows[idx].visibilityLayer)
-      const ownerId = String(body.ownerId || rows[idx].ownerId || userId)
-      if (visibilityLayer === VISIBILITY_LAYERS.PERSONAL && ownerId !== String(userId)) return null
+      const fields = cofounderTaskFields(body, access.cofounderRelationship, userId, rows[idx])
+      if (!fields) return null
+      const { id, workspaceId: ignoredWorkspaceId, cofounderRelationshipId, createdBy, createdAt, updatedAt, ownerId, visibilityLayer, allowedUserIds, ...clientBody } = body
+      rows[idx] = {
+        ...rows[idx],
+        ...cleanObject(clientBody),
+        ...fields,
+        id: rows[idx].id,
+        workspaceId,
+        cofounderRelationshipId: access.cofounderRelationship.id,
+        createdBy: rows[idx].createdBy,
+        createdAt: rows[idx].createdAt,
+        updatedAt: nowIso(),
+      }
+      return rows[idx]
     }
     rows[idx] = {
       ...rows[idx],

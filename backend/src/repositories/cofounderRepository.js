@@ -1,4 +1,4 @@
-import { updateAuthorityDb } from '../config/database.js'
+import { runBoundedDatabase, updateAuthorityDb } from '../config/database.js'
 import { applyDomainMutation, domainFallbackEnabled, domainStoreEnabled, runDomainRead } from './domainRepository.js'
 
 function cofounderScope(userId, options = {}) {
@@ -39,12 +39,12 @@ export async function runCofounderRead(userId, options, read) {
 }
 
 export async function applyCofounderMutation(userId, options, mutate) {
-  if (!domainStoreEnabled()) return updateAuthorityDb(mutate)
+  if (!domainStoreEnabled()) return updateAuthorityDb(db => runBoundedDatabase(db, () => mutate()))
   try {
     return await applyDomainMutation(cofounderScope(userId, options), () => updateAuthorityDb(mutate))
   } catch (error) {
     console.error(JSON.stringify({ event: 'cofounder_write_failed', error: error.message }))
     if (!domainFallbackEnabled()) throw error
-    return updateAuthorityDb(mutate)
+    return updateAuthorityDb(db => runBoundedDatabase(db, () => mutate()))
   }
 }

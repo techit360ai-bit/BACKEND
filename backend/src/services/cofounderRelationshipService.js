@@ -105,8 +105,15 @@ function touch(row, now = nowIso()) {
 }
 
 function sanitizeMetadata(metadata = {}) {
-  const allowed = new Set(['entityType', 'entityId', 'status', 'from', 'to', 'kind', 'count', 'decisionId', 'objectiveId', 'responsibilityId'])
-  return Object.fromEntries(Object.entries(metadata).filter(([key, value]) => allowed.has(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')))
+  const allowed = new Set(['entityType', 'entityId', 'status', 'from', 'to', 'kind', 'count', 'relationshipId', 'projectId', 'candidateId', 'candidateIds', 'requirementVersion', 'decisionId', 'objectiveId', 'responsibilityId'])
+  return Object.fromEntries(Object.entries(metadata).flatMap(([key, value]) => {
+    if (!allowed.has(key)) return []
+    if (key === 'candidateIds') {
+      const ids = [...new Set((Array.isArray(value) ? value : []).map(item => text(item, 120)).filter(Boolean))].slice(0, 20)
+      return ids.length ? [[key, ids]] : []
+    }
+    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? [[key, value]] : []
+  }))
 }
 
 function appendActivity(db, relationship, actorId, type, summary, visibilityLayer = VISIBILITY_LAYERS.SHARED, metadata = {}) {
@@ -170,6 +177,47 @@ function analytics(userId, eventType, metadata = {}) {
     .catch(() => {})
 }
 
+const CLIENT_CANDIDATE_EVENTS = new Set(['cofounder_candidate_viewed', 'cofounder_candidate_compared'])
+
+export async function recordCandidateEventAsync(userId, body = {}) {
+  const disabled = feature(userId)
+  if (disabled) return disabled
+  const eventType = String(body.eventType || '').toLowerCase()
+  if (!CLIENT_CANDIDATE_EVENTS.has(eventType)) return fail('invalid_cofounder_event')
+  const db = readAuthorityDb()
+  const projectId = String(body.projectId || body.ventureId || '').trim()
+  if (!projectId || !founderOwnsVenture(db, userId, projectId)) return fail('venture_not_found', 404)
+  const rawCandidates = Array.isArray(body.candidateIds) ? body.candidateIds : [body.candidateId]
+  const candidateIds = [...new Set(textList(rawCandidates, 20, 120).filter(id => id !== String(userId)))]
+  if (!candidateIds.length) return fail('candidate_id_required')
+  const eligible = new Set(rows(db, 'profiles')
+    .filter(row => !['investor', 'investor_team', 'organization', 'organisation'].includes(String(row.role || '').toLowerCase()))
+    .filter(row => row.active !== false && row.accountStatus !== 'disabled')
+    .map(row => String(row.id)))
+  if (candidateIds.some(id => !eligible.has(id))) return fail('candidate_not_found', 404)
+  const metadata = sanitizeMetadata({
+    projectId,
+    candidateId: candidateIds[0],
+    candidateIds,
+    requirementVersion: boundedNumber(body.requirementVersion, null, 1, 1_000_000),
+  })
+  try {
+    const { recordRecommendationEventAsync } = await import('./discoveryService.js')
+    await recordRecommendationEventAsync(userId, {
+      eventType,
+      surface: 'cofounder',
+      entityType: 'cofounder_candidate',
+      entityId: candidateIds[0],
+      importance: 'LOW',
+      metadata,
+    })
+    return { ok: true, recorded: true, eventType, projectId, candidateIds }
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'cofounder_analytics_failed', eventType, error: error.message }))
+    return { ok: true, recorded: false, eventType, projectId, candidateIds }
+  }
+}
+
 function relationshipForProject(db, userId, projectId) {
   return rows(db, 'cofounderRelationships')
     .filter(row => String(row.projectId) === String(projectId) && relationshipParty(row, userId))
@@ -197,9 +245,22 @@ function publicResponsibility(row, relationship, userId) {
   }
 }
 
-function objectiveProgress(db, objective) {
+function visibleLinkedTasks(db, objective, relationship = null, viewerId = null) {
   const taskIds = new Set((objective.linkedTaskIds || []).map(String))
-  const linked = rows(db, 'workspaceTasks').filter(row => taskIds.has(String(row.id)))
+  const sharedObjective = normalizeVisibility(objective.visibilityLayer) === VISIBILITY_LAYERS.SHARED
+  return rows(db, 'workspaceTasks')
+    .filter(row => taskIds.has(String(row.id)))
+    .filter(row => !relationship || String(row.workspaceId) === String(relationship.workspaceId))
+    .filter(row => !relationship
+      || (sharedObjective
+        ? normalizeVisibility(row.visibilityLayer) === VISIBILITY_LAYERS.SHARED
+        : viewerId
+          ? canViewLayer(row, relationship, viewerId)
+          : normalizeVisibility(row.visibilityLayer) === VISIBILITY_LAYERS.SHARED))
+}
+
+function objectiveProgress(db, objective, relationship = null, viewerId = null) {
+  const linked = visibleLinkedTasks(db, objective, relationship, viewerId)
   if (linked.length) {
     const completed = linked.filter(row => ['completed', 'done'].includes(String(row.status || '').toLowerCase())).length
     return { progress: Math.round((completed / linked.length) * 100), source: 'tasks', evidenceCount: linked.length }
@@ -208,9 +269,26 @@ function objectiveProgress(db, objective) {
   return { progress: boundedNumber(objective.progress, 0, 0, 100), source: 'reported', evidenceCount: 0 }
 }
 
+function validatedLinkedTasks(db, relationship, userId, taskIds, visibilityLayer) {
+  const ids = [...new Set(textList(taskIds, 100, 120))]
+  if (!ids.length) return { ok: true, ids: [] }
+  const byId = new Map(rows(db, 'workspaceTasks').map(row => [String(row.id), row]))
+  for (const id of ids) {
+    const task = byId.get(id)
+    if (!task || String(task.workspaceId) !== String(relationship.workspaceId) || !canViewLayer(task, relationship, userId)) {
+      return fail('linked_task_not_found', 404)
+    }
+    if (normalizeVisibility(visibilityLayer) === VISIBILITY_LAYERS.SHARED && normalizeVisibility(task.visibilityLayer) !== VISIBILITY_LAYERS.SHARED) {
+      return fail('shared_objective_requires_shared_task', 403)
+    }
+  }
+  return { ok: true, ids }
+}
+
 function publicObjective(db, objective, relationship, userId) {
   if (!canViewLayer(objective, relationship, userId)) return null
-  const progress = objectiveProgress(db, objective)
+  const progress = objectiveProgress(db, objective, relationship, userId)
+  const linkedTaskIds = visibleLinkedTasks(db, objective, relationship, userId).map(row => row.id)
   return {
     id: objective.id,
     relationshipId: objective.relationshipId,
@@ -227,7 +305,7 @@ function publicObjective(db, objective, relationship, userId) {
     progressEvidenceCount: progress.evidenceCount,
     status: objective.status || 'active',
     visibilityLayer: normalizeVisibility(objective.visibilityLayer),
-    linkedTaskIds: Array.isArray(objective.linkedTaskIds) ? objective.linkedTaskIds : [],
+    linkedTaskIds,
     milestoneIds: Array.isArray(objective.milestoneIds) ? objective.milestoneIds : [],
     evidenceIds: Array.isArray(objective.evidenceIds) ? objective.evidenceIds : [],
     publishedMilestoneId: objective.publishedMilestoneId || null,
@@ -290,7 +368,7 @@ function modeSummary(db, relationships, userId) {
     const decisions = rows(db, 'cofounderDecisions').filter(row => row.relationshipId === relationship.id && canViewLayer(row, relationship, userId))
     const activities = rows(db, 'cofounderActivity').filter(row => row.relationshipId === relationship.id && canViewLayer(row, relationship, userId))
     const completedResponsibilities = responsibilities.filter(row => row.status === 'completed').length
-    const activeObjectives = objectives.filter(row => row.status === 'active').map(row => objectiveProgress(db, row).progress)
+    const activeObjectives = objectives.filter(row => row.status === 'active').map(row => objectiveProgress(db, row, relationship, userId).progress)
     const overallProgress = activeObjectives.length ? Math.round(activeObjectives.reduce((sum, value) => sum + value, 0) / activeObjectives.length) : null
     return {
       ...publicRelationship(relationship, userId, db),
@@ -1020,6 +1098,8 @@ export async function createObjectiveAsync(userId, relationshipId, body = {}) {
     const visibilityLayer = normalizeVisibility(body.visibilityLayer)
     if (visibilityLayer === VISIBILITY_LAYERS.PERSONAL && ownerId !== String(userId)) return fail('personal_objective_owner_mismatch', 403)
     if (body.responsibilityId && !rows(db, 'cofounderResponsibilities').some(row => row.id === body.responsibilityId && row.relationshipId === relationshipId)) return fail('responsibility_not_found', 404)
+    const linkedTasks = validatedLinkedTasks(db, relationship, userId, body.linkedTaskIds, visibilityLayer)
+    if (linkedTasks.ok === false) return linkedTasks
     const now = nowIso()
     const objective = {
       id: createId('cofounder_objective'),
@@ -1036,7 +1116,7 @@ export async function createObjectiveAsync(userId, relationshipId, body = {}) {
       status: text(body.status, 30) || 'active',
       visibilityLayer,
       allowedUserIds: visibilityLayer === VISIBILITY_LAYERS.RESTRICTED ? textList(body.allowedUserIds, 2, 120) : [],
-      linkedTaskIds: textList(body.linkedTaskIds, 100, 120),
+      linkedTaskIds: linkedTasks.ids,
       milestoneIds: textList(body.milestoneIds, 50, 120),
       evidenceIds: textList(body.evidenceIds, 100, 120),
       publishedMilestoneId: null,
@@ -1069,6 +1149,10 @@ export async function patchObjectiveAsync(userId, objectiveId, body = {}) {
     if (body.title !== undefined && !text(body.title, 180)) return fail('objective_title_required')
     const nextVisibility = body.visibilityLayer !== undefined ? normalizeVisibility(body.visibilityLayer) : normalizeVisibility(objective.visibilityLayer)
     if (nextVisibility === VISIBILITY_LAYERS.PERSONAL && String(body.ownerId || objective.ownerId) !== String(userId)) return fail('personal_objective_owner_mismatch', 403)
+    const nextLinkedTasks = body.linkedTaskIds !== undefined || body.visibilityLayer !== undefined
+      ? validatedLinkedTasks(db, relationship, userId, body.linkedTaskIds !== undefined ? body.linkedTaskIds : objective.linkedTaskIds, nextVisibility)
+      : null
+    if (nextLinkedTasks?.ok === false) return nextLinkedTasks
     if (body.responsibilityId !== undefined && body.responsibilityId
       && !rows(db, 'cofounderResponsibilities').some(row => row.id === body.responsibilityId && row.relationshipId === relationship.id)) {
       return fail('responsibility_not_found', 404)
@@ -1076,9 +1160,10 @@ export async function patchObjectiveAsync(userId, objectiveId, body = {}) {
     for (const key of ['title', 'description', 'kind', 'status']) {
       if (body[key] !== undefined) objective[key] = text(body[key], key === 'description' ? 4000 : 500)
     }
-    for (const key of ['coOwnerIds', 'linkedTaskIds', 'milestoneIds', 'evidenceIds', 'allowedUserIds']) {
+    for (const key of ['coOwnerIds', 'milestoneIds', 'evidenceIds', 'allowedUserIds']) {
       if (body[key] !== undefined) objective[key] = textList(body[key], 100, 120).filter(id => key !== 'coOwnerIds' || parties.includes(id))
     }
+    if (nextLinkedTasks) objective.linkedTaskIds = nextLinkedTasks.ids
     if (body.ownerId !== undefined) objective.ownerId = String(body.ownerId)
     if (body.responsibilityId !== undefined) {
       objective.responsibilityId = body.responsibilityId || null
@@ -1220,16 +1305,17 @@ function average(values) {
 
 function healthFromDb(db, relationship) {
   const now = Date.now()
-  const responsibilities = rows(db, 'cofounderResponsibilities').filter(row => row.relationshipId === relationship.id)
-  const objectives = rows(db, 'cofounderObjectives').filter(row => row.relationshipId === relationship.id)
-  const decisions = rows(db, 'cofounderDecisions').filter(row => row.relationshipId === relationship.id)
-  const tasks = rows(db, 'workspaceTasks').filter(row => row.workspaceId === relationship.workspaceId)
-  const activity = rows(db, 'cofounderActivity').filter(row => row.relationshipId === relationship.id)
+  const sharedOnly = row => normalizeVisibility(row.visibilityLayer) === VISIBILITY_LAYERS.SHARED
+  const responsibilities = rows(db, 'cofounderResponsibilities').filter(row => row.relationshipId === relationship.id && sharedOnly(row))
+  const objectives = rows(db, 'cofounderObjectives').filter(row => row.relationshipId === relationship.id && sharedOnly(row))
+  const decisions = rows(db, 'cofounderDecisions').filter(row => row.relationshipId === relationship.id && sharedOnly(row))
+  const tasks = rows(db, 'workspaceTasks').filter(row => row.workspaceId === relationship.workspaceId && sharedOnly(row))
+  const activity = rows(db, 'cofounderActivity').filter(row => row.relationshipId === relationship.id && sharedOnly(row))
   const completedResponsibilities = responsibilities.filter(row => row.status === 'completed').length
   const completedTasks = tasks.filter(row => ['completed', 'done'].includes(String(row.status || '').toLowerCase())).length
   const executionDenominator = responsibilities.length + tasks.length
   const executionValue = executionDenominator ? ((completedResponsibilities + completedTasks) / executionDenominator) * 100 : null
-  const progress = objectives.map(row => objectiveProgress(db, row).progress)
+  const progress = objectives.map(row => objectiveProgress(db, row, relationship).progress)
   const overdue = objectives.filter(row => row.dueDate && new Date(row.dueDate).getTime() < now && row.status !== 'completed').length
   const goalValue = progress.length ? Math.max(0, average(progress) - overdue * 5) : null
   const partyCounts = [relationship.founderId, relationship.cofounderId].map(partyId => {
@@ -1334,11 +1420,16 @@ export async function getRelationshipHealthAsync(userId, relationshipId) {
   })
 }
 
-function observedFor(db, userId, relationship) {
+function observedFor(db, userId, relationship, viewerId) {
   const tasks = rows(db, 'workspaceTasks').filter(row => String(row.workspaceId) === String(relationship.workspaceId)
+    && canViewLayer(row, relationship, viewerId)
     && [row.assigneeId, row.assignedTo, row.ownerId].filter(Boolean).includes(userId))
-  const responsibilities = rows(db, 'cofounderResponsibilities').filter(row => row.relationshipId === relationship.id && row.ownerId === userId)
-  const objectives = rows(db, 'cofounderObjectives').filter(row => row.relationshipId === relationship.id && [row.ownerId, ...(row.coOwnerIds || [])].includes(userId))
+  const responsibilities = rows(db, 'cofounderResponsibilities').filter(row => row.relationshipId === relationship.id
+    && canViewLayer(row, relationship, viewerId)
+    && row.ownerId === userId)
+  const objectives = rows(db, 'cofounderObjectives').filter(row => row.relationshipId === relationship.id
+    && canViewLayer(row, relationship, viewerId)
+    && [row.ownerId, ...(row.coOwnerIds || [])].includes(userId))
   return {
     completedTasks: tasks.filter(row => ['completed', 'done'].includes(String(row.status || '').toLowerCase())).length,
     assignedTasks: tasks.length,
@@ -1369,8 +1460,8 @@ export async function getRelationshipEvidenceAsync(userId, relationshipId) {
       relationship: access.relationship,
       profiles: [relationshipPartnerProfile(db, access.relationship.founderId), relationshipPartnerProfile(db, access.relationship.cofounderId)],
       observed: {
-        [access.relationship.founderId]: observedFor(db, access.relationship.founderId, access.relationship),
-        [access.relationship.cofounderId]: observedFor(db, access.relationship.cofounderId, access.relationship),
+        [access.relationship.founderId]: observedFor(db, access.relationship.founderId, access.relationship, userId),
+        [access.relationship.cofounderId]: observedFor(db, access.relationship.cofounderId, access.relationship, userId),
       },
     }
   })
