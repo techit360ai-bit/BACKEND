@@ -9,6 +9,7 @@ import { createNotification as createNotificationPostgres, contentWriteEnabled, 
 import { userDirectoryEnabled, userDirectoryFallbackEnabled, loadMemberDirectorySources, loadConnectionRequestSources, loadConnectionSources, loadProfileByRef, applyConnectionMutation } from '../repositories/userDirectoryRepository.js'
 import { normalizeCofounderExperience, normalizeCofounderPreferences } from '../services/cofounderModel.js'
 
+import { applyScopedMutation } from '../repositories/authorizationRepository.js'
 const UPDATABLE = new Set([
   'firstName', 'lastName', 'username', 'phone', 'country', 'countryCode',
   'avatarUrl', 'bio', 'secondaryRoles', 'isOnboarded', 'startupStage', 'industries', 'experience',
@@ -49,11 +50,10 @@ export async function updateMe(req, res) {
     try {
       const profile = await updateIdentityProfile(req.user.id, updates)
       if (profile) {
-        updateAuthorityDb(db => {
-          const idx = db.profiles.findIndex(item => item.id === req.user.id)
+        await applyScopedMutation(req.user.id, ['profiles'], db => {
+          const idx = (db.profiles || []).findIndex(item => item.id === req.user.id)
           if (idx === -1) return
           db.profiles[idx] = { ...db.profiles[idx], ...profile }
-          syncRecommendationProfileInDb(db, req.user.id)
         })
         return res.json(projectOwnProfile(profile))
       }
