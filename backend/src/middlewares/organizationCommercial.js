@@ -1,4 +1,4 @@
-import { rateLimit } from 'express-rate-limit'
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import { evaluateEntitlementAsync } from '../services/tvceService.js'
 import { reserveCapabilityConsumptionAsync, settleCapabilityConsumptionAsync } from '../services/capabilityConsumptionService.js'
 import { resolveOrganizationContextAsync } from '../services/organizationIntelligenceService.js'
@@ -40,6 +40,6 @@ export const organizationCommercialRateLimit = rateLimit({
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
-  keyGenerator: req => `${req.user?.id || req.ip}:${organizationIdFor(req) || 'none'}:${req.params?.hackathonId || 'none'}`,
+  keyGenerator: req => `${req.user?.id || ipKeyGenerator(req)}:${organizationIdFor(req) || 'none'}:${req.params?.hackathonId || 'none'}`,
   message: { error: 'organization_commercial_rate_limit_exceeded' },
 })
