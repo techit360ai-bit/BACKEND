@@ -45,3 +45,22 @@ export async function saveEmailVerification(row) {
     await upsertRecord(client, 'emailVerifications', row, { operation: 'insert', idempotencyKey: `ev:${row.id}` })
   })
 }
+
+// Look up the live (unconsumed, unexpired) verification row for an email whose
+// token hash matches. Read-only: the caller consumes it only after the account
+// was created, so a failed signup never burns a valid token.
+export async function loadEmailVerification(email, tokenHash) {
+  return withPlatformTransaction(async client => {
+    const now = Date.now()
+    for (const row of await listRecordsByField(client, 'emailVerifications', 'email', email)) {
+      if (row.tokenHash === tokenHash && !row.consumedAt && new Date(row.expiresAt).getTime() > now) return row
+    }
+    return null
+  })
+}
+
+export async function consumeEmailVerificationRow(row) {
+  return withPlatformTransaction(async client => {
+    await upsertRecord(client, 'emailVerifications', { ...row, consumedAt: new Date().toISOString() }, { operation: 'update', idempotencyKey: `ev-consume:${row.id}` })
+  })
+}

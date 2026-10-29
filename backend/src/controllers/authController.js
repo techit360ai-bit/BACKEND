@@ -19,6 +19,8 @@ function sessionUser(user) {
 }
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
+import { loadEmailVerification, consumeEmailVerificationRow, otpStoreEnabled } from '../repositories/otpRepository.js'
+import { withPlatformTransaction, upsertRecord, deleteRecord } from '../repositories/platformCollectionRepository.js'
 import { consumePasswordReset, passwordResetFallbackEnabled, passwordResetStoreEnabled, replacePasswordReset } from '../repositories/passwordResetRepository.js'
 import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
 import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
@@ -175,6 +177,16 @@ async function sendPasswordResetEmail(email, resetUrl) {
   assertEmailAccepted(delivery, 'password reset email')
 }
 
+// Undo the legacy-collection mirror when the core_* insert fails, so no half-created account
+// is left for the identity projection to turn into a user who cannot sign in.
+async function removeLegacySignupRows(userId, roleId, contextId) {
+  try {
+    await withPlatformTransaction(async client => {
+      for (const [collection, recordId] of [['activeContexts', contextId], ['userRoles', roleId], ['profiles', userId], ['users', userId]]) await deleteRecord(client, collection, recordId)
+    })
+  } catch (error) { console.error(JSON.stringify({ event: 'signup_legacy_cleanup_failed', error: error.message })) }
+}
+
 export async function signup(req, res) {
   const {
     email: rawEmail, password, firstName, lastName,
@@ -207,22 +219,43 @@ export async function signup(req, res) {
   // below never has to load the whole-DB snapshot just to find these two rows.
   const roleAssignment = { id: randomUUID(), userId: id, role: requestedRole, status: 'active', active: true, assurance: 'CLAIMED', isPrimary: true, createdAt: now, updatedAt: now }
   const activeContext = { id: randomUUID(), userId: id, role: requestedRole, roleAssignmentId: roleAssignment.id, organizationId: null, workspaceId: `user-${id}`, resourceType: null, resourceId: null, status: 'active', startedAt: now, lastActiveAt: now, updatedAt: now }
-  const result = updateAuthorityDb(db => {
-    if (db.users.find(u => u.email === email)) {
-      return { status: 409, error: 'Email already in use' }
+  // Row-level path (IDENTITY_WRITE_SOURCE=postgres): there is no whole-DB snapshot, so check the
+  // email and the verification token in Postgres, mirror the new rows into the legacy collections
+  // (the identity projection copies from them), and consume the token only after the account exists.
+  const postgresSignup = process.env.IDENTITY_WRITE_SOURCE === 'postgres' && otpStoreEnabled()
+  let verificationRow = null
+  let result
+  if (postgresSignup) {
+    if ((await findIdentityByEmail(email))?.user) result = { status: 409, error: 'Email already in use' }
+    else if (!(verificationRow = await loadEmailVerification(email, hashToken(emailVerificationToken)))) result = { status: 400, error: 'Email verification is invalid or expired' }
+    else {
+      await withPlatformTransaction(async client => {
+        const opts = key => ({ operation: 'insert', idempotencyKey: `signup:${key}:${id}` })
+        await upsertRecord(client, 'users', { id, email, passwordHash, createdAt: now, updatedAt: now }, opts('users'))
+        await upsertRecord(client, 'profiles', profile, opts('profiles'))
+        await upsertRecord(client, 'userRoles', roleAssignment, opts('userRoles'))
+        await upsertRecord(client, 'activeContexts', activeContext, opts('activeContexts'))
+      }, { userId: id })
+      result = { status: 201, profile }
     }
+  } else {
+    result = updateAuthorityDb(db => {
+      if (db.users.find(u => u.email === email)) {
+        return { status: 409, error: 'Email already in use' }
+      }
 
-    if (!consumeEmailVerification(db, email, emailVerificationToken)) {
-      return { status: 400, error: 'Email verification is invalid or expired' }
-    }
+      if (!consumeEmailVerification(db, email, emailVerificationToken)) {
+        return { status: 400, error: 'Email verification is invalid or expired' }
+      }
 
-    db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
-    db.profiles.push(profile)
-    ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
-    ;(db.activeContexts || (db.activeContexts = [])).push(activeContext)
-    recordMigrationEvent(db, { domain: 'identity', aggregateType: 'user', aggregateId: id, operation: 'upsert', payload: { userId: id, email, role: requestedRole }, version: 1 })
-    return { status: 201, profile }
-  })
+      db.users.push({ id, email, passwordHash, createdAt: now, updatedAt: now })
+      db.profiles.push(profile)
+      ;(db.userRoles || (db.userRoles = [])).push(roleAssignment)
+      ;(db.activeContexts || (db.activeContexts = [])).push(activeContext)
+      recordMigrationEvent(db, { domain: 'identity', aggregateType: 'user', aggregateId: id, operation: 'upsert', payload: { userId: id, email, role: requestedRole }, version: 1 })
+      return { status: 201, profile }
+    })
+  }
 
   if (result.status !== 201) {
     return res.status(result.status).json({ error: result.error })
@@ -237,10 +270,12 @@ export async function signup(req, res) {
     try {
       await createIdentityBundle({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, roleAssignment, activeContext)
     } catch (error) {
+      if (postgresSignup) await removeLegacySignupRows(id, roleAssignment.id, activeContext.id)
       console.error(JSON.stringify({ event: 'identity_postgres_signup_failed', error: error.message }))
       if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return res.status(503).json({ error: 'identity_write_temporarily_unavailable' })
     }
   }
+  if (postgresSignup && verificationRow) await consumeEmailVerificationRow(verificationRow)
   const credentials = await issueSessionAsync({ id, email, passwordHash, createdAt: now, updatedAt: now }, profile, req, { rememberMe: req.body.rememberMe !== false })
   if (!mobileClient(req)) setSessionCookies(res, credentials)
   return res.status(201).json({
