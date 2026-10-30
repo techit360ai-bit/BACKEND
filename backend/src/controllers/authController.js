@@ -20,7 +20,7 @@ function sessionUser(user) {
 import { recordMigrationEvent } from '../services/migrationOutboxService.js'
 import { createIdentityBundle, findIdentityByEmail, findIdentityById, updateIdentityPassword } from '../repositories/identityRepository.js'
 import { loadEmailVerification, consumeEmailVerificationRow, otpStoreEnabled } from '../repositories/otpRepository.js'
-import { withPlatformTransaction, upsertRecord, deleteRecord } from '../repositories/platformCollectionRepository.js'
+import { withPlatformTransaction, upsertRecord, deleteRecord, getRecord } from '../repositories/platformCollectionRepository.js'
 import { consumePasswordReset, passwordResetFallbackEnabled, passwordResetStoreEnabled, replacePasswordReset } from '../repositories/passwordResetRepository.js'
 import { activateDistributionReferral } from '../services/distributionIntelligenceService.js'
 import { activateReferral as activateMomentReferral } from '../services/techitMomentsService.js'
@@ -487,8 +487,21 @@ export async function resetPassword(req, res) {
       const consumed = await consumePasswordReset(email, hashToken(token), now)
       if (consumed) {
         const persisted = await updateIdentityPassword(consumed.userId, passwordHash)
-        if (persisted) return res.json({ message: 'Password reset successfully' })
+        if (persisted) {
+          // Keep the legacy users record in step: the identity projection copies password_hash from it,
+          // so without this the old password comes back on the next sync.
+          await withPlatformTransaction(async client => {
+            const legacy = await getRecord(client, 'users', consumed.userId)
+            if (legacy) await upsertRecord(client, 'users', { ...legacy, id: consumed.userId, passwordHash, updatedAt: now }, { operation: 'update', idempotencyKey: `pwreset-user:${consumed.id}` })
+          })
+          return res.json({ message: 'Password reset successfully' })
+        }
+        console.error(JSON.stringify({ event: 'password_reset_identity_row_missing', userId: String(consumed.userId) }))
+      } else {
+        console.error(JSON.stringify({ event: 'password_reset_no_matching_record' }))
       }
+      // Postgres owns identity now: a miss is an invalid or expired token, not a reason to read a snapshot that no longer exists.
+      if (!passwordResetFallbackEnabled()) return res.status(400).json({ error: 'Password reset token is invalid or expired' })
       // No row-level match (or the identity row is gone): fall through to the
       // snapshot while it still exists (rolling cutover).
     } catch (error) {
