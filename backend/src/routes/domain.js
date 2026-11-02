@@ -60,6 +60,9 @@ import {
   programEnrollments,
   myProgramEnrollments,
   programInvitationAccept,
+  organizationCommunityImport,
+  programApply,
+  programEvaluate,
   orgCohortHealth,
   orgInterventions,
   orgImpact,
@@ -216,6 +219,9 @@ router.post('/organization/programs', requireCapability('organization.profile.ma
 // Phase O: invite a founder to a program and read the enrolled roster.
 router.post('/organization/programs/:programId/invitations', requireRole('organization', 'organisation'), programInvitationCreate)
 router.get('/organization/programs/:programId/enrollments', requireRole('organization', 'organisation'), programEnrollments)
+router.post('/organization/community/import', requireRole('organization', 'organisation'), organizationCommunityImport)
+router.post('/programs/:programId/apply', programApply)
+router.post('/organization/programs/evaluations/:evaluationId', requireRole('organization', 'organisation'), programEvaluate)
 // Founder-facing: my program enrollments + accept an invite token.
 router.get('/organization/enrollments', myProgramEnrollments)
 router.post('/organization/enrollments/accept', programInvitationAccept)

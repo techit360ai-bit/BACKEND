@@ -2123,6 +2123,153 @@ export function createProgramInvitation(userId, programId, body = {}) {
   })
 }
 
+export function importOrganizationCommunity(userId, organizationId, body = {}) {
+  return updateAuthorityDb(db => {
+    const programId = String(body.programId || '').trim()
+    const contacts = Array.isArray(body.contacts) ? body.contacts : (Array.isArray(body.records) ? body.records : [])
+    if (contacts.length === 0) return { ok: false, error: 'no_contacts_provided', status: 400 }
+
+    const imported = []
+    let matchedCount = 0
+
+    for (const raw of contacts) {
+      const email = String(raw.email || '').trim().toLowerCase()
+      const name = String(raw.name || raw.fullName || '').trim()
+      const role = String(raw.role || raw.type || 'founder').trim()
+      if (!email && !name) continue
+
+      const contactId = createId('orgcont')
+      const profile = email ? collection(db, 'profiles').find(row => String(row.email || '').toLowerCase() === email) : null
+      const matchedFounderId = profile ? profile.id : null
+      if (matchedFounderId) matchedCount++
+
+      const contact = {
+        id: contactId,
+        organizationId,
+        ownerId: userId,
+        name,
+        email,
+        role,
+        matchedFounderId,
+        metadata: cleanObject(raw.metadata || raw),
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      }
+      collection(db, 'organizationContacts').push(contact)
+      imported.push(contact)
+
+      if (matchedFounderId && programId) {
+        const token = createId('proginvite')
+        insertOwned(db, 'programEnrollments', userId, {
+          programId,
+          organizationId,
+          founderId: matchedFounderId,
+          status: 'pending',
+          token,
+          source: 'community_import',
+          sourceCommunity: organizationId,
+          shortlistedAt: nowIso(),
+        }, 'progenroll')
+
+        collection(db, 'membershipInvitations').push({
+          id: createId('inv'),
+          organizationId,
+          userId: matchedFounderId,
+          email,
+          role,
+          token,
+          status: 'pending',
+          createdAt: nowIso(),
+        })
+      }
+    }
+
+    return { ok: true, count: imported.length, matchedCount, contacts: imported }
+  })
+}
+
+export function applyToProgram(programId, body = {}) {
+  return updateAuthorityDb(db => {
+    const program = collection(db, 'organizationPrograms').find(row => row.id === programId)
+    if (!program) return { ok: false, error: 'program_not_found', status: 404 }
+
+    const email = String(body.email || '').trim().toLowerCase()
+    const name = String(body.name || body.applicantName || '').trim()
+    const startupName = String(body.startupName || body.projectName || '').trim()
+    const pitch = String(body.pitch || body.description || '').trim()
+
+    let founderId = body.userId || body.founderId || null
+    if (!founderId && email) {
+      const profile = collection(db, 'profiles').find(row => String(row.email || '').toLowerCase() === email)
+      if (profile) founderId = profile.id
+    }
+    if (!founderId) {
+      founderId = createId('usr_anon')
+    }
+
+    const evaluationId = createId('progeval')
+    const pitchLengthScore = Math.min(100, Math.max(20, pitch.length / 5))
+    const hasDeck = Boolean(body.pitchDeckUrl || body.deck || body.website) ? 30 : 0
+    const compositeScore = Math.min(100, Math.round(pitchLengthScore * 0.6 + hasDeck + 40))
+    const status = compositeScore >= 60 ? 'shortlisted' : 'screening'
+
+    const evaluation = {
+      id: evaluationId,
+      programId,
+      organizationId: program.ownerId || program.organizationId || null,
+      founderId,
+      startupName,
+      compositeScore,
+      status,
+      aiAssessment: {
+        strengths: ['Clear problem formulation', 'Relevant startup vertical'],
+        gaps: compositeScore < 70 ? ['Needs deeper validation metrics'] : [],
+        recommendation: status === 'shortlisted' ? 'Recommended for interview & cohort onboarding' : 'Requires further review',
+        scoredAt: nowIso(),
+      },
+      createdAt: nowIso(),
+    }
+    collection(db, 'programEvaluations').push(evaluation)
+
+    const enrollment = insertOwned(db, 'programEnrollments', program.ownerId || program.organizationId || 'system', {
+      programId,
+      organizationId: program.ownerId || program.organizationId || null,
+      founderId,
+      status: status === 'shortlisted' ? 'pending' : 'applied',
+      evaluationId,
+      source: 'public_application_link',
+      shortlistedAt: status === 'shortlisted' ? nowIso() : null,
+    }, 'progenroll')
+
+    return { ok: true, evaluation, enrollment }
+  })
+}
+
+export function evaluateProgramApplication(userId, evaluationId, body = {}) {
+  return updateAuthorityDb(db => {
+    const evalRecord = collection(db, 'programEvaluations').find(row => row.id === evaluationId)
+    if (!evalRecord) return { ok: false, error: 'evaluation_not_found', status: 404 }
+
+    const decision = String(body.decision || body.status || '').trim()
+    if (decision) {
+      evalRecord.status = decision
+      evalRecord.updatedAt = nowIso()
+    }
+    if (body.score !== undefined) {
+      evalRecord.compositeScore = Number(body.score)
+    }
+    if (body.feedback) {
+      evalRecord.aiAssessment = {
+        ...(evalRecord.aiAssessment || {}),
+        humanOverrideFeedback: String(body.feedback),
+        overriddenBy: userId,
+        overriddenAt: nowIso(),
+      }
+    }
+    return { ok: true, evaluation: evalRecord }
+  })
+}
+
 export function listProgramEnrollments(userId, programId) {
   const db = readAuthorityDb()
   const program = collection(db, 'organizationPrograms').find(row => row.id === programId && row.ownerId === userId)
@@ -2982,6 +3129,15 @@ export async function listFounderProgramEnrollmentsAsync(userId) {
 }
 export async function acceptProgramInvitationAsync(userId, body = {}) {
   return domainWrite(programScope(userId), () => acceptProgramInvitation(userId, body), () => acceptProgramInvitation(userId, body))
+}
+export async function importOrganizationCommunityAsync(userId, organizationId, body = {}) {
+  return domainWrite(programScope(userId), () => importOrganizationCommunity(userId, organizationId, body), () => importOrganizationCommunity(userId, organizationId, body))
+}
+export async function applyToProgramAsync(programId, body = {}) {
+  return domainWrite(programScope('system'), () => applyToProgram(programId, body), () => applyToProgram(programId, body))
+}
+export async function evaluateProgramApplicationAsync(userId, evaluationId, body = {}) {
+  return domainWrite(programScope(userId), () => evaluateProgramApplication(userId, evaluationId, body), () => evaluateProgramApplication(userId, evaluationId, body))
 }
 
 // Row-level (§5) wrappers — sub-slice: hackathons.

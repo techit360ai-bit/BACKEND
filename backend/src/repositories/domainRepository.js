@@ -91,6 +91,9 @@ const OWNER_FIELDS = {
   cofounderTeamSummaries: ['approvedBy', 'ownerId', 'userId'],
   // Organization programs + founder enrollment slice.
   organizationPrograms: ['ownerId', 'userId', 'organizationId'],
+  organizationContacts: ['organizationId', 'ownerId', 'userId'],
+  membershipInvitations: ['organizationId', 'ownerId', 'userId', 'email'],
+  programEvaluations: ['programId', 'organizationId', 'ownerId', 'userId'],
   programEnrollments: ['organizationId', 'founderId', 'ownerId', 'userId'],
   // Wallet analytics slice (completed usage events).
   usageEvents: ['userId', 'ownerId'],

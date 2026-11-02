@@ -81,6 +81,9 @@ import {
   listProgramEnrollmentsAsync,
   listFounderProgramEnrollmentsAsync,
   acceptProgramInvitationAsync,
+  importOrganizationCommunityAsync,
+  applyToProgramAsync,
+  evaluateProgramApplicationAsync,
   promoteIntakeAsync,
   provisionHackathonWorkspaceAsync,
   provisionWorkspaceAsync,
@@ -672,6 +675,24 @@ export async function walletPaymentIntent(req, res) {
   const result = await createPaymentIntentAsync(req.user.id, req.body)
   if (result?.ok === false) return res.status(result.status || 400).json(result)
   return created(res, result)
+}
+
+export async function organizationCommunityImport(req, res) {
+  const result = await importOrganizationCommunityAsync(req.user.id, req.params.organizationId || req.body.organizationId || req.user.id, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export async function programApply(req, res) {
+  const result = await applyToProgramAsync(req.params.programId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export async function programEvaluate(req, res) {
+  const result = await evaluateProgramApplicationAsync(req.user.id, req.params.evaluationId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return res.json(result)
 }
 
 export async function genericListGet(req, res) {
