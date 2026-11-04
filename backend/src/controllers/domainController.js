@@ -81,6 +81,9 @@ import {
   listProgramEnrollmentsAsync,
   listFounderProgramEnrollmentsAsync,
   acceptProgramInvitationAsync,
+  importOrganizationCommunityAsync,
+  applyToProgramAsync,
+  evaluateProgramApplicationAsync,
   promoteIntakeAsync,
   provisionHackathonWorkspaceAsync,
   provisionWorkspaceAsync,
@@ -96,6 +99,10 @@ import {
   updateNotificationPreferencesAsync,
   applyToOpportunityAsync,
   listApplicationsAsync,
+  fetchEngagements,
+  createEngagement,
+  submitDeliverableProof,
+  reviewDeliverable,
   publishProjectAsync,
   updateOrganizationProjectAsync,
   updateProjectAsync,
@@ -670,6 +677,24 @@ export async function walletPaymentIntent(req, res) {
   return created(res, result)
 }
 
+export async function organizationCommunityImport(req, res) {
+  const result = await importOrganizationCommunityAsync(req.user.id, req.params.organizationId || req.body.organizationId || req.user.id, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export async function programApply(req, res) {
+  const result = await applyToProgramAsync(req.params.programId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return created(res, result)
+}
+
+export async function programEvaluate(req, res) {
+  const result = await evaluateProgramApplicationAsync(req.user.id, req.params.evaluationId, req.body)
+  if (!result.ok) return res.status(result.status || 400).json(result)
+  return res.json(result)
+}
+
 export async function genericListGet(req, res) {
   return res.json({ [req.responseKey]: await genericListAsync(req.user.id, req.collectionName, req.collectionScope || null) })
 }
@@ -758,6 +783,29 @@ export async function opportunityApply(req, res) {
 
 export async function applicationsList(req, res) {
   return res.json(await listApplicationsAsync(req.user.id))
+}
+
+export async function engagementsGet(req, res) {
+  const result = fetchEngagements(req.user.id)
+  return res.json(result)
+}
+
+export async function engagementCreate(req, res) {
+  const result = createEngagement(req.user.id, req.params.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, { engagement: result.engagement })
+}
+
+export async function deliverableSubmit(req, res) {
+  const result = submitDeliverableProof(req.user.id, req.params.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return res.json({ deliverable: result.deliverable })
+}
+
+export async function deliverableReview(req, res) {
+  const result = reviewDeliverable(req.user.id, req.params.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return res.json({ deliverable: result.deliverable })
 }
 
 export async function incubationPublish(req, res) {

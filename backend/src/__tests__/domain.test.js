@@ -1760,4 +1760,62 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
     expect(res.status).toBe(404)
     expect(db.projects[0].title).toBe('Org A project')
   })
+
+  it('creates opportunity engagements and manages deliverables lifecycle', async () => {
+    const db = makeDb({
+      opportunities: [
+        { id: 'opp_1', ownerId: A, title: 'Build Backend Feature' }
+      ]
+    })
+    readAuthorityDb.mockReturnValue(db)
+
+    // Create engagement
+    const createRes = await request(app)
+      .post('/api/domain/opportunities/opp_1/engagements')
+      .set('Authorization', `Bearer ${validToken(A)}`)
+      .send({
+        participantId: B,
+        deliverables: [
+          { title: 'API Endpoint', description: 'Implement route', dueDate: '2026-12-01', owner: B }
+        ]
+      })
+
+    expect(createRes.status).toBe(201)
+    expect(createRes.body.engagement).toMatchObject({
+      opportunityId: 'opp_1',
+      creatorId: A,
+      participantId: B,
+      status: 'active'
+    })
+    expect(createRes.body.engagement.deliverables).toHaveLength(1)
+    const delId = createRes.body.engagement.deliverables[0].id
+
+    // Fetch engagements
+    const fetchRes = await request(app)
+      .get('/api/domain/opportunities/engagements')
+      .set('Authorization', `Bearer ${validToken(B)}`)
+
+    expect(fetchRes.status).toBe(200)
+    expect(fetchRes.body.engagements).toHaveLength(1)
+
+    // Submit deliverable proof
+    const submitRes = await request(app)
+      .post(`/api/domain/opportunities/deliverables/${delId}/submit`)
+      .set('Authorization', `Bearer ${validToken(B)}`)
+      .send({ description: 'Implemented route and tested', artifactRef: 'PR #123' })
+
+    expect(submitRes.status).toBe(200)
+    expect(submitRes.body.deliverable.status).toBe('submitted')
+    expect(submitRes.body.deliverable.submissions).toHaveLength(1)
+
+    // Review deliverable (approve)
+    const reviewRes = await request(app)
+      .post(`/api/domain/opportunities/deliverables/${delId}/review`)
+      .set('Authorization', `Bearer ${validToken(A)}`)
+      .send({ decision: 'approved', feedback: 'Looks great!' })
+
+    expect(reviewRes.status).toBe(200)
+    expect(reviewRes.body.deliverable.status).toBe('approved')
+    expect(reviewRes.body.deliverable.feedback).toBe('Looks great!')
+  })
 })
