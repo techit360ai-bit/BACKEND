@@ -82,6 +82,11 @@ import {
   incubationPublish,
   executionIntelligence,
   platformMetrics,
+  workspaceConversationsGet,
+  workspaceConversationCreate,
+  workspaceMessageAdd,
+  fastTrackIncubationsGet,
+  fastTrackIncubationCreate,
   opportunityApply,
   watchlist,
   watchlistAdd,
@@ -319,6 +324,12 @@ router.get('/wallet/subscriptions', bindCollection('subscriptions', 'subscriptio
 router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice', 'invoice'), walletListGet)
 router.get('/wallet/analytics', walletAnalyticsGet)
 router.post('/wallet/payment-intents', walletPaymentIntent)
+
+router.get('/workspace/conversations', workspaceConversationsGet)
+router.post('/workspace/conversations', workspaceConversationCreate)
+router.post('/workspace/conversations/:id/messages', workspaceMessageAdd)
+router.get('/incubation/fast-track', fastTrackIncubationsGet)
+router.post('/incubation/fast-track', fastTrackIncubationCreate)
 
 router.get('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericListGet)
 router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
