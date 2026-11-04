@@ -54,6 +54,8 @@ const OWNER_FIELDS = {
   // Contracts + opportunity applications slice.
   contracts: ['founderId', 'collaboratorId', 'ownerId', 'userId'],
   opportunities: ['ownerId', 'userId', 'createdBy'],
+  engagements: ['creatorId', 'participantId', 'ownerId', 'userId', 'opportunityId'],
+  deliverables: ['engagementId', 'ownerId', 'userId', 'creatorId', 'participantId'],
   opportunityApplications: ['applicantId', 'ownerId', 'userId'],
   // Venture intakes + analyses slice.
   ventureIntakes: ['ownerId', 'userId'],
