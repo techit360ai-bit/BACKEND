@@ -11,7 +11,7 @@
 
 import crypto from 'node:crypto'
 import jwt from 'jsonwebtoken'
-import { issueExecutionGrant } from './usageGrantService.js'
+import { issueExecutionGrantAsync } from './usageGrantService.js'
 
 const AI_ROUTER_URL = (process.env.AI_ROUTER_URL || 'http://localhost:8000').replace(/\/$/, '')
 const TIMEOUT_MS = Number(process.env.AI_ROUTER_TIMEOUT_MS || '6000') || 6000
@@ -48,12 +48,12 @@ function tokenSubject(token) {
  * Non-fatal by design: on any failure the call proceeds without the header and
  * degrades exactly as before (callers already return null on router errors).
  */
-function executionGrantHeader(token, { taskType, workspaceId } = {}) {
+async function executionGrantHeader(token, { taskType, workspaceId } = {}) {
   if (!grantAttachEnabled() || !token) return null
   const userId = tokenSubject(token)
   if (!userId) return null
   try {
-    const result = issueExecutionGrant({
+    const result = await issueExecutionGrantAsync({
       userId,
       requestId: `router_${crypto.randomUUID()}`,
       taskType: taskType || 'router_enrichment',
@@ -84,7 +84,7 @@ async function requestJson(path, { method = 'POST', token, body, headers = {}, t
   if (Date.now() < circuitOpenedUntil) return null
   const requestHeaders = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }
   if (token && !requestHeaders['X-AI-Execution-Grant']) {
-    const grantHeaders = executionGrantHeader(token, { taskType, workspaceId })
+    const grantHeaders = await executionGrantHeader(token, { taskType, workspaceId })
     if (grantHeaders) Object.assign(requestHeaders, grantHeaders)
   }
   const release = await acquireSlot()
