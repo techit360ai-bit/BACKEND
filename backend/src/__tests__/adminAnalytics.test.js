@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 
@@ -46,11 +46,15 @@ function makeDb() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'))
   delete process.env.DB_DRIVER
   delete process.env.ADMIN_AUTH_SOURCE
   readAuthorityDb.mockReturnValue(makeDb())
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }))
 })
+
+afterEach(() => { vi.useRealTimers() })
 
 describe('backend admin analytics routes', () => {
   it('requires an admin token instead of returning 404', async () => {
