@@ -27,6 +27,7 @@ import {
   adminAiSystemHealth,
   adminGeographyAlerts,
   adminMissionControl,
+  adminOpportunityComplianceTelemetry,
   adminReferralCollaboration,
   adminRevenueRetention,
   adminTrustMilestoneReviews,
@@ -56,6 +57,7 @@ router.get('/analytics/revenue-retention', requireAdminAuth, requireSuperAdmin, 
 router.get('/analytics/ai-system-health', requireAdminAuth, requireSuperAdmin, adminAiSystemHealth)
 router.get('/analytics/geography-alerts', requireAdminAuth, requireSuperAdmin, adminGeographyAlerts)
 router.get('/analytics/trust/milestone-reviews', requireAdminAuth, requireAdmin, adminTrustMilestoneReviews)
+router.get('/opportunity/compliance-telemetry', requireAdminAuth, requireAdmin, adminOpportunityComplianceTelemetry)
 router.get('/users', requireAdminAuth, requireSuperAdmin, adminList)
 router.post('/users', requireAdminAuth, requireSuperAdmin, adminCreate)
 router.patch('/users/:id', requireAdminAuth, requireSuperAdmin, adminUpdate)

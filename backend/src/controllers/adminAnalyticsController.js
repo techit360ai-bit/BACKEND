@@ -2,6 +2,7 @@ import {
   aiSystemHealthDashboard,
   geographyAlertsDashboard,
   missionControlDashboard,
+  opportunityComplianceTelemetryDashboard,
   referralCollaborationDashboard,
   revenueRetentionDashboard,
   trustMilestoneReviewsDashboard,
@@ -29,3 +30,4 @@ export const adminRevenueRetention = analyticsResponse(revenueRetentionDashboard
 export const adminAiSystemHealth = analyticsResponse(aiSystemHealthDashboard)
 export const adminGeographyAlerts = analyticsResponse(geographyAlertsDashboard)
 export const adminTrustMilestoneReviews = analyticsResponse(trustMilestoneReviewsDashboard)
+export const adminOpportunityComplianceTelemetry = analyticsResponse(opportunityComplianceTelemetryDashboard)
