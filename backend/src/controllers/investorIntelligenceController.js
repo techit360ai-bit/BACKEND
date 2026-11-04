@@ -1,5 +1,5 @@
 import { authorizeCapabilityAsync, auditCapabilityDecisionAsync } from '../services/capabilityAuthorization.js'
-import { investorAdvisoryEvidenceAsync, investorAlertsAsync, investorDailyBriefAsync, investorIntelligenceOverviewAsync, investorReportsAsync, investorRiskSignalsAsync, investorStartupIntelligenceAsync } from '../services/investorIntelligenceService.js'
+import { investorAdvisoryEvidenceAsync, investorAlertsAsync, investorDailyBriefAsync, investorIntelligenceOverviewAsync, investorReportsAsync, investorRiskSignalsAsync, investorStartupIntelligenceAsync, investorTirsAsync, investorTasAsync } from '../services/investorIntelligenceService.js'
 import { requestInvestorAdvisory, requestInvestorEvi } from '../services/aiRouterClient.js'
 
 async function guard(req, capability) {
@@ -104,4 +104,16 @@ export async function evi(req, res) {
   if (!evidence.startups.length) return res.status(404).json({ error: 'startup_not_authorized' })
   const result = await requestInvestorEvi(req.user.token, req.params.startupId, evidence.startups[0])
   return result ? res.json({ evi: result, deterministicEvidence: evidence.startups[0] }) : res.status(503).json({ error: 'evi_unavailable', deterministicEvidence: evidence.startups[0] })
+}
+
+export async function tirs(req, res) {
+  const decision = await guard(req, 'investor.intelligence.view')
+  if (!decision.allowed) return deny(res, decision)
+  return res.json(await investorTirsAsync(req.user.id))
+}
+
+export async function tas(req, res) {
+  const decision = await guard(req, 'investor.intelligence.view')
+  if (!decision.allowed) return deny(res, decision)
+  return res.json(await investorTasAsync(req.user.id, req.body))
 }
