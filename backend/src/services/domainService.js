@@ -2834,6 +2834,16 @@ export function applyToOpportunity(userId, opportunityId, body) {
     if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
     if (opportunity.ownerId === userId) return { ok: false, error: 'self_application_not_allowed' }
 
+    const status = String(opportunity.status || '').toLowerCase()
+    if (['filled', 'taken', 'expired', 'closed'].includes(status)) {
+      return { ok: false, error: 'opportunity_closed' }
+    }
+
+    const deadline = opportunity.applyDeadline || opportunity.expiresAt
+    if (deadline && new Date(deadline).getTime() < Date.now()) {
+      return { ok: false, error: 'opportunity_expired' }
+    }
+
     const existing = collection(db, 'opportunityApplications').find(row =>
       row.applicantId === userId && row.opportunityId === opportunityId
     )
