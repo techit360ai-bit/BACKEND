@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
-import { advisory, alerts, brief, changes, evi, overview, portfolio, reports, risks, startup, stream } from '../controllers/investorIntelligenceController.js'
+import { advisory, alerts, brief, changes, evi, overview, portfolio, reports, risks, startup, stream, tirs, tas } from '../controllers/investorIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -15,4 +15,8 @@ router.get('/alerts', alerts)
 router.get('/reports', reports)
 router.get('/stream', stream)
 router.get('/advisory/:scope', advisory)
+router.get('/tirs', tirs)
+router.post('/tirs', tirs)
+router.get('/tas', tas)
+router.post('/tas', tas)
 export default router

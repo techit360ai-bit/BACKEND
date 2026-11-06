@@ -303,3 +303,28 @@ export async function requestAcademyExerciseReview(token, input = {}) {
   if (!token) return null
   try { return await requestJson('/api/v1/training/exercises/review', { token, body: input, taskType: 'training_generation' }) } catch { return null }
 }
+
+export async function requestScaffoldGeneration(token, input) {
+  if (!token) return null
+  try { return await requestJson('/api/v1/scaffold/generate', { token, body: input, taskType: 'app_scaffold_generation' }) } catch { return null }
+}
+export async function requestScaffoldRetrieval(token, projectId) {
+  if (!token || !projectId) return null
+  try { return await requestJson(`/api/v1/scaffold/${encodeURIComponent(projectId)}`, { method: 'GET', token }) } catch { return null }
+}
+export async function requestScaffoldDeploy(token, scaffoldId) {
+  if (!token || !scaffoldId) return null
+  try { return await requestJson(`/api/v1/scaffold/${encodeURIComponent(scaffoldId)}/deploy`, { token, body: {}, taskType: 'app_scaffold_deployment' }) } catch { return null }
+}
+export async function requestScaffoldStatus(token, scaffoldId) {
+  if (!token || !scaffoldId) return null
+  try { return await requestJson(`/api/v1/scaffold/${encodeURIComponent(scaffoldId)}/status`, { method: 'GET', token }) } catch { return null }
+}
+export async function requestScaffoldLiveUrl(token, scaffoldId) {
+  if (!token || !scaffoldId) return null
+  try { return await requestJson(`/api/v1/scaffold/${encodeURIComponent(scaffoldId)}/live-url`, { method: 'GET', token }) } catch { return null }
+}
+export async function requestScaffoldStacks(token) {
+  if (!token) return null
+  try { return await requestJson('/api/v1/scaffold/stacks', { method: 'GET', token }) } catch { return null }
+}
