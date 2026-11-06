@@ -324,6 +324,7 @@ router.get('/opportunities', bindPublicCollection('opportunities', 'opportunitie
 router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
 router.post('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericCreatePost)
 router.patch('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericPatchItem)
+router.delete('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericDeleteItem)
 router.post('/opportunities/:id/apply', opportunityApply)
 router.get('/applications', applicationsList)
 router.get('/files', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericListGet)
