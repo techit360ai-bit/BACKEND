@@ -88,6 +88,10 @@ import {
   fastTrackIncubationsGet,
   fastTrackIncubationCreate,
   opportunityApply,
+  engagementsGet,
+  engagementCreate,
+  deliverableSubmit,
+  deliverableReview,
   watchlist,
   watchlistAdd,
   watchlistRemove,
@@ -332,11 +336,15 @@ router.get('/incubation/fast-track', fastTrackIncubationsGet)
 router.post('/incubation/fast-track', fastTrackIncubationCreate)
 
 router.get('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericListGet)
+router.get('/opportunities/engagements', engagementsGet)
 router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
 router.post('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericCreatePost)
 router.patch('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericPatchItem)
 router.delete('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericDeleteItem)
 router.post('/opportunities/:id/apply', opportunityApply)
+router.post('/opportunities/:id/engagements', engagementCreate)
+router.post('/opportunities/deliverables/:id/submit', deliverableSubmit)
+router.post('/opportunities/deliverables/:id/review', deliverableReview)
 router.get('/applications', applicationsList)
 router.get('/files', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericListGet)
 router.post('/files', bindPublicCollection('files', 'files', 'file', 'file', ['ownerId', 'userId', 'createdBy']), genericCreatePost)

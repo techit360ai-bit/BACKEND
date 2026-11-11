@@ -3215,6 +3215,107 @@ export async function listContributionsAsync(userId) {
   return domainRead(contributionScope(userId), () => listContributions(userId), () => listContributions(userId))
 }
 
+export function fetchEngagements(userId) {
+  const db = readAuthorityDb()
+  const rowsList = collection(db, 'engagements').filter(row => row.creatorId === userId || row.participantId === userId)
+  return { engagements: rowsList }
+}
+
+export function createEngagement(userId, opportunityId, body) {
+  return updateAuthorityDb(db => {
+    const opportunity = collection(db, 'opportunities').find(row => row.id === opportunityId)
+    if (!opportunity) return { ok: false, error: 'opportunity_not_found', status: 404 }
+
+    const deliverablesInput = Array.isArray(body.deliverables) ? body.deliverables : []
+    const deliverables = deliverablesInput.map(d => ({
+      id: createId('del'),
+      title: String(d.title || '').trim(),
+      description: String(d.description || '').trim(),
+      dueDate: String(d.dueDate || '').trim(),
+      owner: String(d.owner || body.participantId || '').trim(),
+      status: 'not-specified',
+      submissions: [],
+      feedback: ''
+    }))
+
+    const engagement = insertOwned(db, 'engagements', userId, {
+      opportunityId,
+      opportunityTitle: opportunity.title || opportunity.name || '',
+      creatorId: userId,
+      participantId: String(body.participantId || '').trim(),
+      status: 'active',
+      deliverables,
+      startDate: nowIso(),
+      expectedCompletionDate: deliverables[0]?.dueDate || nowIso()
+    }, 'engagement', 'creatorId')
+
+    return { ok: true, engagement }
+  })
+}
+
+export function submitDeliverableProof(userId, deliverableId, body) {
+  return updateAuthorityDb(db => {
+    const engagements = collection(db, 'engagements')
+    let targetEngagement = null
+    let targetDeliverable = null
+
+    for (const eng of engagements) {
+      const del = (eng.deliverables || []).find(d => d.id === deliverableId)
+      if (del) {
+        targetEngagement = eng
+        targetDeliverable = del
+        break
+      }
+    }
+
+    if (!targetDeliverable) return { ok: false, error: 'deliverable_not_found', status: 404 }
+
+    const submission = {
+      id: createId('sub'),
+      description: String(body.description || '').trim(),
+      artifactRef: String(body.artifactRef || '').trim(),
+      submittedAt: nowIso(),
+      status: 'submitted'
+    }
+
+    if (!Array.isArray(targetDeliverable.submissions)) {
+      targetDeliverable.submissions = []
+    }
+    targetDeliverable.submissions.push(submission)
+    targetDeliverable.status = 'submitted'
+    targetEngagement.updatedAt = nowIso()
+
+    return { ok: true, deliverable: targetDeliverable }
+  })
+}
+
+export function reviewDeliverable(userId, deliverableId, body) {
+  return updateAuthorityDb(db => {
+    const engagements = collection(db, 'engagements')
+    let targetDeliverable = null
+
+    for (const eng of engagements) {
+      const del = (eng.deliverables || []).find(d => d.id === deliverableId)
+      if (del) {
+        targetDeliverable = del
+        break
+      }
+    }
+
+    if (!targetDeliverable) return { ok: false, error: 'deliverable_not_found', status: 404 }
+
+    const decision = String(body.decision || '').trim()
+    if (!['approved', 'changes-requested', 'disputed'].includes(decision)) {
+      return { ok: false, error: 'invalid_decision', status: 400 }
+    }
+
+    targetDeliverable.status = decision
+    targetDeliverable.feedback = String(body.feedback || '').trim()
+
+    return { ok: true, deliverable: targetDeliverable }
+  })
+}
+
 export function fetchWorkspaceConversations(userId) {
   const db = readAuthorityDb()
   const conversations = collection(db, 'workspaceConversations').filter(row => row.ownerId === userId || row.userId === userId || row.creatorId === userId)

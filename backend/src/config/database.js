@@ -96,6 +96,8 @@ const INITIAL = {
   hackathonTeamReports: [],
   hackathonFinalSubmissions: [],
   opportunities: [],
+  engagements: [],
+  deliverables: [],
   workspaceTasks: [],
   workspaceAgents: [],
   workspaceConnectors: [],
