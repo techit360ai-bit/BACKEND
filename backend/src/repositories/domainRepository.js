@@ -57,6 +57,8 @@ const OWNER_FIELDS = {
   // Contracts + opportunity applications slice.
   contracts: ['founderId', 'collaboratorId', 'ownerId', 'userId'],
   opportunities: ['ownerId', 'userId', 'createdBy'],
+  engagements: ['creatorId', 'participantId', 'ownerId', 'userId', 'opportunityId'],
+  deliverables: ['engagementId', 'ownerId', 'userId', 'creatorId', 'participantId'],
   opportunityApplications: ['applicantId', 'ownerId', 'userId'],
   // Venture intakes + analyses slice.
   ventureIntakes: ['ownerId', 'userId'],
@@ -92,6 +94,9 @@ const OWNER_FIELDS = {
   cofounderTeamSummaries: ['approvedBy', 'ownerId', 'userId'],
   // Organization programs + founder enrollment slice.
   organizationPrograms: ['ownerId', 'userId', 'organizationId'],
+  organizationContacts: ['organizationId', 'ownerId', 'userId'],
+  membershipInvitations: ['organizationId', 'ownerId', 'userId', 'email'],
+  programEvaluations: ['programId', 'organizationId', 'ownerId', 'userId'],
   programEnrollments: ['organizationId', 'founderId', 'ownerId', 'userId'],
   // Wallet analytics slice (completed usage events).
   usageEvents: ['userId', 'ownerId'],
