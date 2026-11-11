@@ -50,6 +50,9 @@ const OWNER_FIELDS = {
   organizationAbuseReviews: ['organizationId', 'ownerId', 'userId'],
   workspaces: ['ownerId', 'userId', 'organizationId'],
   workspaceMembers: ['userId', 'ownerId', 'workspaceOwnerId'],
+  workspaceConversations: ['ownerId', 'userId', 'creatorId'],
+  workspaceMessages: ['ownerId', 'userId', 'senderId'],
+  fastTrackIncubations: ['ownerId', 'userId', 'founderId'],
   notifications: ['userId'],
   // Contracts + opportunity applications slice.
   contracts: ['founderId', 'collaboratorId', 'ownerId', 'userId'],

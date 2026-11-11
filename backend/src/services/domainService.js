@@ -2834,6 +2834,16 @@ export function applyToOpportunity(userId, opportunityId, body) {
     if (!opportunity) return { ok: false, error: 'opportunity_not_found' }
     if (opportunity.ownerId === userId) return { ok: false, error: 'self_application_not_allowed' }
 
+    const status = String(opportunity.status || '').toLowerCase()
+    if (['filled', 'taken', 'expired', 'closed'].includes(status)) {
+      return { ok: false, error: 'opportunity_closed' }
+    }
+
+    const deadline = opportunity.applyDeadline || opportunity.expiresAt
+    if (deadline && new Date(deadline).getTime() < Date.now()) {
+      return { ok: false, error: 'opportunity_expired' }
+    }
+
     const existing = collection(db, 'opportunityApplications').find(row =>
       row.applicantId === userId && row.opportunityId === opportunityId
     )
@@ -3306,3 +3316,82 @@ export function reviewDeliverable(userId, deliverableId, body) {
   })
 }
 
+export function fetchWorkspaceConversations(userId) {
+  const db = readAuthorityDb()
+  const conversations = collection(db, 'workspaceConversations').filter(row => row.ownerId === userId || row.userId === userId || row.creatorId === userId)
+  const messages = collection(db, 'workspaceMessages')
+  const results = conversations.map(c => ({
+    ...c,
+    messages: messages.filter(m => m.conversationId === c.id)
+  }))
+  return { conversations: results }
+}
+
+export function createWorkspaceConversation(userId, body) {
+  return updateAuthorityDb(db => {
+    const conversation = insertOwned(db, 'workspaceConversations', userId, {
+      title: String(body.title || 'Conversational Workspace').trim(),
+      workspaceId: String(body.workspaceId || '').trim(),
+      creatorId: userId,
+      status: 'active',
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    }, 'wsconv', 'creatorId')
+    return { ok: true, conversation }
+  })
+}
+
+export function addWorkspaceMessage(userId, conversationId, body) {
+  return updateAuthorityDb(db => {
+    const conversations = collection(db, 'workspaceConversations')
+    const convo = conversations.find(c => c.id === conversationId)
+    if (!convo) return { ok: false, error: 'conversation_not_found', status: 404 }
+
+    const message = insertOwned(db, 'workspaceMessages', userId, {
+      conversationId,
+      senderId: userId,
+      content: String(body.content || body.message || '').trim(),
+      role: String(body.role || 'user').trim(),
+      createdAt: nowIso()
+    }, 'wsmsg', 'senderId')
+    convo.updatedAt = nowIso()
+    return { ok: true, message }
+  })
+}
+
+export function fetchFastTrackIncubations(userId) {
+  const db = readAuthorityDb()
+  const rows = collection(db, 'fastTrackIncubations').filter(row => row.ownerId === userId || row.userId === userId || row.founderId === userId)
+  return { incubations: rows }
+}
+
+export function createFastTrackIncubation(userId, body) {
+  return updateAuthorityDb(db => {
+    const incubation = insertOwned(db, 'fastTrackIncubations', userId, {
+      projectName: String(body.projectName || body.name || '').trim(),
+      pitch: String(body.pitch || body.description || '').trim(),
+      vertical: String(body.vertical || 'ai').trim(),
+      founderId: userId,
+      status: 'fast_track_submitted',
+      score: Number(body.score || 85),
+      createdAt: nowIso()
+    }, 'ftinc', 'founderId')
+    return { ok: true, incubation }
+  })
+}
+
+export async function fetchWorkspaceConversationsAsync(userId) {
+  return domainRead(workspaceWriteScope(userId), () => fetchWorkspaceConversations(userId), () => fetchWorkspaceConversations(userId))
+}
+export async function createWorkspaceConversationAsync(userId, body) {
+  return domainWrite(workspaceWriteScope(userId), () => createWorkspaceConversation(userId, body), () => createWorkspaceConversation(userId, body))
+}
+export async function addWorkspaceMessageAsync(userId, conversationId, body) {
+  return domainWrite(workspaceWriteScope(userId), () => addWorkspaceMessage(userId, conversationId, body), () => addWorkspaceMessage(userId, conversationId, body))
+}
+export async function fetchFastTrackIncubationsAsync(userId) {
+  return domainRead(workspaceWriteScope(userId), () => fetchFastTrackIncubations(userId), () => fetchFastTrackIncubations(userId))
+}
+export async function createFastTrackIncubationAsync(userId, body) {
+  return domainWrite(workspaceWriteScope(userId), () => createFastTrackIncubation(userId, body), () => createFastTrackIncubation(userId, body))
+}

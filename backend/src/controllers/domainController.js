@@ -46,6 +46,11 @@ import {
   listAnalysesAsync,
   listContractsAsync,
   listContributionsAsync,
+  fetchWorkspaceConversationsAsync,
+  createWorkspaceConversationAsync,
+  addWorkspaceMessageAsync,
+  fetchFastTrackIncubationsAsync,
+  createFastTrackIncubationAsync,
   listEndorsementsAsync,
   listHackathonsAsync,
   listHackathonRegistrationsAsync,
@@ -809,4 +814,30 @@ export async function executionIntelligence(req, res) {
 // breakdown.
 export async function platformMetrics(req, res) {
   return res.json(platformMetricsFor(req.user))
+}
+
+export async function workspaceConversationsGet(req, res) {
+  return res.json(await fetchWorkspaceConversationsAsync(req.user.id))
+}
+
+export async function workspaceConversationCreate(req, res) {
+  const result = await createWorkspaceConversationAsync(req.user.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, { conversation: result.conversation })
+}
+
+export async function workspaceMessageAdd(req, res) {
+  const result = await addWorkspaceMessageAsync(req.user.id, req.params.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return res.json({ message: result.message })
+}
+
+export async function fastTrackIncubationsGet(req, res) {
+  return res.json(await fetchFastTrackIncubationsAsync(req.user.id))
+}
+
+export async function fastTrackIncubationCreate(req, res) {
+  const result = await createFastTrackIncubationAsync(req.user.id, req.body)
+  if (result.ok === false) return res.status(result.status || 400).json({ error: result.error })
+  return created(res, { incubation: result.incubation })
 }

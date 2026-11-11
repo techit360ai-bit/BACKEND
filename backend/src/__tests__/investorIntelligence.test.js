@@ -77,4 +77,16 @@ describe('investor mentorship intelligence', () => {
     expect(reports.status).toBe(200); expect(reports.body.deterministic).toBe(true); expect(reports.body.reports[0].type).toBe('daily_brief')
     expect(db.creditLedger).toHaveLength(0); expect(db.usageReservations).toHaveLength(0)
   })
+
+  it('computes TIRS score and performs TAS startup evaluation sync', async () => {
+    const tirsRes = await request(app).get('/api/investor-intelligence/tirs').set('Authorization', `Bearer ${token()}`)
+    expect(tirsRes.status).toBe(200)
+    expect(tirsRes.body.tirsScore).toBeGreaterThan(0)
+    expect(tirsRes.body.ratingTier).toBeDefined()
+
+    const tasRes = await request(app).post('/api/investor-intelligence/tas').set('Authorization', `Bearer ${token()}`).send({ startupId: 'startup-1' })
+    expect(tasRes.status).toBe(200)
+    expect(tasRes.body.syncStatus).toBe('synchronized')
+    expect(tasRes.body.evaluationScorecard.readinessGrade).toBe('A-')
+  })
 })

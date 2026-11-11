@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken'
-import { reserveUsage } from './usageSettlementService.js'
+import { reserveUsage, reserveUsageAsync } from './usageSettlementService.js'
 
 const environment = () => String(process.env.NODE_ENV || process.env.ENVIRONMENT || 'development').toLowerCase()
 const production = () => ['production', 'staging'].includes(environment())
@@ -104,4 +104,25 @@ function billingClasses(value) {
 function stringOrUndefined(value) {
   const text = String(value ?? '').trim()
   return text || undefined
+}
+
+// Async twin of issueExecutionGrant: reserves through reserveUsageAsync so it works
+// when finance runs on Postgres. Same signing material, issuer and audience.
+export async function issueExecutionGrantAsync(body = {}) {
+  const userId = String(body.user_id || body.userId || '').trim()
+  const requestId = String(body.request_id || body.requestId || '').trim()
+  const taskType = String(body.task_type || body.taskType || '').trim()
+  const estimatedCredits = Number(body.estimated_credits ?? body.estimatedCredits)
+  if (!userId || !requestId || !taskType || !Number.isFinite(estimatedCredits) || estimatedCredits <= 0) return { ok: false, error: 'grant_fields_required' }
+  const algorithm = executionGrantAlgorithm()
+  const secret = grantSigningKey(algorithm)
+  if (!secret) return { ok: false, error: algorithm === 'RS256' ? 'execution_grant_private_key_not_configured' : 'execution_grant_secret_not_configured' }
+  const workspaceId = body.workspace_id || body.workspaceId || null
+  const reservation = await reserveUsageAsync({ userId, workspaceId, requestId, taskType, estimatedCredits, grantId: requestId, fundingSource: body.funding_source || body.fundingSource || 'payg', metadata: body.metadata || {} })
+  if (!reservation.ok) return reservation
+  const expiresIn = Math.max(10, Math.min(900, Number(body.expires_in_seconds || 300)))
+  const payload = { sub: userId, jti: requestId, request_id: requestId, reservation_id: reservation.reservation.reservationId, workspace_id: workspaceId, execution_profile: body.execution_profile || body.executionProfile || 'balanced', allowed_model_ids: [] }
+  if (body.bind_task_type !== false && body.bindTaskType !== false) payload.task_type = taskType
+  const token = jwt.sign(payload, secret, { algorithm, expiresIn, issuer: process.env.AI_EXECUTION_GRANT_ISSUER || 'techit-backend', audience: process.env.AI_EXECUTION_GRANT_AUDIENCE || 'techit-ai-router' })
+  return { ok: true, idempotent: reservation.idempotent, grant: { token, requestId, reservationId: reservation.reservation.reservationId, expiresIn, reservation: reservation.reservation } }
 }
