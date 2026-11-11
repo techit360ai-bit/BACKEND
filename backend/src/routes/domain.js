@@ -85,6 +85,11 @@ import {
   incubationPublish,
   executionIntelligence,
   platformMetrics,
+  workspaceConversationsGet,
+  workspaceConversationCreate,
+  workspaceMessageAdd,
+  fastTrackIncubationsGet,
+  fastTrackIncubationCreate,
   opportunityApply,
   engagementsGet,
   engagementCreate,
@@ -330,11 +335,18 @@ router.get('/wallet/invoices', bindCollection('invoices', 'invoices', 'invoice',
 router.get('/wallet/analytics', walletAnalyticsGet)
 router.post('/wallet/payment-intents', walletPaymentIntent)
 
+router.get('/workspace/conversations', workspaceConversationsGet)
+router.post('/workspace/conversations', workspaceConversationCreate)
+router.post('/workspace/conversations/:id/messages', workspaceMessageAdd)
+router.get('/incubation/fast-track', fastTrackIncubationsGet)
+router.post('/incubation/fast-track', fastTrackIncubationCreate)
+
 router.get('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericListGet)
 router.get('/opportunities/engagements', engagementsGet)
 router.post('/opportunities/collaboration-calls', requireRole('founder', 'collaborator'), collaborationCallCreate)
 router.post('/opportunities', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericCreatePost)
 router.patch('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericPatchItem)
+router.delete('/opportunities/:itemId', bindPublicCollection('opportunities', 'opportunities', 'opportunity', 'opp', ['ownerId', 'userId', 'createdBy']), genericDeleteItem)
 router.post('/opportunities/:id/apply', opportunityApply)
 router.post('/opportunities/:id/engagements', engagementCreate)
 router.post('/opportunities/deliverables/:id/submit', deliverableSubmit)

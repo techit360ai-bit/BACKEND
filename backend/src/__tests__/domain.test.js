@@ -1818,4 +1818,40 @@ describe('WS-17 horizontal authorization at the service boundary', () => {
     expect(reviewRes.body.deliverable.status).toBe('approved')
     expect(reviewRes.body.deliverable.feedback).toBe('Looks great!')
   })
+
+  it('manages conversational workspace messages and fast-track incubations', async () => {
+    const db = makeDb({
+      profiles: [makeProfile(A, 'alice@example.com', 'founder')]
+    })
+    readAuthorityDb.mockReturnValue(db)
+
+    // Create workspace conversation
+    const convoRes = await request(app)
+      .post('/api/domain/workspace/conversations')
+      .set('Authorization', `Bearer ${validToken(A)}`)
+      .send({ title: 'Agent Workspace Chat' })
+
+    expect(convoRes.status).toBe(201)
+    expect(convoRes.body.conversation.title).toBe('Agent Workspace Chat')
+    const convoId = convoRes.body.conversation.id
+
+    // Add message
+    const msgRes = await request(app)
+      .post(`/api/domain/workspace/conversations/${convoId}/messages`)
+      .set('Authorization', `Bearer ${validToken(A)}`)
+      .send({ content: 'Hello agent, architect the next feature', role: 'user' })
+
+    expect(msgRes.status).toBe(200)
+    expect(msgRes.body.message.content).toBe('Hello agent, architect the next feature')
+
+    // Create fast-track incubation
+    const ftRes = await request(app)
+      .post('/api/domain/incubation/fast-track')
+      .set('Authorization', `Bearer ${validToken(A)}`)
+      .send({ projectName: 'FastTrack AI Startup', pitch: 'Rapid AI generation tool', vertical: 'ai' })
+
+    expect(ftRes.status).toBe(201)
+    expect(ftRes.body.incubation.projectName).toBe('FastTrack AI Startup')
+    expect(ftRes.body.incubation.status).toBe('fast_track_submitted')
+  })
 })
