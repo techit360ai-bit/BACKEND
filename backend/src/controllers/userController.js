@@ -2,7 +2,7 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName } from '../utils/api.js'
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'
-import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
+import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl, uploadBufferDirectly } from '../services/evidenceStorageService.js'
 import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 import { publicTrustFor } from '../services/trustAuthority.js'
 import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
@@ -102,6 +102,54 @@ export async function avatarFinalize(req, res) {
     return row
   })
   return profile ? res.json({ profile: projectOwnProfile(profile), avatarUrl: profile.avatarUrl, scan }) : res.status(404).json({ error: 'Profile not found' })
+}
+
+export async function avatarDirectUpload(req, res) {
+  let contentType = String(req.headers['content-type'] || '').toLowerCase()
+  let buffer
+  if (req.body && Buffer.isBuffer(req.body)) {
+    buffer = req.body
+  } else if (req.body && typeof req.body === 'object' && req.body.data && typeof req.body.data === 'string') {
+    contentType = String(req.body.contentType || contentType).toLowerCase()
+    const base64Data = req.body.data.replace(/^data:[^;]+;base64,/, '')
+    buffer = Buffer.from(base64Data, 'base64')
+  } else if (req.file && req.file.buffer) {
+    buffer = req.file.buffer
+    contentType = req.file.mimetype || contentType
+  } else {
+    return res.status(400).json({ error: 'missing_file_payload' })
+  }
+
+  contentType = contentType.split(';')[0].trim()
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+    return res.status(400).json({ error: 'unsupported_avatar_type' })
+  }
+  if (!buffer || buffer.length === 0 || buffer.length > 5 * 1024 * 1024) {
+    return res.status(400).json({ error: 'invalid_avatar_size' })
+  }
+
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[contentType] || 'jpg'
+  const objectKey = `profile-avatars/${req.user.id}/${createId('avatar')}.${extension}`
+  const uploadResult = await uploadBufferDirectly(objectKey, buffer, contentType)
+  if (!uploadResult.ok) {
+    return res.status(502).json({ error: uploadResult.error || 'upload_failed' })
+  }
+
+  const profile = updateAuthorityDb(db => {
+    const row = db.profiles.find(item => item.id === req.user.id)
+    if (!row) return null
+    row.avatarObjectKey = objectKey
+    row.avatarContentType = contentType
+    row.avatarSizeBytes = buffer.length
+    row.avatarUpdatedAt = nowIso()
+    row.avatarUrl = uploadResult.url
+    row.updatedAt = nowIso()
+    return row
+  })
+
+  return profile
+    ? res.json({ profile: projectOwnProfile(profile), avatarUrl: profile.avatarUrl })
+    : res.status(404).json({ error: 'Profile not found' })
 }
 
 export function avatarRemove(req, res) {

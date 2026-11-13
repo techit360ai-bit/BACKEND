@@ -133,21 +133,21 @@ function buildSessionContext(db, profile, userId, role) {
 
   // 2. Checkpoints (what they were working on)
   const checkpoints = (db.userContextCheckpoints || [])
-    .filter(c => c.userId === userId && (!c.expiresAt || new Date(c.expiresAt) > new Date()))
+    .filter(c => c.userId === userId && (!c.role || c.role === role) && (!c.expiresAt || new Date(c.expiresAt) > new Date()))
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
   // 3. State machine
-  const stateEntry = (db.userStateMachine || []).find(s => s.userId === userId)
+  const stateEntry = (db.userStateMachine || []).find(s => s.userId === userId && (!s.role || s.role === role))
 
   // 4. Pre-computed suggestions
-  const suggestions = (db.userSuggestions || []).find(s => s.userId === userId)
+  const suggestions = (db.userSuggestions || []).find(s => s.userId === userId && (!s.role || s.role === role))
 
   // 5. What changed (notifications created since last session)
   const lastActiveAt = lastSession?.createdAt || new Date(0).toISOString()
   const newNotifications = (db.notifications || [])
     .filter(n => n.userId === userId && n.createdAt > lastActiveAt && !n.read)
 
-  // 6. Decay factor (founders/orgs)
+  // 6. Decay factor (strictly founders)
   const decayFactor = profile?.decayFactor ?? profile?.decay_factor ?? 1.0
   const gsisScore = profile?.credibilityScore ?? profile?.gsis ?? 0
 

@@ -5,17 +5,23 @@ import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { safeFetch } from './outboundHttpService.js'
 import { operationalStateEnabled, loadOperationalStateById, listOperationalStateForOwner, saveOperationalStateRow } from '../repositories/operationalStateRepository.js'
 
-const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'text/plain'])
+const allowedTypes = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'text/plain'])
 const maxBytes = () => Math.max(1024, Number(process.env.EVIDENCE_MAX_BYTES || 25 * 1024 * 1024))
 const encode = value => encodeURIComponent(value).replace(/[!'()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
 const hmac = (key, value, encoding) => crypto.createHmac('sha256', key).update(value).digest(encoding)
 const hash = value => crypto.createHash('sha256').update(value).digest('hex')
 
-function storageConfig() {
-  const endpoint = (process.env.EVIDENCE_STORAGE_ENDPOINT || '').replace(/\/$/, '')
-  const bucket = process.env.EVIDENCE_STORAGE_BUCKET || ''
-  if (!endpoint || !bucket || !process.env.EVIDENCE_STORAGE_ACCESS_KEY || !process.env.EVIDENCE_STORAGE_SECRET_KEY) return null
-  return { endpoint, bucket, region: process.env.EVIDENCE_STORAGE_REGION || 'us-east-1', access: process.env.EVIDENCE_STORAGE_ACCESS_KEY, secret: process.env.EVIDENCE_STORAGE_SECRET_KEY }
+export function storageConfig() {
+  const bucket = process.env.EVIDENCE_STORAGE_BUCKET || process.env.AWS_S3_BUCKET || process.env.S3_BUCKET || process.env.AWS_BUCKET_NAME || ''
+  const access = process.env.EVIDENCE_STORAGE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID || ''
+  const secret = process.env.EVIDENCE_STORAGE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY || ''
+  const region = process.env.EVIDENCE_STORAGE_REGION || process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'us-east-1'
+  let endpoint = (process.env.EVIDENCE_STORAGE_ENDPOINT || process.env.AWS_ENDPOINT_URL_S3 || process.env.S3_ENDPOINT || '').replace(/\/$/, '')
+  if (!endpoint && bucket) {
+    endpoint = region === 'us-east-1' ? 'https://s3.amazonaws.com' : `https://s3.${region}.amazonaws.com`
+  }
+  if (!endpoint || !bucket || !access || !secret) return null
+  return { endpoint, bucket, region, access, secret }
 }
 function presign(method, key, expires = 900) {
   const config = storageConfig(); if (!config) return null
@@ -34,7 +40,7 @@ export function createEvidenceUpload(userId, requestId, input = {}) {
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > maxBytes()) return { ok: false, error: 'invalid_evidence_size', maxBytes: maxBytes() }
   const db = readAuthorityDb(); const request = (db.verificationRequests || []).find(row => row.id === requestId && row.userId === userId)
   if (!request) return { ok: false, error: 'verification_request_not_found' }
-  const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
+  const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
   const uploadUrl = presign('PUT', objectKey); if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   return updateAuthorityDb(state => { const row = { id: objectId, userId, requestId, objectKey, contentType, sizeBytes, status: 'upload_pending', malwareStatus: 'pending', createdAt: nowIso(), updatedAt: nowIso() }; state.evidenceObjects.push(row); return { ok: true, object: row, uploadUrl, requiredHeaders: { 'Content-Type': contentType } } })
 }
@@ -46,6 +52,7 @@ function matchesDeclaredType(buffer, contentType) {
   if (contentType === 'application/pdf') return buffer.subarray(0, 5).toString() === '%PDF-'
   if (contentType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
   if (contentType === 'image/jpeg') return buffer.subarray(0, 3).equals(Buffer.from([255, 216, 255]))
+  if (contentType === 'image/webp') return buffer.length >= 12 && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP'
   return true
 }
 async function validatePrivateObject({ objectKey, contentType, expectedSizeBytes }) {
@@ -72,7 +79,7 @@ export async function createEvidenceUploadAsync(userId, requestId, input = {}) {
   if (!operationalStateEnabled()) return createEvidenceUpload(userId, requestId, input)
   const request = (await listOperationalStateForOwner('verificationRequests', userId, ['userId'])).find(row => row.id === requestId && row.userId === userId)
   if (!request) return { ok: false, error: 'verification_request_not_found' }
-  const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
+  const objectId = createId('evidence_object'); const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'text/plain': 'txt' }[contentType]; const objectKey = `verification/${userId}/${requestId}/${objectId}.${extension}`
   const uploadUrl = presign('PUT', objectKey); if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   const now = nowIso()
   const row = { id: objectId, userId, requestId, objectKey, contentType, sizeBytes, status: 'upload_pending', malwareStatus: 'pending', createdAt: now, updatedAt: now }
@@ -84,12 +91,33 @@ export function createPrivateUpload({ namespace, ownerId, objectId, contentType,
   const normalizedType = String(contentType || '').toLowerCase(); const bytes = Number(sizeBytes || 0)
   if (!allowedTypes.has(normalizedType)) return { ok: false, error: 'unsupported_evidence_type' }
   if (!Number.isFinite(bytes) || bytes <= 0 || bytes > maxBytes()) return { ok: false, error: 'invalid_evidence_size', maxBytes: maxBytes() }
-  const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'text/plain': 'txt' }[normalizedType]
+  const extension = { 'application/pdf': 'pdf', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'text/plain': 'txt' }[normalizedType]
   const safeNamespace = String(namespace || 'private').replace(/[^a-zA-Z0-9/_-]/g, '')
   const objectKey = `${safeNamespace}/${ownerId}/${objectId}.${extension}`
   const uploadUrl = presign('PUT', objectKey)
   if (!uploadUrl) return { ok: false, error: 'evidence_storage_not_configured' }
   return { ok: true, objectKey, uploadUrl, requiredHeaders: { 'Content-Type': normalizedType } }
+}
+
+export async function uploadBufferDirectly(objectKey, buffer, contentType) {
+  const config = storageConfig()
+  if (!config) {
+    return { ok: true, url: `data:${contentType};base64,${buffer.toString('base64')}`, storage: 'inline' }
+  }
+  const putUrl = presign('PUT', objectKey, 300)
+  if (!putUrl) return { ok: false, error: 'presign_failed' }
+  try {
+    const res = await safeFetch(putUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType },
+      body: buffer,
+    }, { schemes: ['https', 'http'], allowHosts: [new URL(putUrl).hostname] })
+    if (!res.ok) return { ok: false, error: `s3_upload_failed_${res.status}` }
+    const downloadUrl = privateDownloadUrl(objectKey, 86400 * 7) || `${config.endpoint}/${config.bucket}/${objectKey}`
+    return { ok: true, url: downloadUrl, storage: 's3' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
 }
 
 export async function finalizePrivateUpload({ objectKey, contentType, expectedSizeBytes }) {

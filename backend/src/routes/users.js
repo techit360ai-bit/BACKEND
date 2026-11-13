@@ -1,5 +1,5 @@
-import { Router } from 'express'
-import { avatarFinalize, avatarRemove, avatarUploadUrl, connectUser, getMe, getUserProfile, listConnections, listConnectionRequests, listUsers, respondConnectionRequest, updateMe } from '../controllers/userController.js'
+import express, { Router } from 'express'
+import { avatarDirectUpload, avatarFinalize, avatarRemove, avatarUploadUrl, connectUser, getMe, getUserProfile, listConnections, listConnectionRequests, listUsers, respondConnectionRequest, updateMe } from '../controllers/userController.js'
 import { requireAuth } from '../middlewares/auth.js'
 
 const router = Router()
@@ -8,6 +8,7 @@ router.get('/me', requireAuth, getMe)
 router.patch('/me', requireAuth, updateMe)
 router.post('/me/avatar/upload-url', requireAuth, avatarUploadUrl)
 router.post('/me/avatar/finalize', requireAuth, avatarFinalize)
+router.post('/me/avatar/upload', requireAuth, express.raw({ type: ['image/*', 'application/octet-stream'], limit: '6mb' }), avatarDirectUpload)
 router.delete('/me/avatar', requireAuth, avatarRemove)
 router.get('/', requireAuth, listUsers)
 // Registered before '/:id' so 'connections' is not captured as a user id.

@@ -2,6 +2,19 @@ import { createOrganizationActionAsync, createOrganizationCohortAsync, createOrg
 import { requestOrganizationAdvisory } from '../services/aiRouterClient.js'
 import { syncOrganizationAggregate, syncOrganizationCollections, syncOrganizationCommercial, organizationWriteEnabled, organizationFallbackEnabled } from '../repositories/organizationOperationsRepository.js'
 import { createSponsorshipApplicationAsync, createSponsorshipPackageAsync, hackathonOutcomeAsync, listSponsorshipPackagesAsync, convertHackathonTeamAsync, reviewSponsorshipApplicationAsync, recordSponsorshipTransactionAsync, fulfillSponsorshipBenefitAsync, recordSponsorConsentAsync, createManagedHackathonOperationAsync, saveInstitutionalSettingsAsync, requestOrganizationSupportAsync } from '../services/organizationProgramService.js'
+import {
+  scheduleCohortClass,
+  listCohortClasses,
+  broadcastCohortInMail,
+  listCohortMessages,
+  postCohortMessage,
+  createCohortAssignment,
+  listCohortAssignments,
+  submitCohortAssignment,
+  listCohortSubmissions,
+  getCohortHub,
+  getMyCohorts,
+} from '../services/cohortCollaborationService.js'
 
 function result(res, value, success = 200) { if (value?.ok === false) return res.status(value.error?.includes('denied') || value.error === 'organization_context_required' ? 403 : value.error?.includes('not_found') ? 404 : 400).json(value); return res.status(success).json(value) }
 async function persisted(req, value, collections = false) { if (!organizationWriteEnabled() || value?.ok === false) return value; const organizationId = value.organizationId || value.action?.organizationId || value.kpi?.organizationId || value.package?.organizationId || value.application?.organizationId || value.operation?.organizationId || req.body?.organizationId || req.query?.organizationId; if (!organizationId) return value; try { await syncOrganizationAggregate(organizationId); if (collections) await syncOrganizationCollections(organizationId); await syncOrganizationCommercial(organizationId); return value } catch (error) { console.error(JSON.stringify({ event: 'organization_postgres_write_failed', organizationId, error: error.message })); if (organizationFallbackEnabled('WRITE')) return value; return { ok: false, error: 'organization_write_temporarily_unavailable' } } }
@@ -48,3 +61,16 @@ export const sponsorConsent = async (req, res) => result(res, await persisted(re
 export const managedHackathonCreate = async (req, res) => result(res, await persisted(req, await createManagedHackathonOperationAsync(req.user.id, req.body)), 201)
 export const institutionalSettingsSave = async (req, res) => result(res, await persisted(req, await saveInstitutionalSettingsAsync(req.user.id, req.body)))
 export const organizationSupportCreate = async (req, res) => result(res, await requestOrganizationSupportAsync(req.user.id, req.body), 201)
+
+export const cohortClassSchedule = async (req, res) => result(res, scheduleCohortClass(req.user.id, req.params.cohortId, req.body), 201)
+export const cohortClassesList = async (req, res) => result(res, listCohortClasses(req.user.id, req.params.cohortId))
+export const cohortInMailBroadcast = async (req, res) => result(res, broadcastCohortInMail(req.user.id, req.params.cohortId, req.body), 201)
+export const cohortMessagesList = async (req, res) => result(res, listCohortMessages(req.user.id, req.params.cohortId))
+export const cohortMessagePost = async (req, res) => result(res, postCohortMessage(req.user.id, req.params.cohortId, req.body), 201)
+export const cohortAssignmentCreate = async (req, res) => result(res, createCohortAssignment(req.user.id, req.params.cohortId, req.body), 201)
+export const cohortAssignmentsList = async (req, res) => result(res, listCohortAssignments(req.user.id, req.params.cohortId))
+export const cohortAssignmentSubmit = async (req, res) => result(res, submitCohortAssignment(req.user.id, req.params.cohortId, req.params.assignmentId, req.body), 201)
+export const cohortSubmissionsList = async (req, res) => result(res, listCohortSubmissions(req.user.id, req.params.cohortId, req.params.assignmentId))
+export const cohortHubDetails = async (req, res) => result(res, getCohortHub(req.user.id, req.params.cohortId))
+export const myCohortsList = async (req, res) => result(res, getMyCohorts(req.user.id))
+
