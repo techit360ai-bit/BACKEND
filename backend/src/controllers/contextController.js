@@ -2,7 +2,12 @@ import { computeUserState, getSessionContext, createCheckpoint, clearCheckpoint 
 import { availableContextsAsync, getActiveContextAsync, switchContextAsync, touchContextAsync } from '../services/multiRoleContextService.js'
 
 export async function sessionContext(req, res) {
-  const role = req.user.role === 'organization' ? 'organisation' : (req.user.role || 'explorer')
+  let role = req.query.role || req.headers['x-active-role'] || null
+  if (!role) {
+    const activeCtx = await getActiveContextAsync(req.user.id)
+    role = activeCtx?.role || activeCtx?.activeRole || req.user.activeRole || req.user.role || 'explorer'
+  }
+  role = role === 'organization' ? 'organisation' : role
   await computeUserState(req.user.id, role)
   const context = await getSessionContext(req.user.id, role)
   return res.json(context)

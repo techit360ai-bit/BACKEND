@@ -172,7 +172,13 @@ export function switchContext(userId, input = {}) {
 function switchContextFromDb(db, userId, requestedRole, input) {
   const { roles, profile } = synchronizeLegacyRoles(db, userId)
   const assignment = roles.find(row => normalizeRole(row.role) === requestedRole && row.status === 'active')
-  if (!assignment) return { ok: false, error: 'role_not_activated' }
+  if (!assignment) {
+    const pending = roles.find(row => normalizeRole(row.role) === requestedRole && row.status === 'pending_verification')
+    if (pending) {
+      return { ok: false, error: 'verification_required', status: 'pending_verification', message: 'Institutional role requires verification and onboarding review.' }
+    }
+    return { ok: false, error: 'role_not_activated' }
+  }
   if (!validWorkspace(db, userId, input.workspaceId)) return { ok: false, error: 'workspace_access_denied' }
   if (!validOrganization(db, userId, input.organizationId)) return { ok: false, error: 'organization_access_denied' }
   const previous = contextFor(db, userId)
@@ -249,16 +255,36 @@ function activateRoleAssignmentFromDb(db, userId, normalized, profilePatch = {})
   const profile = profileFor(db, userId)
   if (!profile) return { ok: false, error: 'profile_not_found' }
   ensureBaseExplorer(db, userId)
+  const isInstitutional = ['organization', 'investor'].includes(normalized)
+  const isVerified = (collection(db, 'verificationProfiles') || []).some(v => v.userId === userId && normalizeRole(v.role) === normalized && v.status === 'verified')
+  const initialStatus = isInstitutional && !isVerified ? 'pending_verification' : 'active'
+
   const rows = collection(db, 'userRoles')
   let record = rows.find(row => row.userId === userId && normalizeRole(row.role) === normalized)
   const previousStatus = record?.status || null
   const now = nowIso()
   if (!record) { record = { id: createId('user_role'), userId, role: normalized, createdAt: now }; rows.push(record) }
-  Object.assign(record, { role: normalized, status: 'active', active: true, assurance: record.assurance || 'CLAIMED', isPrimary: normalizeRole(profile.role) === normalized || Boolean(record.isPrimary), activatedAt: record.activatedAt || now, updatedAt: now, profile: { ...(record.profile || {}), ...profilePatch } })
+  Object.assign(record, { role: normalized, status: initialStatus, active: initialStatus === 'active', assurance: record.assurance || 'CLAIMED', isPrimary: normalizeRole(profile.role) === normalized || Boolean(record.isPrimary), activatedAt: record.activatedAt || now, updatedAt: now, profile: { ...(record.profile || {}), ...profilePatch } })
   profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(item => item !== normalizeRole(profile.role))
   profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || now, updatedAt: now } }
-  appendRoleEvent(db, userId, normalized, previousStatus, 'active', { reason: 'explicit_activation' })
-  return { ok: true, role: normalized, userRole: record, activeContext: contextFor(db, userId) }
+
+  if (isInstitutional && !isVerified) {
+    const vProfiles = collection(db, 'verificationProfiles')
+    let vProfile = vProfiles.find(row => row.userId === userId && normalizeRole(row.role) === normalized)
+    if (!vProfile) {
+      vProfile = { id: createId('verification_profile'), userId, role: normalized, assurance: 'CLAIMED', status: 'in_review', trustScore: 25, createdAt: now, updatedAt: now }
+      vProfiles.push(vProfile)
+    }
+    const vRequests = collection(db, 'verificationRequests')
+    let vRequest = vRequests.find(row => row.userId === userId && normalizeRole(row.role) === normalized && ['pending', 'in_review'].includes(row.status))
+    if (!vRequest) {
+      vRequest = { id: createId('verification_request'), userId, role: normalized, claimType: 'role_addition', status: 'pending', createdAt: now, updatedAt: now }
+      vRequests.push(vRequest)
+    }
+  }
+
+  appendRoleEvent(db, userId, normalized, previousStatus, initialStatus, { reason: 'explicit_activation' })
+  return { ok: true, role: normalized, userRole: record, verificationRequired: isInstitutional && !isVerified, status: initialStatus, activeContext: contextFor(db, userId) }
 }
 
 export async function activateRoleAssignmentAsync(userId, role, profilePatch = {}) {

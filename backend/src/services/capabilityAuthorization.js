@@ -303,7 +303,8 @@ export function switchActiveRole(userId, role) {
 function switchActiveRoleFromDb(db, userId, normalized) {
   const profile = profileFor(db, userId)
   if (!profile) return { ok: false, error: 'profile_not_found' }
-  const roles = rolesFor(profile, collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false))
+  const activeUserRoles = collection(db, 'userRoles').filter(row => row.userId === userId && row.active !== false && row.status !== 'suspended' && row.status !== 'revoked')
+  const roles = rolesFor(profile, activeUserRoles)
   if (!roles.includes(normalized)) return { ok: false, error: 'role_not_activated' }
   profile.activeRole = normalized; profile.updatedAt = nowIso()
   const trust = ensureTrustProfile(db, userId, normalized); trust.activeRole = normalized
@@ -335,6 +336,9 @@ export function roleActivation(userId, role, profilePatch = {}) {
 function roleActivationFromDb(db, userId, normalized, profilePatch) {
   const profile = profileFor(db, userId)
   if (!profile) return { ok: false, error: 'profile_not_found' }
+  const isInstitutional = ['organization', 'investor'].includes(normalized)
+  const isVerified = (collection(db, 'verificationProfiles') || []).some(v => v.userId === userId && normalizeRole(v.role) === normalized && v.status === 'verified')
+
   profile.secondaryRoles = [...new Set([...(profile.secondaryRoles || []), normalized])].filter(value => value !== profile.role)
   profile.roleProfiles = { ...(profile.roleProfiles || {}), [normalized]: { ...(profile.roleProfiles?.[normalized] || {}), ...profilePatch, activatedAt: profile.roleProfiles?.[normalized]?.activatedAt || nowIso(), updatedAt: nowIso() } }
   const roleProfiles = collection(db, 'roleProfiles')
@@ -346,8 +350,18 @@ function roleActivationFromDb(db, userId, normalized, profilePatch) {
   if (!record) { record = { id: createId('user_role'), userId, role: normalized, status: 'active', assurance: 'CLAIMED', createdAt: nowIso() }; roles.push(record) }
   record.status = 'active'; record.updatedAt = nowIso()
   ensureTrustProfile(db, userId, normalized)
+
+  if (isInstitutional && !isVerified) {
+    const vRequests = collection(db, 'verificationRequests')
+    let vRequest = vRequests.find(row => row.userId === userId && normalizeRole(row.role) === normalized && ['pending', 'in_review'].includes(row.status))
+    if (!vRequest) {
+      vRequest = { id: createId('verification_request'), userId, role: normalized, claimType: 'role_addition', status: 'pending', createdAt: nowIso(), updatedAt: nowIso() }
+      vRequests.push(vRequest)
+    }
+  }
+
   collection(db, 'verificationAuditLogs').push({ id: createId('verification_audit'), userId, action: 'role_activated', role: normalized, previousState: null, newState: 'CLAIMED', policyVersion: 'capability-v1', createdAt: nowIso() })
-  return { ok: true, role: normalized, profile, userRole: record }
+  return { ok: true, role: normalized, profile, userRole: record, verificationRequired: isInstitutional && !isVerified }
 }
 
 export async function roleActivationAsync(userId, role, profilePatch = {}) {

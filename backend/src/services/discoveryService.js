@@ -1116,7 +1116,7 @@ export function getReturnSummary(userId) {
     return {
       available: items.length > 0 && !catchUp.completedAt,
       state: returnState,
-      headline: returnHeadline(profile.role),
+      headline: returnHeadline(profile.activeRole || profile.role || 'explorer'),
       message: `${items.length} relevant ${items.length === 1 ? 'update' : 'updates'} happened while you were away.`,
       anchor,
       hoursAway: Math.round(hoursAway),

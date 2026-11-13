@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middlewares/auth.js'
 import { organizationCommercialRateLimit, requireOrganizationCapability } from '../middlewares/organizationCommercial.js'
-import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortBenchmarks, cohortCreate, cohorts, hackathonOutcomeReport, hackathonTeamConvert, institutionalSettingsSave, kpiSave, kpis, managedHackathonCreate, memberPatch, members, organizationSupportCreate, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, sponsorApplicationCreate, sponsorApplicationReview, sponsorBenefitFulfill, sponsorConsent, sponsorPackageCreate, sponsorPackages, sponsorTransactionCreate, startups } from '../controllers/organizationIntelligenceController.js'
+import { actionCreate, actionPatch, actions, activity, alumniOutcomes, auditEvents, auditVerify, briefing, briefingEvidence, cohortAssignmentCreate, cohortAssignmentsList, cohortAssignmentSubmit, cohortBenchmarks, cohortClassSchedule, cohortClassesList, cohortCreate, cohortHubDetails, cohortInMailBroadcast, cohortMessagePost, cohortMessagesList, cohorts, cohortSubmissionsList, hackathonOutcomeReport, hackathonTeamConvert, institutionalSettingsSave, kpiSave, kpis, managedHackathonCreate, memberPatch, members, myCohortsList, organizationSupportCreate, overview, partnerCreate, partners, programHealth, pulse, recommendations, refresh, reportGenerate, reportScheduleCreate, reportSchedules, resourceAllocation, resourceCreate, resources, risks, sponsorApplicationCreate, sponsorApplicationReview, sponsorBenefitFulfill, sponsorConsent, sponsorPackageCreate, sponsorPackages, sponsorTransactionCreate, startups } from '../controllers/organizationIntelligenceController.js'
 
 const router = Router()
 router.use(requireAuth)
@@ -24,6 +24,17 @@ router.get('/members', members)
 router.patch('/members/:memberId', memberPatch)
 router.get('/cohorts', cohorts)
 router.post('/cohorts', cohortCreate)
+router.get('/cohorts/my-cohorts', myCohortsList)
+router.get('/cohorts/:cohortId/hub', cohortHubDetails)
+router.get('/cohorts/:cohortId/classes', cohortClassesList)
+router.post('/cohorts/:cohortId/classes', cohortClassSchedule)
+router.post('/cohorts/:cohortId/in-mail', cohortInMailBroadcast)
+router.get('/cohorts/:cohortId/messages', cohortMessagesList)
+router.post('/cohorts/:cohortId/messages', cohortMessagePost)
+router.get('/cohorts/:cohortId/assignments', cohortAssignmentsList)
+router.post('/cohorts/:cohortId/assignments', cohortAssignmentCreate)
+router.post('/cohorts/:cohortId/assignments/:assignmentId/submit', cohortAssignmentSubmit)
+router.get('/cohorts/:cohortId/assignments/:assignmentId/submissions', cohortSubmissionsList)
 router.get('/partners', partners)
 router.post('/partners', partnerCreate)
 router.get('/resources', resources)
