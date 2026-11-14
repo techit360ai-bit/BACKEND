@@ -36,7 +36,8 @@ export async function adminOrganizationAbuseReviews(req, res) { return res.json(
 export async function adminOrganizationAbuseReview(req, res) { return send(res, await reviewOrganizationAbuseAsync(req.user.id, req.params.reviewId, body(req))) }
 export async function workflowSave(req, res) { return send(res, await saveWorkflowAsync(req.user.id, body(req)), 201) }
 export async function workflowResume(req, res) { return send(res, await resumeWorkflowAsync(req.user.id, req.params.workflowId, body(req))) }
-export async function checkout(req, res) { const result = await createTvceCheckout(req.user.id, body(req)); return send(res, result, 201) }
+// The receipt/customer email is the authenticated account's, never a body field.
+export async function checkout(req, res) { const result = await createTvceCheckout(req.user.id, { ...body(req), email: req.user.email || body(req).email }); return send(res, result, 201) }
 export function checkoutProviders(_req, res) { return res.json({ providers: providerAvailability() }) }
 export async function teamGrantCreate(req, res) { return send(res, await createWorkspaceTeamGrant(req.user.id, body(req)), 201) }
 export async function billingJobsRun(req, res) { return send(res, await runBillingJobs(req.user.id), 201) }

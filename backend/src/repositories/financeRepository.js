@@ -451,6 +451,9 @@ export async function fulfillPaymentPostgres(userId, paymentId, input = {}) {
       status: 'successful',
       verifiedAt: now,
       providerReference: input.providerReference || payment.providerReference || null,
+      providerPaymentIntentId: input.providerPaymentIntentId || payment.providerPaymentIntentId || null,
+      providerAmountMinor: Number.isFinite(Number(input.providerAmountMinor)) ? Number(input.providerAmountMinor) : payment.providerAmountMinor ?? null,
+      providerCurrency: input.providerCurrency || payment.providerCurrency || null,
       lateFulfillment: lateFulfillment || payment.lateFulfillment === true,
       reconciliationRequired: lateFulfillment || payment.reconciliationRequired === true,
       reconciliationReason: lateFulfillment ? 'provider_capture_after_intent_expiry' : payment.reconciliationReason || null,
@@ -472,7 +475,7 @@ export async function fulfillPaymentPostgres(userId, paymentId, input = {}) {
     let subscription = null
     if (planId) {
       subscription = (await listByUser(client, 'subscriptions', userId, { forUpdate: true })).find(row => row.planId === planId) || { id: createId('subscription'), userId, planId, createdAt: now }
-      subscription = { ...subscription, planId, status: 'active', currentPeriodStart: now, currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(), updatedAt: now }
+      subscription = { ...subscription, planId, ...(input.providerSubscriptionId ? { providerId: input.providerSubscriptionId, provider: input.provider || subscription.provider || null } : {}), status: 'active', currentPeriodStart: now, currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(), updatedAt: now }
       await upsertRecord(client, 'subscriptions', subscription, { idempotencyKey: `subscription:${subscription.id}:active`, operation: subscription.version ? 'update' : 'insert', expectedVersion: subscription.version ?? null })
     }
     const existingAccounts = await listByUser(client, 'accountEntitlements', userId, { forUpdate: true })
@@ -497,6 +500,37 @@ export async function billingEventExistsPostgres(provider, eventId) {
 
 export async function paymentUserPostgres(paymentId) {
   return withPlatformTransaction(async client => (await findById(client, 'paymentIntents', paymentId))?.userId || null)
+}
+
+export async function paymentIntentPostgres(paymentId) {
+  if (!paymentId) return null
+  return withPlatformTransaction(async client => findById(client, 'paymentIntents', String(paymentId)))
+}
+
+// Refund/dispute events reference the provider charge's PaymentIntent, not
+// ours; fulfilment records that id so the reversal can be traced back.
+export async function paymentIntentByProviderPaymentIntentPostgres(providerPaymentIntentId) {
+  if (!providerPaymentIntentId) return null
+  return withPlatformTransaction(async client => findByPayload(client, 'paymentIntents', 'providerPaymentIntentId', String(providerPaymentIntentId)))
+}
+
+export async function subscriptionUserPostgres(providerId) {
+  if (!providerId) return null
+  return withPlatformTransaction(async client => (await findByPayload(client, 'subscriptions', 'providerId', String(providerId)))?.userId || null)
+}
+
+// A captured provider payment that does not match its intent (amount,
+// currency, owner) is never fulfilled automatically; it is parked for finance
+// reconciliation with the evidence attached.
+export async function markPaymentIntentReconciliationPostgres(paymentId, reason, detail = {}) {
+  return withPlatformTransaction(async client => {
+    const payment = await findById(client, 'paymentIntents', paymentId, { forUpdate: true })
+    if (!payment) return { ok: false, error: 'payment_not_found' }
+    if (payment.status === 'successful') return { ok: true, idempotent: true, payment }
+    const updated = { ...payment, reconciliationRequired: true, reconciliationReason: reason, reconciliationDetail: detail, updatedAt: nowIso() }
+    await upsertRecord(client, 'paymentIntents', updated, { idempotencyKey: `payment:${paymentId}:reconciliation:${reason}`, operation: 'update', expectedVersion: payment.version })
+    return { ok: true, payment: updated }
+  }, { userId: null })
 }
 
 export async function recordBillingEventPostgres(event) {

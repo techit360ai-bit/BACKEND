@@ -674,6 +674,9 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     payment.status = 'successful'
     payment.verifiedAt = now
     payment.providerReference = text(input.providerReference) || payment.providerReference || null
+    payment.providerPaymentIntentId = text(input.providerPaymentIntentId) || payment.providerPaymentIntentId || null
+    if (Number.isFinite(Number(input.providerAmountMinor))) payment.providerAmountMinor = Number(input.providerAmountMinor)
+    if (text(input.providerCurrency)) payment.providerCurrency = text(input.providerCurrency)
     payment.lateFulfillment = lateFulfillment || payment.lateFulfillment === true
     payment.reconciliationRequired = lateFulfillment || payment.reconciliationRequired === true
     payment.reconciliationReason = lateFulfillment ? 'provider_capture_after_intent_expiry' : payment.reconciliationReason || null
@@ -691,7 +694,7 @@ export function fulfillPayment(userId, paymentId, input = {}) {
     const planId = text(input.planId || payment.planId)
     if (planId) {
       const subscription = collection(db, 'subscriptions').find(row => row.userId === userId && row.planId === planId) || { id: createId('subscription'), userId, planId, createdAt: now }
-      Object.assign(subscription, { planId, status: 'active', currentPeriodStart: now, currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(), updatedAt: now })
+      Object.assign(subscription, { planId, ...(text(input.providerSubscriptionId) ? { providerId: text(input.providerSubscriptionId), provider: input.provider || subscription.provider || null } : {}), status: 'active', currentPeriodStart: now, currentPeriodEnd: new Date(Date.now() + 30 * 86400000).toISOString(), updatedAt: now })
       if (!db.subscriptions.includes(subscription)) db.subscriptions.push(subscription)
     }
     const account = collection(db, 'accountEntitlements').find(row => row.userId === userId) || { id: createId('account_entitlement'), userId, createdAt: now }
