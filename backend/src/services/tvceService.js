@@ -2,7 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { CAPABILITY_POLICIES, authorizeCapability, availableCredits, subscriptionEntitlement } from './capabilityAuthorization.js'
 import commercialDefaults from '../../../config/tvce-commercial.json' with { type: 'json' }
-import { fulfillPaymentPostgres, loadFinanceSnapshotPostgres, loadFinanceAdminSnapshotPostgres, loadProgressMeterPostgres, saveAdminCommercialConfigPostgres, recordPaywallEventPostgres, reversePaymentCreditsPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { accountEntitlementSourcesPostgres, fulfillPaymentPostgres, loadFinanceSnapshotPostgres, loadFinanceAdminSnapshotPostgres, loadProgressMeterPostgres, saveAdminCommercialConfigPostgres, recordPaywallEventPostgres, reversePaymentCreditsPostgres, resumeWorkflowPostgres, saveWorkflowPostgres, financePostgresEnabled } from '../repositories/financeRepository.js'
 import { evaluateOrganizationEntitlement } from './organizationEntitlementService.js'
 import { workspaceTeamGrantFor } from './workspaceTeamEntitlementService.js'
 import { listDefaultRateCards } from './unitEconomicsService.js'
@@ -287,7 +287,7 @@ export function evaluateEntitlement(userId, input = {}) { return evaluateEntitle
 
 export async function accountEntitlementAsync(userId) {
   if (process.env.FINANCE_READ_SOURCE !== 'postgres') return accountEntitlement(userId)
-  try { const db = await loadFinanceSnapshotPostgres(userId); return accountEntitlementFor(db, userId) } catch (error) {
+  try { const db = await accountEntitlementSourcesPostgres(userId); return accountEntitlementFor(db, userId) } catch (error) {
     console.error(JSON.stringify({ event: 'finance_postgres_read_failed', operation: 'account_entitlement', error: error.message }))
     if (process.env.FINANCE_READ_FALLBACK_SQLITE === 'false') throw error
     return accountEntitlement(userId)
