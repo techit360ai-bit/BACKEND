@@ -69,6 +69,7 @@ export function issueExecutionGrant(body = {}) {
     // routing unrestricted, so older callers keep working unchanged.
     allowed_billing_classes: allowedBillingClasses,
     required_data_handling: requiredDataHandling,
+    routing_tier: routingTier(body.routing_tier ?? body.routingTier),
     workflow_id: workflowId,
     max_workflow_cost_usd: maxWorkflowCostUsd,
   }
@@ -92,6 +93,12 @@ function positiveNumber(value) {
 }
 
 const BILLING_CLASSES = new Set(['free', 'paid', 'metered'])
+const ROUTING_TIERS = new Set(['standard', 'premium'])
+
+export function routingTier(value) {
+  const tier = String(value ?? '').trim().toLowerCase()
+  return ROUTING_TIERS.has(tier) ? tier : undefined
+}
 
 function billingClasses(value) {
   const raw = Array.isArray(value)
@@ -129,6 +136,10 @@ export async function issueExecutionGrantAsync(body = {}) {
   const expiresIn = Math.max(10, Math.min(900, Number(body.expires_in_seconds || 300)))
   const payload = { sub: userId, jti: requestId, request_id: requestId, reservation_id: reservation.reservation.reservationId, workspace_id: workspaceId, execution_profile: body.execution_profile || body.executionProfile || 'balanced', allowed_model_ids: [] }
   if (body.bind_task_type !== false && body.bindTaskType !== false) payload.task_type = taskType
+  // Which model tier the Router may use: "standard" (not subscribed / not
+  // paying, Bedrock by default) or "premium". Omitted means unrestricted.
+  const tier = routingTier(body.routing_tier ?? body.routingTier)
+  if (tier) payload.routing_tier = tier
   const token = jwt.sign(payload, secret, { algorithm, expiresIn, issuer: process.env.AI_EXECUTION_GRANT_ISSUER || 'techit-backend', audience: process.env.AI_EXECUTION_GRANT_AUDIENCE || 'techit-ai-router' })
   return { ok: true, idempotent: reservation.idempotent, grant: { token, requestId, reservationId: reservation.reservation.reservationId, expiresIn, reservation: reservation.reservation } }
 }

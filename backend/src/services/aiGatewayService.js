@@ -26,6 +26,9 @@ export async function forwardToAiRouter(req, res) {
       userId, requestId: `gw_${crypto.randomUUID()}`, taskType: `gateway:${target.path.split('/')[3]}`,
       workspaceId: req.user.workspaceId, estimatedCredits: 1,
       fundingSource: process.env.AI_GATEWAY_FUNDING_SOURCE || 'platform_subsidy', bindTaskType: false,
+      // Subscribed or paying accounts get the premium chain; everyone else runs
+      // on the Router's standard-tier (fallback) providers.
+      routingTier: req.user.accountEntitlement?.active ? 'premium' : 'standard',
     })
     if (!grant.ok) {
       console.error(JSON.stringify({ event: 'ai_gateway_grant_failed', requestId: req.id, error: grant.error }))
