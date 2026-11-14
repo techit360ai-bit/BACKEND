@@ -2,6 +2,7 @@ import { createId, nowIso } from '../utils/api.js'
 import { economicsForUsage } from '../services/unitEconomicsService.js'
 import { mergeWorkflowBudget, workflowBudgetSnapshot, resolveWorkflowCeiling } from '../services/workflowBudgetService.js'
 import { evaluatePurchasePolicy, intentExpiry, purchasePolicyConfig, purchaseUsage, resolvePurchaseIdentity } from '../services/purchasePolicyService.js'
+import { reservationExpiry, reservationHolds, reservationTaskUnbound, settlementBelongsToReservation, settlementCharge } from '../services/usageReservationPolicy.js'
 import { withPlatformTransaction, upsertRecord, deleteRecord, listRecords, listRecordsForOwner, getPlatformPool, closePlatformPool } from './platformCollectionRepository.js'
 
 const enabled = () => process.env.FINANCE_WRITE_SOURCE === 'postgres'
@@ -541,30 +542,55 @@ export async function reserveUsagePostgres({ userId, workspaceId = null, request
   if (!userId || !requestId || !taskType || credits <= 0) return { ok: false, error: 'reservation_fields_required' }
   if (!['subscription', 'payg', 'platform_subsidy'].includes(fundingSource)) return { ok: false, error: 'invalid_funding_source' }
   return withPlatformTransaction(async client => {
+    // Serialize reservations per user: two concurrent requests must not both
+    // pass the balance check against the same credits. Lock order (user, then
+    // request) is the same for every caller.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`usage-user:${userId}`])
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`usage:${requestId}`])
     const existing = await findByPayload(client, 'usageReservations', 'requestId', requestId, { forUpdate: true })
     if (existing) {
       const same = existing.userId === userId && existing.workspaceId === workspaceId && existing.taskType === taskType && number(existing.reservedCredits) === credits && existing.fundingSource === fundingSource
       return same ? { ok: true, idempotent: true, reservation: existing } : { ok: false, error: 'request_id_reservation_conflict' }
     }
+    const nowMs = Date.now()
     const accounts = await listByUser(client, 'walletAccounts', userId, { forUpdate: true })
     const ledger = await listByUser(client, 'creditLedger', userId)
-    const reservations = await listByUser(client, 'usageReservations', userId, { forUpdate: true })
+    // Only reservations that still hold credits matter; settled/refunded/expired
+    // history is not loaded (it grows with every AI call).
+    const reservations = (await listOpenReservations(client, userId)).filter(row => reservationHolds(row, nowMs))
     const subscriptions = await listByUser(client, 'subscriptions', userId)
     const accountBalance = number(accounts[0]?.creditBalance)
     const ledgerBalance = ledger.reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
-    const reservedPayg = reservations.filter(row => row.fundingSource === 'payg' && row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+    const reservedPayg = reservations.filter(row => row.fundingSource === 'payg').reduce((sum, row) => sum + number(row.reservedCredits), 0)
     const subscription = subscriptions.find(row => ['active', 'trialing'].includes(row.status))
-    const included = number(subscription?.includedCredits ?? subscription?.monthlyCredits ?? subscription?.creditAllowance)
-    const used = (await listByUser(client, 'usageEvents', userId)).filter(row => row.fundingSource === 'subscription' && row.status === 'completed').reduce((sum, row) => sum + number(row.credits), 0)
-    const reservedSub = reservations.filter(row => row.fundingSource === 'subscription' && row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
-    const available = fundingSource === 'subscription' ? Math.max(0, included - used - reservedSub) : fundingSource === 'payg' ? accountBalance + ledgerBalance - reservedPayg : Number.POSITIVE_INFINITY
+    let available = Number.POSITIVE_INFINITY
+    if (fundingSource === 'subscription') {
+      const included = number(subscription?.includedCredits ?? subscription?.monthlyCredits ?? subscription?.creditAllowance)
+      const used = (await listByUser(client, 'usageEvents', userId)).filter(row => row.fundingSource === 'subscription' && row.status === 'completed').reduce((sum, row) => sum + number(row.credits), 0)
+      const reservedSub = reservations.filter(row => row.fundingSource === 'subscription').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+      available = Math.max(0, included - used - reservedSub)
+    } else if (fundingSource === 'payg') {
+      available = accountBalance + ledgerBalance - reservedPayg
+    }
     if (fundingSource !== 'platform_subsidy' && available < credits) return { ok: false, error: fundingSource === 'subscription' ? 'subscription_allowance_exhausted' : 'insufficient_credits', availableCredits: available, requiredCredits: credits }
     const now = nowIso()
-    const reservation = { id: createId('usage_reservation'), reservationId: requestId, requestId, userId, workspaceId, taskType, estimatedCredits: credits, reservedCredits: credits, settledCredits: 0, releasedCredits: 0, fundingSource, grantId, status: 'reserved', metadata, createdAt: now, updatedAt: now }
+    const reservation = { id: createId('usage_reservation'), reservationId: requestId, requestId, userId, workspaceId, taskType, estimatedCredits: credits, reservedCredits: credits, settledCredits: 0, releasedCredits: 0, fundingSource, grantId, status: 'reserved', metadata, createdAt: now, updatedAt: now, expiresAt: reservationExpiry(now) }
     await upsertRecord(client, 'usageReservations', reservation, { idempotencyKey: `usage-reservation:${requestId}`, operation: 'insert' })
     return { ok: true, idempotent: false, reservation }
   }, { userId })
+}
+
+// Open ("reserved") reservations for one user. JSONB containment lets the GIN
+// index on payload serve the status filter; owner_id uses the owner index.
+async function listOpenReservations(client, userId) {
+  const result = await client.query(
+    `SELECT * FROM platform_collection_records
+     WHERE collection_name='usageReservations' AND deleted_at IS NULL
+       AND (owner_id=$1 OR payload @> jsonb_build_object('userId', $1::text))
+       AND payload @> '{"status":"reserved"}'::jsonb`,
+    [String(userId)],
+  )
+  return result.rows.map(row => ({ ...(row.payload || {}), id: row.record_id, version: Number(row.version), createdAt: row.created_at, updatedAt: row.updated_at }))
 }
 
 export async function settleUsagePostgres(facts) {
@@ -574,21 +600,38 @@ export async function settleUsagePostgres(facts) {
   const status = String(facts.status || 'completed')
   if (!requestId || !userId || !taskType) return { ok: false, error: 'request_id_user_id_task_type_required' }
   if (!['completed', 'failed', 'cancelled'].includes(status)) return { ok: false, error: 'invalid_execution_status' }
+  const reservationKey = String(facts.reservation_id || facts.reservationId || requestId)
   return withPlatformTransaction(async client => {
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`usage:${requestId}`])
+    // Every settlement of one reservation (its own request plus additional
+    // executions under the same grant) serializes on the reservation key.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`usage:${reservationKey}`])
     const existing = await findByPayload(client, 'usageEvents', 'requestId', requestId, { forUpdate: true })
-    if (existing) return { ok: true, idempotent: true, usageEvent: existing, reservation: await findByPayload(client, 'usageReservations', 'requestId', requestId, { forUpdate: true }), workflowBudget: workflowBudgetSnapshot(existing.workflowId ? await findByPayload(client, 'workflowBudgets', 'workflowId', existing.workflowId) : null) }
-    const reservation = await findByPayload(client, 'usageReservations', 'requestId', facts.reservation_id || facts.reservationId || requestId, { forUpdate: true })
-    if (status === 'completed' && !reservation) return { ok: false, error: 'reservation_not_found', requestId }
-    if (reservation && (reservation.userId !== userId || reservation.taskType !== taskType)) return { ok: false, error: 'reservation_execution_mismatch', requestId }
-    const now = nowIso(); const economics = economicsForUsage({ ...facts, taskType, status }, reservation, null); const credits = economics.settledCredits
-    const usageEvent = { id: createId('usage'), requestId, payloadHash: facts.payloadHash || null, userId, workspaceId: facts.workspace_id || facts.workspaceId || null, taskType, provider: facts.provider || 'unknown', model: facts.model || 'unknown', status, promptTokens: economics.inputTokens, completionTokens: economics.outputTokens, totalTokens: number(facts.total_tokens ?? facts.totalTokens), providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: number(facts.latency_ms ?? facts.latencyMs), attemptCount: number(facts.attempt_count ?? facts.attemptCount, 1), cacheHit: Boolean(facts.cache_hit ?? facts.cacheHit), grantId: facts.grant_id || facts.grantId || null, reservationId: reservation?.reservationId || facts.reservation_id || facts.reservationId || null, credits, rateCardVersion: economics.rateCardVersion, totalCogs: economics.directServiceCogsUsd, customerPrice: economics.allocatedRevenueUsd, allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd, grossMargin: economics.grossMargin, marginStatus: economics.marginStatus, fundingSource: reservation?.fundingSource || 'unknown', workflowId: facts.workflow_id || facts.workflowId || null, costStatus: String(facts.cost_status || facts.costStatus || 'estimated'), pricingVersion: facts.pricing_version || facts.pricingVersion || null, metadata: facts.metadata || {}, createdAt: now, updatedAt: now }
+    if (existing) return { ok: true, idempotent: true, usageEvent: existing, reservation: await findByPayload(client, 'usageReservations', 'requestId', reservationKey, { forUpdate: true }), workflowBudget: workflowBudgetSnapshot(existing.workflowId ? await findByPayload(client, 'workflowBudgets', 'workflowId', existing.workflowId) : null) }
+    const reservation = await findByPayload(client, 'usageReservations', 'requestId', reservationKey, { forUpdate: true })
+    if (reservation && (
+      !settlementBelongsToReservation(reservation, requestId)
+      || reservation.userId !== userId
+      || (!reservationTaskUnbound(reservation) && reservation.taskType !== taskType)
+    )) return { ok: false, error: 'reservation_execution_mismatch', requestId }
+    // No reservation (trusted-worker execution without a grant): record the
+    // fact as zero-credit telemetry rather than a permanent rejection that
+    // would block the Router's settlement outbox.
+    const closesReservation = Boolean(reservation && reservation.status === 'reserved')
+    // Rate cards are admin configuration in the platform store. Passing no
+    // bundle made economicsForUsage fall back to the synchronous authority
+    // store, which throws under DB_DRIVER=postgres, so every production
+    // settlement failed with finance_write_temporarily_unavailable.
+    const rateCards = (await client.query("SELECT record_id, payload FROM platform_collection_records WHERE collection_name='rateCards' AND deleted_at IS NULL")).rows.map(row => ({ ...(row.payload || {}), id: row.record_id }))
+    const now = nowIso(); const economics = economicsForUsage({ ...facts, taskType, status }, reservation, { rateCards })
+    const charge = settlementCharge({ reservation, settledCredits: economics.settledCredits, closesReservation })
+    const credits = charge.chargedCredits
+    const usageEvent = { id: createId('usage'), requestId, payloadHash: facts.payloadHash || null, userId, workspaceId: facts.workspace_id || facts.workspaceId || null, taskType, provider: facts.provider || 'unknown', model: facts.model || 'unknown', status, promptTokens: economics.inputTokens, completionTokens: economics.outputTokens, totalTokens: number(facts.total_tokens ?? facts.totalTokens), providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: number(facts.latency_ms ?? facts.latencyMs), attemptCount: number(facts.attempt_count ?? facts.attemptCount, 1), cacheHit: Boolean(facts.cache_hit ?? facts.cacheHit), grantId: facts.grant_id || facts.grantId || null, reservationId: reservation?.reservationId || facts.reservation_id || facts.reservationId || null, credits, subsidizedCredits: charge.subsidizedCredits, additionalExecution: Boolean(reservation) && !closesReservation, rateCardVersion: economics.rateCardVersion, totalCogs: economics.directServiceCogsUsd, customerPrice: credits ? economics.allocatedRevenueUsd : 0, allocatedRevenueUsd: credits ? economics.allocatedRevenueUsd : 0, grossProfitUsd: economics.grossProfitUsd, grossMargin: economics.grossMargin, marginStatus: economics.marginStatus, fundingSource: reservation?.fundingSource || 'unreserved', workflowId: facts.workflow_id || facts.workflowId || null, costStatus: String(facts.cost_status || facts.costStatus || 'estimated'), pricingVersion: facts.pricing_version || facts.pricingVersion || null, metadata: facts.metadata || {}, createdAt: now, updatedAt: now }
     await upsertRecord(client, 'usageEvents', usageEvent, { idempotencyKey: `usage-event:${requestId}`, operation: 'insert' })
-    if (reservation) {
+    if (closesReservation) {
       const next = { ...reservation, settledCredits: credits, releasedCredits: Math.max(0, number(reservation.reservedCredits) - credits), status: status === 'completed' ? 'settled' : 'refunded', updatedAt: now }
-      await upsertRecord(client, 'usageReservations', next, { idempotencyKey: `usage-reservation-settle:${requestId}`, operation: 'update', expectedVersion: reservation.version })
+      await upsertRecord(client, 'usageReservations', next, { idempotencyKey: `usage-reservation-settle:${reservationKey}`, operation: 'update', expectedVersion: reservation.version })
     }
-    if (credits > 0) await upsertRecord(client, 'creditLedger', { id: createId('usage_debit'), userId, workspaceId: usageEvent.workspaceId, requestId, deltaCredits: -credits, credits: -credits, type: 'usage_settlement', createdAt: now, updatedAt: now }, { idempotencyKey: `usage-debit:${requestId}`, operation: 'insert' })
+    if (charge.debitCredits > 0) await upsertRecord(client, 'creditLedger', { id: createId('usage_debit'), userId, workspaceId: usageEvent.workspaceId, requestId, deltaCredits: -charge.debitCredits, credits: -charge.debitCredits, type: 'usage_settlement', createdAt: now, updatedAt: now }, { idempotencyKey: `usage-debit:${requestId}`, operation: 'insert' })
     let workflowRow = null
     if (usageEvent.workflowId) {
       const existingBudget = await findByPayload(client, 'workflowBudgets', 'workflowId', usageEvent.workflowId, { forUpdate: true })

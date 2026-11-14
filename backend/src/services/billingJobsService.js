@@ -2,6 +2,7 @@ import { nowIso } from '../utils/api.js'
 import { readAuthorityDb, updateAuthorityDb } from '../config/database.js'
 import { TVCE_FREE_QUOTAS } from './tvceService.js'
 import { billingJobStatusRowLevel, billingJobsRowLevelEnabled, runBillingJobsRowLevel } from '../repositories/billingJobsRepository.js'
+import { reservationExpiresAtMs } from './usageReservationPolicy.js'
 
 const rows = (db, name) => { if (!Array.isArray(db[name])) db[name] = []; return db[name] }
 
@@ -12,7 +13,7 @@ export async function runBillingJobs(actor = 'scheduler') {
     // Capability counters are event-derived and reset by cycle; this job only
     // records the run so it remains idempotent and auditable.
     results.freeQuotaCycle = Object.keys(TVCE_FREE_QUOTAS).length
-    results.expiredReservations = rows(db, 'usageReservations').filter(row => row.status === 'reserved' && row.expiresAt && Date.parse(row.expiresAt) <= now).map(row => { row.status = 'refunded'; row.releasedCredits = Number(row.reservedCredits || 0); row.updatedAt = runAt; return row.id }).length
+    results.expiredReservations = rows(db, 'usageReservations').filter(row => row.status === 'reserved' && reservationExpiresAtMs(row) <= now).map(row => { row.status = 'refunded'; row.releasedCredits = Number(row.reservedCredits || 0); row.updatedAt = runAt; return row.id }).length
     results.expiredTeamGrants = rows(db, 'workspaceTeamEntitlements').filter(row => row.status === 'active' && row.expiresAt && Date.parse(row.expiresAt) <= now).map(row => { row.status = 'expired'; row.updatedAt = runAt; return row.id }).length
     results.pastDueSubscriptions = rows(db, 'subscriptions').filter(row => row.status === 'past_due').length
     const usage = rows(db, 'usageEvents').filter(row => row.createdAt && Date.parse(row.createdAt) >= now - 30 * 86400000)
