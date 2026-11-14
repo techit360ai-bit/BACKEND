@@ -10,7 +10,7 @@ vi.mock('../config/database.js', () => ({ readAuthorityDb: vi.fn(), updateAuthor
 describe('TVCE billing webhook contracts', () => {
   let db
   beforeEach(() => {
-    db = { users: [{ id: 'u1' }], profiles: [{ id: 'u1', role: 'founder' }], paymentIntents: [{ id: 'p1', userId: 'u1', credits: 20, status: 'pending', provider: 'stripe' }], subscriptions: [], accountEntitlements: [], creditLedger: [], billingWebhookEvents: [], creditPackages: [], billingPlans: [] }
+    db = { users: [{ id: 'u1' }], profiles: [{ id: 'u1', role: 'founder' }], paymentIntents: [{ id: 'p1', userId: 'u1', credits: 20, amount: 1900, currency: 'USD', status: 'pending', provider: 'stripe' }], subscriptions: [], accountEntitlements: [], creditLedger: [], billingWebhookEvents: [], creditPackages: [], billingPlans: [] }
     readAuthorityDb.mockReturnValue(db)
     updateAuthorityDb.mockImplementation(fn => fn(db))
     process.env.STRIPE_WEBHOOK_SECRET = 'stripe-secret'
@@ -21,7 +21,7 @@ describe('TVCE billing webhook contracts', () => {
   })
 
   it('verifies Stripe signatures and fulfills a payment once', async () => {
-    const payload = JSON.stringify({ id: 'evt_1', type: 'payment_intent.succeeded', data: { object: { id: 'pi_1', metadata: { userId: 'u1', paymentIntentId: 'p1' } } } })
+    const payload = JSON.stringify({ id: 'evt_1', type: 'payment_intent.succeeded', data: { object: { id: 'pi_1', object: 'payment_intent', amount_received: 1900, currency: 'usd', metadata: { userId: 'u1', paymentIntentId: 'p1' } } } })
     const timestamp = Math.floor(Date.now() / 1000)
     const digest = crypto.createHmac('sha256', process.env.STRIPE_WEBHOOK_SECRET).update(`${timestamp}.${payload}`).digest('hex')
     const first = await handleBillingWebhook('stripe', JSON.parse(payload), { 'stripe-signature': `t=${timestamp},v1=${digest}` }, payload)
@@ -120,7 +120,7 @@ describe('TVCE billing webhook contracts', () => {
       currency: 'USD',
       lateFulfillment: false,
     })
-    const payload = JSON.stringify({ id: 'evt_late', type: 'payment_intent.succeeded', data: { object: { id: 'pi_late', metadata: { userId: 'u1', paymentIntentId: 'p1' } } } })
+    const payload = JSON.stringify({ id: 'evt_late', type: 'payment_intent.succeeded', data: { object: { id: 'pi_late', object: 'payment_intent', amount_received: 1_000, currency: 'usd', metadata: { userId: 'u1', paymentIntentId: 'p1' } } } })
     const timestamp = Math.floor(Date.now() / 1000)
     const digest = crypto.createHmac('sha256', process.env.STRIPE_WEBHOOK_SECRET).update(`${timestamp}.${payload}`).digest('hex')
     const result = await handleBillingWebhook('stripe', JSON.parse(payload), { 'stripe-signature': `t=${timestamp},v1=${digest}` }, payload)

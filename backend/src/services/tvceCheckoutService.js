@@ -1,6 +1,7 @@
 import { updateAuthorityDb } from '../config/database.js'
 import { createPaymentIntentAsync } from './domainService.js'
 import { beginPaymentIntentCheckoutPostgres, financePostgresEnabled, markPaymentIntentCheckoutFailurePostgres, markPaymentIntentCheckoutPostgres } from '../repositories/financeRepository.js'
+import { minorToMajorString } from '../utils/money.js'
 
 const providerSet = new Set(['stripe', 'paystack', 'flutterwave'])
 const text = value => typeof value === 'string' ? value.trim() : ''
@@ -11,13 +12,64 @@ function formBody(values) {
   return params
 }
 
+// Stripe Price ids are server configuration. A client-supplied `priceId` could
+// point a subscription checkout at any (cheaper) price while the webhook still
+// grants the requested plan, so only the configured price is ever used.
+export function stripePriceForPlan(planId) {
+  const raw = String(planId || '').trim()
+  if (!raw) return ''
+  const exact = process.env[`STRIPE_PRICE_${raw.toUpperCase()}`]
+  if (exact) return exact.trim()
+  return text(process.env[`STRIPE_PRICE_${raw.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`])
+}
+
+function allowedRedirectOrigins() {
+  const origins = new Set()
+  for (const value of [
+    ...String(process.env.CORS_ORIGINS || '').split(','),
+    process.env.FRONTEND_URL,
+    process.env.BILLING_SUCCESS_URL,
+    process.env.BILLING_CANCEL_URL,
+  ]) {
+    try { if (value && value.trim()) origins.add(new URL(value.trim()).origin) } catch { /* ignore malformed entries */ }
+  }
+  return origins
+}
+
+// Only same-platform https origins may receive the post-checkout redirect;
+// anything else falls back to the configured URL (no open redirect through the
+// provider's hosted page).
+export function checkoutRedirect(candidate, fallback) {
+  const value = text(candidate)
+  if (!value) return text(fallback)
+  try {
+    const url = new URL(value)
+    const local = ['localhost', '127.0.0.1'].includes(url.hostname) && process.env.NODE_ENV !== 'production'
+    if ((url.protocol === 'https:' || local) && allowedRedirectOrigins().has(url.origin)) return url.toString()
+  } catch { /* fall through */ }
+  return text(fallback)
+}
+
+function stripeMetadata(prefix, payment) {
+  return {
+    [`${prefix}[paymentIntentId]`]: payment.id,
+    [`${prefix}[userId]`]: payment.userId,
+    [`${prefix}[packageId]`]: payment.packageId || '',
+    [`${prefix}[planId]`]: payment.planId || '',
+    [`${prefix}[organizationId]`]: payment.organizationId || '',
+    [`${prefix}[purchaseType]`]: payment.purchaseType || '',
+  }
+}
+
 async function providerCheckout(provider, payment, input = {}) {
-  const successUrl = text(input.successUrl || process.env.BILLING_SUCCESS_URL)
-  const cancelUrl = text(input.cancelUrl || process.env.BILLING_CANCEL_URL)
+  const successUrl = checkoutRedirect(input.successUrl, process.env.BILLING_SUCCESS_URL)
+  const cancelUrl = checkoutRedirect(input.cancelUrl, process.env.BILLING_CANCEL_URL)
   if (!successUrl || !cancelUrl) return { ok: false, status: 503, error: 'checkout_redirects_not_configured' }
   if (provider === 'stripe') {
     const secret = text(process.env.STRIPE_SECRET_KEY)
     if (!secret) return { ok: false, status: 503, error: 'stripe_not_configured' }
+    const priceId = payment.planId ? stripePriceForPlan(payment.planId) : ''
+    if (payment.planId && !priceId) return { ok: false, status: 503, error: 'stripe_price_not_configured' }
     const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
       method: 'POST',
       headers: {
@@ -40,8 +92,12 @@ async function providerCheckout(provider, payment, input = {}) {
         'metadata[hackathonId]': payment.hackathonId || '',
         'metadata[sponsorApplicationId]': payment.sponsorApplicationId || '',
         'metadata[credits]': payment.credits,
+        // Session metadata is not copied to the subscription/PaymentIntent, so
+        // renewal, cancellation, refund and dispute events would otherwise
+        // arrive without any link back to the platform user or intent.
+        ...stripeMetadata(payment.planId ? 'subscription_data[metadata]' : 'payment_intent_data[metadata]', payment),
         ...(payment.planId ? {
-          'line_items[0][price]': input.priceId || process.env[`STRIPE_PRICE_${String(payment.planId).toUpperCase()}`],
+          'line_items[0][price]': priceId,
           'line_items[0][quantity]': 1,
         } : {
           'line_items[0][price_data][currency]': String(payment.currency).toLowerCase(),
@@ -65,7 +121,10 @@ async function providerCheckout(provider, payment, input = {}) {
   }
   const secret = text(process.env.FLUTTERWAVE_SECRET_KEY)
   if (!secret) return { ok: false, status: 503, error: 'flutterwave_not_configured' }
-  const response = await fetch('https://api.flutterwave.com/v3/payments', { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ tx_ref: payment.id, amount: payment.amount, currency: payment.currency, redirect_url: successUrl, customer: { email: input.email || 'billing@techit.local' }, customizations: { title: input.name || 'TechIT Network' }, meta: { paymentIntentId: payment.id, userId: payment.userId, packageId: payment.packageId, planId: payment.planId, organizationId: payment.organizationId, purchaseType: payment.purchaseType, programId: payment.programId, hackathonId: payment.hackathonId, sponsorApplicationId: payment.sponsorApplicationId, credits: payment.credits }, payment_options: input.paymentOptions || undefined }) })
+  // Payment intents store minor units; Flutterwave charges MAJOR units. Sending
+  // the stored value unchanged charged customers 100x the price.
+  const majorAmount = Number(minorToMajorString(payment.amount, payment.currency))
+  const response = await fetch('https://api.flutterwave.com/v3/payments', { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ tx_ref: payment.id, amount: majorAmount, currency: payment.currency, redirect_url: successUrl, customer: { email: input.email || 'billing@techit.local' }, customizations: { title: input.name || 'TechIT Network' }, meta: { paymentIntentId: payment.id, userId: payment.userId, packageId: payment.packageId, planId: payment.planId, organizationId: payment.organizationId, purchaseType: payment.purchaseType, programId: payment.programId, hackathonId: payment.hackathonId, sponsorApplicationId: payment.sponsorApplicationId, credits: payment.credits }, payment_options: input.paymentOptions || undefined }) })
   const data = await response.json().catch(() => ({}))
   if (!response.ok || !data.data?.link) return { ok: false, status: 502, error: 'flutterwave_checkout_failed', providerResponse: data }
   return { ok: true, checkoutUrl: data.data.link, providerReference: payment.id }
