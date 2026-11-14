@@ -412,6 +412,7 @@ export async function markPaymentIntentCheckoutFailurePostgres(userId, paymentId
     const updated = {
       ...payment,
       checkoutStatus: 'failed',
+      provider: failure.provider || payment.provider || null,
       lastCheckoutError: String(failure.error || 'provider_checkout_failed').slice(0, 200),
       lastCheckoutFailedAt: now,
       updatedAt: now,

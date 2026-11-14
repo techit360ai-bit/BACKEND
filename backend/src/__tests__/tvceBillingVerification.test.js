@@ -54,6 +54,7 @@ describe('hosted checkout hardening', () => {
 
   it('charges Flutterwave in major units (stored minor units were sent as-is: 100x overcharge)', async () => {
     process.env.FLUTTERWAVE_SECRET_KEY = 'FLWSECK_TEST-x'
+    process.env.FLUTTERWAVE_SECRET_HASH = 'flw-hash' // a provider is offered only when fully configured
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ status: 'success', data: { link: 'https://flw.test/pay' } }) })
     vi.stubGlobal('fetch', fetchMock)
     const result = await createTvceCheckout('u1', { provider: 'flutterwave', packageId: 'pack_ng', idemKey: 'flw-1' })
@@ -66,6 +67,7 @@ describe('hosted checkout hardening', () => {
 
   it('never lets the client choose the Stripe price of a subscription', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_x'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test' // a provider is offered only when fully configured
     process.env.STRIPE_PRICE_PRO_MONTHLY = 'price_server_configured'
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' }) })
     vi.stubGlobal('fetch', fetchMock)
@@ -80,6 +82,7 @@ describe('hosted checkout hardening', () => {
 
   it('refuses a subscription checkout without a configured Stripe price', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_x'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
     delete process.env.STRIPE_PRICE_PRO_MONTHLY
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -102,6 +105,7 @@ describe('hosted checkout hardening', () => {
 
   it('attaches payment metadata so refunds and disputes can be traced', async () => {
     process.env.STRIPE_SECRET_KEY = 'sk_test_x'
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test'
     db.creditPackages.push({ id: 'pack_usd', amount: 1900, currency: 'USD', credits: 100, active: true })
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: 'cs_2', url: 'https://checkout.stripe.test/cs_2' }) })
     vi.stubGlobal('fetch', fetchMock)

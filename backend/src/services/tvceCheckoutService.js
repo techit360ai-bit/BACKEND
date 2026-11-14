@@ -2,9 +2,54 @@ import { updateAuthorityDb } from '../config/database.js'
 import { createPaymentIntentAsync } from './domainService.js'
 import { beginPaymentIntentCheckoutPostgres, financePostgresEnabled, markPaymentIntentCheckoutFailurePostgres, markPaymentIntentCheckoutPostgres } from '../repositories/financeRepository.js'
 import { minorToMajorString } from '../utils/money.js'
+import { enabledCheckoutProviders } from './billingProviderConfig.js'
 
 const providerSet = new Set(['stripe', 'paystack', 'flutterwave'])
 const text = value => typeof value === 'string' ? value.trim() : ''
+
+// Provider routing: Paystack and Flutterwave serve African payers, Stripe
+// serves everyone else when it is configured. A provider that is not fully
+// configured (API secret plus webhook secret/hash) never receives a checkout,
+// because its payments could not be verified and fulfilled.
+const AFRICAN_COUNTRIES = new Set(['DZ', 'AO', 'BJ', 'BW', 'BF', 'BI', 'CV', 'CM', 'CF', 'TD', 'KM', 'CG', 'CD', 'CI', 'DJ', 'EG', 'GQ', 'ER', 'SZ', 'ET', 'GA', 'GM', 'GH', 'GN', 'GW', 'KE', 'LS', 'LR', 'LY', 'MG', 'MW', 'ML', 'MR', 'MU', 'MA', 'MZ', 'NA', 'NE', 'NG', 'RW', 'ST', 'SN', 'SC', 'SL', 'SO', 'ZA', 'SS', 'SD', 'TZ', 'TG', 'TN', 'UG', 'ZM', 'ZW'])
+const AFRICAN_CURRENCIES = new Set(['NGN', 'GHS', 'KES', 'ZAR', 'EGP', 'UGX', 'TZS', 'RWF', 'XOF', 'XAF', 'ZMW', 'MWK', 'MAD', 'ETB', 'DZD', 'TND', 'BWP', 'NAD', 'MZN', 'AOA', 'SLE', 'GMD', 'LRD', 'CDF', 'BIF', 'DJF', 'SOS', 'SDG', 'SSP', 'LYD', 'MGA', 'MUR', 'SCR', 'SZL', 'LSL', 'CVE', 'STN', 'KMF', 'GNF', 'MRU', 'ERN'])
+const AFRICA_ORDER = ['paystack', 'flutterwave', 'stripe']
+const GLOBAL_ORDER = ['stripe', 'flutterwave', 'paystack']
+// Currencies each provider settles by default; <PROVIDER>_CURRENCIES (comma
+// separated) overrides, e.g. when a merchant account enables more. null = any.
+const DEFAULT_PROVIDER_CURRENCIES = {
+  paystack: ['NGN', 'GHS', 'ZAR', 'KES', 'USD'],
+  flutterwave: ['NGN', 'GHS', 'KES', 'UGX', 'TZS', 'RWF', 'ZAR', 'ZMW', 'MWK', 'XAF', 'XOF', 'EGP', 'USD', 'EUR', 'GBP'],
+  stripe: null,
+}
+
+function providerCurrencies(provider) {
+  const override = text(process.env[`${provider.toUpperCase()}_CURRENCIES`])
+  if (override) return override.split(',').map(item => item.trim().toUpperCase()).filter(Boolean)
+  return DEFAULT_PROVIDER_CURRENCIES[provider]
+}
+
+export function providerSupportsCurrency(provider, currency) {
+  const supported = providerCurrencies(provider)
+  return !supported || supported.includes(String(currency || '').toUpperCase())
+}
+
+export function isAfricanPayer({ countryCode, currency } = {}) {
+  const country = String(countryCode || '').trim().toUpperCase()
+  if (country) return AFRICAN_COUNTRIES.has(country)
+  return AFRICAN_CURRENCIES.has(String(currency || '').trim().toUpperCase())
+}
+
+// The provider for a checkout: an explicitly requested provider when it is
+// fully configured and settles the currency, otherwise the first configured
+// provider for the payer's region that settles it. null when none can.
+export function selectCheckoutProvider({ requested, currency, countryCode, available = enabledCheckoutProviders() } = {}) {
+  const usable = provider => available.includes(provider) && providerSupportsCurrency(provider, currency)
+  const wanted = String(requested || '').trim().toLowerCase()
+  if (wanted && usable(wanted)) return wanted
+  const order = isAfricanPayer({ countryCode, currency }) ? AFRICA_ORDER : GLOBAL_ORDER
+  return order.find(usable) || null
+}
 
 function formBody(values) {
   const params = new URLSearchParams()
@@ -131,12 +176,26 @@ async function providerCheckout(provider, payment, input = {}) {
 }
 
 export async function createTvceCheckout(userId, input = {}) {
-  const provider = text(input.provider || process.env.DEFAULT_BILLING_PROVIDER).toLowerCase()
-  if (!providerSet.has(provider)) return { ok: false, status: 400, error: 'unsupported_provider' }
+  const requested = text(input.provider || process.env.DEFAULT_BILLING_PROVIDER).toLowerCase()
+  if (requested && !providerSet.has(requested)) return { ok: false, status: 400, error: 'unsupported_provider' }
+  const available = enabledCheckoutProviders()
+  // Nothing can take the payment: do not create an intent that cannot proceed.
+  if (!available.length) return { ok: false, status: 503, error: requested ? `${requested}_not_configured` : 'unsupported_provider' }
+  const countryCode = text(input.country_code || input.countryCode)
   const idemKey = text(input.idemKey || input.idempotencyKey || input.idempotency_key)
-  const intent = await createPaymentIntentAsync(userId, { ...input, provider, ...(idemKey ? { idemKey } : {}) })
+  // The provider is chosen once the intent has fixed the (server-side)
+  // currency: the requested provider when it is fully configured and settles
+  // that currency, otherwise the payer's regional default. So a missing Stripe
+  // key never blocks Paystack/Flutterwave for a payment they can take.
+  const intent = await createPaymentIntentAsync(userId, { ...input, provider: null, ...(idemKey ? { idemKey } : {}) })
   if (intent?.ok === false) return intent
   let payment = intent.paymentIntent
+  const provider = selectCheckoutProvider({ requested, currency: payment.currency, countryCode, available })
+  if (!provider) {
+    return requested && !available.includes(requested)
+      ? { ok: false, status: 503, error: `${requested}_not_configured`, availableProviders: available, paymentIntent: payment }
+      : { ok: false, status: 422, error: 'no_provider_for_currency', currency: payment.currency, availableProviders: available, paymentIntent: payment }
+  }
   if (payment.provider && payment.provider !== provider) {
     return { ok: false, status: 409, error: 'payment_provider_mismatch', paymentIntent: payment }
   }
@@ -160,8 +219,8 @@ export async function createTvceCheckout(userId, input = {}) {
   const checkout = await providerCheckout(provider, { ...payment, userId }, input)
   if (!checkout.ok) {
     const failed = financePostgresEnabled()
-      ? await markPaymentIntentCheckoutFailurePostgres(userId, payment.id, checkout).catch(() => null)
-      : persistCheckoutFailure(userId, payment.id, checkout)
+      ? await markPaymentIntentCheckoutFailurePostgres(userId, payment.id, { ...checkout, provider }).catch(() => null)
+      : persistCheckoutFailure(userId, payment.id, { ...checkout, provider })
     return {
       ok: false,
       status: checkout.status || 502,
@@ -226,6 +285,7 @@ function persistCheckoutFailure(userId, paymentId, failure) {
     if (!payment) return null
     const now = new Date().toISOString()
     Object.assign(payment, {
+      provider: failure.provider || payment.provider || null,
       checkoutStatus: 'failed',
       lastCheckoutError: String(failure.error || 'provider_checkout_failed').slice(0, 200),
       lastCheckoutFailedAt: now,

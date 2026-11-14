@@ -72,4 +72,26 @@ describe.skipIf(!url)('payment fulfilment on PostgreSQL (production driver)', ()
     const entitlement = await tvce.accountEntitlementAsync('u5')
     expect(entitlement.active).toBe(true)
   })
+
+  it('creates a Paystack checkout when Stripe is requested but not configured', async () => {
+    const { vi } = await import('vitest')
+    const { createTvceCheckout } = await import('../services/tvceCheckoutService.js')
+    const saved = Object.fromEntries(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'PAYSTACK_SECRET_KEY', 'BILLING_SUCCESS_URL', 'BILLING_CANCEL_URL'].map(key => [key, process.env[key]]))
+    delete process.env.STRIPE_SECRET_KEY
+    delete process.env.STRIPE_WEBHOOK_SECRET
+    process.env.PAYSTACK_SECRET_KEY = 'pg-paystack-secret'
+    process.env.BILLING_SUCCESS_URL = 'https://beta.techitnetwork.com/wallet?checkout=success'
+    process.env.BILLING_CANCEL_URL = 'https://beta.techitnetwork.com/wallet?checkout=cancelled'
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ status: true, data: { authorization_url: 'https://paystack.test/pay', reference: 'ref-pg' } }) })))
+    try {
+      await seed('creditPackages', { id: 'pack_pg_ng', amount: 199900, currency: 'NGN', credits: 400, active: true })
+      const result = await createTvceCheckout('u6', { provider: 'stripe', packageId: 'pack_pg_ng', idemKey: 'pg-fallback-1' })
+      expect(result).toMatchObject({ ok: true, provider: 'paystack', checkoutUrl: 'https://paystack.test/pay' })
+      const row = await platform.getPlatformPool().query("SELECT payload->>'provider' AS provider FROM platform_collection_records WHERE collection_name='paymentIntents' AND record_id=$1", [result.paymentIntent.id])
+      expect(row.rows[0].provider).toBe('paystack')
+    } finally {
+      vi.unstubAllGlobals()
+      for (const [key, value] of Object.entries(saved)) { if (value === undefined) delete process.env[key]; else process.env[key] = value }
+    }
+  })
 })
