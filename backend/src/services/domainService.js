@@ -9,7 +9,7 @@ import { evaluateOrganizationEntitlement } from './organizationEntitlementServic
 import { normalizeOrganizationResourcePayload, sanitizeOrganizationResource } from './organizationResourcePolicy.js'
 import { evaluatePurchasePolicy, intentExpiry, purchasePolicyConfig, purchaseUsage, resolvePurchaseIdentity } from './purchasePolicyService.js'
 import { listProjects as listProjectsPostgres, listWorkspaces as listWorkspacesPostgres, findWorkspace as findWorkspacePostgres, listMembers as listMembersPostgres, workspaceReadEnabled, workspaceReadFallbackEnabled } from '../repositories/workspaceProjectRepository.js'
-import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, createPaymentIntentPostgres, financeReadEnabled, financeReadFallbackEnabled, financePostgresEnabled } from '../repositories/financeRepository.js'
+import { walletSummary as walletSummaryPostgres, walletCollection as walletCollectionPostgres, createPaymentIntentPostgres, financeReadEnabled, financeReadFallbackEnabled, financePostgresEnabled, loadWalletSourcesPostgres, walletCatalogCollection, activeCatalogRow } from '../repositories/financeRepository.js'
 import { canViewLayer, normalizeVisibility, VISIBILITY_LAYERS } from './cofounderModel.js'
 
 const OWNER_FIELDS = ['ownerId', 'userId', 'founderId', 'collaboratorId', 'investorId', 'organizationId', 'createdBy']
@@ -2365,19 +2365,11 @@ export function walletSummary(userId) {
 export async function walletSummaryAsync(userId) {
   if (!financeReadEnabled()) return walletSummary(userId)
   try {
-    const summary = await walletSummaryPostgres(userId)
-    // The Postgres read model carries no analytics fields. Derive them from the
-    // authority store, which is the write source of truth projected to Postgres.
-    const derived = walletSummaryFor(readAuthorityDb(), userId)
-    return {
-      ...summary,
-      sourceTotals: derived.sourceTotals,
-      deductionOrder: derived.deductionOrder,
-      subscriptionUsage: derived.subscriptionUsage,
-      consumedThisPeriod: derived.consumedThisPeriod,
-      expirationAlerts: derived.expirationAlerts,
-      lowBalance: derived.lowBalance,
-    }
+    // One authoritative, uncapped read of the user's finance rows. The previous
+    // path mixed the 30s core_* projection with walletSummaryFor(readAuthorityDb()),
+    // and readAuthorityDb() throws under DB_DRIVER=postgres (HTTP 500).
+    const db = await loadWalletSourcesPostgres(userId)
+    return { ...walletSummaryFor(db, userId), pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length }
   } catch (error) {
     if (!financeReadFallbackEnabled()) throw error
     return walletSummary(userId)
@@ -2386,6 +2378,9 @@ export async function walletSummaryAsync(userId) {
 
 export function walletList(userId, name) {
   const db = readAuthorityDb()
+  // Plans and credit packages are the purchasable catalog, not user-owned rows;
+  // filtering them by userId always returned an empty list.
+  if (walletCatalogCollection(name)) return collection(db, name).filter(activeCatalogRow).sort(byNewest)
   return listOwned(db, name, userId, 'userId')
 }
 

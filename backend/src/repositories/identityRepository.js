@@ -97,6 +97,16 @@ export async function updateIdentityPassword(userId, passwordHash) {
   const result = await getPool().query('UPDATE core_users SET password_hash=$1,updated_at=$2 WHERE id=$3', [passwordHash, new Date().toISOString(), userId])
   return result.rowCount > 0
 }
+// Single profile by id or username. Profile pages used to load every profile
+// in the platform and search it in memory on each view.
+export async function findIdentityProfile(idOrUsername) {
+  const value = String(idOrUsername || '').trim()
+  if (!value) return null
+  const result = await getPool().query('SELECT id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at FROM core_profiles WHERE id=$1 OR username=$1 ORDER BY (id=$1) DESC LIMIT 1', [value])
+  const row = result.rows[0]
+  return row ? { ...(row.payload || {}), id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, username: row.username, role: row.role, workspaceId: row.workspace_id, isVerified: row.is_verified, isOnboarded: row.is_onboarded, createdAt: row.created_at, updatedAt: row.updated_at } : null
+}
+
 export async function listIdentityProfiles() {
   const result = await getPool().query('SELECT id,email,first_name,last_name,username,role,workspace_id,is_verified,is_onboarded,payload,created_at,updated_at FROM core_profiles ORDER BY created_at DESC')
   return result.rows.map(row => ({ ...(row.payload || {}), id: row.id, email: row.email, firstName: row.first_name, lastName: row.last_name, username: row.username, role: row.role, workspaceId: row.workspace_id, isVerified: row.is_verified, isOnboarded: row.is_onboarded, createdAt: row.created_at, updatedAt: row.updated_at }))

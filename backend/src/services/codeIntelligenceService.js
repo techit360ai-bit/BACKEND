@@ -14,7 +14,8 @@
 //    platform model. That gap is disclosed, never hidden.
 
 import { readAuthorityDb } from '../config/database.js'
-import { codeWorkspaceAccess, codeWorkspaceSnapshot, detectProjectAdapter, safeCodePath } from './codeWorkspaceService.js'
+import { codeWorkspaceAccess, codeWorkspaceAccessRow, codeWorkspaceSnapshot, detectProjectAdapter, safeCodePath } from './codeWorkspaceService.js'
+import { listByWorkspace, loadById, workspaceCodeEnabled } from '../repositories/workspaceCodeRepository.js'
 import { requestWorkspaceConversation } from './aiRouterClient.js'
 
 const rows = (db, name) => (Array.isArray(db[name]) ? db[name] : [])
@@ -61,10 +62,23 @@ function existingSystems(files, adapter) {
  */
 export function resolveWorkspaceRouting(userId, workspaceId) {
   const db = readAuthorityDb()
-  const binding = rows(db, 'workspaceModelBindings').find(row =>
-    row.workspaceId === workspaceId && row.userId === userId && row.status === 'active')
+  return routingDecision(
+    rows(db, 'workspaceModelBindings').find(row => row.workspaceId === workspaceId && row.userId === userId && row.status === 'active'),
+    connectionId => rows(db, 'userModelConnections').find(row => row.id === connectionId && row.status === 'active'),
+  )
+}
+
+// Row-level twin: the synchronous store throws under DB_DRIVER=postgres.
+export async function resolveWorkspaceRoutingAsync(userId, workspaceId) {
+  if (!workspaceCodeEnabled()) return resolveWorkspaceRouting(userId, workspaceId)
+  const binding = (await listByWorkspace('workspaceModelBindings', workspaceId)).find(row => row.userId === userId && row.status === 'active')
+  const connection = binding?.connectionId ? await loadById('userModelConnections', binding.connectionId) : null
+  return routingDecision(binding, () => (connection && connection.status === 'active' ? connection : null))
+}
+
+function routingDecision(binding, findConnection) {
   if (!binding) return { requested: 'platform', applied: 'platform', reason: null, connectionId: null, connectionName: null, modelId: null }
-  const connection = rows(db, 'userModelConnections').find(row => row.id === binding.connectionId && row.status === 'active')
+  const connection = findConnection(binding.connectionId)
   if (!connection) return { requested: 'platform', applied: 'platform', reason: 'bound_connection_not_active', connectionId: null, connectionName: null, modelId: null }
   return {
     requested: 'byok',
@@ -76,9 +90,12 @@ export function resolveWorkspaceRouting(userId, workspaceId) {
   }
 }
 
-function requireAccess(userId, workspaceId) {
-  const db = readAuthorityDb()
-  const access = codeWorkspaceAccess(db, userId, workspaceId)
+async function requireAccess(userId, workspaceId) {
+  // Same rule on both stores; the row-level check avoids the synchronous store,
+  // which throws under DB_DRIVER=postgres (plan/orchestrate answered 500).
+  const access = workspaceCodeEnabled()
+    ? await codeWorkspaceAccessRow(userId, workspaceId)
+    : codeWorkspaceAccess(readAuthorityDb(), userId, workspaceId)
   if (!access) return { ok: false, status: 403, error: 'workspace_access_denied' }
   return { ok: true, access }
 }
@@ -140,12 +157,12 @@ async function buildPlan(userId, workspaceId, body) {
     },
     context_injected: files.length > 0,
     authoritative: false,
-    ai_routing: resolveWorkspaceRouting(userId, workspaceId),
+    ai_routing: await resolveWorkspaceRoutingAsync(userId, workspaceId),
   }
 }
 
 export async function planCodeTask(userId, workspaceId, body, token) {
-  const guard = requireAccess(userId, workspaceId)
+  const guard = await requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
   const result = await buildPlan(userId, workspaceId, body)
   if (!result.ok) return result
@@ -169,7 +186,7 @@ function extractJson(text) {
 }
 
 export async function proposeCodeChanges(userId, workspaceId, body, token) {
-  const guard = requireAccess(userId, workspaceId)
+  const guard = await requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
   const snapshot = await codeWorkspaceSnapshot(userId, workspaceId)
   if (!snapshot.ok) return snapshot
@@ -227,7 +244,7 @@ export async function proposeCodeChanges(userId, workspaceId, body, token) {
 }
 
 export async function orchestrateCodeTask(userId, workspaceId, body) {
-  const guard = requireAccess(userId, workspaceId)
+  const guard = await requireAccess(userId, workspaceId)
   if (!guard.ok) return guard
   const plan = await buildPlan(userId, workspaceId, body)
   if (!plan.ok) return plan

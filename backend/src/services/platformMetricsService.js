@@ -1,3 +1,5 @@
+import { currentDriver, runBoundedDatabase } from '../config/database.js'
+import { listRecords, listRecordsByFieldIn, listRecordsByIds, listRecordsForOwner, withPlatformTransaction } from '../repositories/platformCollectionRepository.js'
 import { readAuthorityDb } from '../config/database.js'
 import { nowIso } from '../utils/api.js'
 import { stageRank } from './lifecycleService.js'
@@ -119,4 +121,43 @@ export function platformMetricsFor(user) {
   const computed = computePlatformMetrics(ownProjects, allMilestones.filter(row => ownIds.has(projectOf(row))))
   const mine = computed.perFounder.find(entry => entry.founderId === String(userId)) || null
   return { ok: true, scope: 'founder', totals: computed.totals, founder: mine, generatedAt: computed.generatedAt }
+}
+
+
+// Row-level path for DB_DRIVER=postgres: the synchronous store throws outside
+// a bounded scope, which made GET /api/domain/platform/metrics a 500. Load only
+// the rows the caller's role can see, then run the same aggregation.
+const ORGANIZATION_ROLES = ['organization', 'organisation', 'organisation_admin', 'organization_admin']
+
+async function loadPlatformMetricsBundle(user) {
+  const userId = String(user?.id || '')
+  const role = String(user?.role || '').toLowerCase()
+  return withPlatformTransaction(async client => {
+    const db = { projects: [], milestones: [], organizationPrograms: [], programEnrollments: [] }
+    const merge = (name, list) => { const seen = new Set(db[name].map(row => String(row.id))); for (const row of list) if (row?.id && !seen.has(String(row.id))) { db[name].push(row); seen.add(String(row.id)) } }
+    if (role === 'admin') {
+      merge('projects', await listRecords(client, 'projects'))
+      merge('milestones', await listRecords(client, 'milestones'))
+      return db
+    }
+    if (ORGANIZATION_ROLES.includes(role)) {
+      merge('organizationPrograms', await listRecordsForOwner(client, 'organizationPrograms', userId, { ownerFields: ['ownerId', 'organizationId'] }))
+      merge('programEnrollments', await listRecordsByFieldIn(client, 'programEnrollments', 'programId', db.organizationPrograms.map(row => row.id)))
+      merge('programEnrollments', await listRecordsForOwner(client, 'programEnrollments', userId, { ownerFields: ['organizationId', 'ownerId'] }))
+      merge('projects', await listRecordsByIds(client, 'projects', db.programEnrollments.map(row => row.projectId)))
+      merge('projects', await listRecords(client, 'projects', { organizationId: userId }))
+    } else {
+      merge('projects', await listRecordsForOwner(client, 'projects', userId, { ownerFields: ['ownerId', 'founderId'] }))
+    }
+    const projectIds = db.projects.map(row => String(row.id))
+    merge('milestones', await listRecordsByFieldIn(client, 'milestones', 'projectId', projectIds))
+    merge('milestones', await listRecordsByFieldIn(client, 'milestones', 'startupId', projectIds))
+    return db
+  }, { userId: userId || null })
+}
+
+export async function platformMetricsForAsync(user) {
+  if (currentDriver() !== 'postgres') return platformMetricsFor(user)
+  const db = await loadPlatformMetricsBundle(user)
+  return runBoundedDatabase(db, () => platformMetricsFor(user))
 }

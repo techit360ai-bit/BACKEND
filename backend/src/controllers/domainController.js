@@ -118,7 +118,7 @@ import { appendWorkspaceTaskEvent, getWorkspaceTask, runWorkspaceTask } from '..
 import { connectorCredentialStatus, removeConnectorCredential, setConnectorCredential } from '../services/connectorCredentialService.js'
 import { syncWorkspaceProjectAggregate } from '../repositories/workspaceProjectRepository.js'
 import { executionIntelligenceFor } from '../services/executionIntelligenceService.js'
-import { platformMetricsFor } from '../services/platformMetricsService.js'
+import { platformMetricsFor, platformMetricsForAsync } from '../services/platformMetricsService.js'
 
 function created(res, body) {
   return res.status(201).json(body)
@@ -136,7 +136,7 @@ function requireTitle(req, res) {
   }
   return title
 }
-async function persistedWorkspace(req, value, projectId = null) { if (!process.env.WORKSPACE_WRITE_SOURCE || process.env.WORKSPACE_WRITE_SOURCE !== 'postgres' || value?.ok === false) return value; try { await syncWorkspaceProjectAggregate(req.user.id, value.workspace?.id || req.params.workspaceId || null, projectId || value.project?.id || null); return value } catch (error) { console.error(JSON.stringify({ event: 'workspace_project_postgres_write_failed', error: error.message })); if (process.env.WORKSPACE_WRITE_FALLBACK_SQLITE !== 'false') return value; return { ok: false, error: 'workspace_project_write_temporarily_unavailable' } } }
+async function persistedWorkspace(req, value, projectId = null) { if (!process.env.WORKSPACE_WRITE_SOURCE || process.env.WORKSPACE_WRITE_SOURCE !== 'postgres' || !value || value?.ok === false) return value; try { await syncWorkspaceProjectAggregate(req.user.id, value.workspace?.id || req.params.workspaceId || null, projectId || value.project?.id || null); return value } catch (error) { console.error(JSON.stringify({ event: 'workspace_project_postgres_write_failed', error: error.message })); if (process.env.WORKSPACE_WRITE_FALLBACK_SQLITE !== 'false') return value; return { ok: false, error: 'workspace_project_write_temporarily_unavailable' } } }
 
 export async function founderProjects(req, res) {
   return res.json(await listProjectsAsync(req.user.id))
@@ -273,6 +273,8 @@ export async function workspaceItemCreate(req, res) {
     req.itemPrefix,
   ))
   if (!row) return notFound(res, 'Workspace not found')
+  // A failed write is an error response, never 201 Created with the error nested.
+  if (row.ok === false) return res.status(row.status || (String(row.error || '').includes('temporarily_unavailable') ? 503 : 400)).json({ error: row.error })
   return created(res, { [req.itemKey]: row })
 }
 
@@ -323,6 +325,7 @@ export async function workspaceItemPatch(req, res) {
     req.body,
   ))
   if (!row) return notFound(res, 'Workspace item not found')
+  if (row.ok === false) return res.status(row.status || (String(row.error || '').includes('temporarily_unavailable') ? 503 : 400)).json({ error: row.error })
   if (
     req.collectionName === 'workspaceTasks' &&
     row.status === 'completed' &&
@@ -786,7 +789,7 @@ export async function executionIntelligence(req, res) {
 // plus their own row; organizations and admins also receive the per-founder
 // breakdown.
 export async function platformMetrics(req, res) {
-  return res.json(platformMetricsFor(req.user))
+  return res.json(await platformMetricsForAsync(req.user))
 }
 
 export async function workspaceConversationsGet(req, res) {

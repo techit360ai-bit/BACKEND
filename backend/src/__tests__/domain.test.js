@@ -9,6 +9,9 @@ vi.mock('../config/database.js', () => ({
   readAuthorityDb: vi.fn(),
   writeAuthorityDb: vi.fn(),
   updateAuthorityDb: vi.fn(),
+  currentDriver: () => 'json',
+  currentBoundedDatabase: () => null,
+  runBoundedDatabase: (_db, fn) => fn(),
 }))
 
 import { readAuthorityDb, updateAuthorityDb, writeAuthorityDb } from '../config/database.js'
