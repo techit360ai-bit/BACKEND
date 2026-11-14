@@ -25,6 +25,8 @@ import { intelligenceStateEnabled, intelligenceStateFallbackEnabled, syncIntelli
 function badRequest(res, error) {
   return res.status(400).json({ error: error instanceof Error ? error.message : String(error) })
 }
+// The degraded-store response is a 503, not a 200/201 carrying an error.
+const writeUnavailable = value => value?.ok === false && String(value.error || '').includes('temporarily_unavailable')
 async function persisted(req, value) { if (!intelligenceStateEnabled() || value?.ok === false) return value; try { await syncIntelligenceState(req.user.id); return value } catch (error) { console.error(JSON.stringify({ event: 'intelligence_postgres_write_failed', error: error.message })); if (intelligenceStateFallbackEnabled()) return value; return { ok: false, error: 'intelligence_write_temporarily_unavailable' } } }
 
 export async function listRecommendations(req, res) {
@@ -51,6 +53,7 @@ export async function listRecommendations(req, res) {
 
 export async function putRecommendationProfile(req, res) {
   const profile = await persisted(req, await updateRecommendationProfileAsync(req.user.id, req.body))
+  if (writeUnavailable(profile)) return res.status(503).json(profile)
   if (!profile) return res.status(404).json({ error: 'Profile not found' })
   void invalidateDiscoveryUser(req.user.id)
   void enqueueDiscoveryRefresh(req.user.id, 'profile_updated')
@@ -60,6 +63,7 @@ export async function putRecommendationProfile(req, res) {
 export async function createRecommendationEvent(req, res) {
   try {
     const event = await persisted(req, await recordRecommendationEventAsync(req.user.id, req.body))
+    if (writeUnavailable(event)) return res.status(503).json(event)
     void invalidateDiscoveryUser(req.user.id)
     void enqueueDiscoveryRefresh(req.user.id, event.eventType)
     return res.status(201).json({ event })
@@ -70,6 +74,7 @@ export async function createRecommendationEvent(req, res) {
 
 export async function createExposure(req, res) {
   const exposure = await persisted(req, await recordExposureAsync(req.user.id, req.params.id, req.body))
+  if (writeUnavailable(exposure)) return res.status(503).json(exposure)
   if (!exposure) return res.status(404).json({ error: 'Recommendation not found' })
   return res.status(201).json({ exposure })
 }
@@ -77,6 +82,7 @@ export async function createExposure(req, res) {
 export async function createFeedback(req, res) {
   try {
     const feedback = await persisted(req, await recordFeedbackAsync(req.user.id, req.params.id, req.body))
+    if (writeUnavailable(feedback)) return res.status(503).json(feedback)
     if (!feedback) return res.status(404).json({ error: 'Recommendation not found' })
     void invalidateDiscoveryUser(req.user.id)
     void enqueueDiscoveryRefresh(req.user.id, 'feedback')
@@ -96,12 +102,14 @@ export async function catchUp(req, res) {
 
 export async function markCatchUpSeen(req, res) {
   const state = await persisted(req, await markCatchUpItemAsync(req.user.id, req.params.id, req.body.action))
+  if (writeUnavailable(state)) return res.status(503).json(state)
   if (!state) return res.status(404).json({ error: 'Active catch-up session not found' })
   return res.json({ state })
 }
 
 export async function finishCatchUp(req, res) {
   const result = await persisted(req, await completeCatchUpAsync(req.user.id))
+  if (writeUnavailable(result)) return res.status(503).json(result)
   if (!result) return res.status(404).json({ error: 'Active catch-up session not found' })
   return res.json(result)
 }
@@ -110,6 +118,7 @@ export async function recordActivity(req, res) {
   const eventType = String(req.body.eventType || '').trim().toLowerCase()
   if (!eventType) return res.status(400).json({ error: 'eventType is required' })
   const state = await persisted(req, await noteUserActivityAsync(req.user.id, eventType, req.body.surface))
+  if (writeUnavailable(state)) return res.status(503).json(state)
   return res.status(201).json({ state })
 }
 

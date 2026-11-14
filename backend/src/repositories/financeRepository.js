@@ -19,7 +19,38 @@ function getFinancePool() {
 const mapNormalized = row => ({ ...(row.payload || {}), id: row.id, userId: row.user_id, creditBalance: row.balance == null ? undefined : Number(row.balance), balance: row.balance == null ? undefined : Number(row.balance), currency: row.currency, deltaCredits: row.delta_credits == null ? undefined : Number(row.delta_credits), reservedCredits: row.reserved_credits == null ? undefined : Number(row.reserved_credits), status: row.status, amount: row.amount == null ? undefined : Number(row.amount), credits: row.credits == null ? undefined : Number(row.credits), createdAt: row.created_at, updatedAt: row.updated_at })
 
 export async function walletAccount(userId) { const result = await getFinancePool().query('SELECT * FROM core_wallet_accounts WHERE user_id=$1', [userId]); return result.rows[0] ? mapNormalized(result.rows[0]) : null }
-export async function walletCollection(userId, name) { const tables = { creditLedger: 'core_credit_ledger', usageReservations: 'core_usage_reservations', paymentIntents: 'core_payment_intents', subscriptions: 'core_subscriptions' }; const table = tables[name]; if (!table) throw new Error('unsupported finance collection'); const result = await getFinancePool().query(`SELECT * FROM ${table} WHERE user_id=$1 ORDER BY created_at DESC`, [userId]); return result.rows.map(mapNormalized) }
+// Wallet reads come from the authoritative platform records the finance
+// writers update. The core_* tables are a periodic projection (whole-snapshot
+// sync every 30s) and only covered four collections, so usage, plans, credit
+// packages and invoices threw "unsupported finance collection" (HTTP 500).
+const WALLET_USER_COLLECTIONS = new Set(['creditLedger', 'usageReservations', 'paymentIntents', 'subscriptions', 'usageEvents', 'invoices', 'walletAccounts'])
+const WALLET_CATALOG_COLLECTIONS = new Set(['billingPlans', 'creditPackages'])
+const collectionRow = row => ({ createdAt: row.created_at, updatedAt: row.updated_at, ...(row.payload || {}), id: row.record_id })
+export function walletCatalogCollection(name) { return WALLET_CATALOG_COLLECTIONS.has(name) }
+export function activeCatalogRow(row) { return row && row.active !== false && !['inactive', 'archived', 'retired'].includes(String(row.status || '').toLowerCase()) }
+export async function walletCollection(userId, name) {
+  if (WALLET_CATALOG_COLLECTIONS.has(name)) {
+    const result = await getFinancePool().query('SELECT record_id,payload,created_at,updated_at FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL ORDER BY updated_at DESC LIMIT 200', [name])
+    return result.rows.map(collectionRow).filter(activeCatalogRow)
+  }
+  if (!WALLET_USER_COLLECTIONS.has(name)) throw new Error('unsupported finance collection')
+  const result = await getFinancePool().query("SELECT record_id,payload,created_at,updated_at FROM platform_collection_records WHERE collection_name=$1 AND deleted_at IS NULL AND (owner_id=$2 OR payload @> jsonb_build_object('userId', $2::text)) ORDER BY created_at DESC LIMIT 500", [name, String(userId)])
+  return result.rows.map(collectionRow)
+}
+
+// Everything walletSummaryFor reads, scoped to one user (plus the plan catalog).
+export async function loadWalletSourcesPostgres(userId) {
+  const pool = getFinancePool()
+  const names = ['walletAccounts', 'creditLedger', 'usageEvents', 'paymentIntents', 'subscriptions', 'usageReservations']
+  const [owned, plans] = await Promise.all([
+    pool.query("SELECT collection_name,record_id,payload,created_at,updated_at FROM platform_collection_records WHERE collection_name = ANY($1::text[]) AND deleted_at IS NULL AND (owner_id=$2 OR payload @> jsonb_build_object('userId', $2::text))", [names, String(userId)]),
+    pool.query("SELECT record_id,payload,created_at,updated_at FROM platform_collection_records WHERE collection_name='billingPlans' AND deleted_at IS NULL"),
+  ])
+  const db = Object.fromEntries(names.map(name => [name, []]))
+  for (const row of owned.rows) db[row.collection_name].push(collectionRow(row))
+  db.billingPlans = plans.rows.map(collectionRow)
+  return db
+}
 export async function walletSummary(userId) { const [account, ledger, reservations, payments] = await Promise.all([walletAccount(userId), walletCollection(userId, 'creditLedger'), walletCollection(userId, 'usageReservations'), walletCollection(userId, 'paymentIntents')]); const creditBalance = Number(account?.creditBalance || 0) + ledger.reduce((sum, row) => sum + Number(row.deltaCredits || row.credits || 0), 0); return { account: account || { userId, creditBalance, currency: 'USD' }, creditBalance, lifetimeCreditsUsed: Math.abs(ledger.filter(row => row.type === 'usage_settlement').reduce((sum, row) => sum + Number(row.deltaCredits || 0), 0)), pendingPayments: payments.filter(row => row.status === 'pending').length, pendingReservations: reservations.filter(row => row.status === 'reserved').length } }
 export function financeReadEnabled() { return readEnabled() }
 export function financeReadFallbackEnabled() { return readFallback() }

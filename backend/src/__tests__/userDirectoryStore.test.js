@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateAuthorityDb: vi.fn(),
   findIdentityById: vi.fn(),
   listIdentityProfiles: vi.fn(),
+  findIdentityProfile: vi.fn(),
   loadMemberDirectorySources: vi.fn(),
   loadConnectionRequestSources: vi.fn(),
   loadConnectionSources: vi.fn(),
@@ -17,13 +18,14 @@ const mocks = vi.hoisted(() => ({
   trustPublic: vi.fn(),
 }))
 
-vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, writeAuthorityDb: mocks.writeAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb }))
+vi.mock('../config/database.js', () => ({ readAuthorityDb: mocks.readAuthorityDb, writeAuthorityDb: mocks.writeAuthorityDb, updateAuthorityDb: mocks.updateAuthorityDb, currentDriver: () => 'json', currentBoundedDatabase: () => null }))
 vi.mock('../services/trustAuthority.js', async importOriginal => ({ ...(await importOriginal()), publicTrustFor: mocks.trustPublic }))
 vi.mock('../services/tvceService.js', async importOriginal => ({ ...(await importOriginal()), accountEntitlementAsync: mocks.entitlement }))
 vi.mock('../repositories/identityRepository.js', async importOriginal => ({
   ...(await importOriginal()),
   findIdentityById: mocks.findIdentityById,
   listIdentityProfiles: mocks.listIdentityProfiles,
+  findIdentityProfile: mocks.findIdentityProfile,
 }))
 vi.mock('../repositories/userDirectoryRepository.js', () => ({
   userDirectoryEnabled: () => process.env.IDENTITY_READ_SOURCE === 'postgres',
@@ -68,6 +70,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.findIdentityById.mockImplementation(async id => ({ user: { id, email: `${id}@example.com` }, profile: id === 'viewer' ? viewerProfile : targetProfile, roles: [], activeContext: null }))
   mocks.listIdentityProfiles.mockResolvedValue([viewerProfile, targetProfile])
+  mocks.findIdentityProfile.mockImplementation(async ref => [viewerProfile, targetProfile].find(profile => profile.id === ref || profile.username === ref) || null)
   mocks.trustPublic.mockResolvedValue(trust)
   mocks.entitlement.mockResolvedValue(null)
   mocks.loadMemberDirectorySources.mockResolvedValue(directoryBundle())

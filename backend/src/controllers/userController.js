@@ -3,7 +3,7 @@ import { avatarGradient, createId, nowIso, projectOwnProfile, timeAgo, userName 
 import { appendPlatformEventInDb, appendRelationshipInDb, syncRecommendationProfileInDb } from '../services/discoveryService.js'
 import { invalidateDiscoveryUser } from '../services/discoveryInfrastructure.js'
 import { createPrivateUpload, finalizePrivateUpload, privateDownloadUrl } from '../services/evidenceStorageService.js'
-import { findIdentityById, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
+import { findIdentityById, findIdentityProfile, listIdentityProfiles, updateIdentityProfile } from '../repositories/identityRepository.js'
 import { publicTrustFor } from '../services/trustAuthority.js'
 import { createNotification as createNotificationPostgres, contentWriteEnabled, contentWriteFallbackEnabled } from '../repositories/contentRepository.js'
 import { userDirectoryEnabled, userDirectoryFallbackEnabled, loadMemberDirectorySources, loadConnectionRequestSources, loadConnectionSources, loadProfileByRef, applyConnectionMutation } from '../repositories/userDirectoryRepository.js'
@@ -90,28 +90,45 @@ export async function avatarFinalize(req, res) {
   if (!objectKey.startsWith(`profile-avatars/${req.user.id}/`)) return res.status(403).json({ error: 'avatar_object_forbidden' })
   const scan = await finalizePrivateUpload({ objectKey, contentType, expectedSizeBytes: sizeBytes })
   if (!scan.ok) return res.status(400).json({ error: scan.error || 'avatar_scan_failed' })
-  const profile = updateAuthorityDb(db => {
-    const row = db.profiles.find(item => item.id === req.user.id)
-    if (!row) return null
-    row.avatarObjectKey = objectKey
-    row.avatarContentType = contentType
-    row.avatarSizeBytes = sizeBytes
-    row.avatarUpdatedAt = nowIso()
-    row.avatarUrl = privateDownloadUrl(objectKey, 900)
-    row.updatedAt = nowIso()
-    return row
+  const profile = await persistProfileUpdates(req.user.id, {
+    avatarObjectKey: objectKey,
+    avatarContentType: contentType,
+    avatarSizeBytes: sizeBytes,
+    avatarUpdatedAt: nowIso(),
+    avatarUrl: privateDownloadUrl(objectKey, 900),
   })
   return profile ? res.json({ profile: projectOwnProfile(profile), avatarUrl: profile.avatarUrl, scan }) : res.status(404).json({ error: 'Profile not found' })
 }
 
-export function avatarRemove(req, res) {
-  const profile = updateAuthorityDb(db => {
-    const row = db.profiles.find(item => item.id === req.user.id)
+export async function avatarRemove(req, res) {
+  const profile = await persistProfileUpdates(req.user.id, { avatarObjectKey: null, avatarUrl: null, avatarContentType: null, avatarSizeBytes: 0 })
+  return profile ? res.json({ ok: true, profile: projectOwnProfile(profile) }) : res.status(404).json({ error: 'Profile not found' })
+}
+
+// Profile writes go to the identity authority (core_profiles) under
+// IDENTITY_WRITE_SOURCE=postgres, mirrored into the scoped profiles collection
+// exactly like updateMe. The avatar handlers wrote the synchronous store
+// directly, which throws under DB_DRIVER=postgres (DELETE /api/users/me/avatar
+// returned 500).
+async function persistProfileUpdates(userId, updates) {
+  if (process.env.IDENTITY_WRITE_SOURCE === 'postgres') {
+    const profile = await updateIdentityProfile(userId, updates)
+    if (profile) {
+      await applyScopedMutation(userId, ['profiles'], db => {
+        const idx = (db.profiles || []).findIndex(item => item.id === userId)
+        if (idx === -1) return
+        db.profiles[idx] = { ...db.profiles[idx], ...profile }
+      })
+      return profile
+    }
+    if (process.env.IDENTITY_WRITE_FALLBACK_SQLITE === 'false') return null
+  }
+  return updateAuthorityDb(db => {
+    const row = db.profiles.find(item => item.id === userId)
     if (!row) return null
-    row.avatarObjectKey = null; row.avatarUrl = null; row.avatarContentType = null; row.avatarSizeBytes = 0; row.updatedAt = nowIso()
+    Object.assign(row, updates, { updatedAt: nowIso() })
     return row
   })
-  return profile ? res.json({ ok: true, profile: projectOwnProfile(profile) }) : res.status(404).json({ error: 'Profile not found' })
 }
 
 async function publicProfile(profile, db, viewerId) {
@@ -328,7 +345,11 @@ export async function getUserProfile(req, res) {
   let db = null
   if (userDirectoryEnabled()) {
     try {
-      profile = (await listIdentityProfiles()).find(p => p.id === id || p.username === id)
+      profile = await findIdentityProfile(id)
+      // PostgreSQL is the identity authority: an unknown profile is a 404, not
+      // a fall-through to the synchronous store (which throws under
+      // DB_DRIVER=postgres and turned every unknown id into a 500).
+      if (!profile && process.env.IDENTITY_READ_FALLBACK_SQLITE === 'false') return res.status(404).json({ error: 'Profile not found' })
       if (profile) db = await loadMemberDirectorySources(req.user.id, [profile.id], { activity: true, fullEdgeIds: [profile.id] })
     } catch (error) {
       console.error(JSON.stringify({ event: 'identity_postgres_read_failed', operation: 'get_user_profile', error: error.message }))

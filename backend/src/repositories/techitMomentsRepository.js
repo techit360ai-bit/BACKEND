@@ -44,11 +44,15 @@ export async function loadMomentSources(userId) {
   return withPlatformTransaction(async client => {
     const out = {}
     for (const [collection, fields] of Object.entries(SOURCE_OWNER_FIELDS)) {
-      const clauses = fields.map((field, index) => `payload->>'${field}'=$${index + 2}`)
+      // Every owner field compares against the same user id ($2). The previous
+      // per-field placeholders ($2..$n+1) plus owner_id=$2 bound one value too
+      // many, so Postgres rejected the statement and /api/moments returned 500.
+      // Containment (@>) lets the GIN index on payload serve the filter.
+      const clauses = fields.map(field => `payload @> jsonb_build_object('${field}', $2::text)`)
       const result = await client.query(
         `SELECT payload FROM platform_collection_records
          WHERE collection_name=$1 AND deleted_at IS NULL AND (owner_id=$2 OR ${clauses.join(' OR ')})`,
-        [collection, userId, ...fields.map(() => userId)],
+        [collection, String(userId)],
       )
       out[collection] = result.rows.map(row => ({ ...(row.payload || {}) }))
     }

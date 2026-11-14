@@ -38,6 +38,8 @@ import { authorizeCodeDestination, projectCodeCommit } from './services/codeExec
 import { readAuthorityDb, updateAuthorityDb } from './config/database.js'
 import { organizationResourceAccess } from './services/organizationResourcePolicy.js'
 import { mountTechitApi } from '../../Plugins-MCP/server/mount.ts'
+import { findIdentityById } from './repositories/identityRepository.js'
+import { mcpScopedStoreEnabled, withMcpAuthority } from './repositories/mcpAuthorityRepository.js'
 import { globalRateLimit } from './middlewares/globalRateLimit.js'
 import {
   buildInfo,
@@ -348,18 +350,28 @@ export function mcpRoleFromClaim(role) {
 const MCP_ENABLED = process.env.MCP_ENABLED === 'true'
 if (MCP_ENABLED) {
   await mountTechitApi(app, '/api/mcp', {
-    resolveActor(req) {
+    async resolveActor(req) {
       if (!JWT_SECRET && !process.env.JWT_PUBLIC_KEY) return null
       const auth = req.headers?.authorization
       if (typeof auth !== 'string' || !auth.startsWith('Bearer ')) return null
+      let claims
       try {
-        const claims = verifyJwt(auth.slice(7), {
+        claims = verifyJwt(auth.slice(7), {
           ...(process.env.JWT_ISSUER ? { issuer: process.env.JWT_ISSUER } : {}),
           ...(process.env.JWT_AUDIENCE ? { audience: process.env.JWT_AUDIENCE } : {}),
         })
-        const db = readAuthorityDb()
-        const profile = db.profiles.find(row => row.id === claims.sub)
+      } catch {
+        return null
+      }
+      try {
         const testMode = process.env.NODE_ENV === 'test'
+        // Under DB_DRIVER=postgres the synchronous authority store throws
+        // outside a bounded scope; the identity repository is the profile
+        // authority there. (Reading the snapshot here turned every production
+        // MCP request into a 401.)
+        const profile = mcpScopedStoreEnabled()
+          ? (await findIdentityById(claims.sub))?.profile || null
+          : readAuthorityDb().profiles.find(row => row.id === claims.sub) || null
         if (!profile && !testMode) return null
         const workspaceId = typeof profile?.workspaceId === 'string'
           ? profile.workspaceId
@@ -368,9 +380,12 @@ if (MCP_ENABLED) {
         // WS-H: resolve the workspace's incubation project server-side (never from
         // the client) and stamp it so MCP audit + contribution events are
         // attributed to the same project the hub and every surface read.
-        const workspaceRow = (db.workspaces || []).find(row => row.id === workspaceId)
-        const projectId = typeof workspaceRow?.projectId === 'string' ? workspaceRow.projectId : undefined
-        const project = projectId ? (db.projects || []).find(row => row.id === projectId) : undefined
+        const { projectId, project } = await withMcpAuthority({ userId: String(claims.sub), workspaceId }, () => {
+          const db = readAuthorityDb()
+          const workspaceRow = (db.workspaces || []).find(row => row.id === workspaceId)
+          const scopedProjectId = typeof workspaceRow?.projectId === 'string' ? workspaceRow.projectId : undefined
+          return { projectId: scopedProjectId, project: scopedProjectId ? (db.projects || []).find(row => row.id === scopedProjectId) : undefined }
+        })
         const incubation = project
           ? {
               projectId: project.id,
@@ -398,11 +413,14 @@ if (MCP_ENABLED) {
           },
           workspaceId,
         }
-      } catch {
+      } catch (error) {
+        // A valid token that cannot be resolved is an operational failure, not
+        // a bad credential: make it visible instead of a silent 401.
+        console.error(JSON.stringify({ event: 'mcp_actor_resolution_failed', requestId: req.id, error: error.message }))
         return null
       }
     },
-    authorizeInvocation({ resolved, plugin, tool, params }) {
+    async authorizeInvocation({ resolved, plugin, tool, params }) {
       // Boundary gate is default-deny: only catalogue plugins are accepted, and
       // a token that carries an explicit tool allow-list can never exceed it.
       // Per-tool minimum role stays enforced downstream by the MCP server's
@@ -412,19 +430,36 @@ if (MCP_ENABLED) {
       if (Array.isArray(allowedTools) && !allowedTools.includes(`${plugin}.${tool}`)) {
         return { allowed: false, status: 403, error: `${plugin}.${tool} is not permitted for this actor` }
       }
-      const integrationDecision = authorizeOrganizationIntegration(resolved.actor, plugin, params)
-      if (!integrationDecision.allowed) {
-        return { allowed: false, status: 403, error: integrationDecision.error }
-      }
-      if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
-      if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
-      return { allowed: true }
+      const integrationId = String(params.integrationId || params.organizationIntegrationId || '').trim() || null
+      if (!integrationId && plugin !== 'github') return { allowed: true }
+      const scope = { userId: resolved.actor.id, workspaceId: resolved.workspaceId, projectId: params.projectId ? String(params.projectId) : null, integrationId }
+      return withMcpAuthority(scope, () => {
+        const integrationDecision = authorizeOrganizationIntegration(resolved.actor, plugin, params)
+        if (!integrationDecision.allowed) {
+          return { allowed: false, status: 403, error: integrationDecision.error }
+        }
+        if (plugin === 'github' && (tool === 'push_files' || tool === 'run_workflow')) return authorizeCodeDestination(resolved.actor.id, params, { write: true })
+        if (plugin === 'github' && (tool === 'get_repository_state' || (tool === 'read_file' && params.projectId))) return authorizeCodeDestination(resolved.actor.id, params)
+        return { allowed: true }
+      })
     },
-    onSuccessfulInvocation({ resolved, plugin, tool, params, data }) {
-      if (plugin === 'github' && tool === 'push_files') projectCodeCommit(resolved.actor.id, params, data)
-      const integration = authorizeOrganizationIntegration(resolved.actor, plugin, params)
-      if (integration.integration) {
-        recordOrganizationSoftwareEvidence({ actor: resolved.actor, plugin, tool, params, integration: integration.integration })
+    async onSuccessfulInvocation({ resolved, plugin, tool, params, data }) {
+      const integrationId = String(params.integrationId || params.organizationIntegrationId || '').trim() || null
+      const commit = plugin === 'github' && tool === 'push_files'
+      if (!commit && !integrationId) return
+      const scope = { userId: resolved.actor.id, workspaceId: resolved.workspaceId, projectId: params.projectId ? String(params.projectId) : null, integrationId }
+      try {
+        await withMcpAuthority(scope, () => {
+          if (commit) projectCodeCommit(resolved.actor.id, params, data)
+          const integration = authorizeOrganizationIntegration(resolved.actor, plugin, params)
+          if (integration.integration) {
+            recordOrganizationSoftwareEvidence({ actor: resolved.actor, plugin, tool, params, integration: integration.integration })
+          }
+        }, { write: true })
+      } catch (error) {
+        // The provider side effect already happened; a projection failure must
+        // not make the client retry it.
+        console.error(JSON.stringify({ event: 'mcp_success_projection_failed', plugin, tool, error: error.message }))
       }
     },
   })

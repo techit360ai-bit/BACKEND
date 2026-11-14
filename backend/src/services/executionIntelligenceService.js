@@ -1,5 +1,7 @@
 import { findIdentityById } from '../repositories/identityRepository.js'
-import { readAuthorityDb } from '../config/database.js'
+import { currentDriver, readAuthorityDb } from '../config/database.js'
+import { runInvestorRead } from '../repositories/investorIntelligenceRepository.js'
+import { listRecordsByFieldIn, listRecordsByIds, mapRow, withPlatformTransaction } from '../repositories/platformCollectionRepository.js'
 import { publicTrustFor } from './trustAuthority.js'
 import { requireOrganizationPermissionAsync } from './organizationIntelligenceService.js'
 import { investorCanReadStartup } from './investorIntelligenceService.js'
@@ -104,13 +106,51 @@ async function authorizeExecutionScope(user, scope) {
     delete scope.cohortId
     delete scope.hackathonId
     if (scope.projectId) {
-      if (!investorCanReadStartup(readAuthorityDb(), user.id, scope.projectId)) {
+      if (!(await investorCanReadStartupAsync(user.id, scope.projectId))) {
         return { ok: false, status: 403, error: 'scope_forbidden', detail: 'startup_not_authorized' }
       }
     }
   }
 
   return { ok: true }
+}
+
+// Row-level reads for DB_DRIVER=postgres, where the synchronous authority store
+// throws outside a bounded scope (execution intelligence answered 503 for every
+// caller). The JSON/SQLite drivers keep the original snapshot reads.
+async function investorCanReadStartupAsync(investorId, projectId) {
+  if (currentDriver() !== 'postgres') return investorCanReadStartup(readAuthorityDb(), investorId, projectId)
+  return runInvestorRead({ userId: investorId, intelligence: true }, () => investorCanReadStartup(readAuthorityDb(), investorId, projectId))
+}
+
+async function cohortForProject(projectId) {
+  if (currentDriver() !== 'postgres') {
+    const db = readAuthorityDb()
+    const project = projectId ? rowsOf(db, 'projects').find(row => String(row.id) === String(projectId)) : null
+    return cohortFor(db, project)
+  }
+  if (!projectId) return cohortFor({}, null)
+  return withPlatformTransaction(async client => {
+    const [project] = await listRecordsByIds(client, 'projects', [projectId])
+    if (!project) return cohortFor({}, null)
+    const industry = industryOf(project)
+    if (!industry) return cohortFor({ projects: [project] }, project)
+    // Mirrors industryOf/stageOf: first non-empty field, trimmed, lower-cased.
+    const peers = (await client.query(
+      `SELECT * FROM platform_collection_records
+       WHERE collection_name='projects' AND deleted_at IS NULL
+         AND lower(btrim(coalesce(nullif(payload->>'industry',''), nullif(payload->>'sector',''), nullif(payload->>'vertical',''), nullif(payload->>'category',''), ''))) = $1
+         AND lower(btrim(coalesce(nullif(payload->>'stage',''), nullif(payload->>'status',''), 'idea'))) = $2`,
+      [industry, stageOf(project)],
+    )).rows.map(mapRow)
+    const ids = peers.map(peer => String(peer.id))
+    const byId = new Map()
+    for (const row of [
+      ...await listRecordsByFieldIn(client, 'milestones', 'projectId', ids),
+      ...await listRecordsByFieldIn(client, 'milestones', 'startupId', ids),
+    ]) byId.set(String(row.id), row)
+    return cohortFor({ projects: peers, milestones: [...byId.values()] }, project)
+  })
 }
 
 /**
@@ -156,10 +196,8 @@ export async function executionIntelligenceFor(user, query = {}) {
     const subjects = (view.trustSubjects || []).filter((subject) => subject.kind === 'actor')
     const trust = await Promise.all(subjects.map(async (subject) => ({ subjectId: subject.id, kind: 'actor', ...(await publicTrustFor(subject.id, null)) })))
     // Anonymous cohort comparison for the caller's project (when one is resolved).
-    const db = readAuthorityDb()
     const projectId = scope.projectId || (Array.isArray(view.signals?.projects) ? view.signals.projects[0] : null)
-    const project = projectId ? rowsOf(db, 'projects').find(row => String(row.id) === String(projectId)) : null
-    const cohort = cohortFor(db, project)
+    const cohort = await cohortForProject(projectId)
     return { ok: true, ...view, cohort, trust }
   } catch (error) {
     return { ok: false, error: 'execution_intelligence_unavailable', detail: String(error?.message || error) }

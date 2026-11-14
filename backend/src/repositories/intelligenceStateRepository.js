@@ -1,4 +1,4 @@
-import { readAuthorityDb } from '../config/database.js'
+import { currentBoundedDatabase, currentDriver, readAuthorityDb } from '../config/database.js'
 import { withPlatformTransaction, upsertRecord, listRecords, getRecord, listRecordsForOwner } from './platformCollectionRepository.js'
 
 const collections = [
@@ -14,6 +14,12 @@ const fallback = () => process.env.INTELLIGENCE_FALLBACK_SQLITE !== 'false'
 
 export async function syncIntelligenceState(userId) {
   if (!enabled()) return { enabled: false }
+  // Legacy dual-write from the synchronous snapshot. Under DB_DRIVER=postgres
+  // there is no snapshot outside a bounded scope (readAuthorityDb throws), and
+  // the row-level discovery, moments and academy repositories have already
+  // persisted their rows; throwing here turned those successful writes into
+  // "intelligence_write_temporarily_unavailable" responses.
+  if (currentDriver() === 'postgres' && !currentBoundedDatabase()) return { enabled: true, userId, records: 0, skipped: 'row_level_store_authoritative' }
   const db = readAuthorityDb()
   return withPlatformTransaction(async client => {
     let records = 0
