@@ -48,6 +48,25 @@ async function listByUser(client, collection, userId, { forUpdate = false } = {}
   return result.rows.map(row => ({ ...(row.payload || {}), id: row.record_id, version: Number(row.version), createdAt: row.created_at, updatedAt: row.updated_at }))
 }
 
+// Minimal read for the account-entitlement badge that requireAuth attaches to
+// every authenticated request. The full finance snapshot is 26 sequential
+// queries inside a transaction (including whole-collection catalog reads and
+// the user's ever-growing usage history); this needs two indexed lookups.
+export async function accountEntitlementSourcesPostgres(userId) {
+  const pool = getPlatformPool()
+  const owned = "deleted_at IS NULL AND (owner_id=$1 OR payload @> jsonb_build_object('userId', $1::text))"
+  const [state, purchase] = await Promise.all([
+    pool.query(`SELECT collection_name, record_id, payload, created_at FROM platform_collection_records WHERE collection_name = ANY($2::text[]) AND ${owned}`, [String(userId), ['accountEntitlements', 'subscriptions']]),
+    pool.query(`SELECT record_id, payload, created_at FROM platform_collection_records WHERE collection_name='creditLedger' AND ${owned} AND payload->>'type' = ANY($2::text[]) AND COALESCE(NULLIF(payload->>'deltaCredits','')::numeric, NULLIF(payload->>'credits','')::numeric, 0) > 0 ORDER BY created_at ASC LIMIT 1`, [String(userId), ['credit_purchase', 'credits_purchased', 'subscription_purchase']]),
+  ])
+  const map = row => ({ createdAt: row.created_at, ...(row.payload || {}), id: row.record_id })
+  return {
+    accountEntitlements: state.rows.filter(row => row.collection_name === 'accountEntitlements').map(map),
+    subscriptions: state.rows.filter(row => row.collection_name === 'subscriptions').map(map),
+    creditLedger: purchase.rows.map(map),
+  }
+}
+
 export async function loadFinanceSnapshotPostgres(userId) {
   return withPlatformTransaction(async client => {
     const names = ['profiles', 'userRoles', 'verificationProfiles', 'trustProfiles', 'riskProfiles', 'organizationMemberships', 'walletAccounts', 'creditLedger', 'usageReservations', 'usageEvents', 'subscriptions', 'billingPlans', 'creditPackages', 'rateCards', 'geoPricingProfiles', 'profitabilityEvents', 'marginAlerts', 'workspaceTeamEntitlements', 'accountEntitlements', 'capabilityConsumptions', 'capabilityAnalytics', 'paywallEvents', 'workflowSnapshots', 'workflowBudgets', 'paymentIntents', 'billingWebhookEvents']

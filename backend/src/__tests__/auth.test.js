@@ -618,6 +618,22 @@ describe('GET /api/auth/session', () => {
     expect(res.status).toBe(401)
   })
 
+  it('returns 401 for purpose-bound and non-access tokens signed with the access key', async () => {
+    // Step-up (MFA) and other purpose-bound tokens share the signing key; only
+    // issuer/audience configuration used to keep them out of requireAuth.
+    readAuthorityDb.mockReturnValue(makeDb({ users: [makeUser()], profiles: [makeProfile()] }))
+    for (const claims of [{ purpose: 'mfa_step_up' }, { token_use: 'refresh' }]) {
+      const token = jwt.sign({ sub: 'user-uuid-1', ...claims }, TEST_SECRET, { expiresIn: '1h' })
+      const res = await request(app)
+        .get('/api/auth/session')
+        .set('Authorization', `Bearer ${token}`)
+      expect(res.status).toBe(401)
+    }
+    const access = jwt.sign({ sub: 'user-uuid-1', token_use: 'access' }, TEST_SECRET, { expiresIn: '1h' })
+    const ok = await request(app).get('/api/auth/session').set('Authorization', `Bearer ${access}`)
+    expect(ok.status).toBe(200)
+  })
+
   it('returns 401 when user no longer exists in DB', async () => {
     readAuthorityDb.mockReturnValue(makeDb({ users: [] })) // user deleted
 

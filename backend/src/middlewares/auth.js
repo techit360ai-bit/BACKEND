@@ -26,6 +26,11 @@ export async function requireAuth(req, res, next) {
   } catch {
     return res.status(401).json({ error: 'Invalid or expired token' })
   }
+  // Step-up (MFA) and other purpose-bound tokens share the signing key but are
+  // not access tokens; only issuer/audience configuration kept them out.
+  if (payload?.purpose || (payload?.token_use && payload.token_use !== 'access')) {
+    return res.status(401).json({ error: 'Invalid or expired token' })
+  }
 
   const binding = await validateSessionBindingAsync(payload)
   if (!binding.valid) return res.status(401).json({ error: binding.error || 'Session invalid' })
