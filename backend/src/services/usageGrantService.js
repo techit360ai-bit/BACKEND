@@ -40,11 +40,13 @@ export function issueExecutionGrant(body = {}) {
   const requiredDataHandling = stringOrUndefined(body.required_data_handling ?? body.requiredDataHandling)
   const workflowId = stringOrUndefined(body.workflow_id ?? body.workflowId)
   const maxWorkflowCostUsd = positiveNumber(body.max_workflow_cost_usd ?? body.maxWorkflowCostUsd)
+  const taskTypeBound = body.bind_task_type !== false && body.bindTaskType !== false
   const reservation = reserveUsage({
     userId, workspaceId: body.workspace_id || body.workspaceId || null, requestId, taskType,
     estimatedCredits, grantId: requestId, fundingSource: body.funding_source || body.fundingSource || 'payg',
     metadata: {
       ...(body.metadata || {}),
+      ...(taskTypeBound ? {} : { taskTypeBound: false }),
       ...(workflowId ? { workflowId } : {}),
       ...(maxWorkflowCostUsd ? { maxWorkflowCostUsd } : {}),
       ...(allowedBillingClasses ? { allowedBillingClasses } : {}),
@@ -118,7 +120,11 @@ export async function issueExecutionGrantAsync(body = {}) {
   const secret = grantSigningKey(algorithm)
   if (!secret) return { ok: false, error: algorithm === 'RS256' ? 'execution_grant_private_key_not_configured' : 'execution_grant_secret_not_configured' }
   const workspaceId = body.workspace_id || body.workspaceId || null
-  const reservation = await reserveUsageAsync({ userId, workspaceId, requestId, taskType, estimatedCredits, grantId: requestId, fundingSource: body.funding_source || body.fundingSource || 'payg', metadata: body.metadata || {} })
+  const taskTypeBound = body.bind_task_type !== false && body.bindTaskType !== false
+  // An unbound grant (the AI gateway) may run any Router task type; record that
+  // on the reservation so settlement accepts the concrete task the Router ran.
+  const metadata = { ...(body.metadata || {}), ...(taskTypeBound ? {} : { taskTypeBound: false }) }
+  const reservation = await reserveUsageAsync({ userId, workspaceId, requestId, taskType, estimatedCredits, grantId: requestId, fundingSource: body.funding_source || body.fundingSource || 'payg', metadata })
   if (!reservation.ok) return reservation
   const expiresIn = Math.max(10, Math.min(900, Number(body.expires_in_seconds || 300)))
   const payload = { sub: userId, jti: requestId, request_id: requestId, reservation_id: reservation.reservation.reservationId, workspace_id: workspaceId, execution_profile: body.execution_profile || body.executionProfile || 'balanced', allowed_model_ids: [] }

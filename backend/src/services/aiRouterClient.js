@@ -83,14 +83,19 @@ function releaseSlot() {
 async function requestJson(path, { method = 'POST', token, body, headers = {}, timeoutMs = TIMEOUT_MS, taskType, workspaceId } = {}) {
   if (Date.now() < circuitOpenedUntil) return null
   const requestHeaders = { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }
-  if (token && !requestHeaders['X-AI-Execution-Grant']) {
-    const grantHeaders = await executionGrantHeader(token, { taskType, workspaceId })
-    if (grantHeaders) Object.assign(requestHeaders, grantHeaders)
-  }
+  // A grant is consumed by the Router's first execution, so a retry carrying
+  // the same grant was always rejected as a replay. Mint one per attempt unless
+  // the caller supplied its own grant.
+  const callerGrant = Boolean(requestHeaders['X-AI-Execution-Grant'])
   const release = await acquireSlot()
   try {
     let lastResponse = null
     for (let attempt = 0; attempt <= 2; attempt += 1) {
+      if (token && !callerGrant) {
+        const grantHeaders = await executionGrantHeader(token, { taskType, workspaceId })
+        if (grantHeaders) Object.assign(requestHeaders, grantHeaders)
+        else delete requestHeaders['X-AI-Execution-Grant']
+      }
       try {
         const response = await fetch(`${AI_ROUTER_URL}${path}`, {
           method,

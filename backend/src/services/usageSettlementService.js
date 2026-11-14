@@ -7,6 +7,7 @@ import { reserveOrganizationBudget, settleOrganizationBudget } from './organizat
 import { economicsForUsage } from './unitEconomicsService.js'
 import { billingJobsRowLevelEnabled, usageSettlementHealthRowLevel } from '../repositories/billingJobsRepository.js'
 import { recordWorkflowUsage, workflowBudgetFor, workflowBudgetSnapshot, resolveWorkflowCeiling } from './workflowBudgetService.js'
+import { reservationExpiry, reservationHolds, reservationTaskUnbound, settlementBelongsToReservation, settlementCharge } from './usageReservationPolicy.js'
 
 function number(value, fallback = 0) {
   const parsed = Number(value)
@@ -47,7 +48,7 @@ function availableSubscriptionCredits(db, userId, subscription) {
   if (!subscription) return 0
   const included = number(subscription.includedCredits ?? subscription.monthlyCredits ?? subscription.creditAllowance)
   const used = db.usageEvents.filter(row => row.userId === userId && row.fundingSource === 'subscription' && row.status === 'completed').reduce((sum, row) => sum + number(row.credits), 0)
-  const reserved = db.usageReservations.filter(row => row.userId === userId && row.fundingSource === 'subscription' && row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+  const reserved = db.usageReservations.filter(row => row.userId === userId && row.fundingSource === 'subscription' && reservationHolds(row)).reduce((sum, row) => sum + number(row.reservedCredits), 0)
   return Math.max(0, included - used - reserved)
 }
 
@@ -104,7 +105,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
     }
     const account = db.walletAccounts.find(row => row.userId === userId) || { userId, creditBalance: 0, currency: 'USD' }
     const ledgerBalance = db.creditLedger.filter(row => row.userId === userId).reduce((sum, row) => sum + number(row.deltaCredits ?? row.credits), 0)
-    const usageReserved = db.usageReservations.filter(row => row.userId === userId && row.fundingSource === 'payg' && row.status === 'reserved').reduce((sum, row) => sum + number(row.reservedCredits), 0)
+    const usageReserved = db.usageReservations.filter(row => row.userId === userId && row.fundingSource === 'payg' && reservationHolds(row)).reduce((sum, row) => sum + number(row.reservedCredits), 0)
     const subscription = activeSubscription(db, userId)
     const subscriptionAvailable = availableSubscriptionCredits(db, userId, subscription)
     const paygAvailable = number(account.creditBalance) + ledgerBalance - usageReserved
@@ -117,6 +118,7 @@ export function reserveUsage({ userId, workspaceId = null, requestId, taskType, 
       userId, workspaceId, taskType, estimatedCredits: credits, reservedCredits: credits,
       settledCredits: 0, releasedCredits: 0, fundingSource: requestedFunding, grantId, status: 'reserved',
       metadata: { ...metadata, ...(organizationId ? { organizationId, budgetId, programId, hackathonId } : {}) }, createdAt: now, updatedAt: now,
+      expiresAt: reservationExpiry(now),
     }
     db.usageReservations.push(reservation)
     return { ok: true, idempotent: false, reservation }
@@ -139,23 +141,27 @@ export function settleUsage(facts) {
     }
     const now = nowIso()
     const reservation = reservationFor(db, normalized.reservationId || normalized.requestId)
-    if (normalized.status === 'completed' && !reservation) return { ok: false, error: 'reservation_not_found', requestId: normalized.requestId }
     if (reservation) {
-      if (reservation.requestId !== normalized.requestId
+      if (!settlementBelongsToReservation(reservation, normalized.requestId)
           || reservation.userId !== normalized.userId
           || reservation.workspaceId !== normalized.workspaceId
-          || reservation.taskType !== normalized.taskType) {
+          || (!reservationTaskUnbound(reservation) && reservation.taskType !== normalized.taskType)) {
         return { ok: false, error: 'reservation_execution_mismatch', requestId: normalized.requestId }
       }
       if (normalized.grantId && reservation.grantId && normalized.grantId !== reservation.grantId) {
         return { ok: false, error: 'reservation_grant_mismatch', requestId: normalized.requestId }
       }
     }
+    // Without a reservation (trusted-worker executions carry no grant) the fact
+    // is recorded as zero-credit telemetry instead of being rejected: a
+    // permanent 4xx would sit in the Router outbox forever.
+    const closesReservation = Boolean(reservation && reservation.status === 'reserved')
     const reservedCredits = number(reservation?.reservedCredits)
     // Credits, customer price, COGS and margin are backend-owned. Router facts
     // can report provider telemetry, but cannot increase or rewrite the charge.
-    const actualCredits = normalized.status === 'completed' ? reservedCredits : 0
+    const actualCredits = normalized.status === 'completed' && closesReservation ? reservedCredits : 0
     const economics = economicsForUsage(normalized, reservation, db)
+    const charge = settlementCharge({ reservation, settledCredits: economics.settledCredits, closesReservation })
     const usageEvent = {
       id: createId('usage'), requestId: normalized.requestId, payloadHash, userId: normalized.userId,
       workspaceId: normalized.workspaceId, taskType: normalized.taskType, provider: normalized.provider,
@@ -164,13 +170,15 @@ export function settleUsage(facts) {
       totalTokens: normalized.totalTokens || normalized.promptTokens + normalized.completionTokens,
       providerCostUsd: economics.providerCostUsd, infrastructureCostUsd: economics.infrastructureCostUsd, externalCostUsd: economics.externalCostUsd, paymentCostUsd: economics.paymentCostUsd, directServiceCogsUsd: economics.directServiceCogsUsd, totalVariableCostUsd: economics.totalVariableCostUsd, latencyMs: normalized.latencyMs,
       attemptCount: normalized.attemptCount, cacheHit: normalized.cacheHit, grantId: normalized.grantId,
-      reservationId: normalized.reservationId, credits: economics.settledCredits,
+      reservationId: normalized.reservationId, credits: charge.chargedCredits,
+      subsidizedCredits: charge.subsidizedCredits,
+      additionalExecution: Boolean(reservation) && !closesReservation,
       rateCardVersion: economics.rateCardVersion, targetMargin: economics.targetMargin,
       totalCogs: economics.directServiceCogsUsd,
-      customerPrice: economics.allocatedRevenueUsd,
-      allocatedRevenueUsd: economics.allocatedRevenueUsd, grossProfitUsd: economics.grossProfitUsd,
+      customerPrice: charge.chargedCredits ? economics.allocatedRevenueUsd : 0,
+      allocatedRevenueUsd: charge.chargedCredits ? economics.allocatedRevenueUsd : 0, grossProfitUsd: economics.grossProfitUsd,
       grossMargin: economics.grossMargin, marginStatus: economics.marginStatus,
-      fundingSource: reservation?.fundingSource || 'unknown',
+      fundingSource: reservation?.fundingSource || 'unreserved',
       workflowId: normalized.workflowId || null,
       costStatus: normalized.costStatus || 'estimated',
       pricingVersion: normalized.pricingVersion || null,
@@ -187,25 +195,25 @@ export function settleUsage(facts) {
       userId: normalized.userId,
       workspaceId: normalized.workspaceId,
       providerCostUsd: economics.providerCostUsd,
-      credits: economics.settledCredits,
+      credits: charge.chargedCredits,
       costStatus: normalized.costStatus || 'estimated',
       pricingVersion: normalized.pricingVersion,
       maxCostUsd: resolveWorkflowCeiling(reservation, normalized),
       status: normalized.status,
     })
-    if (reservation?.fundingSource === 'organization') {
-      const organizationSettlement = settleOrganizationBudget({ requestId: normalized.requestId, status: normalized.status, actualCredits })
+    if (closesReservation && reservation?.fundingSource === 'organization') {
+      const organizationSettlement = settleOrganizationBudget({ requestId: reservation.requestId, status: normalized.status, actualCredits })
       if (!organizationSettlement.ok) return organizationSettlement
     }
-    if (reservation) {
-      reservation.settledCredits = economics.settledCredits
-      reservation.releasedCredits = Math.max(0, reservedCredits - economics.settledCredits)
+    if (closesReservation) {
+      reservation.settledCredits = charge.chargedCredits
+      reservation.releasedCredits = Math.max(0, reservedCredits - charge.chargedCredits)
       reservation.status = normalized.status === 'completed' ? 'settled' : 'refunded'
       reservation.updatedAt = now
     }
-    if (economics.settledCredits > 0 && reservation?.fundingSource !== 'organization') db.creditLedger.push({
+    if (charge.debitCredits > 0) db.creditLedger.push({
       id: createId('usage_debit'), userId: normalized.userId, workspaceId: normalized.workspaceId,
-      requestId: normalized.requestId, deltaCredits: -economics.settledCredits, credits: -economics.settledCredits,
+      requestId: normalized.requestId, deltaCredits: -charge.debitCredits, credits: -charge.debitCredits,
       type: 'usage_settlement', createdAt: now,
     })
     return { ok: true, idempotent: false, usageEvent, reservation, workflowBudget: workflowBudgetSnapshot(workflowRow) }
@@ -219,7 +227,7 @@ export function usageSettlementHealth() {
   return {
     ok: true,
     usageEvents: db.usageEvents.length,
-    pendingReservations: db.usageReservations.filter(row => row.status === 'reserved').length,
+    pendingReservations: db.usageReservations.filter(row => reservationHolds(row)).length,
     workflows: workflows.length,
     workflowsOverBudget: workflows.filter(row => row.status === 'exceeded').length,
     workflowsPendingReconciliation: workflows.filter(row => row.costStatus === 'pending_reconciliation').length,

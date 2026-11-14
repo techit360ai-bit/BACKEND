@@ -6,6 +6,7 @@
 // platform_collection_records (never the full database). Enabled with
 // FINANCE_WRITE_SOURCE=postgres (or BILLING_JOBS_SOURCE).
 import { getPlatformPool, withPlatformTransaction, upsertRecord } from './platformCollectionRepository.js'
+import { reservationExpiresAtMs } from '../services/usageReservationPolicy.js'
 
 const enabled = () => process.env.BILLING_JOBS_SOURCE === 'postgres' || process.env.FINANCE_WRITE_SOURCE === 'postgres'
 
@@ -13,11 +14,11 @@ export function billingJobsRowLevelEnabled() { return enabled() }
 
 async function rowsByField(collection, field, value) {
   const result = await getPlatformPool().query(
-    `SELECT record_id, payload FROM platform_collection_records
+    `SELECT record_id, payload, created_at FROM platform_collection_records
      WHERE collection_name=$1 AND deleted_at IS NULL AND payload->>$2=$3`,
     [collection, field, value],
   )
-  return result.rows.map(row => ({ ...(row.payload || {}), id: row.record_id }))
+  return result.rows.map(row => ({ createdAt: row.created_at, ...(row.payload || {}), id: row.record_id }))
 }
 
 async function rowsSince(collection, field, iso) {
@@ -33,7 +34,8 @@ async function rowsSince(collection, field, iso) {
 
 export async function runBillingJobsRowLevel(actor, { freeQuotaCycles, now = Date.now(), runAt }) {
   const reservations = await rowsByField('usageReservations', 'status', 'reserved')
-  const expiredReservations = reservations.filter(row => row.expiresAt && Date.parse(row.expiresAt) <= now)
+  // Reservations written before expiry existed fall back to createdAt + TTL.
+  const expiredReservations = reservations.filter(row => reservationExpiresAtMs(row) <= now)
   const grants = await rowsByField('workspaceTeamEntitlements', 'status', 'active')
   const expiredGrants = grants.filter(row => row.expiresAt && Date.parse(row.expiresAt) <= now)
   const pastDue = (await rowsByField('subscriptions', 'status', 'past_due')).length
